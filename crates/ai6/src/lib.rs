@@ -240,8 +240,8 @@ pub use directorates::registry::tracker::{
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, AssistantNetwork, McpServerRef,
-    ModelInfo, ModelListing, READ_CLEARANCE, SessionRecordFile, SessionRecordQuery,
-    clearance_reads_only, clearance_runs_commands,
+    ModelInfo, ModelListing, OverlaySkill, READ_CLEARANCE, SessionOverlays, SessionRecordFile,
+    SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,

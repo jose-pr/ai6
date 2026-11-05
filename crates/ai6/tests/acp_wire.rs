@@ -177,6 +177,7 @@ fn start() -> AgentStart {
         project_mcp: false,
         answer_only: false,
         assistant: None,
+        overlays: Default::default(),
     }
 }
 
@@ -397,6 +398,7 @@ fn a_session_resumes_through_the_facade() {
         answer_only: false,
         assistant: None,
         initial_context: vec!["standing".to_owned()],
+        overlays: Default::default(),
     };
     let mut options = AcpOptions {
         cwd: resume.working_directory.clone(),
@@ -1045,6 +1047,7 @@ fn launch_meta_round_trips_and_never_prints_the_environment() {
         answer_only: true,
         assistant: None,
         initial_context: Vec::new(),
+        overlays: Default::default(),
     });
     assert!(!format!("{resume:?}").contains("hunter2-secret"));
     let back: ResumeMeta = serde_json::from_value(resume.to_value()).unwrap();

@@ -13,6 +13,8 @@ use ai6::guatiao::Status;
 use ai6::guatiao::library::ProviderError;
 use serde_json::{Map, Value, json};
 
+use ai6::SessionOverlays;
+
 use crate::{Plan, internal, refuse};
 
 const AGENT_DESCRIPTION: &str = "An AI6 Agent's Session, with the tools AI6 chose for it.";
@@ -24,6 +26,7 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct SessionFiles {
     path: PathBuf,
     agent: String,
+    skills: Option<PathBuf>,
 }
 
 impl SessionFiles {
@@ -36,6 +39,7 @@ impl SessionFiles {
         mcp_timeout_secs: i64,
         hooks: Option<&Value>,
         context: &str,
+        overlays: &SessionOverlays,
     ) -> Result<Self, ProviderError> {
         let unique = unique_suffix();
         let root = working_directory.trim_end_matches(['/', '\\']);
@@ -47,7 +51,11 @@ impl SessionFiles {
                 format!("the Session's directory {}: {error}", path.display()),
             )
         })?;
-        let files = Self { path, agent };
+        let mut files = Self {
+            path,
+            agent,
+            skills: None,
+        };
         let dot_agents = files.path.join(".agents");
         create_private_dir(&dot_agents).map_err(internal)?;
         let agent_dir = dot_agents.join("agents").join(&files.agent);
@@ -66,7 +74,15 @@ impl SessionFiles {
         if let Some(hooks) = hooks {
             write_private(&dot_agents.join("hooks.json"), hooks.to_string().as_bytes())?;
         }
+        files.skills = copy_skills(root, &unique, overlays)?;
         Ok(files)
+    }
+
+    /// The second workspace, which holds the overlays' skills, when the launch has any.
+    pub(crate) fn skills_text(&self) -> Option<String> {
+        self.skills
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
     }
 
     pub(crate) fn path_text(&self) -> String {
@@ -81,7 +97,61 @@ impl SessionFiles {
 impl Drop for SessionFiles {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
+        if let Some(skills) = &self.skills {
+            let _ = std::fs::remove_dir_all(skills);
+        }
     }
+}
+
+/// Copies each overlay skill agy may load into `<working directory>.ai6-agy-skills-<unique>`, as
+/// `skills/<name>/` in its `.agents` directory. agy 1.4.12 lists a workspace's skills with an `--agent` too, and reads
+/// one with `read_file`, so the directory holds nothing else: the Session's own, which holds the MCP
+/// tokens, stays denied to the file tools. Its name extends the working directory's, as that one's
+/// does, to sort after it.
+fn copy_skills(
+    root: &str,
+    unique: &str,
+    overlays: &SessionOverlays,
+) -> Result<Option<PathBuf>, ProviderError> {
+    let native: Vec<_> = overlays
+        .skills
+        .iter()
+        .filter(|skill| skill.native)
+        .collect();
+    if native.is_empty() {
+        return Ok(None);
+    }
+    let path = PathBuf::from(format!("{root}.ai6-agy-skills-{unique}"));
+    for skill in native {
+        let copied = copy_tree(
+            Path::new(&skill.path),
+            &path.join(".agents").join("skills").join(&skill.name),
+        );
+        if let Err(error) = copied {
+            let _ = std::fs::remove_dir_all(&path);
+            return Err(refuse(
+                Status::GUATIAO_ERR_INTERNAL,
+                format!("overlay skill {:?}: {error}", skill.name),
+            ));
+        }
+    }
+    Ok(Some(path))
+}
+
+/// Copies the regular files under `from`, which the Station's store holds with no link in it.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::write(&target, std::fs::read(entry.path())?)?;
+        }
+    }
+    Ok(())
 }
 
 /// The agent file: its frontmatter fixes the tools, its body is the system prompt. agy turns each

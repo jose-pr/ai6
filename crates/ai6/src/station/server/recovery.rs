@@ -582,6 +582,7 @@ fn record_adopted(
         }),
         runner: launch.runner,
         clearance: launch.clearance,
+        overlays: launch.overlays,
     };
     let mut missions = state
         .missions
@@ -696,6 +697,7 @@ pub(super) fn launch_of(manifest: &LaunchManifest, agent: Option<&str>) -> Sessi
     .with_pool(manifest.pool.clone())
     .with_mode(manifest.mode)
     .with_clearance(manifest.clearance.clone())
+    .with_overlays(manifest.overlays.clone())
     .with_agent(agent.map(str::to_owned));
     if let Some(runner) = &manifest.runner {
         launch = launch.with_runner(runner.clone());

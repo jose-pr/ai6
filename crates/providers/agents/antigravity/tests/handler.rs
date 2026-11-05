@@ -332,6 +332,7 @@ fn start_request(wd: &str, clearance: &str) -> AgentStart {
         project_mcp: false,
         answer_only: false,
         assistant: None,
+        overlays: Default::default(),
     }
 }
 
@@ -351,6 +352,7 @@ fn resume_request(wd: &str, id: &str, clearance: &str) -> AgentResume {
         answer_only: false,
         assistant: None,
         initial_context: Vec::new(),
+        overlays: Default::default(),
     }
 }
 
@@ -1275,4 +1277,92 @@ fn it_speaks_on_pipes() {
 fn it_cannot_hold_a_session_to_its_plan() {
     let refused = handler("").read_only_refusal().unwrap();
     assert!(refused.is_some());
+}
+
+fn overlay_request(wd: &str, skills: &Path) -> AgentStart {
+    let mut request = start_request(wd, "field");
+    request.overlays.roots.push("/store/tools".to_owned());
+    for (name, native) in [("review", true), ("audit", false)] {
+        request.overlays.skills.push(ai6::OverlaySkill {
+            name: name.to_owned(),
+            overlay: "tools".to_owned(),
+            description: "Does a thing.".to_owned(),
+            path: skills.join(name).to_string_lossy().into_owned(),
+            native,
+        });
+    }
+    request
+}
+
+/// Measured with agy 1.4.12: `skills/<name>/SKILL.md` in a workspace's `.agents` is listed under an
+/// `--agent` and read with `read_file`, and a read outside the workspaces with no rule ends the turn.
+#[test]
+fn an_overlays_skill_is_in_a_second_workspace_and_its_root_may_be_read() {
+    let (root, wd) = checkout();
+    let source = root.path().join("source");
+    for name in ["review", "audit"] {
+        std::fs::create_dir_all(source.join(name).join("refs")).unwrap();
+        std::fs::write(
+            source.join(name).join("SKILL.md"),
+            format!("the skill {name}"),
+        )
+        .unwrap();
+        std::fs::write(source.join(name).join("refs/more.md"), "more").unwrap();
+    }
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    let session = started(&fake, overlay_request(&wd, &source), "");
+    let launch = fake.launch();
+    let dirs: Vec<&String> = launch
+        .spec
+        .argv
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| *at > 0 && launch.spec.argv[at - 1] == "--add-dir")
+        .map(|(_, dir)| dir)
+        .collect();
+    assert_eq!(dirs.len(), 2, "{:?}", launch.spec.argv);
+    let skills = PathBuf::from(dirs[1]);
+    assert!(
+        dirs[1].starts_with(&wd),
+        "its name extends the working directory's"
+    );
+    let copied = skills.join(".agents").join("skills").join("review");
+    assert_eq!(
+        std::fs::read_to_string(copied.join("SKILL.md")).unwrap(),
+        "the skill review"
+    );
+    assert!(copied.join("refs/more.md").is_file());
+    assert!(
+        !skills.join(".agents").join("skills").join("audit").exists(),
+        "not a native skill"
+    );
+    assert!(
+        launch
+            .rules("allow")
+            .contains(&"read_file(/store/tools)".to_owned()),
+        "{:?}",
+        launch.rules("allow")
+    );
+    let agent = launch.agent.unwrap();
+    assert!(agent.contains("Skill `audit` (overlay `tools`)"), "{agent}");
+    assert!(!agent.contains("Skill `review`"), "{agent}");
+    session.close().unwrap();
+    assert!(!skills.exists(), "removed with the Session");
+}
+
+#[test]
+fn a_session_with_no_overlay_has_one_workspace_beside_its_own() {
+    let (_root, wd) = checkout();
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    let _session = started(&fake, start_request(&wd, "field"), "");
+    let launch = fake.launch();
+    assert_eq!(
+        launch
+            .spec
+            .argv
+            .iter()
+            .filter(|word| *word == "--add-dir")
+            .count(),
+        1
+    );
 }

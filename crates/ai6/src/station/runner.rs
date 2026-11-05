@@ -1133,6 +1133,7 @@ mod tests {
             project_mcp: false,
             answer_only: false,
             assistant: None,
+            overlays: Default::default(),
         }
     }
 

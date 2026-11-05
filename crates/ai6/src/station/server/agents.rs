@@ -701,6 +701,7 @@ mod tests {
             }),
             runner: None,
             clearance: None,
+            overlays: Vec::new(),
         };
         state
             .missions

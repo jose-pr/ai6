@@ -82,6 +82,9 @@ pub struct SessionLaunch {
     /// The Agent codename the harness ran as. A scorecard groups Sessions by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The overlays it was launched with, each at its digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<crate::directorates::q::overlays::IssuedDigest>,
 }
 
 impl SessionLaunch {
@@ -102,6 +105,7 @@ impl SessionLaunch {
             runner: None,
             clearance: None,
             agent: None,
+            overlays: Vec::new(),
         }
     }
 
@@ -127,6 +131,15 @@ impl SessionLaunch {
     /// Records the execution mode.
     pub fn with_mode(mut self, mode: ExecutionMode) -> Self {
         self.mode = mode;
+        self
+    }
+
+    /// Records the overlays the harness was launched with.
+    pub fn with_overlays(
+        mut self,
+        overlays: Vec<crate::directorates::q::overlays::IssuedDigest>,
+    ) -> Self {
+        self.overlays = overlays;
         self
     }
 

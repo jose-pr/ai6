@@ -101,6 +101,14 @@ pub fn check_skill(
     Ok(())
 }
 
+/// What the `SKILL.md` in `dir` says it is for: its front matter's `description`.
+pub fn skill_description(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
+    let (yaml, _) = front_matter(&text)?;
+    let keys: BTreeMap<String, serde_json::Value> = serde_saphyr::from_str(yaml).ok()?;
+    keys.get("description")?.as_str().map(str::to_owned)
+}
+
 /// The YAML between the opening `---` line and the next `---` line, and the text after it.
 fn front_matter(text: &str) -> Option<(&str, &str)> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);

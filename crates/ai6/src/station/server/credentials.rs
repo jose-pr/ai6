@@ -442,6 +442,25 @@ fn built_error(provider: &str, error: &PluginBuildError) -> String {
     }
 }
 
+/// The value of the `[secret.<name>]` a private overlay source is fetched with, read for this
+/// fetch alone: no Session sees it.
+pub(super) fn read_for_overlay(
+    state: &DaemonState,
+    name: &str,
+) -> Result<zeroize::Zeroizing<String>, String> {
+    let desk = &state.station.credentials;
+    let catalog = desk
+        .catalog
+        .as_ref()
+        .ok_or_else(|| format!("secret {name:?} is defined by no loadout document"))?;
+    desk.finder(state.plugins.clone(), catalog.clone())
+        .read(
+            &crate::bootstrap::SecretRef::Named(name.to_owned()),
+            &mut Vec::new(),
+        )
+        .map_err(|why| format!("secret {name:?}: {why}"))
+}
+
 /// What a Session of `agent` starts from: its roster `env`, with its loadout's `env` over it.
 /// The issue of secrets after this takes only secrets' and pool accounts' variables away, which
 /// a loadout's `env` cannot name, so what is here reaches an exposed Session too.

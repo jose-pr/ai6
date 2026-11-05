@@ -375,6 +375,7 @@ mod tests {
                         session: None,
                         runner: None,
                         clearance: None,
+                        overlays: Vec::new(),
                     },
                 )
                 .unwrap();

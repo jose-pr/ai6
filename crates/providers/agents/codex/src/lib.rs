@@ -414,7 +414,11 @@ impl CodexHandler {
         gate: Option<Gate>,
     ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let scripts = Scripts::of(request.assistant.as_ref());
-        let mut instructions = request.initial_context.clone();
+        // Codex 0.164.0 reads skills from its home and the project only: no setting and no
+        // `skills/list` root added one, so an overlay's skill is the file a routing line names.
+        let mut instructions = request
+            .overlays
+            .with_routing(&request.initial_context, false);
         if let Some(mode) = &request.assistant {
             instructions.extend(assistant_instructions(
                 mode,
@@ -2562,6 +2566,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -2594,6 +2599,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -2710,6 +2716,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 ProcessTerminal::new().into_object(),
                 approvals_gate(approved.clone()),
@@ -3100,6 +3107,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -3123,6 +3131,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -3309,6 +3318,7 @@ mod tests {
                 project_mcp: false,
                 answer_only: false,
                 assistant: None,
+                overlays: Default::default(),
             },
             terminal.into_object(),
         )
@@ -3599,6 +3609,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -3692,6 +3703,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -3737,6 +3749,7 @@ mod tests {
                 answer_only: false,
                 assistant: None,
                 initial_context: Vec::new(),
+                overlays: Default::default(),
             },
             terminal.into_object(),
         );
@@ -4106,6 +4119,7 @@ mod tests {
                     project_mcp: true,
                     answer_only: false,
                     assistant: Some(AssistantMode::moneypenny()),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4129,6 +4143,7 @@ mod tests {
                     answer_only: false,
                     assistant: Some(AssistantMode::moneypenny()),
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4281,6 +4296,7 @@ mod tests {
             project_mcp: false,
             answer_only: false,
             assistant: Some(mode),
+            overlays: Default::default(),
         }
     }
 
@@ -4393,6 +4409,7 @@ mod tests {
                     answer_only: false,
                     assistant: Some(mode),
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4448,6 +4465,7 @@ mod tests {
                         answer_only: false,
                         assistant: Some(mode.clone()),
                         initial_context: Vec::new(),
+                        overlays: Default::default(),
                     },
                     terminal.into_object(),
                 )
@@ -4530,6 +4548,7 @@ mod tests {
             project_mcp: false,
             answer_only: true,
             assistant: None,
+            overlays: Default::default(),
         }
     }
 
@@ -5250,5 +5269,46 @@ mod tests {
             "params": { "tokenUsage": { "total": { "totalTokens": 1 } } }
         });
         assert_eq!(decode_event(&total_only, None).unwrap().usage, None);
+    }
+
+    /// Real Codex 0.164.0 listed skills of its home and of the project only: `skills.*` settings and
+    /// `skills/list` with extra roots added none, so the routing line is the delivery.
+    #[test]
+    fn an_overlays_skill_is_a_routing_line_in_the_developer_instructions() {
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-overlay-fixture".to_owned(),
+            ..CodexConfig::default()
+        })
+        .unwrap();
+        let terminal = ProcessTerminal::new();
+        let mut start = assistant_start(AssistantMode::moneypenny(), "Do it.");
+        start.assistant = None;
+        start.clearance = "field".to_owned();
+        start.overlays.skills.push(ai6::OverlaySkill {
+            name: "review".to_owned(),
+            overlay: "tools".to_owned(),
+            description: "Reviews a change.".to_owned(),
+            path: "/store/tools/skills/review".to_owned(),
+            native: true,
+        });
+        let session = handler.start(start, terminal.into_object()).unwrap();
+        let events = read_to_completion(&session);
+        let instructions = reported_policy(&events)["developerInstructions"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            instructions.starts_with("You are Moneypenny."),
+            "{instructions}"
+        );
+        assert!(
+            instructions.contains("Skill `review` (overlay `tools`)"),
+            "{instructions}"
+        );
+        assert!(
+            instructions.contains("/store/tools/skills/review/SKILL.md"),
+            "{instructions}"
+        );
+        session.close().unwrap();
     }
 }

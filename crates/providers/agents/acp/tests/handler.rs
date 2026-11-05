@@ -63,6 +63,7 @@ fn start(environment: BTreeMap<String, String>) -> AgentStart {
         project_mcp: false,
         answer_only: false,
         assistant: None,
+        overlays: Default::default(),
     }
 }
 
@@ -366,6 +367,7 @@ fn a_session_resumes_when_the_agent_can() {
         answer_only: false,
         assistant: None,
         initial_context: Vec::new(),
+        overlays: Default::default(),
     };
     let session = handler("").resume(request, terminal()).unwrap();
     let events = until(&session, &["completed", "failed"]);
@@ -386,6 +388,7 @@ fn a_session_resumes_when_the_agent_can() {
         answer_only: false,
         assistant: None,
         initial_context: Vec::new(),
+        overlays: Default::default(),
     };
     let error = handler("")
         .resume(request, terminal())
@@ -416,6 +419,7 @@ fn launched(clearance: &str, extra: &str) -> [Result<(), String>; 2] {
         answer_only: false,
         assistant: None,
         initial_context: Vec::new(),
+        overlays: Default::default(),
     };
     let handler = handler(extra);
     [
@@ -504,4 +508,27 @@ fn settings_are_validated_when_the_handler_loads() {
         .map(|_| ())
         .expect_err("no command");
     assert!(error.to_string().contains("handler_settings"), "{error}");
+}
+
+/// An ACP agent is any program, so a skill reaches it as the routing line in its first prompt.
+#[test]
+fn an_overlays_skill_reaches_the_agent_as_a_routing_line() {
+    let mut request = start(environment(&[]));
+    request.overlays.skills.push(ai6::OverlaySkill {
+        name: "review".to_owned(),
+        overlay: "tools".to_owned(),
+        description: "Reviews a change.".to_owned(),
+        path: "/store/tools/skills/review".to_owned(),
+        native: true,
+    });
+    let session = handler("")
+        .start(request, terminal())
+        .expect("the agent starts");
+    let said = text(&until(&session, &["completed", "failed"]));
+    assert!(said.contains("You are 007"), "{said}");
+    assert!(said.contains("Skill `review` (overlay `tools`)"), "{said}");
+    assert!(
+        said.contains("/store/tools/skills/review/SKILL.md"),
+        "{said}"
+    );
 }

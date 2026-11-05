@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::directorates::m::identity::{MissionId, SessionId};
-use crate::directorates::section_00::agent::{AgentResume, AgentStart, AssistantMode};
+use crate::directorates::section_00::agent::{
+    AgentResume, AgentStart, AssistantMode, SessionOverlays,
+};
 
 /// The handler provider a field runner starts, by id and Guatiao configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +66,9 @@ pub struct LaunchMeta {
     /// The assistant mode.
     #[serde(default)]
     pub assistant: Option<AssistantMode>,
+    /// What the Session's overlays hand the harness.
+    #[serde(default)]
+    pub overlays: SessionOverlays,
     /// The handler a field runner starts; absent where the façade serves one handler.
     #[serde(default)]
     pub handler: Option<HandlerSpec>,
@@ -91,6 +96,7 @@ impl LaunchMeta {
             project_mcp: start.project_mcp,
             answer_only: start.answer_only,
             assistant: start.assistant.clone(),
+            overlays: start.overlays.clone(),
             handler: None,
             terminal: None,
             key: None,
@@ -135,6 +141,7 @@ impl LaunchMeta {
             project_mcp: self.project_mcp,
             answer_only: self.answer_only,
             assistant: self.assistant,
+            overlays: self.overlays,
         }
     }
 
@@ -200,6 +207,9 @@ pub struct ResumeMeta {
     /// The standing part of the start-up context.
     #[serde(default)]
     pub initial_context: Vec<String>,
+    /// What the Session's overlays hand the harness.
+    #[serde(default)]
+    pub overlays: SessionOverlays,
     /// The handler a field runner starts.
     #[serde(default)]
     pub handler: Option<HandlerSpec>,
@@ -228,6 +238,7 @@ impl ResumeMeta {
             answer_only: resume.answer_only,
             assistant: resume.assistant.clone(),
             initial_context: resume.initial_context.clone(),
+            overlays: resume.overlays.clone(),
             handler: None,
             terminal: None,
             key: None,
@@ -272,6 +283,7 @@ impl ResumeMeta {
             answer_only: self.answer_only,
             assistant: self.assistant,
             initial_context: self.initial_context,
+            overlays: self.overlays,
         }
     }
 

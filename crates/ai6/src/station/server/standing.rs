@@ -128,6 +128,7 @@ pub(super) fn resume_request(start: AgentStart, session_id: SessionId) -> AgentR
         answer_only: start.answer_only,
         assistant: start.assistant,
         initial_context: start.initial_context,
+        overlays: start.overlays,
     }
 }
 

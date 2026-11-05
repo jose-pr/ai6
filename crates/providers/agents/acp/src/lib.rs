@@ -582,7 +582,9 @@ impl AgentHandler for AcpHandler {
                 assistant: request.assistant.as_ref(),
                 desk: !restricted && !clearance_runs_commands(&request.clearance),
                 prompt: Some(briefing(
-                    &request.initial_context,
+                    &request
+                        .overlays
+                        .with_routing(&request.initial_context, false),
                     restricted,
                     &request.prompt,
                 )),

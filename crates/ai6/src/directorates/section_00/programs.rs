@@ -126,7 +126,7 @@ pub fn find_program(program: &str, environment: &BTreeMap<String, String>) -> Op
 
 /// Where a process started with no `PATH` looks for a bare name on Unix: the C library's default
 /// search path, which `execvp` uses then. Windows looks nowhere.
-const NO_PATH_SEARCH: &str = if cfg!(windows) { "" } else { "/bin:/usr/bin" };
+pub const NO_PATH_SEARCH: &str = if cfg!(windows) { "" } else { "/bin:/usr/bin" };
 
 /// Why `agent`'s harness `program` cannot be started with `environment` and nothing else, or
 /// `None` when it can be found: a path must be a file; a bare name must be on the environment's

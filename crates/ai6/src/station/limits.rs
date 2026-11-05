@@ -744,6 +744,15 @@ pub struct OverlayLimits {
     #[schema(title = "Issue overlays without a pin")]
     #[map(default)]
     pub unpinned: bool,
+    /// Bytes of the rules, routing and context a Session's overlays add to its initial context
+    /// together. Past it the Session is refused, naming this setting, rather than its text cut.
+    #[schema(title = "Largest overlay context", format = "bytes")]
+    #[map(default = OverlayLimits::default().context_bytes)]
+    pub context_bytes: Limit,
+    /// Seconds a fetch of one overlay's Git source may take.
+    #[schema(title = "Longest overlay fetch")]
+    #[map(default = OverlayLimits::default().fetch_timeout)]
+    pub fetch_timeout: Seconds,
 }
 
 impl Default for OverlayLimits {
@@ -755,6 +764,9 @@ impl Default for OverlayLimits {
             bytes: Limit::at(64 * MIB),
             file_bytes: Limit::at(16 * MIB),
             unpinned: false,
+            // A harness on Windows takes its context on a command line of at most 32 KiB.
+            context_bytes: Limit::at(24 * 1024),
+            fetch_timeout: Seconds::new(300),
         }
     }
 }
@@ -787,6 +799,7 @@ impl OverlayLimits {
                 "files": self.files.get(),
                 "bytes": self.bytes.get(),
                 "file_bytes": self.file_bytes.get(),
+                "context_bytes": self.context_bytes.get(),
             }),
             &serde_json::json!({
                 "manifest_bytes": Self::default().manifest_bytes.get(),
@@ -794,6 +807,7 @@ impl OverlayLimits {
                 "files": Self::default().files.get(),
                 "bytes": Self::default().bytes.get(),
                 "file_bytes": Self::default().file_bytes.get(),
+                "context_bytes": Self::default().context_bytes.get(),
             }),
             &[],
         );

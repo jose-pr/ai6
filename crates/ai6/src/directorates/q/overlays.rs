@@ -72,7 +72,7 @@ pub use read::{
     Document, DotenvLine, ReadError, ReadLimits, ScriptOutput, parse_dotenv, read_document,
     read_env_script_output,
 };
-pub use skills::{SKILL_INERT_KEYS, check_skill};
+pub use skills::{SKILL_INERT_KEYS, check_skill, skill_description};
 pub use source::{Source, SourceError, SourceKind};
 pub use subst::{Lookup, SubstitutionError, substitute};
 pub use validate::{Issue, applies, named_files, valid_license, validate};
@@ -312,6 +312,15 @@ pub struct IssuedOverlay {
     pub record: OverlayRecord,
     /// Its manifest.
     pub manifest: Document,
+}
+
+/// Which overlay a digest on a launch's record is for.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IssuedDigest {
+    /// The overlay's identity.
+    pub overlay: String,
+    /// Its tree digest, `sha256:<hex>`.
+    pub digest: String,
 }
 
 /// The overlays a Session is issued.

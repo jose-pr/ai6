@@ -192,6 +192,9 @@ pub(crate) struct LaunchManifest {
     /// The clearance the harness was launched at, which fixed its tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) clearance: Option<String>,
+    /// The overlays the harness was launched with, each at its digest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) overlays: Vec<crate::directorates::q::overlays::IssuedDigest>,
 }
 
 /// What a Station needs to act on its Session record: the record's ID and the fencing token
@@ -1089,6 +1092,7 @@ mod tests {
                 session: None,
                 runner: Some("key-1".to_owned()),
                 clearance: None,
+                overlays: Vec::new(),
             },
         )
         .unwrap();
@@ -1294,6 +1298,7 @@ mod tests {
                     session: None,
                     runner: None,
                     clearance: None,
+                    overlays: Vec::new(),
                 },
             )
             .unwrap();
@@ -1351,6 +1356,7 @@ mod tests {
                     session: None,
                     runner: None,
                     clearance: None,
+                    overlays: Vec::new(),
                 },
             )
             .unwrap();
@@ -1512,6 +1518,7 @@ mod tests {
                     session: None,
                     runner: None,
                     clearance: None,
+                    overlays: Vec::new(),
                 },
             )
             .unwrap();

@@ -1306,6 +1306,7 @@ impl Desk {
             project_mcp: false,
             answer_only: false,
             assistant: Some(mode.clone()),
+            overlays: Default::default(),
         };
         let resume = previous
             .and_then(|previous| SessionId::try_new(previous).ok())
@@ -1324,6 +1325,7 @@ impl Desk {
                 answer_only: false,
                 assistant: Some(mode),
                 initial_context,
+                overlays: Default::default(),
             });
         let launched = Launched {
             harness: self.harness.clone(),
@@ -5137,6 +5139,7 @@ secret = "gateway-key"
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
             )
             .unwrap();

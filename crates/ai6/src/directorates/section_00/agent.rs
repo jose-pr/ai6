@@ -69,6 +69,83 @@ pub struct AgentStart {
     /// [`answer_only`]: AgentStart::answer_only
     #[serde(default)]
     pub assistant: Option<AssistantMode>,
+    /// What the Session's overlays hand the harness beside their text and environment, which are
+    /// in `initial_context` and `environment` already.
+    #[map(default)]
+    #[serde(default)]
+    pub overlays: SessionOverlays,
+}
+
+/// A skill of an overlay issued to a Session.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+pub struct OverlaySkill {
+    /// The skill's name, its directory under `skills/`.
+    pub name: String,
+    /// The overlay that issues it.
+    pub overlay: String,
+    /// What its front matter says it is for.
+    pub description: String,
+    /// The skill's directory on the harness's host, absolute and read-only; `SKILL.md` is in it.
+    pub path: String,
+    /// Whether a handler whose harness loads skills may do so. `false` when the overlay's harness
+    /// hint turns native delivery off: the routing line is then the delivery.
+    #[map(default)]
+    #[serde(default)]
+    pub native: bool,
+}
+
+/// What a Session's overlays hand its harness. Empty for a Session with none.
+#[derive(
+    ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default,
+)]
+#[map(crate = ::guatiao)]
+pub struct SessionOverlays {
+    /// Each overlay's root on the harness's host, absolute and read-only. A handler whose harness
+    /// refuses to read outside its workspaces allows these.
+    #[map(default)]
+    #[serde(default)]
+    pub roots: Vec<String>,
+    /// The skills, each once, in composition order.
+    #[map(default)]
+    #[serde(default)]
+    pub skills: Vec<OverlaySkill>,
+    /// A read-only directory holding the skills whose `native` is set as a harness plugin:
+    /// `skills/<name>/` and a manifest `.claude-plugin/plugin.json` naming the plugin `ai6`.
+    #[serde(default)]
+    pub plugin_dir: Option<String>,
+}
+
+impl SessionOverlays {
+    /// The routing lines for the skills a handler does not load itself: those whose `native` is
+    /// unset when `loads_skills`, else every one. A skill is a file an Agent can read, so a harness
+    /// with no skills of its own is told where each one is. `None` when there is none to name.
+    pub fn routing(&self, loads_skills: bool) -> Option<String> {
+        let lines: Vec<String> = self
+            .skills
+            .iter()
+            .filter(|skill| !(loads_skills && skill.native))
+            .map(|skill| {
+                format!(
+                    "- Skill `{}` (overlay `{}`): {} Read {}/SKILL.md when the task calls for it.",
+                    skill.name,
+                    skill.overlay,
+                    skill.description.trim(),
+                    skill.path.trim_end_matches(['/', '\\'])
+                )
+            })
+            .collect();
+        (!lines.is_empty()).then(|| format!("Skills you can use:\n{}", lines.join("\n")))
+    }
+
+    /// `context` with the routing lines for the skills a handler does not load itself, after it.
+    pub fn with_routing(&self, context: &[String], loads_skills: bool) -> Vec<String> {
+        context
+            .iter()
+            .cloned()
+            .chain(self.routing(loads_skills))
+            .collect()
+    }
 }
 
 /// What an assistant Session may use besides answering: its parts, so a handler builds the
@@ -269,6 +346,10 @@ pub struct AgentResume {
     /// instructions and ignores it.
     #[serde(default)]
     pub initial_context: Vec<String>,
+    /// What the Session's overlays hand the harness, delivered again for this launch.
+    #[map(default)]
+    #[serde(default)]
+    pub overlays: SessionOverlays,
 }
 
 /// One model a harness says an account may use.

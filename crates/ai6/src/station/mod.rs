@@ -14,6 +14,8 @@ pub mod identity;
 pub(crate) mod issues;
 pub mod limits;
 #[cfg(feature = "daemon")]
+pub(crate) mod overlays;
+#[cfg(feature = "daemon")]
 pub mod plugins;
 #[cfg(feature = "publisher")]
 pub mod publisher;

@@ -39,6 +39,15 @@ impl OverlayTree {
         }
     }
 
+    /// The tree with the text of `path`, one of its files, as read.
+    #[must_use]
+    pub fn with_text(mut self, path: &str, text: impl Into<String>) -> Self {
+        if self.paths.contains(path) {
+            self.texts.insert(path.to_owned(), text.into());
+        }
+        self
+    }
+
     /// Every path, in byte order.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.paths.iter().map(String::as_str)

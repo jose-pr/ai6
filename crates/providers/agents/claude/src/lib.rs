@@ -16,7 +16,7 @@ use ai6::directorates::q::terminal::{
     TerminalSession, exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, SessionOverlays,
     SessionRecordFile, SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
@@ -340,7 +340,9 @@ impl AgentHandler for ClaudeHandler {
         ];
         add_launch_options(
             &mut argv,
-            &request.initial_context,
+            &request
+                .overlays
+                .with_routing(&request.initial_context, true),
             request.model.as_deref(),
             request.effort.as_deref(),
         );
@@ -359,6 +361,7 @@ impl AgentHandler for ClaudeHandler {
             mode,
             &self.settings,
             request.assistant.as_ref(),
+            &request.overlays,
         )?;
         let session = spawn(
             terminal,
@@ -400,7 +403,9 @@ impl AgentHandler for ClaudeHandler {
         // that, or with the snapshot off, it builds the prompt from this launch's flags.
         add_launch_options(
             &mut argv,
-            &request.initial_context,
+            &request
+                .overlays
+                .with_routing(&request.initial_context, true),
             request.model.as_deref(),
             request.effort.as_deref(),
         );
@@ -421,6 +426,7 @@ impl AgentHandler for ClaudeHandler {
             mode,
             &self.settings,
             request.assistant.as_ref(),
+            &request.overlays,
         )?;
         let session = spawn(
             terminal,
@@ -669,6 +675,7 @@ fn add_settings(
     mode: Mode,
     settings: &ClaudeSettings,
     assistant: Option<&AssistantMode>,
+    overlays: &SessionOverlays,
 ) -> Result<(), ProviderError> {
     if let Some(assistant) = assistant {
         add_assistant(argv, environment, working_directory, assistant)?;
@@ -678,14 +685,71 @@ fn add_settings(
         add_project_settings(argv, false, false);
         add_read_only_tools(argv, environment);
         add_mcp(argv, environment);
-        add_gate(argv, environment);
+        add_overlay_skills(argv, overlays);
+        add_mission_settings(argv, environment, overlays);
     } else {
         add_project_settings(argv, mode.project_settings, mode.project_mcp);
         add_field_tools(argv, environment, settings, mode.commands);
         add_mcp(argv, environment);
-        add_gate(argv, environment);
+        add_overlay_skills(argv, overlays);
+        add_mission_settings(argv, environment, overlays);
     }
     Ok(())
+}
+
+/// Whether the launch has a native overlay skill to load: a plugin directory and a skill for it.
+fn loads_overlay_skills(overlays: &SessionOverlays) -> bool {
+    overlays.plugin_dir.is_some() && overlays.skills.iter().any(|skill| skill.native)
+}
+
+/// Loads a Mission's overlay skills: `Skill` joins `--tools`, closed by the next flag, each skill is
+/// allowed as `Skill(ai6:<name>)`, and the Station's plugin directory is `--plugin-dir`. Claude Code
+/// 2.1.318 listed and launched the plugin's skills with this under `dontAsk`, at `field` and `desk`,
+/// and with no `Skill` in `--tools` it answered `No such tool available`.
+fn add_overlay_skills(argv: &mut Vec<String>, overlays: &SessionOverlays) {
+    let Some(dir) = overlays
+        .plugin_dir
+        .as_ref()
+        .filter(|_| loads_overlay_skills(overlays))
+    else {
+        return;
+    };
+    let mut add_to = |flag: &str, added: &str| {
+        if let Some(at) = argv.iter().position(|arg| arg == flag)
+            && let Some(list) = argv.get_mut(at + 1)
+        {
+            if !list.is_empty() {
+                list.push(',');
+            }
+            list.push_str(added);
+        }
+    };
+    add_to("--tools", SKILL_TOOL);
+    let rules: Vec<String> = overlays
+        .skills
+        .iter()
+        .filter(|skill| skill.native)
+        .map(|skill| format!("{SKILL_TOOL}({SKILLS_PLUGIN}:{})", skill.name))
+        .collect();
+    add_to("--allowedTools", &rules.join(","));
+    argv.extend(["--plugin-dir".to_owned(), dir.clone()]);
+}
+
+/// The one `--settings` a Mission's Session gets: the green ink gate when it has a Station to ask,
+/// and, with overlay skills, no skill's injected command: a skill Claude Code ships or the user's
+/// directory holds is not one the Station checked, and its command would run before the gate saw it.
+fn add_mission_settings(
+    argv: &mut Vec<String>,
+    environment: &BTreeMap<String, String>,
+    overlays: &SessionOverlays,
+) {
+    let mut settings = gate_of(environment).unwrap_or_else(|| json!({}));
+    if loads_overlay_skills(overlays) {
+        settings["disableSkillShellExecution"] = json!(true);
+    }
+    if settings.as_object().is_some_and(|map| !map.is_empty()) {
+        argv.extend(["--settings".to_owned(), settings.to_string()]);
+    }
 }
 
 /// An assistant Session, built from its mode's parts: answer-only's restrictions
@@ -1375,21 +1439,13 @@ fn gate_settings(program: &str, cable_url: &str) -> Value {
     })
 }
 
-/// Adds the green ink gate when the Session has a Station to ask (its Cable endpoint). The
-/// gate is the `ai6` program hosting this handler, or the one `AI6_GREEN_INK_GATE` names.
-fn add_gate(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
-    let Some(cable_url) = environment
+/// The green ink gate when the Session has a Station to ask (its Cable endpoint). The gate is the
+/// `ai6` program hosting this handler, or the one `AI6_GREEN_INK_GATE` names.
+fn gate_of(environment: &BTreeMap<String, String>) -> Option<Value> {
+    let cable_url = environment
         .get("AI6_CABLE_MCP_URL")
-        .filter(|_| has_endpoint(environment, "AI6_CABLE_MCP"))
-    else {
-        return;
-    };
-    if let Some(program) = hook_program(environment) {
-        argv.extend([
-            "--settings".to_owned(),
-            gate_settings(&program, cable_url).to_string(),
-        ]);
-    }
+        .filter(|_| has_endpoint(environment, "AI6_CABLE_MCP"))?;
+    hook_program(environment).map(|program| gate_settings(&program, cable_url))
 }
 
 /// Keeps the working directory's own settings out of the harness unless AI6 allowed them:
@@ -2484,6 +2540,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -2515,6 +2572,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -2693,6 +2751,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -2778,6 +2837,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -2840,6 +2900,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -2927,6 +2988,7 @@ mod tests {
                         answer_only,
                         assistant,
                         initial_context: Vec::new(),
+                        overlays: Default::default(),
                     },
                     ResumeTerminal {
                         spec: Arc::new(Mutex::new(None)),
@@ -2985,6 +3047,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -3034,6 +3097,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -3354,6 +3418,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -3555,6 +3620,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -3578,6 +3644,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -3613,6 +3680,7 @@ mod tests {
             },
             &ClaudeSettings::default(),
             None,
+            &SessionOverlays::default(),
         )
         .unwrap();
         let (offered, _, allowed) = field_flags(&argv);
@@ -3716,6 +3784,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -3739,6 +3808,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -3920,6 +3990,7 @@ mod tests {
             },
             &ClaudeSettings::default(),
             None,
+            &SessionOverlays::default(),
         )
         .unwrap();
         let (offered, denied, allowed) = field_flags(&argv);
@@ -3945,6 +4016,7 @@ mod tests {
                 },
                 &ClaudeSettings::default(),
                 assistant,
+                &SessionOverlays::default(),
             )
             .unwrap();
             argv
@@ -4001,6 +4073,7 @@ mod tests {
                     },
                     settings,
                     assistant,
+                    &SessionOverlays::default(),
                 )
                 .unwrap();
                 argv
@@ -4046,6 +4119,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.into_object(),
             )
@@ -4115,7 +4189,7 @@ mod tests {
         let mut environment = cable_environment();
         environment.insert(GATE_PROGRAM_ENV.to_owned(), "/opt/ai6/bin/ai6".to_owned());
         let mut argv = vec!["claude".to_owned()];
-        add_gate(&mut argv, &environment);
+        add_mission_settings(&mut argv, &environment, &SessionOverlays::default());
 
         assert_eq!(argv[1], "--settings");
         let settings: Value = serde_json::from_str(&argv[2]).unwrap();
@@ -4147,7 +4221,7 @@ mod tests {
 
         // Unnamed, the gate is the program hosting the handler.
         let mut argv = vec!["claude".to_owned()];
-        add_gate(&mut argv, &cable_environment());
+        add_mission_settings(&mut argv, &cable_environment(), &SessionOverlays::default());
         let settings: Value = serde_json::from_str(&argv[2]).unwrap();
         assert_eq!(
             settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
@@ -4156,7 +4230,7 @@ mod tests {
 
         // Without a Station to ask there is no gate.
         let mut argv = vec!["claude".to_owned()];
-        add_gate(&mut argv, &BTreeMap::new());
+        add_mission_settings(&mut argv, &BTreeMap::new(), &SessionOverlays::default());
         assert_eq!(argv, ["claude"]);
     }
 
@@ -4194,6 +4268,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: None,
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4217,6 +4292,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4268,6 +4344,7 @@ mod tests {
             project_mcp,
             answer_only,
             assistant: None,
+            overlays: Default::default(),
         };
         for mode in [
             (false, false, false),
@@ -4298,6 +4375,7 @@ mod tests {
                     answer_only: false,
                     assistant: None,
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4439,6 +4517,7 @@ mod tests {
                     project_mcp: true,
                     answer_only: false,
                     assistant: Some(AssistantMode::moneypenny()),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4462,6 +4541,7 @@ mod tests {
                     answer_only: false,
                     assistant: Some(AssistantMode::moneypenny()),
                     initial_context: vec!["You are Moneypenny.".to_owned()],
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4576,6 +4656,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: Some(mode.clone()),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4599,6 +4680,7 @@ mod tests {
                     answer_only: false,
                     assistant: Some(mode),
                     initial_context: Vec::new(),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -4964,6 +5046,7 @@ mod tests {
                     project_mcp: false,
                     answer_only: false,
                     assistant: Some(mode),
+                    overlays: Default::default(),
                 },
                 terminal.clone().into_object(),
             )
@@ -5741,5 +5824,94 @@ mod tests {
         let mut none = vec!["claude".to_owned()];
         add_budget(&mut none, None);
         assert_eq!(none.len(), 1);
+    }
+
+    fn overlay_skill(name: &str, native: bool) -> ai6::OverlaySkill {
+        ai6::OverlaySkill {
+            name: name.to_owned(),
+            overlay: "tools".to_owned(),
+            description: "Does a thing.".to_owned(),
+            path: format!("/store/tools/skills/{name}"),
+            native,
+        }
+    }
+
+    fn mission_argv(overlays: &SessionOverlays, commands: bool) -> Vec<String> {
+        let mut argv = Vec::new();
+        add_settings(
+            &mut argv,
+            &cable_environment(),
+            "wd",
+            Mode {
+                project_settings: false,
+                project_mcp: false,
+                answer_only: false,
+                commands,
+                reads_only: false,
+            },
+            &ClaudeSettings::default(),
+            None,
+            overlays,
+        )
+        .unwrap();
+        argv
+    }
+
+    /// Measured with Claude Code 2.1.318 against a loopback stand-in for the API: under these flags
+    /// the plugin's skills were listed in the request and launched, at `field` and at `desk`.
+    #[test]
+    fn a_missions_overlay_skills_load_from_the_plugin_directory_under_its_rules() {
+        let overlays = SessionOverlays {
+            roots: vec!["/store/tools".to_owned()],
+            skills: vec![overlay_skill("review", true), overlay_skill("audit", false)],
+            plugin_dir: Some("/store/plugin".to_owned()),
+        };
+        for commands in [true, false] {
+            let argv = mission_argv(&overlays, commands);
+            let (offered, _, allowed) = field_flags(&argv);
+            assert!(offered.split(',').any(|tool| tool == "Skill"), "{offered}");
+            assert!(allowed.contains("Skill(ai6:review)"), "{allowed}");
+            assert!(
+                !allowed.contains("audit"),
+                "a routed skill is no rule: {allowed}"
+            );
+            assert_eq!(
+                flag(&argv, "--plugin-dir").as_deref(),
+                Some("/store/plugin")
+            );
+            let settings = settings_of(&argv).unwrap();
+            assert_eq!(settings["disableSkillShellExecution"], json!(true));
+            assert!(settings["hooks"]["PreToolUse"].is_array(), "the gate stays");
+        }
+        // What it does not load itself is named in its context.
+        let context = overlays.with_routing(&["standing".to_owned()], true);
+        assert_eq!(context.len(), 2);
+        assert!(
+            context[1].contains("/store/tools/skills/audit/SKILL.md"),
+            "{context:?}"
+        );
+        assert!(!context[1].contains("review"), "{context:?}");
+    }
+
+    #[test]
+    fn a_mission_with_no_overlay_skill_is_offered_no_skill_tool() {
+        for overlays in [
+            SessionOverlays::default(),
+            SessionOverlays {
+                roots: vec!["/store/tools".to_owned()],
+                skills: vec![overlay_skill("audit", false)],
+                plugin_dir: None,
+            },
+        ] {
+            let argv = mission_argv(&overlays, true);
+            let (offered, _, allowed) = field_flags(&argv);
+            assert!(!offered.contains("Skill"), "{offered}");
+            assert!(!allowed.contains("Skill"), "{allowed}");
+            assert_eq!(flag(&argv, "--plugin-dir"), None);
+            assert_eq!(
+                settings_of(&argv).unwrap()["disableSkillShellExecution"],
+                Value::Null
+            );
+        }
     }
 }

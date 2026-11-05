@@ -25,6 +25,9 @@ mod medical;
 #[cfg(feature = "cables-mcp")]
 mod memories;
 mod models;
+mod overlay_desk;
+#[cfg(test)]
+mod overlay_tests;
 #[cfg(test)]
 mod placement_tests;
 mod promotion;
@@ -171,6 +174,8 @@ pub struct StationConfig {
     state_dir: Option<PathBuf>,
     /// Where its sealing key is kept, beside its identity; `None` is the state directory.
     sealing_dir: Option<PathBuf>,
+    /// What a relative `path` in an `[overlay.<name>]` is read against.
+    overlay_base: Option<PathBuf>,
     /// What the bootstrap file gives up against the defaults, reported at check-in.
     bootstrap_weakened: Vec<String>,
     /// The Station's own directories an assistant's interpreters may never read.
@@ -367,6 +372,7 @@ impl Default for StationConfig {
             hygiene: Default::default(),
             state_dir: None,
             sealing_dir: None,
+            overlay_base: None,
             bootstrap_weakened: Vec::new(),
             protected_paths: Vec::new(),
             tls_weakened: Vec::new(),
@@ -719,6 +725,7 @@ where
     };
     let state_dir = config.station.state_dir()?;
     config.station.state_dir = Some(state_dir.clone());
+    config.station.overlay_base = Some(config_dir.clone());
     let secrets_dir = config
         .secrets_dir
         .take()
@@ -4397,6 +4404,34 @@ async fn start_mission(
             "a Chief of Staff review runs only on this Station's own host",
         ));
     }
+    // Before anything is opened for the Session: a Mission that cannot have what it is issued
+    // waits with the reason, and an operator's fix lets it go on.
+    let issued = if review {
+        None
+    } else {
+        let (worker, worker_agent, worker_operation) = (
+            state.clone(),
+            agent.id.clone(),
+            mission.operation_id.clone(),
+        );
+        let prepared = tokio::task::spawn_blocking(move || {
+            overlay_desk::prepare(&worker, &worker_agent, worker_operation.as_deref())
+        })
+        .await
+        .map_err(|error| runtime_error(format!("overlay worker failed: {error}")))?;
+        match prepared {
+            Ok(prepared) => {
+                if !agent.is_routed() && mission.waiting.is_some() {
+                    agents::note_waiting(&state, &mission, None);
+                }
+                prepared
+            }
+            Err(reason) => {
+                agents::note_waiting(&state, &mission, Some(reason.clone()));
+                return Err(conflict(&reason));
+            }
+        }
+    };
     let theater_id = plan.theater_id.clone();
     let runner = match plan.mode {
         ExecutionMode::Field => runner_link(&state, &theater_id).map_err(configuration_error)?,
@@ -4625,6 +4660,48 @@ async fn start_mission(
     }
     if !review {
         environment.extend(requested_environment(request.environment));
+    }
+    // Before what is the Station's to set, which an overlay's environment does not override.
+    let mut issued_overlays = crate::directorates::section_00::agent::SessionOverlays::default();
+    let mut issued_digests = Vec::new();
+    if let Some(issued) = issued {
+        let commands = !plan_stage
+            && crate::directorates::section_00::agent::clearance_runs_commands(&agent.clearance);
+        let (worker_environment, worker_handler, worker_directory) = (
+            environment.clone(),
+            handler_provider.clone(),
+            area.path.clone(),
+        );
+        let delivered = tokio::task::spawn_blocking(move || {
+            issued.deliver_here(crate::station::overlays::SessionFacts {
+                environment: worker_environment,
+                commands,
+                handler: &worker_handler,
+                working_directory: &worker_directory,
+            })
+        })
+        .await
+        .map_err(|error| runtime_error(format!("overlay worker failed: {error}")))?;
+        let delivered = match delivered {
+            Ok(delivered) => delivered,
+            Err(reason) => {
+                return Err(
+                    start_failure(&state, &mission_id, reason, area.safe_house.clone()).await,
+                );
+            }
+        };
+        overlay_desk::report(
+            &state,
+            mission_id.as_str(),
+            mission.operation_id.as_deref(),
+            &delivered,
+        );
+        environment = delivered.environment;
+        initial_context.extend(delivered.context);
+        issued_overlays = delivered.overlays;
+        issued_digests = delivered.digests;
+    }
+    if !review {
         if let Some(briefing) = configure_station_cover(
             &state.roster,
             mission.operation_id.as_deref(),
@@ -4787,6 +4864,7 @@ async fn start_mission(
         session: previous_hold.clone(),
         runner: runner_key.clone(),
         clearance: Some(launch_clearance.clone()),
+        overlays: issued_digests,
     };
     let persisted = state
         .missions
@@ -4865,6 +4943,7 @@ async fn start_mission(
         project_mcp,
         answer_only: review,
         assistant: None,
+        overlays: issued_overlays,
     };
     let resuming = resume_from.is_some();
     let launch = match resume_from {
@@ -5487,6 +5566,77 @@ async fn resume_mission(
     } else {
         resume_agent.clearance.clone()
     };
+    // A harness started again is given its overlays again; one still running keeps what it has.
+    let mut resumed_overlays = crate::directorates::section_00::agent::SessionOverlays::default();
+    let mut resumed_digests = None;
+    let mut resumed_context = None;
+    if !review && reattach.is_none() {
+        let (worker, worker_agent, worker_operation) = (
+            state.clone(),
+            resume_agent.id.clone(),
+            mission.operation_id.clone(),
+        );
+        let commands = !plan_stage
+            && crate::directorates::section_00::agent::clearance_runs_commands(
+                &resume_agent.clearance,
+            );
+        let (worker_environment, worker_handler, worker_directory) = (
+            environment.clone(),
+            handler_provider.clone(),
+            working_directory.clone(),
+        );
+        let delivered = tokio::task::spawn_blocking(move || {
+            let issued =
+                overlay_desk::prepare(&worker, &worker_agent, worker_operation.as_deref())?;
+            issued
+                .map(|issued| {
+                    issued.deliver_here(crate::station::overlays::SessionFacts {
+                        environment: worker_environment,
+                        commands,
+                        handler: &worker_handler,
+                        working_directory: &worker_directory,
+                    })
+                })
+                .transpose()
+        })
+        .await
+        .map_err(|error| runtime_error(format!("overlay worker failed: {error}")))?
+        .map_err(|reason| conflict(&reason))?;
+        let before = resume_manifest
+            .as_ref()
+            .map_or(&[][..], |manifest| manifest.overlays.as_slice());
+        let digests = delivered
+            .as_ref()
+            .map_or_else(Vec::new, |d| d.digests.clone());
+        overlay_desk::report_change(
+            &state,
+            mission_id.as_str(),
+            mission.operation_id.as_deref(),
+            before,
+            &digests,
+        );
+        resumed_digests = Some(digests);
+        if let Some(delivered) = delivered {
+            overlay_desk::report(
+                &state,
+                mission_id.as_str(),
+                mission.operation_id.as_deref(),
+                &delivered,
+            );
+            environment = delivered.environment;
+            resumed_context = delivered.context;
+            resumed_overlays = delivered.overlays;
+            // The overlays' environment does not override what is the Station's to set.
+            configure_station_cover(
+                &state.roster,
+                mission.operation_id.as_deref(),
+                &resume_agent.id,
+                model.as_deref().unwrap_or_default(),
+                &mut environment,
+            )
+            .map_err(configuration_error)?;
+        }
+    }
     let session_id = stored_session_id
         .or_else(|| mission.session_ids.last().cloned())
         .or_else(|| {
@@ -5721,8 +5871,10 @@ async fn resume_mission(
             if plan_stage {
                 context.push(review::PLAN_CONTEXT.to_owned());
             }
+            context.extend(resumed_context);
             context
         },
+        overlays: resumed_overlays,
     };
     let attachment = runner.as_ref().map(|_| RunnerAttachment {
         key: reattach.as_ref().map_or_else(
@@ -5930,6 +6082,9 @@ async fn resume_mission(
         && let Some(mut manifest) = missions.operation(&mission_id)
     {
         manifest.clearance = Some(launched_clearance.clone());
+        if let Some(digests) = resumed_digests {
+            manifest.overlays = digests;
+        }
         if let Some(on) = &resume_on {
             manifest.model = on.route.model.clone();
             manifest.effort = on.route.effort.clone();

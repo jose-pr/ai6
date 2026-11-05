@@ -15,8 +15,8 @@ use ai6::AgentSession;
 use ai6::HarnessStdio;
 use ai6::directorates::q::terminal::{AgentTerminal, STREAM_COLS, Spec, TerminalSession};
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, SessionRecordFile, SessionRecordQuery,
-    clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, SessionOverlays, SessionRecordFile,
+    SessionRecordQuery, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_PROGRAM_ENV};
 use ai6::directorates::section_00::records;
@@ -235,6 +235,7 @@ struct Launch<'a> {
     project_mcp: bool,
     answer_only: bool,
     assistant: Option<&'a AssistantMode>,
+    overlays: &'a SessionOverlays,
 }
 
 /// Starts and resumes Antigravity CLI streams for AI6 Agent Sessions.
@@ -353,15 +354,22 @@ impl AgentHandler for AntigravityHandler {
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
             assistant: request.assistant.as_ref(),
+            overlays: &request.overlays,
         };
         let plan = self.plan(&launch)?;
-        let context = self.context(&request.initial_context, request.assistant.as_ref())?;
+        let context = self.context(
+            &request
+                .overlays
+                .with_routing(&request.initial_context, true),
+            request.assistant.as_ref(),
+        )?;
         let files = SessionFiles::create(
             &request.working_directory,
             &plan,
             self.config.mcp_timeout_secs,
             self.gate_hook(&launch, &plan).as_ref(),
             &context,
+            &request.overlays,
         )?;
         let argv = self.argv(&launch, &plan, &files, Some(files.agent_name()), None);
         let environment = self.environment(&request.environment);
@@ -404,16 +412,18 @@ impl AgentHandler for AntigravityHandler {
             project_mcp: request.project_mcp,
             answer_only: request.answer_only,
             assistant: request.assistant.as_ref(),
+            overlays: &request.overlays,
         };
         let plan = self.plan(&launch)?;
         // The agent and its system prompt stay as the conversation's first launch had them, so
-        // this launch needs no agent file; its MCP servers and hooks are this launch's.
+        // this launch needs no agent file; its MCP servers, hooks and skills are this launch's.
         let files = SessionFiles::create(
             &request.working_directory,
             &plan,
             self.config.mcp_timeout_secs,
             self.gate_hook(&launch, &plan).as_ref(),
             "",
+            &request.overlays,
         )?;
         let argv = self.argv(
             &launch,
@@ -526,6 +536,14 @@ impl AntigravityHandler {
                     .map(|tool| (*tool).to_owned()),
             );
             plan.allow.push(format!("write_file({})", display(root)));
+            // agy 1.4.12 ended the turn on a read outside its workspaces under no rule.
+            plan.allow.extend(
+                launch
+                    .overlays
+                    .roots
+                    .iter()
+                    .map(|root| format!("read_file({root})")),
+            );
             plan.deny.extend(
                 PROTECTED_DIRECTORIES
                     .iter()
@@ -712,6 +730,9 @@ impl AntigravityHandler {
             "--add-dir".to_owned(),
             files.path_text(),
         ];
+        if let Some(skills) = files.skills_text() {
+            argv.extend(["--add-dir".to_owned(), skills]);
+        }
         if let Some(agent) = agent {
             argv.push(format!("--agent={agent}"));
         }
