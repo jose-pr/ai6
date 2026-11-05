@@ -792,6 +792,15 @@ pub struct UnexRecord {
     #[schema(title = "Directory attribute of the proxy's user")]
     #[map(default = UnexRecord::default_lookup_by())]
     pub proxy_lookup_by: String,
+    /// The Authenticator provider ID that names the person asking for one of Moneypenny's
+    /// pages from the request itself: `coqui_access_mtls` on the gateway's own TLS,
+    /// `coqui_access_proxy` behind a front door. It answers only under the pages' base,
+    /// never for `/v1`. Default: none; pages know a person by the page cookie alone.
+    #[schema(title = "Page viewers' authenticator")]
+    pub page_authenticator: Option<String>,
+    /// The page authenticator's configuration. Default: none.
+    #[schema(title = "Page viewers' authenticator's configuration", sensitive)]
+    pub page_authenticator_config: Option<ProviderConfig>,
     /// Password or key tries a minute from one client address. Default: 5.
     #[schema(title = "Tries a minute per client address")]
     pub login_tries_per_address: Option<u32>,
@@ -861,6 +870,8 @@ impl Default for UnexRecord {
             accounts_config: None,
             proxy_user_header: None,
             proxy_lookup_by: Self::default_lookup_by(),
+            page_authenticator: None,
+            page_authenticator_config: None,
             login_tries_per_address: None,
             login_tries_per_name: None,
             client_address_header: None,
@@ -919,6 +930,7 @@ impl UnexRecord {
             ("directory_config", &self.directory_config),
             ("authorizer_config", &self.authorizer_config),
             ("accounts_config", &self.accounts_config),
+            ("page_authenticator_config", &self.page_authenticator_config),
         ] {
             if let Some(config) = config {
                 inline(

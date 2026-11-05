@@ -91,6 +91,24 @@ impl AccessTokenStore for SqlRegistry {
         })
     }
 
+    fn login_by_id(&self, token_id: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_id(token_id)?;
+        let limit = self.limits.tokens.record_bytes;
+        self.read(|tx| {
+            let Some(record) = token_by_id(tx, token_id, limit)? else {
+                return Ok(None);
+            };
+            if !record.active_at(unix_time()?) {
+                return Ok(None);
+            }
+            let sign_in = match record.sign_in() {
+                Some(sign_in) => token_by_id(tx, sign_in, limit)?,
+                None => None,
+            };
+            Ok(sign_in_stands(&record, sign_in.as_ref()).then_some(record))
+        })
+    }
+
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
         validate_token_id(token_id)?;
         self.write(|tx, revision| {

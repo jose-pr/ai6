@@ -679,7 +679,7 @@ are an Audit route's (not both).
 `Gateway::with_pages(PagesConfig { dir, origin, listen })` keeps pages (`{dir}/{id}/meta.json`
 and `files/`) and serves them; `Gateway::pages_router()` is the router of the pages' own
 listener (page routes only, `None` without an `origin`) and `serve_pages(address, shutdown)`
-runs it. Without an origin the routes are `/pages/v/{token}/…` on the API router. Quotas and
+runs it. Without an origin the routes are `/pages/p/{id}/…` on the API router. Quotas and
 options are the roster's `[assistant.pages]`, read at each use. Tools (listed by `tools/list`):
 `publish_page {kind: dashboard|report|file, title, path | content+format, entry?, replace?,
 feeds?}`, `unpublish_page {id}`, `pages`. A `path` is uploaded by the Station
@@ -687,17 +687,29 @@ feeds?}`, `unpublish_page {id}`, `pages`. A `path` is uploaded by the Station
 with `{files: [AssistantPageFile]}` or `{refused}`; `digest` is `page_call_digest(path)`); the
 call waits `upload_wait` for it and checks the manifest. Audit (`config:assistant` scope) comes
 before the page exists. The person's routes: `GET /v1/user/pages`, `POST /v1/user/pages/{id}/open
-{network?}` → `{url, expires_at}`, `POST …/remember {remember}`, `DELETE …`; any other person
-gets 404. Page routes: `GET /v/{token}/` (the frame: the bar and an `<iframe>`), `/v/{token}/f/{path}`
-(a file; a top-level request redirects to the frame), `/v/{token}/data/{feed}` (`{data, at}`;
-403 when feeds or the network are off or the viewer may not read it, 429 past
-`feed_reads_per_minute`). A link stands only while its page, its time and its viewer's
-sign-in do; links are kept in `{dir}/.links.json` by token digest and the view token is an HMAC
-under `{dir}/.key`, so a restart keeps them. An ended sign-in answers 403 with "The link's owner
-is signed out"; every other refusal is a bare 404, its reason logged once per link (stderr).
-Every page response carries the sandbox CSP (no `allow-same-origin`), `nosniff`,
-`no-referrer`, `no-store`, CORP `cross-origin` and `Access-Control-Allow-Origin: *`; no `/v1`
-route ever answers CORS.
+{network?}` → `{url: "{pages base}/p/{id}/[?network=]", expires_at}`, `POST …/remember {remember}`,
+`DELETE …`; any other person gets 404. Page routes: `GET /p/{id}/[?network=]` (the frame: the bar
+and an `<iframe>` of `{token}/f/{entry}`; audited `moneypenny.page.opened`), `/p/{id}/{token}/f/{path}`
+(a file; a top-level request redirects to the frame), `/p/{id}/{token}/data/{feed}` and
+`…/f/data/{feed}` (`{data, at}`; 403 when feeds or the network are off or the viewer may not read
+it, 429 past `feed_reads_per_minute`). Every one names its viewer (`page_access::viewer`): the
+`AccessProviders::with_page_authenticator` provider, given the headers but `Cookie`, the TCP peer
+and the certificates the client proved on `Gateway::serve_tls` (`Valid` names the person, `Unknown`
+falls through, anything else refuses), else the page cookie `ai6_pages={sign-in id}.{HMAC}`
+(`HttpOnly; Secure; SameSite=None; Path={pages base path}/`, set by `/v1/auth/login`, `resume` and
+`renew` for a request with `Origin` when pages share the API's origin, dropped by `logout`; the
+sign-in is checked with `login_by_id` each request), then checks `may_view`. `{token}` is
+`{expires}.{network}.{HMAC of page, viewer, network, expires}` under `{dir}/.key`, `open_ttl`
+long: it is no credential, and ties a file or feed request to the viewer's frame. An ended sign-in
+answers 403 ("You are signed out…"); nobody, someone the page is hidden from, a token not theirs or
+expired answer as an unknown page (404), the reason logged once per page and viewer (stderr). A
+request with `Origin: null` (the page's own credentialed fetch) gets `Access-Control-Allow-Origin:
+null` and `-Credentials: true`. Every page response carries the sandbox CSP (no
+`allow-same-origin`), `nosniff`, `no-referrer`, `no-store`, CORP `cross-origin`; no `/v1` route
+answers CORS or reads the page cookie, a client certificate or the page authenticator.
+`tls_server_config(chain_pem, key_pem) -> Result<rustls::ServerConfig, String>` asks for a client
+certificate it does not require and takes any whose key is proven (trust is the page
+authenticator's); `Gateway::serve_tls(listener, config, shutdown)` serves HTTP/1.1 on it.
 
 ## Gateway state
 
@@ -880,7 +892,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/rename` | Requires `mission.control`; body `{"handle"}`. Returns `{operation_id, mission_id, handle, previous}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (a handle another Mission had) or `404` (no such Mission in the Operation). Audited `mission.rename` (resource `mission:UID`, target the UID), timeline kind `control` action `rename.done` with details `handle` and `previous`. |
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
 | `GET /v1/auth/methods` | No token. `{"methods": [...]}`: `password` when the Authenticator takes a name and a secret (it says so in `describe`, or says nothing), `proxy` with a proxy identity header. Names no account. |
-| `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret, `expires_at`, `expires_in` (seconds left, for a client that does not trust its clock) and `ends_at`. `ttl_seconds` is optional, default `[gateway] access_token_ttl`, at most `access_token_max_ttl`. A request with `Origin` (checked) also gets `Set-Cookie: ai6_session=…; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; Max-Age=…`, ending `session_max` after signing in, unless `[gateway] session_cookie` is `false`, `session_max` is `0` or the body says `"session_cookie": false`. |
+| `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret, `expires_at`, `expires_in` (seconds left, for a client that does not trust its clock) and `ends_at`. `ttl_seconds` is optional, default `[gateway] access_token_ttl`, at most `access_token_max_ttl`. A request with `Origin` (checked) also gets `Set-Cookie: ai6_session=…; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; Max-Age=…`, ending `session_max` after signing in, unless `[gateway] session_cookie` is `false`, `session_max` is `0` or the body says `"session_cookie": false`; and, when pages share the API's origin, the page cookie `ai6_pages` (see Pages she publishes), which `resume` and a renewal with `Origin` set again and `logout` with `Origin` drops. |
 | `POST /v1/auth/resume` | Takes the `ai6_session` cookie, not a bearer. `Origin` must be the public origin (`403`). Answers `201` as login does, with a new token of the same sign-in: its time still runs from signing in, and its renewals stop at the same `ends_at`. `401` and the cookie cleared when it is refused: not active, past the end, the person gone from the directory, a proven proxy identity naming someone else, or the setting off; `401` with nothing cleared when no cookie came. Refused cookies are counted by address alone (`login_tries_per_address`), apart from login tries, and past that answer `429`. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. With an `ai6_session` cookie from the public origin it also takes that, and the token may then be absent or over; `204`, `401` when it ended nothing, and a cookie sent is cleared either way. A token or cookie of a sign-in takes the whole sign-in: the cookie and every token issued from it. |
 | `POST /v1/auth/renew` | Moves the presented token's expiry on by `[gateway] access_token_ttl`, up to `session_max` after it was issued, never earlier; the value does not change. `Origin` is checked when present; it is not counted as a login try. `200 {token_id, expires_at, expires_in, ends_at}`, no secret (`ends_at` is `null` with no bound); `401` when not active or the person has left the directory. |

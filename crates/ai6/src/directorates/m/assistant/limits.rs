@@ -568,8 +568,9 @@ pub struct AssistantPageLimits {
     #[schema(title = "Keep a page for")]
     #[map(default = AssistantPageLimits::default().default_ttl)]
     pub default_ttl: Seconds,
-    /// Seconds a link to a page is valid.
-    #[schema(title = "A link to a page lasts")]
+    /// Seconds a frame's view token, which the page's files and feeds are named under, is valid.
+    /// A reload names a new one.
+    #[schema(title = "A view of a page lasts")]
     #[map(default = AssistantPageLimits::default().open_ttl)]
     pub open_ttl: Seconds,
     /// Seconds a publish waits for the Station's files.
@@ -597,7 +598,7 @@ pub struct AssistantPageLimits {
     #[map(default = AssistantPageLimits::default().feeds)]
     pub feeds: bool,
     /// Whether a page's frame shows the classification bar. The page stays in the gateway's
-    /// frame either way, which keeps a viewer's link in the browser that opened it.
+    /// frame either way, which names the view token of its files and feeds.
     #[schema(title = "Show the classification bar")]
     #[map(default = AssistantPageLimits::default().frame)]
     pub frame: bool,

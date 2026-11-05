@@ -46,11 +46,20 @@ similar = { workspace = true }
 sha2 = { workspace = true, features = ["alloc"] }
 hmac = { workspace = true }
 base64 = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tower = { workspace = true }
 uuid = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+rcgen = { workspace = true }
 reqwest = { workspace = true }
 tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
+# Libraries to load, never to link: depending on them has Cargo build each beside the test
+# binaries, where the page tests load the real page authenticators.
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "add863cf24394a9c88e3aaf360287a6884fe9cf4" }
+coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "add863cf24394a9c88e3aaf360287a6884fe9cf4" }

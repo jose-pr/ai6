@@ -146,9 +146,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         eprintln!("universal-exports: warning: {weakening}");
     }
     let listen = settings.located.unex_listen();
-    if listen.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
+    let tls = own_tls(&settings)?;
+    if tls.is_none() && listen.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(format!(
-            "[unex] listen must be a 127.0.0.1 address behind the reverse proxy, not {listen}"
+            "[unex] listen must be a 127.0.0.1 address behind the reverse proxy, not {listen}, \
+             unless [unex.tls] gives the gateway TLS of its own"
         ));
     }
     let public_origin = settings
@@ -312,10 +314,37 @@ async fn run(cli: Cli) -> Result<(), String> {
     if !poll.is_zero() {
         tokio::spawn(follow_policy(provider, live, snapshot.clone(), poll));
     }
-    gateway
-        .serve_loopback(listen.port(), shutdown_signal())
-        .await
-        .map_err(|error| format!("gateway listener failed: {error}"))
+    match tls {
+        Some(config) => {
+            let listener = tokio::net::TcpListener::bind(listen)
+                .await
+                .map_err(|error| format!("gateway listener failed: {error}"))?;
+            eprintln!("universal-exports: serving TLS of its own on {listen}");
+            gateway.serve_tls(listener, config, shutdown_signal()).await
+        }
+        None => {
+            gateway
+                .serve_loopback(listen.port(), shutdown_signal())
+                .await
+        }
+    }
+    .map_err(|error| format!("gateway listener failed: {error}"))
+}
+
+/// `[unex.tls]`: the TLS configuration of a gateway that serves TLS itself; `None` without one.
+fn own_tls(settings: &Settings) -> Result<Option<std::sync::Arc<rustls::ServerConfig>>, String> {
+    let tls = &settings.located.value.unex.tls;
+    let (certificate, key) = match (&tls.certificate, &tls.key) {
+        (None, None) => return Ok(None),
+        (Some(certificate), Some(key)) => (certificate, key),
+        _ => return Err("[unex.tls] needs both certificate and key".to_owned()),
+    };
+    let read = |path: &std::path::Path| {
+        std::fs::read(path).map_err(|error| format!("[unex.tls] {}: {error}", path.display()))
+    };
+    universal_exports::tls_server_config(&read(certificate)?, &read(key)?)
+        .map(|config| Some(std::sync::Arc::new(config)))
+        .map_err(|error| format!("[unex.tls]: {error}"))
 }
 
 /// Reads the provider every `every` and applies a changed `access` or `operation_access`
@@ -641,6 +670,16 @@ fn configured_access(
         (None, None) => {
             return Err("configure unex.authenticator or unex.proxy_user_header".to_owned());
         }
+    };
+    let access = match record.page_authenticator.as_deref() {
+        Some(id) => {
+            let page_config = config(&record.page_authenticator_config)?;
+            let page_authenticator = plugins
+                .authenticator(id, page_config.as_ref())
+                .map_err(|error| format!("unex.page_authenticator: {error}"))?;
+            access.with_page_authenticator(Arc::from(page_authenticator))
+        }
+        None => access,
     };
     Ok(Some((access, accounts)))
 }

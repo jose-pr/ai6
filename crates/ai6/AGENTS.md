@@ -1113,10 +1113,11 @@ pub struct StationSettings { id: Option<String>, state_dir: Option<PathBuf>, lis
     plugins: PluginSettings, identity: IdentitySettings, secrets: SecretSettings }
 pub struct AccessSettings { chief: Vec<String> }   // [unex.access] chief: always-chief subjects
 pub struct PagesSettings { dir: Option<PathBuf>, origin: Option<String>, listen: Option<SocketAddr> }
+pub struct UnexTlsSettings { certificate: Option<PathBuf>, key: Option<PathBuf> }   // [unex.tls]: PEM files; both or neither
 pub struct UnexSettings { url: Option<String>, ca_file: Option<PathBuf>, station_token: Option<SecretRef>,
     listen: Option<SocketAddr>, public_origin: Option<String>, proxy_secret: Option<SecretRef>,
     proxy_secret_min_bytes: Option<u64>, state_dir: Option<PathBuf>, plugins: PluginSettings,
-    access: AccessSettings, pages: PagesSettings }  // a Station publishes with url and station_token; paths resolved beside the file
+    access: AccessSettings, pages: PagesSettings, tls: UnexTlsSettings }  // a Station publishes with url and station_token; paths resolved beside the file
 pub struct Bootstrap { provider: ProviderSettings, registry: RegistrySettings, unex: UnexSettings,
     station: StationSettings, oo: serde_json::Map<String, serde_json::Value> }  // oo: unread here
 pub const DEFAULT_PAGES_LISTEN: SocketAddr;                              // 127.0.0.1:7083
@@ -1219,6 +1220,7 @@ impl StationRuntime { pub fn validate(&self) -> Result<(), String>;   // include
     pub fn duration(seconds: Option<f64>) -> Option<Duration>; }
 pub struct UnexRecord { authenticator, authenticator_config, directory, directory_config,
     authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
+    page_authenticator, page_authenticator_config /* the pages' request-taking authenticator */,
     login_tries_per_address, login_tries_per_name, client_address_header, access_cache_ttl,
     access_cache_negative_ttl, access_cache_entries, assistant /* true */,
     assistant_agent /* "moneypenny" */, route_text_bytes /* None: 128 */,
@@ -3959,6 +3961,7 @@ marks a record as a sign-in's session cookie (`is_session_cookie()`) and `in_sig
 bearer token as belonging to that sign-in (`sign_in()`).
 `AccessTokenStore` (`store_access_token`; `find_access_token`, which never answers with a session
 cookie, nor with a token whose sign-in was revoked; `find_session_cookie`, the converse;
+`login_by_id`, an active session cookie or bearer record (whose sign-in stands) by its ID;
 `revoke_access_token`, where a token of a sign-in takes the sign-in with it;
 `extend_access_token`, which moves an active bearer record's expiry later and never earlier);
 `FileRegistry` stores and validates records in the `access-tokens/` and `access-token-digests/`

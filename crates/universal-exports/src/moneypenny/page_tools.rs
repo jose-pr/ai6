@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use ai6::{AssistantPageFile, AssistantPageLimits, PageNetwork, page_call_digest};
+use ai6::{AssistantPageFile, AssistantPageLimits, page_call_digest};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path as UrlPath, Query, State};
@@ -30,7 +30,8 @@ pub(crate) const LIST: &str = "pages";
 pub(crate) const PUBLISH_DESCRIPTION: &str = "Publish a page the person opens in a browser tab \
     outside the app. kind is dashboard (reads live data through feeds, each a read tool with \
     fixed input, run with the viewer's own permissions; a script in a file at the top of the \
-    bundle fetches each as data/NAME, so no file may be under a top-level data/ directory), \
+    bundle fetches each as data/NAME, so no file may be under a top-level data/ directory; a \
+    script fetches a feed, or a file of the page, with fetch(url, {credentials: 'include'})), \
     report (a snapshot of data you put in \
     the files; make one only when the person asks for a report) or file (one file shown by its \
     format: a log, CSV, Markdown, an image). Give path (a file or a directory under personal/ \
@@ -490,42 +491,42 @@ pub(crate) struct OpenRequest {
     network: Option<String>,
 }
 
-/// `POST /v1/user/pages/{id}/open {network?}`: a link to the page for this sign-in, valid
-/// `open_ttl` or until the page goes: `{url, expires_at}`. Only the person whose page it is, or
-/// someone a share names, may ask; any other gets 404, an administrator included.
+/// `POST /v1/user/pages/{id}/open {network?}`: where the page opens, `{url, expires_at}`: its own
+/// address, with the network asked for, which any request that names a person who may read the
+/// page opens, and `expires_at` when an opening from it lasts until (`open_ttl`, or until the page
+/// goes). Only the person whose page it is, or someone a share names, may ask; any other gets 404,
+/// an administrator included.
 pub(crate) async fn open(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     UrlPath(id): UrlPath<String>,
     request: Option<Json<OpenRequest>>,
 ) -> Result<Json<Value>, ApiError> {
-    let token = bearer(&headers)?;
-    let person = resolve_user(&gateway, token).await?;
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     let page = store.get(&id).ok_or_else(ApiError::not_found)?;
     let limits = page_limits(&gateway).await?;
     if !pages::may_view(&gateway, &page, &person, &limits).await {
         return Err(ApiError::not_found());
     }
-    let asked = match request.and_then(|Json(request)| request.network).as_deref() {
+    let network = match request.and_then(|Json(request)| request.network).as_deref() {
         None => None,
-        Some("none") => Some(PageNetwork::None),
-        Some("own") => Some(PageNetwork::Own),
-        Some("open") => Some(PageNetwork::Open),
+        Some(network @ ("none" | "own" | "open")) => Some(network.to_owned()),
         Some(_) => return Err(ApiError::bad_request()),
     };
-    let network = pages::profile(&limits, asked);
-    let (link, expires) = store.mint(
-        &page,
-        &person.id,
-        &crate::access_token_digest(token),
-        network,
-        limits.open_ttl.0,
+    let mut expires = now() + limits.open_ttl.0.as_secs_f64();
+    if let Some(end) = page.expires_at {
+        expires = expires.min(end);
+    }
+    let mut url = format!(
+        "{}/p/{}/",
+        pages::pages_base(&gateway),
+        pages::percent(&page.id)
     );
-    Ok(Json(json!({
-        "url": format!("{}/v/{link}/", pages::pages_base(&gateway)),
-        "expires_at": expires,
-    })))
+    if let Some(network) = network {
+        url.push_str(&format!("?network={network}"));
+    }
+    Ok(Json(json!({"url": url, "expires_at": expires})))
 }
 
 #[derive(Deserialize)]
@@ -584,8 +585,8 @@ fn refusal(status: StatusCode, reason: impl Into<String>) -> Response {
 /// `PUT /v1/user/pages/{id}/shares {subjects}`: whom the page is shared with, in place of whom
 /// it was; an empty list shares it with nobody. Only the page's person, and only while
 /// `[assistant.pages] sharing` is on; a compartment only if they are read into it, an Operation
-/// only where they hold `mission.read`. A viewer no share names any longer loses their links at
-/// once. Answers the page as its person lists it.
+/// only where they hold `mission.read`. A viewer no share names any longer is refused at their
+/// next request. Answers the page as its person lists it.
 pub(crate) async fn share(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -670,15 +671,6 @@ pub(crate) async fn share(
         .share(&id, subjects)
         .map_err(|_| ApiError::internal())?
         .ok_or_else(ApiError::not_found)?;
-    let mut kept = Vec::new();
-    for (viewer, sign_in) in store.viewers(&id) {
-        if let Ok(holder) = crate::resolve_digest(&gateway, sign_in).await
-            && pages::may_view(&gateway, &page, &holder, &limits).await
-        {
-            kept.push(viewer);
-        }
-    }
-    store.revoke_viewers(&id, &|viewer| kept.iter().any(|kept| kept == viewer));
     Ok(Json(page.summary_with_link(&pages::pages_base(&gateway))).into_response())
 }
 

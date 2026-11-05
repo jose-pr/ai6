@@ -531,6 +531,22 @@ pub struct PagesSettings {
     pub listen: Option<SocketAddr>,
 }
 
+/// `[unex.tls]`: TLS the gateway serves itself. Its listener asks each client for a certificate
+/// and admits one without; the certificate counts only under the pages' base, through the `unex`
+/// record's `page_authenticator`, never for `/v1`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct UnexTlsSettings {
+    /// A PEM file of the gateway's certificate and its chain. Default: none; the gateway serves
+    /// plain HTTP for a reverse proxy, and with `key` both are needed.
+    #[schema(title = "The gateway's certificate")]
+    pub certificate: Option<PathBuf>,
+    /// A PEM file of the certificate's private key. Default: none.
+    #[schema(title = "The certificate's key")]
+    pub key: Option<PathBuf>,
+}
+
 /// The default address of the pages' own listener.
 pub const DEFAULT_PAGES_LISTEN: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 7083);
@@ -584,6 +600,10 @@ pub struct UnexSettings {
     #[schema(title = "Moneypenny's pages")]
     #[map(default)]
     pub pages: PagesSettings,
+    /// `[unex.tls]`: the gateway on TLS of its own, with no reverse proxy in front.
+    #[schema(title = "The gateway's own TLS")]
+    #[map(default)]
+    pub tls: UnexTlsSettings,
 }
 
 /// `ai6.cfg`: what every program on a host or for a user needs before it reaches the

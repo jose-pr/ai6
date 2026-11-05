@@ -319,67 +319,49 @@ fn a_discarded_page_leaves_nothing_and_a_committed_one_survives_a_restart() {
 }
 
 #[test]
-fn links_stand_for_their_page_and_time_and_are_counted() {
-    let (_dir, store) = store();
-    let files = one("index.html", "x");
-    let made = keep(
-        &store,
-        page("page-1", "p", &files),
-        &files,
-        &AssistantPageLimits::default(),
-    )
-    .unwrap();
-    let (token, expires) = store.mint(
-        &made,
-        "p",
-        "bearer",
-        PageNetwork::Own,
-        Duration::from_secs(3600),
+fn view_tokens_are_their_viewer_s_for_their_page_until_they_end() {
+    let store_again = store;
+    let (dir, store) = store();
+    let ends = now() + 3600.0;
+    let token = store.view_token("page-1", "p", PageNetwork::Own, ends);
+    assert_eq!(store.viewed(&token, "page-1", "p"), Ok(PageNetwork::Own));
+    for (page, viewer) in [("page-1", "q"), ("page-2", "p")] {
+        assert!(
+            store.viewed(&token, page, viewer).is_err(),
+            "{page} {viewer}"
+        );
+    }
+    // Its network and its end are under the mark.
+    let (end, rest) = token.split_once('.').unwrap();
+    let (_, mark) = rest.split_once('.').unwrap();
+    assert!(
+        store
+            .viewed(&format!("{end}.open.{mark}"), "page-1", "p")
+            .is_err()
     );
-    assert!(expires <= made.expires_at.unwrap());
-    let (key, link, _) = store.link(&token).unwrap();
-    assert_eq!(
-        (link.viewer.as_str(), link.network),
-        ("p", PageNetwork::Own)
+    assert!(
+        store
+            .viewed(
+                &format!("{:.0}.own.{mark}", (ends + 60.0) * 1000.0),
+                "page-1",
+                "p"
+            )
+            .is_err()
     );
-    assert!(store.link("not-the-token").is_none());
-    // The address-bar token and the view token each find the link only through their own door.
-    let view = store.view_token(&key);
-    assert_ne!(view, token);
-    assert!(store.viewed(&view).is_some());
-    assert!(store.viewed(&token).is_none());
-    assert!(store.link(&view).is_none());
-    // The first request binds a cookie; later ones need it.
-    let Admit::First(cookie) = store.admit(&token, &[]) else {
-        panic!("the first request binds the link");
-    };
-    assert_eq!(store.admit(&token, &[]), Admit::Refused);
-    assert_eq!(store.admit(&token, &["other"]), Admit::Refused);
-    assert_eq!(store.admit(&token, &["other", &cookie]), Admit::Again);
-    assert_eq!(store.admit("not-the-token", &[&cookie]), Admit::Refused);
+    assert!(store.viewed("not-a-token", "page-1", "p").is_err());
+    let ended = store.view_token("page-1", "p", PageNetwork::Own, now() - 1.0);
+    assert!(store.viewed(&ended, "page-1", "p").is_err());
+    // A restart keeps the key, so the token stands; another store's key makes another.
+    let reopened = PageStore::open(dir.path().join("pages")).unwrap();
+    assert_eq!(reopened.viewed(&token, "page-1", "p"), Ok(PageNetwork::Own));
+    let (_other_dir, other) = store_again();
+    assert!(other.viewed(&token, "page-1", "p").is_err());
+    // Feed reads are counted for each page and viewer.
+    let key = viewing("page-1", "p");
     for _ in 0..3 {
         assert!(store.note_read(&key, 3));
     }
     assert!(!store.note_read(&key, 3), "the fourth read in a minute");
-    // A restart keeps the link, its view token and its cookie, but not its address-bar token.
-    let reopened = PageStore::open(_dir.path().join("pages")).unwrap();
-    let (again, kept, _) = reopened.viewed(&view).unwrap();
-    assert_eq!(again, key);
-    assert_eq!(
-        (kept.viewer.as_str(), kept.sign_in.as_str()),
-        ("p", "bearer")
-    );
-    assert!(kept.token.is_none());
-    assert_eq!(reopened.admit(&token, &[&cookie]), Admit::Again);
-    assert_eq!(reopened.admit(&token, &[]), Admit::Refused);
-    let (short, _) = store.mint(&made, "p", "b", PageNetwork::Open, Duration::ZERO);
-    assert!(
-        store.link(&short).is_none(),
-        "a link of no time stands for none"
-    );
-    store.delete("page-1");
-    assert!(store.link(&token).is_none(), "the page's links go with it");
-    assert!(store.viewed(&view).is_none());
 }
 
 #[test]

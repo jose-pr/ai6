@@ -69,9 +69,9 @@ origin leaves the public roots alone.
 - `ai6ctl pages list` prints `GET /v1/user/pages` as tab-separated `ID KIND BYTES EXPIRES_UNIX
   TITLE SHARED_BY` (`EXPIRES_UNIX` is `remembered` without an expiry; `SHARED_BY` is `-` for
   your own pages, else whose the shared page is);
-  `pages open <ID> [--network none|own]` prints the link `POST /v1/user/pages/{id}/open` gives
-  (open it in a browser at once; it is bound to the access token and to the first browser that
-  opens it, so a copy opens nothing elsewhere); `pages remember <ID>` and `pages forget <ID>`
+  `pages open <ID> [--network none|own]` prints the page's address `POST /v1/user/pages/{id}/open`
+  gives (it opens in a browser that signed in to the app or that the page authenticator names, and
+  for nobody else); `pages remember <ID>` and `pages forget <ID>`
   post `.../remember`; `pages share <ID> [SUBJECT...]` puts `.../shares` (`person:`, `group:`,
   `account:`, `compartment:` or `operation:` and an ID; none shares with nobody) and prints
   `ID: shared with SUBJECT...` or `ID: shared with nobody`; `pages public <ID> on|off` puts

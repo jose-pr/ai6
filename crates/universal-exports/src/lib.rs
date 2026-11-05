@@ -17,6 +17,7 @@ mod login_limit;
 mod memories;
 mod models;
 mod moneypenny;
+mod page_access;
 mod pools;
 #[cfg(test)]
 mod rename_tests;
@@ -24,6 +25,7 @@ mod reviews;
 mod roster;
 mod source_reads;
 mod timeline;
+mod tls;
 mod transcripts;
 mod tree;
 
@@ -79,6 +81,7 @@ pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{TimelineItem, TimelinePage};
+pub use tls::tls_server_config;
 
 /// Bytes a frame's length field can grow by past an empty frame's.
 const LENGTH_GROWTH: usize = 10;
@@ -135,6 +138,9 @@ pub struct AccessProviders {
     directory: Arc<dyn Directory>,
     authorizer: Arc<dyn Authorizer>,
     proxy_identity: Option<ProxyIdentity>,
+    /// Names the person asking for a page from the request itself; read only by the page
+    /// routes.
+    page_authenticator: Option<Arc<dyn Authenticator>>,
 }
 
 #[derive(Clone)]
@@ -166,6 +172,7 @@ impl AccessProviders {
             directory,
             authorizer,
             proxy_identity: None,
+            page_authenticator: None,
         }
     }
 
@@ -190,7 +197,18 @@ impl AccessProviders {
                 lookup_by: lookup_by.into(),
                 secret: None,
             }),
+            page_authenticator: None,
         }
+    }
+
+    /// Names the person asking for one of Moneypenny's pages by `authenticator`, a provider that
+    /// reads the request itself (`coqui_access_mtls`, `coqui_access_proxy`): it is given the
+    /// request's headers but cookies, its client's address, and the certificates the client
+    /// proved on [`Gateway::serve_tls`]. Only the page routes ask it; no `/v1` route does.
+    #[must_use]
+    pub fn with_page_authenticator(mut self, authenticator: Arc<dyn Authenticator>) -> Self {
+        self.page_authenticator = Some(authenticator);
+        self
     }
 
     /// Adds trusted reverse-proxy identity as a login method alongside password login.
@@ -797,9 +815,12 @@ impl Gateway {
             .pages_router()
             .ok_or_else(|| std::io::Error::other("pages have no origin of their own"))?;
         let listener = tokio::net::TcpListener::bind(address).await?;
-        axum::serve(listener, router.into_make_service())
-            .with_graceful_shutdown(shutdown)
-            .await
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .await
     }
 
     /// Starts the page sweeper once, when a runtime runs.
@@ -3213,6 +3234,7 @@ async fn login(
     } else {
         None
     };
+    let sign_in = cookie.as_ref().map(|cookie| cookie.sign_in.clone());
     let issued = store_bearer(
         registry,
         person.id,
@@ -3222,14 +3244,40 @@ async fn login(
             now: issued_at,
         },
         session_max,
-        cookie.as_ref().map(|cookie| cookie.sign_in.clone()),
+        sign_in.clone(),
     )
     .await?;
+    let page_cookie = from_browser
+        .then(|| page_cookie_for(&gateway, &issued, sign_in.as_deref()))
+        .flatten();
     let mut response = (StatusCode::CREATED, Json(issued)).into_response();
     if let Some(cookie) = cookie {
         response.headers_mut().insert(SET_COOKIE, cookie.header);
     }
+    page_access::append(response.headers_mut(), page_cookie);
     Ok(response)
+}
+
+/// The page cookie of a browser's sign-in that `issued` was issued in: it names the sign-in
+/// (`sign_in`, the session cookie's record) when there is one, else the token itself, and lasts as
+/// long as what it names may.
+fn page_cookie_for(
+    gateway: &Gateway,
+    issued: &IssuedAccessToken,
+    sign_in: Option<&str>,
+) -> Option<HeaderValue> {
+    let seconds = match sign_in {
+        Some(_) => issued
+            .ends_at
+            .map_or(f64::MAX, |ends| ends - issued_now(issued)),
+        None => issued.expires_in,
+    };
+    page_access::set_page_cookie(gateway, sign_in.unwrap_or(&issued.token_id), seconds)
+}
+
+/// The moment `issued` was answered at, by its own times.
+fn issued_now(issued: &IssuedAccessToken) -> f64 {
+    issued.expires_at - issued.expires_in
 }
 
 /// The person a trusted reverse proxy asserts on this request; `None` when it asserts nobody.
@@ -3285,8 +3333,11 @@ async fn resume(
     // Unlike a bearer, a cookie goes along by itself, so the origin is not optional here.
     require_origin(&gateway, &headers)?;
     let value = session_cookie(&headers).ok_or_else(ApiError::unauthorized)?;
-    if let Some(issued) = resumed_token(&gateway, &headers, value).await? {
-        return Ok((StatusCode::CREATED, Json(issued)).into_response());
+    if let Some((issued, sign_in)) = resumed_token(&gateway, &headers, value).await? {
+        let page_cookie = page_cookie_for(&gateway, &issued, Some(&sign_in));
+        let mut response = (StatusCode::CREATED, Json(issued)).into_response();
+        page_access::append(response.headers_mut(), page_cookie);
+        return Ok(response);
     }
     // Judged before being counted: the value cannot be guessed, so the count only slows a client
     // hammering this route, and must not keep out a good cookie behind the same address.
@@ -3303,14 +3354,14 @@ async fn resume(
     Ok(response)
 }
 
-/// The token a session cookie's value gets; `None` when it gets none: the setting is off, the
+/// The token a session cookie's value gets, with the ID of its sign-in; `None` when it gets none: the setting is off, the
 /// value is not a standing cookie, its time is up, its person has left the directory, or a
 /// front proxy now says this browser is someone else.
 async fn resumed_token(
     gateway: &Gateway,
     headers: &HeaderMap,
     value: &str,
-) -> Result<Option<IssuedAccessToken>, ApiError> {
+) -> Result<Option<(IssuedAccessToken, String)>, ApiError> {
     let table = &gateway.config.unex().gateway;
     if !session_cookies_on(table) {
         return Ok(None);
@@ -3364,16 +3415,13 @@ async fn resumed_token(
         Some(cookie.token_id().to_owned()),
     )
     .await
-    .map(Some)
+    .map(|issued| Some((issued, cookie.token_id().to_owned())))
 }
 
 /// `POST /v1/auth/renew`: moves the presented token's expiry on by `access_token_ttl`, up to
 /// `session_max` after it was issued. The value does not change, so what is bound to it keeps
 /// working; the person must still be in the directory, and it is no try at a password.
-async fn renew(
-    State(gateway): State<Gateway>,
-    headers: HeaderMap,
-) -> Result<Json<RenewedAccessToken>, ApiError> {
+async fn renew(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Response, ApiError> {
     if headers.contains_key(ORIGIN) {
         require_origin(&gateway, &headers)?;
     }
@@ -3398,12 +3446,27 @@ async fn renew(
             .map_err(|_| ApiError::internal())?
             .map_err(|_| ApiError::internal())?
             .ok_or_else(ApiError::unauthorized)?;
-    Ok(Json(RenewedAccessToken {
+    let renewed = RenewedAccessToken {
         token_id: extended.token_id().to_owned(),
         expires_at: extended.expires_at(),
         expires_in: extended.expires_at() - unix_timestamp()?,
         ends_at: session_end(extended.issued_at(), extended.expires_at(), session_max),
-    }))
+    };
+    // A browser's renewal keeps its page cookie as long as the sign-in it names.
+    let page_cookie = headers.contains_key(ORIGIN).then(|| {
+        let seconds = match extended.sign_in() {
+            Some(_) => renewed.ends_at.unwrap_or(f64::MAX) - unix_timestamp().unwrap_or(0.0),
+            None => renewed.expires_in,
+        };
+        page_access::set_page_cookie(
+            &gateway,
+            extended.sign_in().unwrap_or(extended.token_id()),
+            seconds,
+        )
+    });
+    let mut response = Json(renewed).into_response();
+    page_access::append(response.headers_mut(), page_cookie.flatten());
+    Ok(response)
 }
 
 async fn authenticate_password(
@@ -4573,6 +4636,13 @@ async fn logout(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Re
     };
     if cookie.is_some() {
         response.headers_mut().append(SET_COOKIE, ended_cookie()?);
+    }
+    // A browser's page cookie named this sign-in, which no longer stands either way.
+    if headers.contains_key(ORIGIN) {
+        page_access::append(
+            response.headers_mut(),
+            page_access::ended_page_cookie(&gateway),
+        );
     }
     Ok(response)
 }

@@ -1,5 +1,5 @@
-//! A page is private: its link opens in the browser that first asked for it and nowhere else, and
-//! a public link is the person's choice, with no feeds.
+//! A page is private: only its person and whom they share it with open it, and a public link
+//! is the person's choice, with no feeds.
 
 use ai6::{ConfigProvider, ConfigRecord, ConfigScope, SqlProvider};
 
@@ -39,111 +39,6 @@ async fn board_dashboard(served: &Served) -> String {
         )
         .await,
     )
-}
-
-/// The token in a link's address.
-fn token_of(url: &str) -> &str {
-    url.trim_end_matches('/').rsplit('/').next().unwrap()
-}
-
-#[tokio::test]
-async fn pages_a_copied_link_answers_as_an_unknown_one_and_the_first_browser_keeps_it() {
-    let served = served(AssistantConfig::default()).await;
-    let id = board_dashboard(&served).await;
-    let frame = frame_url(&served, &served.operator, &id, None).await;
-    let token = token_of(&frame).to_owned();
-    let unknown = frame.replace(&token, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-
-    // The first request binds the link to this browser: its cookie applies to that link only.
-    let first = plain().get(&frame).send().await.unwrap();
-    assert_eq!(first.status(), StatusCode::OK);
-    let set = first.headers()["set-cookie"].to_str().unwrap().to_owned();
-    let cookie = set
-        .split(';')
-        .next()
-        .unwrap()
-        .strip_prefix("ai6_page=")
-        .unwrap()
-        .to_owned();
-    let attributes: Vec<&str> = set.split("; ").skip(1).collect();
-    assert_eq!(
-        attributes[..4],
-        [
-            format!("Path=/pages/v/{token}/").as_str(),
-            "HttpOnly",
-            "Secure",
-            "SameSite=Strict"
-        ],
-        "{set}"
-    );
-    let max_age: u64 = attributes[4]
-        .strip_prefix("Max-Age=")
-        .unwrap()
-        .parse()
-        .unwrap();
-    assert!((1..=3600).contains(&max_age), "{set}");
-    assert_eq!(attributes.len(), 5, "{set}");
-    let html = first.text().await.unwrap();
-    let view = html
-        .split("<iframe src=\"../")
-        .nth(1)
-        .and_then(|rest| rest.split("/f/").next())
-        .unwrap()
-        .to_owned();
-    assert!(
-        !html.contains(&token),
-        "the frame does not repeat its own token"
-    );
-    assert_eq!(audits(&served, "moneypenny.page.opened").len(), 1);
-
-    // A copy of the address, without the cookie or with another, is no link at all: the same
-    // answer as an unknown token, on the frame and with the address-bar token on f/ and data/.
-    let copied = get(&frame).await;
-    assert_eq!(copied.0, StatusCode::NOT_FOUND);
-    assert_eq!(copied, get(&unknown).await);
-    let wrong = plain()
-        .get(&frame)
-        .header("cookie", "ai6_page=not-the-cookie")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(answer(wrong).await, get(&unknown).await);
-    for suffix in ["f/index.html", "data/board", "f/data/board"] {
-        assert_eq!(
-            get(&format!("{frame}{suffix}")).await,
-            get(&format!("{unknown}{suffix}")).await,
-            "{suffix}"
-        );
-    }
-    // The view token opens the frame of nothing either.
-    let view_frame = frame.replace(&token, &view);
-    assert_eq!(get(&view_frame).await, get(&unknown).await);
-
-    // The browser that opened it reloads it, and the page's files and feeds answer under the
-    // view token alone.
-    let again = plain()
-        .get(&frame)
-        .header("cookie", format!("other=1; ai6_page={cookie}"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(again.status(), StatusCode::OK);
-    assert!(again.headers().get("set-cookie").is_none());
-    let base = frame.replace(&token, &view);
-    assert_eq!(get(&format!("{base}f/index.html")).await.0, StatusCode::OK);
-    assert_eq!(get(&format!("{base}data/board")).await.0, StatusCode::OK);
-    assert_eq!(audits(&served, "moneypenny.page.opened").len(), 1);
-}
-
-#[tokio::test]
-async fn pages_on_their_own_origin_the_cookie_is_the_links_path_there() {
-    let served = served_full(AssistantConfig::default(), None, true).await;
-    let id = board_dashboard(&served).await;
-    let frame = frame_url(&served, &served.operator, &id, None).await;
-    let token = token_of(&frame);
-    let first = plain().get(&frame).send().await.unwrap();
-    let set = first.headers()["set-cookie"].to_str().unwrap();
-    assert!(set.contains(&format!("; Path=/v/{token}/; ")), "{set}");
 }
 
 #[tokio::test]

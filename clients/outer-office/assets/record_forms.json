@@ -3318,6 +3318,47 @@
               "title": "All the files read for a page",
               "description": "Bytes over all the files of one page the Station reads.",
               "default": 16777216
+            },
+            "images": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Images in one message",
+              "description": "Images one message carries.",
+              "default": 4
+            },
+            "image_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest image in a message",
+              "description": "Bytes of one image a message carries.",
+              "default": 5242880
             }
           },
           "additionalProperties": false,
@@ -3339,7 +3380,9 @@
             "personal_walk": 10000,
             "page_file_bytes": 8388608,
             "page_files": 200,
-            "page_bytes": 16777216
+            "page_bytes": 16777216,
+            "images": 4,
+            "image_bytes": 5242880
           }
         },
         "desk": {
@@ -4244,6 +4287,95 @@
               "title": "Wait for her conversation log at a stop for",
               "description": "Seconds a stopping gateway waits for her conversation log to keep what is still queued; `none` waits for all of it.",
               "default": 10.0
+            },
+            "source_comments": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Comments read of a tracker item",
+              "description": "Comments of a tracker item `source_item` reads, the latest.",
+              "default": 10
+            },
+            "source_items": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Tracker items listed",
+              "description": "Items `source_items` lists.",
+              "default": 50
+            },
+            "source_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Wait for a live tracker read",
+              "description": "Seconds a live tracker read waits for the Headquarters Station to answer.",
+              "default": 30.0
+            },
+            "source_reads": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Live tracker reads waiting",
+              "description": "Live tracker reads waiting for the Headquarters Station at once.",
+              "default": 32
+            },
+            "source_answer_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest live tracker read answer",
+              "description": "Bytes of the Headquarters Station's answer to one live tracker read.",
+              "default": 1048576
             }
           },
           "additionalProperties": false,
@@ -4286,7 +4418,12 @@
             "log_age": 7776000.0,
             "log_bytes": 1073741824,
             "log_prune_every": 3600.0,
-            "log_flush_timeout": 10.0
+            "log_flush_timeout": 10.0,
+            "source_comments": 10,
+            "source_items": 50,
+            "source_wait": 30.0,
+            "source_reads": 32,
+            "source_answer_bytes": 1048576
           }
         },
         "pages": {
@@ -4529,8 +4666,8 @@
               "type": "number",
               "minimum": 0,
               "format": "seconds",
-              "title": "A link to a page lasts",
-              "description": "Seconds a link to a page is valid.",
+              "title": "A view of a page lasts",
+              "description": "Seconds a frame's view token, which the page's files and feeds are named under, is valid. A reload names a new one.",
               "default": 3600.0
             },
             "upload_wait": {
@@ -4588,7 +4725,7 @@
             "frame": {
               "type": "boolean",
               "title": "Show the classification bar",
-              "description": "Whether a page's frame shows the classification bar. The page stays in the gateway's frame either way, which keeps a viewer's link in the browser that opened it.",
+              "description": "Whether a page's frame shows the classification bar. The page stays in the gateway's frame either way, which names the view token of its files and feeds.",
               "default": true
             },
             "sharing": {

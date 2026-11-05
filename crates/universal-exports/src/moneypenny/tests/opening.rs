@@ -1,5 +1,5 @@
-//! A page opened from the app keeps opening: its link outlives a restart of the gateway, and when
-//! it stops working it says why.
+//! A page keeps opening: a restart of the gateway leaves an open page and its address working, and
+//! when a request stops being answered it says why, or logs why.
 
 use super::*;
 
@@ -41,28 +41,23 @@ async fn pages_an_open_page_keeps_its_files_and_feeds_across_a_restart() {
     let before = served.base.clone();
     served.restart().await;
     let moved = |url: &str| url.replacen(&before, &served.base, 1);
-    // The page already open reads its files and feeds as before.
+    // The browser still holds its cookie, and the page already open names its files as before.
     let view = moved(&opened.view);
+    viewing_cookies()
+        .lock()
+        .unwrap()
+        .push((view.clone(), opened.cookie.clone()));
     let file = framed(&format!("{view}f/index.html")).await;
     assert_eq!(file.0, StatusCode::OK, "{}", file.1);
     assert!(file.1.contains("<p>x</p>"), "{}", file.1);
     assert_eq!(framed(&format!("{view}data/board")).await.0, StatusCode::OK);
-    // The browser that opened it reloads the frame, which names the same files.
+    // Its address opens it again.
     let reloaded = plain()
-        .get(moved(&opened.frame))
-        .header("cookie", format!("ai6_page={}", opened.cookie))
+        .get(format!("{}#{}", moved(&opened.frame), opened.cookie))
         .send()
         .await
         .unwrap();
     assert_eq!(reloaded.status(), StatusCode::OK);
-    let html = reloaded.text().await.unwrap();
-    let named = opened
-        .view
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap();
-    assert!(html.contains(named), "{html}");
 }
 
 #[tokio::test]
@@ -95,7 +90,7 @@ async fn pages_a_missing_file_answers_404_and_the_log_names_it_once() {
 }
 
 #[tokio::test]
-async fn pages_a_link_whose_owner_is_signed_out_says_so() {
+async fn pages_a_viewer_whose_sign_in_ended_is_told_so() {
     let served = served(AssistantConfig::default()).await;
     let id = dashboard(&served).await;
     let opened = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
@@ -110,9 +105,9 @@ async fn pages_a_link_whose_owner_is_signed_out_says_so() {
     assert_eq!(reloaded.status(), StatusCode::FORBIDDEN);
     assert!(reloaded.text().await.unwrap().contains("signed out"));
     let logged = served.gateway.pages.clone().unwrap().logged();
-    let signed_out = logged
+    let ended = logged
         .iter()
-        .filter(|line| line.contains("signed out"))
+        .filter(|line| line.contains("sign-in that has ended"))
         .count();
-    assert_eq!(signed_out, 1, "logged once for the link: {logged:?}");
+    assert_eq!(ended, 1, "logged once for the page: {logged:?}");
 }

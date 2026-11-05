@@ -81,6 +81,38 @@ async fn disabled_assistant_polls_still_wait_before_returning_no_content() {
     assert!(held < Duration::from_secs(30), "held {held:?}");
 }
 
+/// A page authenticator for pages on their own origin, where no sign-in sets the page cookie:
+/// the person the `x-test-viewer` header names.
+struct TestViewer;
+
+impl Authenticator for TestViewer {
+    fn authenticate(&self, attempt: Attempt) -> Result<Verdict, ProviderError> {
+        Ok(attempt
+            .headers
+            .iter()
+            .find(|(name, _)| name == "x-test-viewer")
+            .map_or(Verdict::Unknown, |(_, value)| {
+                Verdict::Valid(Lookup {
+                    by: "id".to_owned(),
+                    value: value.clone(),
+                })
+            }))
+    }
+}
+
+trait WithPageAuthenticator {
+    fn with_page_authenticator_if(self, authenticator: Option<Arc<dyn Authenticator>>) -> Self;
+}
+
+impl WithPageAuthenticator for AccessProviders {
+    fn with_page_authenticator_if(self, authenticator: Option<Arc<dyn Authenticator>>) -> Self {
+        match authenticator {
+            Some(authenticator) => self.with_page_authenticator(authenticator),
+            None => self,
+        }
+    }
+}
+
 struct People;
 
 impl Authenticator for People {
@@ -190,6 +222,10 @@ struct Setup {
     config: AssistantConfig,
     roster: Option<Arc<dyn ai6::ConfigProvider>>,
     own_origin: bool,
+    /// Names who asks for a page from the request; on pages' own origin, [`TestViewer`].
+    page_authenticator: Option<Arc<dyn Authenticator>>,
+    /// The public origin; `https://localhost` when `None`.
+    public_origin: Option<String>,
 }
 
 /// A test gateway over `registry`, keeping pages in `pages_dir`; with `pages_origin` its pages
@@ -203,7 +239,10 @@ fn test_gateway(
 ) -> Gateway {
     let gateway = Gateway::with_access(
         GatewayConfig::new(
-            "https://localhost",
+            setup
+                .public_origin
+                .as_deref()
+                .unwrap_or("https://localhost"),
             STATION_TOKEN,
             GatewayLimits::default(),
             Duration::from_secs(30),
@@ -218,7 +257,8 @@ fn test_gateway(
                 inner: Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
                 denied: denied.clone(),
             }),
-        ),
+        )
+        .with_page_authenticator_if(setup.page_authenticator.clone()),
     )
     .with_assistant(setup.config.clone());
     let pages = match pages_origin {
@@ -363,6 +403,18 @@ async fn served_full(
     roster: Option<Arc<dyn ai6::ConfigProvider>>,
     own_origin: bool,
 ) -> Served {
+    served_setup(Setup {
+        config,
+        roster,
+        own_origin,
+        page_authenticator: own_origin.then(|| Arc::new(TestViewer) as Arc<dyn Authenticator>),
+        public_origin: None,
+    })
+    .await
+}
+
+/// A gateway of `setup` over the Registry and roster [`served`] describes.
+async fn served_setup(setup: Setup) -> Served {
     let directory = tempfile::tempdir().unwrap();
     let pages_dir = directory.path().join("pages");
     let denied = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -382,11 +434,6 @@ async fn served_full(
             .unwrap();
     }
     registry.elect("hq", Duration::from_secs(120)).unwrap();
-    let setup = Setup {
-        config,
-        roster,
-        own_origin,
-    };
     let (gateway, serving) = serve_gateway(&registry, &pages_dir, &denied, &setup).await;
     let (operation, mission) = (
         ai6_diptel::OperationId::new("G").unwrap(),
@@ -4332,8 +4379,44 @@ async fn open_page(
     .unwrap()
 }
 
-/// The address-bar URL of a new link to page `id`, on the test listener it is served from, not
-/// yet opened.
+/// The name of the page cookie.
+const PAGE_COOKIE: &str = crate::page_access::PAGE_COOKIE;
+
+/// The `Set-Cookie` of the page cookie a browser's renewal of `bearer` gets, as the app's token
+/// refresh does.
+async fn page_cookie_header(served: &Served, bearer: &str) -> String {
+    let renewed = reqwest::Client::new()
+        .post(format!("{}/v1/auth/renew", served.base))
+        .bearer_auth(bearer)
+        .header("origin", "https://localhost")
+        .header("x-forwarded-proto", "https")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(renewed.status(), StatusCode::OK);
+    renewed
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .find(|value| value.starts_with(&format!("{PAGE_COOKIE}=")))
+        .expect("a browser's renewal sets the page cookie")
+}
+
+/// The page cookie of `bearer`'s sign-in, its value.
+async fn page_cookie(served: &Served, bearer: &str) -> String {
+    page_cookie_header(served, bearer)
+        .await
+        .split(';')
+        .next()
+        .and_then(|pair| pair.strip_prefix(&format!("{PAGE_COOKIE}=")))
+        .unwrap()
+        .to_owned()
+}
+
+/// The address of page `id` as `bearer` opens it from the app, on the test listener it is served
+/// from, with `#` and that sign-in's page cookie after it: [`plain`] sends the cookie with it,
+/// as the browser that signed in would.
 async fn frame_url(served: &Served, bearer: &str, id: &str, network: Option<&str>) -> String {
     let response = open_page(served, bearer, id, network).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -4341,18 +4424,35 @@ async fn frame_url(served: &Served, bearer: &str, id: &str, network: Option<&str
         .as_str()
         .unwrap()
         .to_owned();
-    match &served.pages_server {
+    let url = match &served.pages_server {
         Some(_) => url,
         None => url.replacen(
             "https://localhost/pages",
             &format!("{}/pages", served.base),
             1,
         ),
+    };
+    if served.setup.own_origin {
+        return format!("{url}#viewer={}", person_of(served, bearer));
     }
+    format!("{url}#{}", page_cookie(served, bearer).await)
 }
 
-/// A link opened as a browser opens it: its frame's URL, the cookie its first request set, and
-/// the base of the page's own files and feeds the frame names (`…/v/{view}/`).
+/// The person `bearer` was issued to, of the served people.
+fn person_of(served: &Served, bearer: &str) -> &'static str {
+    [
+        (&served.operator, "operator-007"),
+        (&served.viewer, "viewer-007"),
+        (&served.admin, "admin-007"),
+        (&served.member, "member-007"),
+    ]
+    .into_iter()
+    .find(|(token, _)| token.as_str() == bearer)
+    .map_or("nobody", |(_, person)| person)
+}
+
+/// A page opened as a browser opens it: its frame's address, the viewer's page cookie, and the
+/// base of the page's own files and feeds the frame names (`…/p/{id}/{token}/`).
 struct Opened {
     frame: String,
     cookie: String,
@@ -4363,53 +4463,92 @@ impl Opened {
     /// The frame again, as the browser that opened it asks.
     async fn reload(&self) -> reqwest::Response {
         plain()
-            .get(&self.frame)
-            .header("cookie", format!("ai6_page={}", self.cookie))
+            .get(format!("{}#{}", self.frame, self.cookie))
             .send()
             .await
             .unwrap()
     }
 }
 
-/// Opens frame `url` once, as a browser does.
+/// Opens frame `url` (as [`frame_url`] gives it) as a browser does, and keeps its cookie for the
+/// page's files and feeds, which [`plain`] then sends it with.
 async fn open_frame(url: &str) -> Opened {
+    let (frame, cookie) = url.split_once('#').expect("a frame URL carries its cookie");
     let response = plain().get(url).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK, "{url}");
-    let cookie = response.headers()["set-cookie"]
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .and_then(|pair| pair.strip_prefix("ai6_page="))
-        .unwrap()
-        .to_owned();
     let html = response.text().await.unwrap();
-    let view = html
-        .split("<iframe src=\"../")
+    let token = html
+        .split("<iframe src=\"")
         .nth(1)
         .and_then(|rest| rest.split("/f/").next())
         .unwrap()
         .to_owned();
-    let token = url.trim_end_matches('/').rsplit('/').next().unwrap();
+    let base = frame.split_once('?').map_or(frame, |(base, _)| base);
+    let view = format!("{base}{token}/");
+    viewing_cookies()
+        .lock()
+        .unwrap()
+        .push((view.clone(), cookie.to_owned()));
     Opened {
-        frame: url.to_owned(),
-        cookie,
-        view: format!("{}{view}/", url.trim_end_matches(&format!("{token}/"))),
+        frame: frame.to_owned(),
+        cookie: cookie.to_owned(),
+        view,
     }
 }
 
-/// A new link to page `id`, opened: the base of its own files and feeds (`…/v/{view}/`).
+/// A page of `id` opened by `bearer`: the base of its own files and feeds (`…/p/{id}/{token}/`).
 async fn page_url(served: &Served, bearer: &str, id: &str, network: Option<&str>) -> String {
     open_frame(&frame_url(served, bearer, id, network).await)
         .await
         .view
 }
 
-fn plain() -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap()
+/// The page cookie each opened page's files and feeds are asked for with, by the base of their
+/// addresses: the view token in it is its viewer's alone.
+fn viewing_cookies() -> &'static std::sync::Mutex<Vec<(String, String)>> {
+    static COOKIES: std::sync::OnceLock<std::sync::Mutex<Vec<(String, String)>>> =
+        std::sync::OnceLock::new();
+    COOKIES.get_or_init(Default::default)
+}
+
+/// A client that follows no redirect and asks for a page as its viewer's browser would: with the
+/// page cookie a `#COOKIE` after the address names, or that an opened page's view keeps.
+struct Plain(reqwest::Client);
+
+impl Plain {
+    fn get(&self, url: impl AsRef<str>) -> reqwest::RequestBuilder {
+        let url = url.as_ref();
+        let (address, cookie) = match url.split_once('#') {
+            Some((address, cookie)) => (address, Some(cookie.to_owned())),
+            None => (
+                url,
+                viewing_cookies()
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(view, _)| url.starts_with(view.as_str()))
+                    .map(|(_, cookie)| cookie.clone()),
+            ),
+        };
+        let request = self.0.get(address);
+        match cookie {
+            // Pages on their own origin, where the test page authenticator names the viewer.
+            Some(cookie) if cookie.starts_with("viewer=") => {
+                request.header("x-test-viewer", &cookie["viewer=".len()..])
+            }
+            Some(cookie) => request.header("cookie", format!("{PAGE_COOKIE}={cookie}")),
+            None => request,
+        }
+    }
+}
+
+fn plain() -> Plain {
+    Plain(
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap(),
+    )
 }
 
 async fn upload_file(
@@ -5170,11 +5309,13 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
     );
     assert!(!html.contains("<b>Board</b>"));
     assert!(html.contains("Expires "));
-    let view = url.trim_end_matches('/').rsplit('/').next().unwrap();
-    assert!(
-        html.contains(&format!("<iframe src=\"../{view}/f/index.html\"")),
-        "{html}"
-    );
+    // Each opening names a view token of its own: its end, its network and a mark of both.
+    let src = html.split("<iframe src=\"").nth(1).unwrap();
+    let src = &src[..src.find('"').unwrap()];
+    let parts: Vec<&str> = src.splitn(3, '.').collect();
+    assert!(parts[0].bytes().all(|byte| byte.is_ascii_digit()), "{src}");
+    assert_eq!(parts[1], "open", "{src}");
+    assert!(parts[2].ends_with("/f/index.html"), "{src}");
     assert!(html.contains("sandbox=\"allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-scripts\""));
     assert!(!html.contains("allow-same-origin"));
     assert!(!html.contains("<script"));
@@ -5312,7 +5453,7 @@ async fn pages_on_their_own_origin_the_api_listener_serves_none_and_the_pages_li
         .await,
     );
     let url = page_url(&served, &served.operator, &id, None).await;
-    assert!(url.starts_with(&format!("{pages_base}/v/")), "{url}");
+    assert!(url.starts_with(&format!("{pages_base}/p/{id}/")), "{url}");
     let file = plain()
         .get(format!("{url}f/page.txt"))
         .header("sec-fetch-dest", "iframe")
@@ -5327,10 +5468,10 @@ async fn pages_on_their_own_origin_the_api_listener_serves_none_and_the_pages_li
             .contains(&format!("frame-ancestors {pages_base}"))
     );
     // The API listener answers 404 for the same path, and the pages listener for the API.
-    let token = url.split("/v/").nth(1).unwrap().trim_end_matches('/');
+    let path = url.strip_prefix(&pages_base).unwrap();
     assert_eq!(
         plain()
-            .get(format!("{}/pages/v/{token}/f/page.txt", served.base))
+            .get(format!("{}/pages{path}f/page.txt", served.base))
             .send()
             .await
             .unwrap()
@@ -5486,7 +5627,7 @@ async fn pages_a_page_made_after_reading_a_brief_is_framed_as_any_other() {
     let (_app, job) = accepted(&served, &served.operator, "Report.").await;
     let token = &job.mcp_token;
     // With `frame = false` the frame has no bar, whatever she read; a top-level request for a
-    // file still goes to the frame, which keeps the link in the browser that opened it.
+    // file still goes to the frame, which names its view token.
     call_tool(&served, token, "missions", json!({})).await;
     let id = published_id(
         &publish(
@@ -5499,7 +5640,7 @@ async fn pages_a_page_made_after_reading_a_brief_is_framed_as_any_other() {
     let opened = open_frame(&frame_url(&served, &served.operator, &id, None).await).await;
     let html = opened.reload().await.text().await.unwrap();
     assert!(!html.contains("class=\"bar\""), "{html}");
-    assert!(html.contains("<iframe src=\"../"), "{html}");
+    assert!(html.contains("<iframe src=\""), "{html}");
     let direct = plain()
         .get(format!("{}f/index.html", opened.view))
         .header("sec-fetch-dest", "document")
@@ -5736,11 +5877,21 @@ const out = {{}};
     out.api = 'status ' + r.status;
   }} catch (e) {{ out.api = 'blocked ' + e.name; }}
   try {{
-    const r = await fetch('own.json');
+    const r = await fetch('own.json', {{credentials: 'include'}});
     out.own = 'status ' + r.status + ' ' + (await r.text());
   }} catch (e) {{ out.own = 'blocked ' + e.name; }}
   try {{
-    const r = await fetch('data/board');
+    const r = await fetch('own.json');
+    out.plain = 'status ' + r.status;
+  }} catch (e) {{ out.plain = 'blocked ' + e.name; }}
+  out.image = await new Promise((done) => {{
+    const image = new Image();
+    image.onload = () => done('loaded');
+    image.onerror = () => done('failed');
+    image.src = 'dot.png';
+  }});
+  try {{
+    const r = await fetch('data/board', {{credentials: 'include'}});
     out.feed = 'status ' + r.status + (r.ok ? ' ' + Object.keys(await r.json()).sort() : '');
   }} catch (e) {{ out.feed = 'blocked ' + e.name; }}
   try {{
@@ -5783,6 +5934,8 @@ impl Browser {
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--remote-debugging-port=0",
+                // The test gateway's own TLS has a certificate of its own making.
+                "--ignore-certificate-errors",
             ])
             .arg(format!("--user-data-dir={}", profile.path().display()))
             .arg("about:blank")
@@ -5890,7 +6043,7 @@ impl Browser {
         self.call(
             Some(session),
             "Runtime.evaluate",
-            json!({"expression": expression, "returnByValue": true}),
+            json!({"expression": expression, "returnByValue": true, "awaitPromise": true}),
         )
         .await
         .map(|result| result["result"]["value"].clone())
@@ -5976,6 +6129,7 @@ impl Browser {
     /// What the tab's top document is, once it has loaded: whether it frames anything and
     /// shows the bar.
     async fn top(&mut self, session: &str) -> Value {
+        let mut last = Value::Null;
         for _ in 0..100 {
             let state = self
                 .evaluate(
@@ -5992,9 +6146,10 @@ impl Browser {
             {
                 return state;
             }
+            last = state;
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        panic!("the tab never loaded");
+        panic!("the tab never loaded; it last said {last}");
     }
 }
 
@@ -6015,6 +6170,10 @@ fn assert_probe(record: &Value, open: bool, feed: &str, what: &str) {
         "{what}: {api}"
     );
     assert_eq!(record["own"], "status 200 {\"own\":true}", "{what}");
+    assert_eq!(
+        record["image"], "loaded",
+        "{what}: an image of the page loads"
+    );
     if open {
         assert_eq!(record["outside"], "status 200 from outside", "{what}");
     } else {
@@ -6024,167 +6183,6 @@ fn assert_probe(record: &Value, open: bool, feed: &str, what: &str) {
             record["outside"]
         );
     }
-}
-
-/// Opens pages in real browsers, as `AI6_TEST_BROWSER` names one (a Chromium), on the pages' own
-/// origin: a probe page loads and runs in its frame as an opaque origin, under each network
-/// profile; its link reloads in the browser that opened it, even one sent there from another
-/// site, and opens nothing in another browser profile; a public link opens anywhere. Skipped,
-/// and ignored by default, without it.
-#[tokio::test]
-#[ignore = "needs AI6_TEST_BROWSER to name a Chromium binary"]
-async fn pages_browser_a_sandboxed_page_cannot_reach_the_app_and_its_link_stays_in_its_browser() {
-    let Ok(binary) = std::env::var("AI6_TEST_BROWSER") else {
-        eprintln!("skipped: AI6_TEST_BROWSER names no browser");
-        return;
-    };
-    // Somewhere outside that answers anyone, and a page there that sends its visitor on: on
-    // `localhost`, another site than the pages' `127.0.0.1`.
-    let outside = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = outside.local_addr().unwrap().port();
-    let outside_url = format!("http://127.0.0.1:{port}");
-    tokio::spawn(async move {
-        let app = axum::Router::new()
-            .route(
-                "/",
-                axum::routing::get(|| async {
-                    ([("access-control-allow-origin", "*")], "from outside")
-                }),
-            )
-            .route(
-                "/opener",
-                axum::routing::get(|| async {
-                    axum::response::Html(
-                        "<script>location.href = new URLSearchParams(location.search)\
-                         .get('to');</script>",
-                    )
-                }),
-            );
-        let _ = axum::serve(outside, app).await;
-    });
-    let served = served_full(AssistantConfig::default(), None, true).await;
-    let (_app, job) = accepted(&served, &served.operator, "Probe.").await;
-    station_bundle(
-        &served,
-        &job.conversation_id,
-        "scratch/probe",
-        &[
-            (
-                "index.html",
-                probe_page(&served.base, &outside_url).as_bytes(),
-            ),
-            ("own.json", b"{\"own\":true}"),
-        ],
-    )
-    .await;
-    let id = published_id(
-        &publish(
-            &served,
-            &job.mcp_token,
-            json!({"kind": "dashboard", "title": "probe", "path": "scratch/probe",
-                   "feeds": [{"name": "board", "tool": "board", "input": {}}]}),
-        )
-        .await,
-    );
-    let mut mine = Browser::start(&binary).await;
-    let mut other = Browser::start(&binary).await;
-
-    // The page and its scripts load in the frame, under the bar, as an opaque origin.
-    let link = frame_url(&served, &served.operator, &id, None).await;
-    let tab = mine.open(&link).await;
-    let top = mine.top(&tab).await;
-    assert_eq!(
-        (top["iframe"].clone(), top["bar"].clone()),
-        (json!(true), json!(true))
-    );
-    assert_probe(&mine.probe(&tab).await, true, "status 200 at,data", "open");
-    // A reload in the same browser works.
-    mine.evaluate(&tab, "window.before = 1").await;
-    mine.call(Some(&tab), "Page.reload", json!({}))
-        .await
-        .unwrap();
-    for _ in 0..100 {
-        if mine.evaluate(&tab, "window.before === undefined").await == json!(true) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert_probe(
-        &mine.probe(&tab).await,
-        true,
-        "status 200 at,data",
-        "open, reloaded",
-    );
-    // Another browser profile, given the copied address, gets nothing.
-    let copied = other.open(&link).await;
-    let top = other.top(&copied).await;
-    assert_eq!(
-        (top["iframe"].clone(), top["bar"].clone()),
-        (json!(false), json!(false)),
-        "{top}"
-    );
-
-    // With the network off the page reaches nothing outside.
-    let none = frame_url(&served, &served.operator, &id, Some("none")).await;
-    let tab = mine.open(&none).await;
-    assert_probe(&mine.probe(&tab).await, false, "status 403", "none");
-
-    // A link another site sends its viewer to opens there. Its reload is a navigation that site
-    // started, so the `SameSite=Strict` cookie stays home and the reload opens nothing: on
-    // pages of another registrable domain than the app's, the app opens the page again.
-    let sent = frame_url(&served, &served.operator, &id, None).await;
-    let opener = format!(
-        "http://localhost:{port}/opener?to={}",
-        sent.replace(':', "%3A").replace('/', "%2F")
-    );
-    let tab = mine.open(&opener).await;
-    assert_probe(
-        &mine.probe(&tab).await,
-        true,
-        "status 200 at,data",
-        "sent from another site",
-    );
-    mine.evaluate(&tab, "window.before = 1").await;
-    mine.call(Some(&tab), "Page.reload", json!({}))
-        .await
-        .unwrap();
-    for _ in 0..100 {
-        if mine.evaluate(&tab, "window.before === undefined").await == json!(true) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let top = mine.top(&tab).await;
-    assert_eq!(
-        (top["iframe"].clone(), top["bar"].clone()),
-        (json!(false), json!(false)),
-        "sent from another site, reloaded: {top}"
-    );
-
-    // A public link opens in any browser, with no sign-in.
-    let public = reqwest::Client::new()
-        .put(format!("{}/v1/user/pages/{id}/public", served.base))
-        .bearer_auth(&served.operator)
-        .json(&json!({"on": true}))
-        .send()
-        .await
-        .unwrap()
-        .json::<Value>()
-        .await
-        .unwrap()["public_url"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let tab = other.open(&public).await;
-    let top = other.top(&tab).await;
-    assert_eq!(top["bar"], true, "{top}");
-    // A public link has no feed: its 404 carries no CORS header, so the page's fetch fails.
-    assert_probe(
-        &other.probe(&tab).await,
-        true,
-        "blocked TypeError",
-        "public",
-    );
 }
 
 /// Links `gh:o/r#1` to Mission `mission-g`, which the served Registry holds a Session of.
@@ -6363,9 +6361,13 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
     finish(&served, &mut app, &job).await;
 }
 
+#[cfg(feature = "cli")]
+mod ambient;
+mod browser;
 mod images;
 mod opening;
 mod privacy;
 mod sharing;
 mod sources;
 mod transcripts;
+mod viewing;

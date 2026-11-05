@@ -2465,6 +2465,10 @@ pub trait AccessTokenStore {
     /// token's digest finds nothing.
     fn find_session_cookie(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
+    /// Returns the record of a sign-in that stands, by its public UUID: an active session
+    /// cookie, or an active bearer token whose sign-in, when it has one, stands too.
+    fn login_by_id(&self, token_id: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
+
     /// Revokes a token or session cookie by its public UUID, returning false when unknown or
     /// already revoked. A token of a sign-in takes that sign-in with it, and so every other
     /// token of it, including one issued a moment later.
@@ -2530,6 +2534,23 @@ impl AccessTokenStore for FileRegistry {
             return Ok(None);
         };
         Ok((record.is_session_cookie() && record.active_at(unix_time()?)).then_some(record))
+    }
+
+    fn login_by_id(&self, token_id: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
+        validate_token_id(token_id)?;
+        let _registry_lock = self.lock()?;
+        let Some(record) = self.stored_access_token(&self.access_token_path(token_id), token_id)?
+        else {
+            return Ok(None);
+        };
+        if !record.active_at(unix_time()?) {
+            return Ok(None);
+        }
+        let sign_in = match record.sign_in() {
+            Some(sign_in) => self.stored_access_token(&self.access_token_path(sign_in), sign_in)?,
+            None => None,
+        };
+        Ok(sign_in_stands(&record, sign_in.as_ref()).then_some(record))
     }
 
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool> {
@@ -4985,6 +5006,16 @@ mod tests {
         );
         let found = verifier.find_access_token(first.digest()).unwrap().unwrap();
         assert_eq!(found.sign_in(), Some(sign_in));
+        // A sign-in is found by its ID, a cookie's or a token's, while it stands.
+        for id in [sign_in, first.token_id(), plain.token_id()] {
+            assert_eq!(verifier.login_by_id(id).unwrap().unwrap().token_id(), id);
+        }
+        assert!(
+            verifier
+                .login_by_id("d1111111-1111-4111-8111-111111111111")
+                .unwrap()
+                .is_none()
+        );
         assert!(
             registry
                 .extend_access_token(sign_in, now + 7_200.0)
@@ -5012,6 +5043,9 @@ mod tests {
                 .is_none(),
             "and its cookie"
         );
+        for id in [sign_in, first.token_id(), second.token_id()] {
+            assert!(verifier.login_by_id(id).unwrap().is_none(), "{id} ended");
+        }
         let late = record("a4444444-4444-4444-8444-444444444444", "late")
             .in_sign_in(sign_in)
             .unwrap();

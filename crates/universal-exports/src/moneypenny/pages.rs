@@ -2,10 +2,10 @@
 //!
 //! A page is what she makes for the person to open in a browser tab outside Outer Office: a
 //! dashboard reading live data, a report (a snapshot) or one file. The gateway keeps pages in
-//! a [`PageStore`] (a directory, so remembered pages outlive a restart), serves each to the
-//! person and whom they share it with through a link of their own (`{base}/v/{token}/`) that
-//! opens only in the browser that first asks for it, or to anyone through a public link
-//! (`{base}/s/{token}/`) the person makes, and never lets a page act as the app: every page
+//! a [`PageStore`] (a directory, so remembered pages outlive a restart), serves each at its own
+//! address (`{base}/p/{id}/`) to its person and whom they share it with, every request naming its
+//! viewer by the gateway's page authenticator or the page cookie, or to anyone through a public
+//! link (`{base}/s/{token}/`) the person makes, and never lets a page act as the app: every page
 //! response carries a CSP `sandbox` without `allow-same-origin`, so the page is an opaque
 //! origin, and `/v1` answers no cross-origin request. A page is shown in the gateway's own
 //! frame under a classification bar that says who made it and when it expires.
@@ -16,15 +16,17 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use ai6::{AssistantPageFile, AssistantPageLimits, PageNetwork, Person};
-use axum::extract::{Path as UrlPath, Query, State};
+use axum::Extension;
+use axum::extract::{ConnectInfo, Path as UrlPath, Query, State};
 use axum::http::header::{
-    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, LOCATION,
-    REFERRER_POLICY, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
+    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, LOCATION, ORIGIN,
+    REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -37,6 +39,8 @@ use tokio::sync::Notify;
 
 use super::tools;
 use crate::Gateway;
+use crate::page_access::{self, Connection, NoViewer};
+use crate::tls::ClientCertificates;
 
 // ---------------------------------------------------------------------------------------
 // What a page is
@@ -80,7 +84,7 @@ impl Kind {
 }
 
 /// A live read a dashboard declares: the page asks for `data/{name}` and the gateway runs
-/// the read tool `tool` with the fixed `input` as the link's viewer.
+/// the read tool `tool` with the fixed `input` as the page's viewer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Feed {
     pub(crate) name: String,
@@ -400,86 +404,9 @@ fn now() -> f64 {
 // The store
 // ---------------------------------------------------------------------------------------
 
-/// A link for one viewer: who may read which page, with what network, until when.
-///
-/// Its token, in the address bar, opens only the gateway's frame, and only in the browser its
-/// first request bound with a cookie. The frame names the page's files and feeds under a second
-/// token, its view token ([`PageStore::view_token`]), which no address bar shows. A link is kept
-/// with the pages, by the SHA-256 of its token, so it outlives a restart.
-#[derive(Debug, Clone)]
-pub(crate) struct Link {
-    pub(crate) page: String,
-    pub(crate) viewer: String,
-    /// The SHA-256 of the access token the link was made with: the viewer's sign-in, checked on
-    /// each request.
-    pub(crate) sign_in: String,
-    pub(crate) network: PageNetwork,
-    pub(crate) expires: f64,
-    /// The address-bar token, to send a file asked for on its own back to the frame; only this
-    /// gateway's memory holds it, so after a restart such a request finds nothing.
-    pub(crate) token: Option<String>,
-    /// The SHA-256 of the cookie the first request set; `None` until then.
-    pub(crate) cookie: Option<String>,
-}
-
-/// A link as the links file keeps it.
-#[derive(Serialize, Deserialize)]
-struct StoredLink {
-    page: String,
-    viewer: String,
-    sign_in: String,
-    network: String,
-    expires: f64,
-    cookie: Option<String>,
-}
-
-impl StoredLink {
-    fn of(link: &Link) -> Self {
-        Self {
-            page: link.page.clone(),
-            viewer: link.viewer.clone(),
-            sign_in: link.sign_in.clone(),
-            network: link.network.as_str().to_owned(),
-            expires: link.expires,
-            cookie: link.cookie.clone(),
-        }
-    }
-
-    fn link(self) -> Option<Link> {
-        let network = match self.network.as_str() {
-            "open" => PageNetwork::Open,
-            "own" => PageNetwork::Own,
-            "none" => PageNetwork::None,
-            _ => return None,
-        };
-        Some(Link {
-            page: self.page,
-            viewer: self.viewer,
-            sign_in: self.sign_in,
-            network,
-            expires: self.expires,
-            token: None,
-            cookie: self.cookie,
-        })
-    }
-}
-
-/// Where the links are kept, in the pages directory: hidden, so no page is ever read from it.
-const LINKS_FILE: &str = ".links.json";
-
-/// The key of the view tokens, in the pages directory.
+/// The key the page cookies and view tokens are made with, in the pages directory: hidden, so no
+/// page is ever read from it.
 const KEY_FILE: &str = ".key";
-
-/// What a request for the frame is, against the link's cookie.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Admit {
-    /// The first request: the link is bound to this cookie, which the answer sets.
-    First(String),
-    /// A later request carrying the cookie.
-    Again,
-    /// A request without it: answered as a link that does not exist.
-    Refused,
-}
 
 /// Files a Station sent for a `publish_page` call, until the call takes them.
 struct Staged {
@@ -495,23 +422,24 @@ struct Inner {
     pages: BTreeMap<String, Page>,
     /// Staged uploads by (conversation, call digest).
     staged: HashMap<(String, String), Staged>,
-    /// Links by the SHA-256 of their token.
-    links: HashMap<String, Link>,
-    /// The key of each link in `links` by the SHA-256 of its view token.
-    views: HashMap<String, String>,
-    /// Feed reads in the current minute, by link.
+    /// Feed reads in the current minute, by [`viewing`] key.
     reads: HashMap<String, (Instant, u32)>,
-    /// Why requests were refused, each logged once per link.
+    /// Why requests were refused, each logged once per page, viewer and reason.
     noted: HashSet<(String, String)>,
     /// What was logged, for the tests to read.
     #[cfg(test)]
     log: Vec<String>,
 }
 
-/// The pages and links on disk, and the uploads and counters in memory.
+/// The key of one viewer's viewing of one page, which notes and read counts are kept by.
+pub(crate) fn viewing(page: &str, viewer: &str) -> String {
+    format!("{page} {viewer}")
+}
+
+/// The pages on disk, and the uploads and counters in memory.
 pub(crate) struct PageStore {
     dir: PathBuf,
-    /// The key view tokens are derived with, kept in the pages directory.
+    /// The key view tokens and page cookies are made with, kept in the pages directory.
     key: Vec<u8>,
     state: Mutex<Inner>,
     staged: Notify,
@@ -535,8 +463,8 @@ pub(crate) struct Prepared {
 }
 
 impl PageStore {
-    /// Opens `dir`, created private (`0700` on Unix), reading each page's record, the links and
-    /// the key, which it makes the first time.
+    /// Opens `dir`, created private (`0700` on Unix), reading each page's record and the key,
+    /// which it makes the first time.
     ///
     /// # Errors
     ///
@@ -552,9 +480,8 @@ impl PageStore {
         for entry in std::fs::read_dir(&dir)?.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.contains(".tmp-") {
-                // A publish, or a write of the links, that never finished.
-                let _ = std::fs::remove_dir_all(entry.path())
-                    .or_else(|_| std::fs::remove_file(entry.path()));
+                // A publish that never finished.
+                let _ = std::fs::remove_dir_all(entry.path());
                 continue;
             }
             let Ok(text) = std::fs::read(entry.path().join("meta.json")) else {
@@ -567,7 +494,7 @@ impl PageStore {
             }
         }
         let key = read_or_make_key(&dir.join(KEY_FILE))?;
-        let store = Self {
+        Ok(Self {
             dir,
             key,
             state: Mutex::new(Inner {
@@ -576,63 +503,66 @@ impl PageStore {
             }),
             staged: Notify::new(),
             sweeping: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// The keyed digest of `parts` under the store's key, as base64url.
+    pub(crate) fn keyed_text(&self, parts: &[&str]) -> String {
+        base64url(&keyed(&self.key, parts))
+    }
+
+    /// The view token the frame of `page` names for `viewer`, with `network`, until `expires`
+    /// (Unix seconds): `{expires}.{network}.{mark}`, its end in Unix milliseconds. It names the page's files and feeds and
+    /// opens nothing by itself; it ties those requests to the frame its viewer was shown, which
+    /// another site cannot know.
+    pub(crate) fn view_token(
+        &self,
+        page: &str,
+        viewer: &str,
+        network: PageNetwork,
+        expires: f64,
+    ) -> String {
+        let expires = format!("{:.0}", (expires * 1000.0).floor());
+        let mark = self.keyed_text(&["view", page, viewer, network.as_str(), &expires]);
+        format!("{expires}.{}.{mark}", network.as_str())
+    }
+
+    /// The network of the view token `token` when it is `viewer`'s for `page` and has not
+    /// expired; why not, otherwise.
+    pub(crate) fn viewed(
+        &self,
+        token: &str,
+        page: &str,
+        viewer: &str,
+    ) -> Result<PageNetwork, &'static str> {
+        let mut parts = token.splitn(3, '.');
+        let (Some(expires), Some(network), Some(mark)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err("a view token that is none");
         };
-        // A links file that cannot be read loses its links, not the pages.
-        let stored: BTreeMap<String, StoredLink> = std::fs::read(store.dir.join(LINKS_FILE))
-            .ok()
-            .and_then(|text| serde_json::from_slice(&text).ok())
-            .unwrap_or_default();
-        {
-            let mut state = store.state();
-            for (key, stored) in stored {
-                if let Some(link) = stored.link() {
-                    let view = sha256_hex(store.view_token(&key).as_bytes());
-                    state.views.insert(view, key.clone());
-                    state.links.insert(key, link);
-                }
-            }
-        }
-        Ok(store)
-    }
-
-    /// The view token of the link whose key is `key`: a keyed digest, so it needs no storing
-    /// and a restart keeps it.
-    pub(crate) fn view_token(&self, key: &str) -> String {
-        base64url(&keyed(&self.key, &["view", key]))
-    }
-
-    /// Writes the links file from `state`.
-    fn save_links(&self, state: &Inner) {
-        let stored: BTreeMap<&String, StoredLink> = state
-            .links
-            .iter()
-            .map(|(key, link)| (key, StoredLink::of(link)))
-            .collect();
-        let write = || -> io::Result<()> {
-            let temp = self.dir.join(format!(
-                "{LINKS_FILE}.tmp-{}",
-                uuid::Uuid::new_v4().simple()
-            ));
-            std::fs::write(
-                &temp,
-                serde_json::to_vec(&stored).map_err(io::Error::other)?,
-            )?;
-            std::fs::rename(&temp, self.dir.join(LINKS_FILE)).inspect_err(|_| {
-                let _ = std::fs::remove_file(&temp);
-            })
+        let network = match network {
+            "open" => PageNetwork::Open,
+            "own" => PageNetwork::Own,
+            "none" => PageNetwork::None,
+            _ => return Err("a view token that is none"),
         };
-        if let Err(error) = write() {
-            eprintln!("universal-exports: the page links could not be saved: {error}");
+        let expected = self.keyed_text(&["view", page, viewer, network.as_str(), expires]);
+        if !crate::constant_time_eq(expected.as_bytes(), mark.as_bytes()) {
+            return Err("a view token that is not this viewer's for this page");
+        }
+        match expires.parse::<f64>() {
+            Ok(end) if end / 1000.0 > now() => Ok(network),
+            _ => Err("a view token that has expired; reload the page"),
         }
     }
 
-    /// Logs why a request on the link `key` was refused, once for each link and reason.
+    /// Logs why a request for a page was refused, once for each [`viewing`] key and reason.
     pub(crate) fn note(&self, key: &str, reason: &str) {
         let mut state = self.state();
         if state.noted.insert((key.to_owned(), reason.to_owned())) {
-            let line = match state.links.get(key) {
-                Some(link) => format!("page {}, link of {}: {reason}", link.page, link.viewer),
-                None => format!("a page link: {reason}"),
+            let line = match key.split_once(' ') {
+                Some((page, viewer)) => format!("page {page}, viewer {viewer}: {reason}"),
+                None => format!("page {key}: {reason}"),
             };
             eprintln!("universal-exports: {line}");
             #[cfg(test)]
@@ -695,21 +625,6 @@ impl PageStore {
         self.save(&changed)?;
         state.pages.insert(changed.id.clone(), changed.clone());
         Ok(Some(changed))
-    }
-
-    /// Each viewer holding a link to `page`, with the digest of the access token the link was
-    /// made with.
-    pub(crate) fn viewers(&self, page: &str) -> Vec<(String, String)> {
-        let mut viewers: Vec<(String, String)> = self
-            .state()
-            .links
-            .values()
-            .filter(|link| link.page == page)
-            .map(|link| (link.viewer.clone(), link.sign_in.clone()))
-            .collect();
-        viewers.sort();
-        viewers.dedup();
-        viewers
     }
 
     /// `person`'s pages, newest first.
@@ -849,13 +764,26 @@ impl PageStore {
         )
     }
 
-    /// Removes a page and every link to it.
+    /// Removes a page, with what was counted and noted of its viewing.
     pub(crate) fn delete(&self, id: &str) -> Option<Page> {
         let mut state = self.state();
         let page = state.pages.remove(id)?;
-        self.retain_links(&mut state, |link| link.page != id);
+        Self::forget_viewing(&mut state);
         let _ = std::fs::remove_dir_all(self.dir.join(id));
         Some(page)
+    }
+
+    /// Drops the read counts and notes of pages that are gone.
+    fn forget_viewing(state: &mut Inner) {
+        let Inner {
+            pages,
+            reads,
+            noted,
+            ..
+        } = state;
+        let standing = |key: &str| pages.contains_key(key.split(' ').next().unwrap_or(key));
+        reads.retain(|key, _| standing(key));
+        noted.retain(|(key, _)| standing(key));
     }
 
     /// Sets or clears a page's expiry: remembered pages have none.
@@ -885,7 +813,7 @@ impl PageStore {
         std::fs::read(at).ok()
     }
 
-    /// Deletes expired pages, expired links and stale uploads; answers the pages deleted.
+    /// Deletes expired pages and stale uploads; answers the pages deleted.
     pub(crate) fn sweep(&self, at: f64, stage_ttl: Duration) -> Vec<Page> {
         let mut state = self.state();
         let expired: Vec<String> = state
@@ -901,152 +829,16 @@ impl PageStore {
                 gone.push(page);
             }
         }
-        let pages: std::collections::BTreeSet<String> = state.pages.keys().cloned().collect();
-        self.retain_links(&mut state, |link| {
-            link.expires > at && pages.contains(&link.page)
-        });
+        Self::forget_viewing(&mut state);
         state
             .staged
             .retain(|_, staged| staged.at.elapsed() < stage_ttl);
         gone
     }
 
-    // ---- links
-
-    /// A new link for `viewer` to `page`, standing on the sign-in whose access token has the
-    /// digest `sign_in`, valid `ttl` or until the page goes; answers the token and when it ends.
-    pub(crate) fn mint(
-        &self,
-        page: &Page,
-        viewer: &str,
-        sign_in: &str,
-        network: PageNetwork,
-        ttl: Duration,
-    ) -> (String, f64) {
-        let token = random_token();
-        let mut expires = now() + ttl.as_secs_f64();
-        if let Some(end) = page.expires_at {
-            expires = expires.min(end);
-        }
-        let key = sha256_hex(token.as_bytes());
-        let view = sha256_hex(self.view_token(&key).as_bytes());
-        let mut state = self.state();
-        state.views.insert(view, key.clone());
-        state.links.insert(
-            key,
-            Link {
-                page: page.id.clone(),
-                viewer: viewer.to_owned(),
-                sign_in: sign_in.to_owned(),
-                network,
-                expires,
-                token: Some(token.clone()),
-                cookie: None,
-            },
-        );
-        self.save_links(&state);
-        (token, expires)
-    }
-
-    /// The link under `key` and its page while both stand; otherwise why not, logged.
-    fn standing_link(&self, state: &Inner, key: &str) -> Result<(Link, Page), &'static str> {
-        let at = now();
-        let link = state.links.get(key).ok_or("unknown")?;
-        let Some(page) = state.pages.get(&link.page) else {
-            return Err("its page is gone");
-        };
-        if link.expires <= at {
-            return Err("the link has expired; open the page again from the app");
-        }
-        if page.expires_at.is_some_and(|end| end <= at) {
-            return Err("the page has expired");
-        }
-        Ok((link.clone(), page.clone()))
-    }
-
-    /// The key of the link whose address-bar token is `token`, the link and its page, while
-    /// both stand.
-    pub(crate) fn link(&self, token: &str) -> Option<(String, Link, Page)> {
-        self.found(sha256_hex(token.as_bytes()))
-    }
-
-    /// The key of the link whose view token is `view`, the link and its page, while both stand.
-    pub(crate) fn viewed(&self, view: &str) -> Option<(String, Link, Page)> {
-        let key = self
-            .state()
-            .views
-            .get(&sha256_hex(view.as_bytes()))
-            .cloned()?;
-        self.found(key)
-    }
-
-    /// The link under `key` and its page while both stand, noting why when it is known but
-    /// does not.
-    fn found(&self, key: String) -> Option<(String, Link, Page)> {
-        let standing = self.standing_link(&self.state(), &key);
-        match standing {
-            Ok((link, page)) => Some((key, link, page)),
-            Err("unknown") => None,
-            Err(reason) => {
-                self.note(&key, reason);
-                None
-            }
-        }
-    }
-
-    /// Admits a request for the frame of link `token` carrying `cookies`, the values of every
-    /// page cookie it sent: the first request binds the link to a new cookie, and every later
-    /// one must carry it.
-    pub(crate) fn admit(&self, token: &str, cookies: &[&str]) -> Admit {
-        let mut state = self.state();
-        let Some(link) = state.links.get_mut(&sha256_hex(token.as_bytes())) else {
-            return Admit::Refused;
-        };
-        let admitted = match &link.cookie {
-            None => {
-                let cookie = random_token();
-                link.cookie = Some(sha256_hex(cookie.as_bytes()));
-                Admit::First(cookie)
-            }
-            Some(bound)
-                if cookies
-                    .iter()
-                    .any(|cookie| sha256_hex(cookie.as_bytes()) == *bound) =>
-            {
-                return Admit::Again;
-            }
-            Some(_) => return Admit::Refused,
-        };
-        self.save_links(&state);
-        admitted
-    }
-
-    /// Keeps only the links `keep` accepts, with their view tokens, read counts and notes.
-    fn retain_links(&self, state: &mut Inner, keep: impl Fn(&Link) -> bool) {
-        let before = state.links.len();
-        state.links.retain(|_, link| keep(link));
-        let links = &state.links;
-        state.views.retain(|_, key| links.contains_key(key));
-        state.reads.retain(|key, _| links.contains_key(key));
-        state.noted.retain(|(key, _)| links.contains_key(key));
-        if state.links.len() != before {
-            self.save_links(state);
-        }
-    }
-
-    /// Drops every link to `page` held by a viewer who no longer qualifies.
-    pub(crate) fn revoke_viewers(&self, page: &str, keep: &dyn Fn(&str) -> bool) {
-        self.retain_links(&mut self.state(), |link| {
-            link.page != page || keep(&link.viewer)
-        });
-    }
-
-    /// Counts a feed read on the link `key`; false past `most` in the minute.
+    /// Counts a feed read of the [`viewing`] key `key`; false past `most` in the minute.
     pub(crate) fn note_read(&self, key: &str, most: usize) -> bool {
         let mut state = self.state();
-        if !state.links.contains_key(key) {
-            return false;
-        }
         let entry = state
             .reads
             .entry(key.to_owned())
@@ -1309,7 +1101,8 @@ fn page_headers(csp: &str) -> HeaderMap {
     set(&mut headers, X_CONTENT_TYPE_OPTIONS, "nosniff");
     set(&mut headers, REFERRER_POLICY, "no-referrer");
     set(&mut headers, CACHE_CONTROL, "no-store, private");
-    // The opaque page loads and fetches its own files: the capability in the URL guards them.
+    // The opaque page loads its own files from another origin as it sees it: who asks, and the
+    // view token its frame named, guard them.
     set(
         &mut headers,
         HeaderName::from_static("cross-origin-resource-policy"),
@@ -1376,22 +1169,18 @@ pub(crate) fn pages_base(gateway: &Gateway) -> String {
     }
 }
 
-/// The path of the pages' base, `""` on an origin of their own: where a link's cookie applies.
-fn base_path(base: &str) -> &str {
-    &base[origin_of(base).len()..]
-}
-
-/// The routes of pages. `/v/{token}/` is a viewer's frame, bound to the browser that first
-/// asked for it; `/v/{view}/f/{path}` and `/v/{view}/data/{name}` are the page's files and feeds
-/// under the view token the frame names, each feed also at `/v/{view}/f/data/{name}`, where
-/// `data/NAME` from a file at the top of the page leads. `/s/{token}/` and `/s/{token}/f/{path}`
-/// are a public link's frame and files, with no feed. Nothing of `/v1`.
+/// The routes of pages. `/p/{id}/` is a private page's frame; `/p/{id}/{token}/f/{path}` and
+/// `/p/{id}/{token}/data/{name}` are its files and feeds under the view token the frame names,
+/// each feed also at `/p/{id}/{token}/f/data/{name}`, where `data/NAME` from a file at the top of
+/// the page leads. Every one of them names its viewer ([`page_access::viewer`]) and checks
+/// [`may_view`]. `/s/{token}/` and `/s/{token}/f/{path}` are a public link's frame and files, with
+/// no feed. Nothing of `/v1`.
 pub(crate) fn pages_router() -> Router<Gateway> {
     Router::new()
-        .route("/v/{token}/", get(frame))
-        .route("/v/{token}/f/{*path}", get(file))
-        .route("/v/{token}/data/{name}", get(feed))
-        .route("/v/{token}/f/data/{name}", get(feed))
+        .route("/p/{id}/", get(frame))
+        .route("/p/{id}/{token}/f/{*path}", get(file))
+        .route("/p/{id}/{token}/data/{name}", get(feed))
+        .route("/p/{id}/{token}/f/data/{name}", get(feed))
         .route("/s/{token}/", get(public_frame))
         .route("/s/{token}/f/{*path}", get(public_file))
 }
@@ -1472,42 +1261,9 @@ async fn page_limits(gateway: &Gateway) -> Option<AssistantPageLimits> {
     )
 }
 
-/// What the link's owner reads when their sign-in has ended.
-pub(crate) const SIGNED_OUT: &str = "The link's owner is signed out. Sign in to Outer Office \
-                                     and open the page again.";
-
-/// The viewer of link `key` with the live `[assistant.pages]`, while the viewer is still signed
-/// in and still may read `page`; otherwise the answer to give, its reason logged. A viewer who
-/// may no longer read it loses every link to it.
-async fn stands_for(
-    gateway: &Gateway,
-    store: &PageStore,
-    key: &str,
-    link: &Link,
-    page: &Page,
-) -> Result<(Person, AssistantPageLimits), Response> {
-    let viewer = match crate::resolve_digest(gateway, link.sign_in.clone()).await {
-        Ok(viewer) => viewer,
-        Err(error) if error.status == StatusCode::UNAUTHORIZED => {
-            store.note(key, "the link's owner is signed out");
-            return Err(signed_out());
-        }
-        Err(error) => {
-            store.note(key, "the viewer's sign-in could not be checked");
-            return Err(error.status.into_response());
-        }
-    };
-    let Some(limits) = page_limits(gateway).await else {
-        store.note(key, "the roster could not be read");
-        return Err(StatusCode::SERVICE_UNAVAILABLE.into_response());
-    };
-    if viewer.id != link.viewer || !may_view(gateway, page, &viewer, &limits).await {
-        store.note(key, "the viewer may no longer read the page");
-        store.revoke_viewers(&page.id, &|held| held != link.viewer);
-        return Err(gone());
-    }
-    Ok((viewer, limits))
-}
+/// What a viewer whose sign-in has ended reads.
+pub(crate) const SIGNED_OUT: &str = "You are signed out: your sign-in has ended. Sign in to \
+                                     Outer Office and open the page again.";
 
 /// `403` with [`SIGNED_OUT`], as plain text nothing runs in.
 fn signed_out() -> Response {
@@ -1519,33 +1275,50 @@ fn signed_out() -> Response {
     (StatusCode::FORBIDDEN, headers, SIGNED_OUT).into_response()
 }
 
-/// The cookie that binds a viewer's link to the browser that first asked for it.
-const VIEW_COOKIE: &str = "ai6_page";
-
-/// The value of every page cookie a request carries; a client speaking HTTP/2 may split
-/// `Cookie` over several headers.
-fn view_cookies(headers: &HeaderMap) -> Vec<&str> {
-    headers
-        .get_all(COOKIE)
-        .iter()
-        .filter_map(|line| line.to_str().ok())
-        .flat_map(|line| line.split(';'))
-        .filter_map(|pair| pair.trim().split_once('='))
-        .filter(|(name, _)| *name == VIEW_COOKIE)
-        .map(|(_, value)| value)
-        .collect()
-}
-
-/// The `Set-Cookie` that binds link `token` to this browser: sent only to that link's frame,
-/// never to a script, never from another site, and gone when the link ends.
-fn view_cookie(base: &str, token: &str, value: &str, expires: f64) -> Option<HeaderValue> {
-    let seconds = (expires - now()).ceil().max(1.0);
-    HeaderValue::from_str(&format!(
-        "{VIEW_COOKIE}={value}; Path={}/v/{token}/; HttpOnly; Secure; SameSite=Strict; \
-         Max-Age={seconds:.0}",
-        base_path(base)
-    ))
-    .ok()
+/// A request for private page `id`, once it names a person who may read the page now: the page,
+/// the person and the live `[assistant.pages]`; otherwise the answer to give, its reason logged.
+/// A request that names nobody, or someone the page is hidden from, is answered as a page that
+/// does not exist.
+async fn asked(
+    gateway: &Gateway,
+    id: &str,
+    headers: &HeaderMap,
+    connection: Connection,
+) -> Result<(std::sync::Arc<PageStore>, Page, Person, AssistantPageLimits), Box<Response>> {
+    let refused = || Box::new(gone());
+    let store = gateway.pages.clone().ok_or_else(refused)?;
+    let at = now();
+    let page = store
+        .get(id)
+        .filter(|page| !page.expires_at.is_some_and(|end| end <= at))
+        .ok_or_else(refused)?;
+    let viewer = match page_access::viewer(gateway, headers, connection).await {
+        Ok(viewer) => viewer,
+        Err(NoViewer::SignedOut) => {
+            store.note(
+                &page.id,
+                "asked for with the cookie of a sign-in that has ended",
+            );
+            return Err(Box::new(signed_out()));
+        }
+        Err(NoViewer::Nobody) => return Err(refused()),
+        Err(NoViewer::Unavailable) => {
+            store.note(&page.id, "the viewer could not be told");
+            return Err(Box::new(StatusCode::SERVICE_UNAVAILABLE.into_response()));
+        }
+    };
+    let Some(limits) = page_limits(gateway).await else {
+        store.note(&page.id, "the roster could not be read");
+        return Err(Box::new(StatusCode::SERVICE_UNAVAILABLE.into_response()));
+    };
+    if !may_view(gateway, &page, &viewer, &limits).await {
+        store.note(
+            &viewing(&page.id, &viewer.id),
+            "the viewer may not read the page",
+        );
+        return Err(refused());
+    }
+    Ok((store, page, viewer, limits))
 }
 
 /// A `303 See Other` to `to`.
@@ -1566,51 +1339,48 @@ fn top_level(headers: &HeaderMap) -> bool {
         == Some("document")
 }
 
-/// `GET /v/{token}/`: the frame of a viewer's link. Its first request binds the link to this
-/// browser with a cookie and audits the opening; any later request without that cookie, as
-/// from a copied address, is answered as a link that does not exist.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct FrameQuery {
+    /// `none`, `own` or `open`: a tighter network than the deployment's, for this opening.
+    network: Option<String>,
+}
+
+/// `GET /p/{id}/`: a private page's frame, for its person and whom it is shared with, opened from
+/// the app, a bookmark, a new tab or another device alike. The page in it is named under a view
+/// token for this viewer and opening ([`PageStore::view_token`]); each opening is audited.
 async fn frame(
     State(gateway): State<Gateway>,
-    UrlPath(token): UrlPath<String>,
+    UrlPath(id): UrlPath<String>,
+    Query(query): Query<FrameQuery>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    certificates: Option<Extension<ClientCertificates>>,
     headers: HeaderMap,
 ) -> Response {
-    let Some(store) = gateway.pages.clone() else {
-        return gone();
+    let (store, page, viewer, limits) =
+        match asked(&gateway, &id, &headers, (connection, certificates)).await {
+            Ok(asked) => asked,
+            Err(refused) => return *refused,
+        };
+    let asked_network = match query.network.as_deref() {
+        None => None,
+        Some("none") => Some(PageNetwork::None),
+        Some("own") => Some(PageNetwork::Own),
+        Some("open") => Some(PageNetwork::Open),
+        Some(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
-    let Some((key, link, page)) = store.link(&token) else {
-        return gone();
-    };
-    let cookies = view_cookies(&headers);
-    if let Some(bound) = &link.cookie
-        && !cookies
-            .iter()
-            .any(|cookie| sha256_hex(cookie.as_bytes()) == *bound)
-    {
-        store.note(
-            &key,
-            "asked for without the cookie of the browser that opened it",
-        );
-        return gone();
+    let network = profile(&limits, asked_network);
+    let mut expires = now() + limits.open_ttl.0.as_secs_f64();
+    if let Some(end) = page.expires_at {
+        expires = expires.min(end);
     }
-    let (viewer, limits) = match stands_for(&gateway, &store, &key, &link, &page).await {
-        Ok(standing) => standing,
-        Err(refused) => return refused,
-    };
+    let token = store.view_token(&page.id, &viewer.id, network, expires);
+    audit_opened(&gateway, &viewer, &page, network).await;
     let base = pages_base(&gateway);
-    let set_cookie = match store.admit(&token, &cookies) {
-        Admit::Refused => return gone(),
-        Admit::Again => None,
-        Admit::First(cookie) => {
-            audit_opened(&gateway, &viewer, &link, &page).await;
-            view_cookie(&base, &token, &cookie, link.expires)
-        }
-    };
-    let src = format!("../{}/f/", store.view_token(&key));
-    let mut response = frame_html(&page, &Viewing::Link(&link), &src, &limits).into_response();
+    let src = format!("{token}/f/");
+    let mut response =
+        frame_html(&page, &Viewing::Person(&viewer.id), &src, &limits).into_response();
     *response.headers_mut() = frame_headers(&base);
-    if let Some(set_cookie) = set_cookie {
-        response.headers_mut().insert(SET_COOKIE, set_cookie);
-    }
     response
 }
 
@@ -1625,25 +1395,23 @@ fn frame_headers(base: &str) -> HeaderMap {
     headers
 }
 
-/// Audits a link's first request, as its viewer.
-async fn audit_opened(gateway: &Gateway, viewer: &Person, link: &Link, page: &Page) {
-    {
-        let _ = super::audit(
-            gateway,
-            viewer,
-            "moneypenny.page.opened",
-            String::new(),
-            Some(RESOURCE.to_owned()),
-            &format!("{} ({})", page.id, link.network.as_str()),
-        )
-        .await;
-    }
+/// Audits an opening of `page` by `viewer`.
+async fn audit_opened(gateway: &Gateway, viewer: &Person, page: &Page, network: PageNetwork) {
+    let _ = super::audit(
+        gateway,
+        viewer,
+        "moneypenny.page.opened",
+        String::new(),
+        Some(RESOURCE.to_owned()),
+        &format!("{} ({})", page.id, network.as_str()),
+    )
+    .await;
 }
 
 /// Whom a frame is shown to.
 enum Viewing<'a> {
-    /// A signed-in viewer, through their link.
-    Link(&'a Link),
+    /// A signed-in viewer, by their ID.
+    Person(&'a str),
     /// Anyone holding the page's public link.
     Public,
 }
@@ -1661,12 +1429,12 @@ fn frame_html(page: &Page, viewing: &Viewing, src: &str, limits: &AssistantPageL
         escape(&page.title)
     );
     let (note, bar) = match viewing {
-        Viewing::Link(link) => {
+        Viewing::Person(viewer) => {
             let mut note = format!(
                 "Made by Moneypenny for {}, not part of Outer Office. {what} {expiry}",
                 escape(&page.person_id),
             );
-            if link.viewer != page.person_id {
+            if *viewer != page.person_id {
                 let _ = write!(note, " Shared by {}.", escape(&page.person_id));
             }
             (note, limits.frame)
@@ -1738,42 +1506,82 @@ struct FileQuery {
     source: Option<String>,
 }
 
-/// `GET /v/{view}/f/{path}`: a file of the page, under the view token its frame names. A
-/// top-level request is sent to the frame, which carries the bar and needs the browser's
-/// cookie, so a view token in an address bar opens nothing elsewhere.
+/// A request for a file or feed of private page `id` under view token `token`: the request names
+/// its viewer, who may read the page, and the token is the one the frame named for them. Answers
+/// the page, the viewer, the live `[assistant.pages]` and the token's network.
+async fn viewed(
+    gateway: &Gateway,
+    id: &str,
+    token: &str,
+    headers: &HeaderMap,
+    connection: Connection,
+) -> Result<
+    (
+        std::sync::Arc<PageStore>,
+        Page,
+        Person,
+        AssistantPageLimits,
+        PageNetwork,
+    ),
+    Box<Response>,
+> {
+    let (store, page, viewer, limits) = asked(gateway, id, headers, connection).await?;
+    match store.viewed(token, &page.id, &viewer.id) {
+        Ok(network) => Ok((store, page, viewer, limits, network)),
+        Err(reason) => {
+            store.note(&viewing(&page.id, &viewer.id), reason);
+            Err(Box::new(gone()))
+        }
+    }
+}
+
+/// `GET /p/{id}/{token}/f/{path}`: a file of the page. A top-level request is sent to the
+/// frame, which carries the bar.
 async fn file(
     State(gateway): State<Gateway>,
-    UrlPath((view, path)): UrlPath<(String, String)>,
+    UrlPath((id, token, path)): UrlPath<(String, String, String)>,
     Query(query): Query<FileQuery>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    certificates: Option<Extension<ClientCertificates>>,
     headers: HeaderMap,
 ) -> Response {
-    let Some(store) = gateway.pages.clone() else {
-        return gone();
-    };
-    let Some((key, link, page)) = store.viewed(&view) else {
-        return gone();
-    };
-    let limits = match stands_for(&gateway, &store, &key, &link, &page).await {
-        Ok((_, limits)) => limits,
-        Err(refused) => return refused,
-    };
     let base = pages_base(&gateway);
     if top_level(&headers) {
-        let Some(token) = &link.token else {
-            store.note(
-                &key,
-                "a file asked for in the address bar, whose link this gateway no longer holds; \
-                 open the page again from the app",
-            );
-            return gone();
+        return match asked(&gateway, &id, &headers, (connection, certificates)).await {
+            Ok(_) => see_other(&format!("{base}/p/{}/", percent(&id))),
+            Err(refused) => *refused,
         };
-        return see_other(&format!("{base}/v/{token}/"));
     }
-    let csp = page_csp(&base, link.network.tighter(limits.network), limits.scripts);
-    serve_file(&store, &page, &path, query.source.is_some(), &csp).unwrap_or_else(|| {
-        store.note(&key, &format!("{path} is not a file of the page"));
-        gone()
-    })
+    let (store, page, viewer, limits, network) =
+        match viewed(&gateway, &id, &token, &headers, (connection, certificates)).await {
+            Ok(viewed) => viewed,
+            Err(refused) => return *refused,
+        };
+    let csp = page_csp(&base, network.tighter(limits.network), limits.scripts);
+    let Some(mut served) = serve_file(&store, &page, &path, query.source.is_some(), &csp) else {
+        store.note(
+            &viewing(&page.id, &viewer.id),
+            &format!("{path} is not a file of the page"),
+        );
+        return gone();
+    };
+    credentialed(&headers, served.headers_mut());
+    served
+}
+
+/// Lets the page's own script read the answer to a request it made with its credentials: the
+/// page is an opaque origin, which sends `Origin: null`, and `*` admits no credentialed request.
+fn credentialed(asked: &HeaderMap, answer: &mut HeaderMap) {
+    if asked.get(ORIGIN).is_some_and(|origin| origin == "null") {
+        answer.insert(
+            HeaderName::from_static("access-control-allow-origin"),
+            HeaderValue::from_static("null"),
+        );
+        answer.insert(
+            HeaderName::from_static("access-control-allow-credentials"),
+            HeaderValue::from_static("true"),
+        );
+    }
 }
 
 /// One listed file of `page`, by its format, under `csp`; `None` when there is no such file.
@@ -1823,26 +1631,29 @@ fn serve_file(
     Some((headers, body).into_response())
 }
 
-/// `GET /v/{view}/data/{name}`: a feed of the page, run as the link's viewer.
+/// `GET /p/{id}/{token}/data/{name}`: a feed of the page, run as its viewer. A page's script
+/// reads it with `fetch(url, {credentials: "include"})`, which sends the page cookie from the
+/// page's opaque origin (`Origin: null`); the answer lets that script read it.
 async fn feed(
     State(gateway): State<Gateway>,
-    UrlPath((view, name)): UrlPath<(String, String)>,
+    UrlPath((id, token, name)): UrlPath<(String, String, String)>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    certificates: Option<Extension<ClientCertificates>>,
+    headers: HeaderMap,
 ) -> Response {
-    let Some(store) = gateway.pages.clone() else {
-        return gone();
-    };
-    let Some((key, link, page)) = store.viewed(&view) else {
-        return gone();
-    };
-    let (viewer, limits) = match stands_for(&gateway, &store, &key, &link, &page).await {
-        Ok(standing) => standing,
-        Err(refused) => return refused,
-    };
+    let (store, page, viewer, limits, network) =
+        match viewed(&gateway, &id, &token, &headers, (connection, certificates)).await {
+            Ok(viewed) => viewed,
+            Err(refused) => return *refused,
+        };
+    let key = viewing(&page.id, &viewer.id);
     let base = pages_base(&gateway);
-    let headers = page_headers(&page_csp(&base, link.network, limits.scripts));
-    let reply =
-        |status: StatusCode, body: Value| (status, headers.clone(), Json(body)).into_response();
-    if !limits.feeds || link.network.tighter(limits.network) == PageNetwork::None {
+    let mut answer_headers = page_headers(&page_csp(&base, network, limits.scripts));
+    credentialed(&headers, &mut answer_headers);
+    let reply = |status: StatusCode, body: Value| {
+        (status, answer_headers.clone(), Json(body)).into_response()
+    };
+    if !limits.feeds || network.tighter(limits.network) == PageNetwork::None {
         return reply(
             StatusCode::FORBIDDEN,
             json!({"error": "this page may not read live data"}),
@@ -1917,7 +1728,11 @@ async fn public_file(
         return see_other(&format!("{base}/s/{token}/"));
     }
     let csp = page_csp(&base, limits.network, limits.scripts);
-    serve_file(&store, &page, &path, query.source.is_some(), &csp).unwrap_or_else(gone)
+    let Some(mut served) = serve_file(&store, &page, &path, query.source.is_some(), &csp) else {
+        return gone();
+    };
+    credentialed(&headers, served.headers_mut());
+    served
 }
 
 /// Checks the declared feeds of a dashboard: each a read tool with input its schema accepts, at
