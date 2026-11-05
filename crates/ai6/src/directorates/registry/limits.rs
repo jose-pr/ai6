@@ -293,6 +293,10 @@ pub struct ApprovalLimits {
     #[schema(title = "Longest name in a class authorization", format = "bytes")]
     #[map(default = ApprovalLimits::default().name_bytes)]
     pub name_bytes: Limit,
+    /// Expired requests one list shows, the newest first.
+    #[schema(title = "Expired requests listed")]
+    #[map(default = ApprovalLimits::default().expired_listed)]
+    pub expired_listed: Limit,
 }
 
 impl Default for ApprovalLimits {
@@ -309,6 +313,7 @@ impl Default for ApprovalLimits {
             class_entries: Limit::at(64),
             pattern_bytes: Limit::at(256),
             name_bytes: Limit::at(128),
+            expired_listed: Limit::at(200),
         }
     }
 }

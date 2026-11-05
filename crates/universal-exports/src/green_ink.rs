@@ -14,11 +14,11 @@ use std::time::Duration;
 use ai6::directorates::registry::backend::*;
 use ai6::{
     Approval, ApprovalRequest, ApprovalStatus, AuditRecord, CLEARANCE_KIND, ClassAuthorization,
-    DEFAULT_APPROVAL_TTL, Decision, Ruling,
+    DEFAULT_APPROVAL_TTL, Decision, Rearming, Revocation, Ruling, TimelineEvent,
 };
 use ai6_diptel::OperationId;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -42,6 +42,30 @@ pub(crate) struct ApproveRequest {
 pub(crate) struct RejectRequest {
     /// Why, for the Agent.
     reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RevokeRequest {
+    /// Why, for the record.
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RearmRequest {
+    /// Seconds it waits for a decision again; as long as it first waited when omitted.
+    expires_in_secs: Option<u64>,
+    /// Why, for the record.
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExpiredQuery {
+    /// The earliest expiry to list, as Unix seconds; `[text] green_ink_expired_window` ago when
+    /// omitted.
+    since: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -179,6 +203,105 @@ pub(crate) async fn pending(
     Ok(Json(requests))
 }
 
+/// `GET /v1/user/operations/{operation_id}/green-ink/expired?since=`: the requests that expired
+/// undecided, the newest first. Re-arming one takes it out of the list.
+pub(crate) async fn expired(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(operation_id): Path<String>,
+    Query(query): Query<ExpiredQuery>,
+) -> Result<Json<Vec<Approval>>, ApiError> {
+    if query.since.is_some_and(|since| !since.is_finite()) {
+        return Err(ApiError::bad_request());
+    }
+    let (_, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "approval.decide").await?;
+    let now = unix_timestamp()?;
+    let window = gateway.config.unex().text.green_ink_expired_window;
+    let since = query.since.unwrap_or_else(|| {
+        window
+            .get()
+            .map_or(0.0, |window| now - window.as_secs_f64())
+    });
+    let operation = operation.to_string();
+    let requests =
+        tokio::task::spawn_blocking(move || registry.expired_approvals(&operation, since, now))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(registry_error)?;
+    Ok(Json(requests))
+}
+
+/// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/rearm`: re-opens a request
+/// that expired undecided, under `approval.decide`. Its Mission's Station takes it up and the
+/// person deciding it signs as for any other. Audited as `green_ink.rearmed`, on the timeline.
+pub(crate) async fn rearm(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, request_id)): Path<(String, String)>,
+    Json(request): Json<RearmRequest>,
+) -> Result<Json<ApprovalRequest>, ApiError> {
+    valid_id(&request_id)?;
+    let lasts = request
+        .expires_in_secs
+        .map(|seconds| grant(seconds, gateway.config.unex().text.green_ink_max_grant))
+        .transpose()?;
+    let note = note(
+        request.note,
+        gateway.config.unex().text.green_ink_note_chars,
+    )?;
+    let (person, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "approval.decide").await?;
+    let now = unix_timestamp()?;
+    let (store, key, id) = (registry.clone(), operation.to_string(), request_id.clone());
+    let status = tokio::task::spawn_blocking(move || store.approval(&key, &id, now))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?;
+    let lapsed = match status {
+        Some(ApprovalStatus::Decided(approval)) if approval.decision == Decision::Expired => {
+            approval
+        }
+        Some(_) => return Err(ApiError::from(GatewayError::Conflict)),
+        None => return Err(ApiError::not_found()),
+    };
+    let first_wait = lapsed.request.expires_at - lapsed.request.requested_at;
+    let target = step_target(&lapsed.request);
+    // Audited first: a re-arming that cannot be recorded is not made.
+    audit(
+        registry.clone(),
+        person.id.clone(),
+        "green_ink.rearmed",
+        &operation,
+        target,
+        now,
+    )
+    .await?;
+    let rearming = Rearming::new(person.id.clone(), now, note);
+    let (store, key) = (registry.clone(), operation.to_string());
+    let reopened = tokio::task::spawn_blocking(move || {
+        store.rearm_approval(
+            &key,
+            &request_id,
+            &rearming,
+            now + lasts.unwrap_or(first_wait),
+        )
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(registry_error)?;
+    let event = TimelineEvent::new("green_ink", "rearmed", operation.to_string(), now)
+        .mission(reopened.mission.to_string())
+        .session(reopened.session.to_string())
+        .actor(person.id)
+        .detail("request", reopened.id.clone())
+        .detail("step", reopened.scope.kind.clone())
+        .detail("target", reopened.scope.target.clone());
+    // A timeline entry that fails is left out; the audit record and the request stand.
+    let _ = tokio::task::spawn_blocking(move || registry.record_event(&event)).await;
+    Ok(Json(reopened))
+}
+
 /// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/approve`.
 pub(crate) async fn approve(
     State(gateway): State<Gateway>,
@@ -278,14 +401,20 @@ async fn decide(
     Ok(Json(approval))
 }
 
-/// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/revoke`: withdraws an
-/// approval before it expires. The Station revokes a credential leased against it.
+/// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/revoke` with an optional
+/// `{"reason"}`: withdraws an approval before it expires. The Station revokes a credential leased
+/// against it.
 pub(crate) async fn revoke(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     Path((operation_id, request_id)): Path<(String, String)>,
+    request: Option<Json<RevokeRequest>>,
 ) -> Result<Json<Approval>, ApiError> {
     valid_id(&request_id)?;
+    let reason = note(
+        request.and_then(|Json(request)| request.reason),
+        gateway.config.unex().text.green_ink_note_chars,
+    )?;
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "approval.decide").await?;
     let now = unix_timestamp()?;
@@ -318,9 +447,9 @@ pub(crate) async fn revoke(
     .await?;
     let operation_key = operation.to_string();
     let store = registry.clone();
-    let signer = person.id.clone();
+    let revocation = Revocation::new(person.id.clone(), now, reason);
     let approval = tokio::task::spawn_blocking(move || {
-        store.revoke_approval(&operation_key, &request_id, &signer, now)
+        store.revoke_approval(&operation_key, &request_id, &revocation)
     })
     .await
     .map_err(|_| ApiError::internal())?
@@ -576,6 +705,187 @@ mod tests {
             request = request.json(&body);
         }
         request.send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_expired_request_lists_apart_and_is_rearmed_with_its_first_wait() {
+        let served = served_with(ROLES).await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let lapsed = ai6::ApprovalRequest::try_new(
+            "G",
+            MissionId::try_new("mission-g").unwrap(),
+            SessionId::try_new("session-g").unwrap(),
+            "007",
+            ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
+            "the release is green",
+            "lapsed",
+            &Default::default(),
+        )
+        .unwrap()
+        .expiring(now - 120.0, std::time::Duration::from_secs(60));
+        served.registry.request_approval(&lapsed).unwrap();
+
+        let pending: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "G/green-ink",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(pending, serde_json::json!([]));
+        let expired: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "G/green-ink/expired",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(expired[0]["request"]["id"], lapsed.id.as_str(), "{expired}");
+        assert_eq!(expired[0]["decision"], "expired");
+        let none: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            &format!("G/green-ink/expired?since={}", now + 60.0),
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(none, serde_json::json!([]));
+
+        let path = format!("G/green-ink/{}/rearm", lapsed.id);
+        let denied = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::POST,
+            &path,
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(denied.status(), 403);
+
+        let rearmed = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &path,
+            Some(serde_json::json!({ "note": "back from leave" })),
+        )
+        .await;
+        assert_eq!(rearmed.status(), 200);
+        let rearmed: serde_json::Value = rearmed.json().await.unwrap();
+        assert_eq!(rearmed["rearmed"]["by"], "operator-007");
+        assert_eq!(rearmed["rearmed"]["note"], "back from leave");
+        let waits =
+            rearmed["expires_at"].as_f64().unwrap() - rearmed["rearmed"]["at"].as_f64().unwrap();
+        assert!((waits - 60.0).abs() < 1.0, "{waits}");
+
+        let pending: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "G/green-ink",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(pending[0]["id"], lapsed.id.as_str());
+        let again = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &path,
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(again.status(), 409, "still waiting");
+
+        let audit = served.registry.audit_records().unwrap();
+        let record = audit
+            .iter()
+            .find(|record| record.action == "green_ink.rearmed")
+            .unwrap();
+        assert_eq!(record.actor, "operator-007");
+        assert!(!record.target.contains("leave"), "the note stays out");
+        assert!(
+            served
+                .registry
+                .timeline_events("G")
+                .unwrap()
+                .iter()
+                .any(|event| event.kind == "green_ink" && event.action == "rearmed")
+        );
+
+        let approved = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/approve", lapsed.id),
+            Some(serde_json::json!({ "expires_in_secs": 60 })),
+        )
+        .await;
+        assert_eq!(approved.status(), 200, "decidable again");
+    }
+
+    async fn approved(served: &Served, id: &str) {
+        let path = format!("G/green-ink/{id}/approve");
+        let signed = call(
+            served,
+            &served.operator,
+            reqwest::Method::POST,
+            &path,
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(signed.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn a_revoke_keeps_its_reason_and_needs_no_body() {
+        let served = served_with(ROLES).await;
+        let with_reason = asked(&served, "revoke-reason", 3600);
+        approved(&served, &with_reason.id).await;
+        let revoked = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/revoke", with_reason.id),
+            Some(serde_json::json!({ "reason": "wrong branch" })),
+        )
+        .await;
+        assert_eq!(revoked.status(), 200);
+        let revoked: serde_json::Value = revoked.json().await.unwrap();
+        assert_eq!(revoked["revoked"]["by"], "operator-007");
+        assert_eq!(revoked["revoked"]["note"], "wrong branch");
+
+        let bare = asked(&served, "revoke-bare", 3600);
+        approved(&served, &bare.id).await;
+        let revoked = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/revoke", bare.id),
+            None,
+        )
+        .await;
+        assert_eq!(revoked.status(), 200);
+        let revoked: serde_json::Value = revoked.json().await.unwrap();
+        assert!(revoked["revoked"].get("note").is_none(), "{revoked}");
     }
 
     #[tokio::test]

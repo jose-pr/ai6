@@ -564,7 +564,11 @@ fn withdraw_raise(
         && let Some(approval) = grant.approval.as_deref()
     {
         // Best effort: M applies an approval once, so the removed grant stays removed either way.
-        let _ = registry.revoke_approval(&grant.operation, approval, by, at);
+        let _ = registry.revoke_approval(
+            &grant.operation,
+            approval,
+            &ai6::Revocation::new(by, at, None),
+        );
     }
 }
 

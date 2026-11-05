@@ -47,6 +47,7 @@ class FakeGreenInk {
   final requests = <http.Request>[];
   bool decided = false;
   bool revoked = false;
+  bool rearmed = false;
 
   /// Operations whose routes answer 503.
   final failing = <String>{};
@@ -58,6 +59,27 @@ class FakeGreenInk {
     }
     if (path.endsWith('/green-ink')) {
       return http.Response(jsonEncode(decided ? [] : [pendingRequest()]), 200);
+    }
+    if (path.endsWith('/green-ink/expired')) {
+      return http.Response(
+        jsonEncode(
+          rearmed
+              ? []
+              : [
+                  {
+                    'request': pendingRequest(),
+                    'decision': 'expired',
+                    'signer': 'expiry',
+                    'at': 1_798_086_400.0,
+                  },
+                ],
+        ),
+        200,
+      );
+    }
+    if (path.endsWith('/rearm')) {
+      rearmed = true;
+      return http.Response(jsonEncode(pendingRequest()), 200);
     }
     if (path.endsWith('/approve') || path.endsWith('/reject')) {
       decided = true;
@@ -207,6 +229,42 @@ void main() {
     expect(find.text('Signed in green ink.'), findsOneWidget);
     expect(
       find.textContaining('No steps are waiting for green ink.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the Expired tab lists what lapsed and re-arms it', (
+    tester,
+  ) async {
+    final gateway = FakeGreenInk();
+    final board = await signedIn(gateway);
+    addTearDown(board.dispose);
+    await openAdministration(tester, board);
+    await tester.tap(find.widgetWithText(Tab, 'Expired'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ExpiredGreenInkPage), findsOneWidget);
+    expect(find.text('push · origin:refs/heads/main'), findsOneWidget);
+    expect(find.text('The release branch passed review.'), findsOneWidget);
+    expect(find.textContaining('expired '), findsWidgets);
+
+    await tester.tap(find.text('Re-arm…'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'back from leave');
+    await tester.tap(find.text('Re-arm'));
+    await tester.pumpAndSettle();
+
+    final rearmed = gateway.requests.singleWhere(
+      (request) => request.url.path.endsWith('/rearm'),
+    );
+    expect(
+      rearmed.url.path,
+      '/v1/user/operations/G/green-ink/$requestId/rearm',
+    );
+    expect(jsonDecode(rearmed.body), {'note': 'back from leave'});
+    expect(find.text('It is waiting for a decision again.'), findsOneWidget);
+    expect(
+      find.text('No step has expired without a decision.'),
       findsOneWidget,
     );
   });

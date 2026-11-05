@@ -1742,6 +1742,14 @@ impl Gateway {
                 get(green_ink::pending),
             )
             .route(
+                "/v1/user/operations/{operation_id}/green-ink/expired",
+                get(green_ink::expired),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/green-ink/{request_id}/rearm",
+                post(green_ink::rearm),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/green-ink/{request_id}/approve",
                 post(green_ink::approve),
             )

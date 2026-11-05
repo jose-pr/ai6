@@ -94,7 +94,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('mission_id', _Kind.identifier),
   ],
   OoPage.greenInk: [
-    _Field('tab', _Kind.oneOf, ['inbox', 'classes']),
+    _Field('tab', _Kind.oneOf, ['inbox', 'expired', 'classes']),
     _Field('operation_id', _Kind.identifier),
     _Field('request_id', _Kind.identifier),
     _Field('agent', _Kind.identifier),

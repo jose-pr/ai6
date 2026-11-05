@@ -8,7 +8,8 @@ use super::{SqlRegistry, bounded_json, from_json};
 use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ApprovalStore, ClassAuthorization, Decision,
-    Revocation, Ruling, class_approval, expired, ruled, validate_ruling,
+    Rearming, Revocation, Ruling, class_approval, expired, expired_undecided, newest_expired,
+    rearmed, ruled, validate_note, validate_rearming, validate_ruling,
 };
 use crate::directorates::registry::limits::ApprovalLimits;
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
@@ -61,6 +62,26 @@ fn settle(
             approval.request.operation.as_str().into(),
             approval.request.id.as_str().into(),
             record_json(approval, limits)?.into(),
+            revision.into(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Stores `request`, pending, over the row it has.
+fn put_pending(
+    tx: &mut Tx<'_>,
+    request: &ApprovalRequest,
+    revision: i64,
+    limits: &ApprovalLimits,
+) -> io::Result<()> {
+    tx.execute(
+        "UPDATE ai6_approvals SET state = 'pending', record = $3, revision = $4 \
+         WHERE operation = $1 AND id = $2",
+        &[
+            request.operation.as_str().into(),
+            request.id.as_str().into(),
+            record_json(request, limits)?.into(),
             revision.into(),
         ],
     )?;
@@ -315,11 +336,11 @@ impl ApprovalStore for SqlRegistry {
         &self,
         operation: &str,
         id: &str,
-        by: &str,
-        at: f64,
+        revocation: &Revocation,
     ) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
+        validate_note(revocation.note.as_deref(), &self.limits.approvals)?;
         self.write(|tx, revision| {
             let mut approval = decided_in(tx, operation, id)?;
             if approval.decision != Decision::Approved {
@@ -329,13 +350,97 @@ impl ApprovalStore for SqlRegistry {
                 ));
             }
             if approval.revoked.is_none() {
-                approval.revoked = Some(Revocation {
-                    by: by.to_owned(),
-                    at,
-                });
+                approval.revoked = Some(revocation.clone());
                 settle(tx, &approval, revision, &self.limits.approvals)?;
             }
             Ok(approval)
+        })
+    }
+
+    fn expired_approvals(
+        &self,
+        operation: &str,
+        since: f64,
+        now: f64,
+    ) -> io::Result<Vec<Approval>> {
+        self.pending_approvals(operation, now)?;
+        self.read(|tx| {
+            let rows = tx.query(
+                "SELECT record FROM ai6_approvals WHERE operation = $1 AND state = 'decided'",
+                &[operation.into()],
+            )?;
+            let mut approvals = Vec::new();
+            for row in rows {
+                if let Ok(approval) = serde_json::from_str::<Approval>(&row.text(0)?)
+                    && approval.request.operation == operation
+                {
+                    approvals.push(approval);
+                }
+            }
+            Ok(newest_expired(
+                approvals,
+                since,
+                self.limits.approvals.expired_listed,
+            ))
+        })
+    }
+
+    fn rearm_approval(
+        &self,
+        operation: &str,
+        id: &str,
+        rearming: &Rearming,
+        expires_at: f64,
+    ) -> io::Result<ApprovalRequest> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        validate_rearming(rearming, expires_at, &self.limits.approvals)?;
+        self.write(|tx, revision| {
+            let approval = expired_undecided(status_in(
+                tx,
+                operation,
+                id,
+                rearming.at,
+                revision,
+                &self.limits.approvals,
+            )?)?;
+            let pending = tx
+                .query_opt(
+                    "SELECT count(*) FROM ai6_approvals WHERE operation = $1 AND state = 'pending'",
+                    &[operation.into()],
+                )?
+                .map_or(Ok(0), |row| row.int(0))?;
+            let most = self.limits.approvals.pending;
+            if !most.allows(pending + 1) {
+                return Err(invalid_data(format!(
+                    "the Operation has {most} requests waiting for green ink"
+                )));
+            }
+            let request = rearmed(approval.request, rearming, expires_at);
+            put_pending(tx, &request, revision, &self.limits.approvals)?;
+            Ok(request)
+        })
+    }
+
+    fn mark_rearming_told(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        self.write(|tx, revision| {
+            let row = tx
+                .query_opt(
+                    "SELECT record FROM ai6_approvals \
+                     WHERE operation = $1 AND id = $2 AND state = 'pending'",
+                    &[operation.into(), id.into()],
+                )?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "no pending green ink request")
+                })?;
+            let mut request: ApprovalRequest = from_json(&row.text(0)?, "green ink record")?;
+            if let Some(rearming) = request.rearmed.as_mut().filter(|r| r.told_at.is_none()) {
+                rearming.told_at = Some(at);
+                put_pending(tx, &request, revision, &self.limits.approvals)?;
+            }
+            Ok(())
         })
     }
 
@@ -464,10 +569,7 @@ impl ApprovalStore for SqlRegistry {
                 })?;
             let mut record: ClassAuthorization = from_json(&row.text(0)?, "green ink record")?;
             if record.revoked.is_none() {
-                record.revoked = Some(Revocation {
-                    by: by.to_owned(),
-                    at,
-                });
+                record.revoked = Some(Revocation::new(by, at, None));
                 put_class(tx, &record, revision, &self.limits.approvals)?;
             }
             Ok(record)

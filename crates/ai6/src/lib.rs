@@ -170,7 +170,7 @@ pub use directorates::registry::agent_records::{
 };
 pub use directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
-    Revocation, Ruling,
+    Rearming, Revocation, Ruling,
 };
 pub use directorates::registry::assistant_log::{
     AssistantConversation, AssistantLogEntry, AssistantTurn,

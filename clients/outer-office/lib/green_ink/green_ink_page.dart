@@ -61,6 +61,26 @@ class GreenInkRequestSummary {
   }
 }
 
+/// A request that expired with no decision.
+@immutable
+class ExpiredGreenInkSummary {
+  const ExpiredGreenInkSummary({
+    required this.request,
+    required this.expiredAt,
+  });
+
+  final GreenInkRequestSummary request;
+  final double expiredAt;
+
+  factory ExpiredGreenInkSummary.fromJson(Map<String, dynamic> json) =>
+      ExpiredGreenInkSummary(
+        request: GreenInkRequestSummary.fromJson(
+          json['request'] as Map<String, dynamic>,
+        ),
+        expiredAt: (json['at'] as num).toDouble(),
+      );
+}
+
 /// A standing approval of a kind of step.
 @immutable
 class ClassAuthorizationSummary {
@@ -453,6 +473,293 @@ class _GreenInkPageState extends State<GreenInkPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The requests no one decided before they expired. One can be re-armed: it waits for a decision
+/// again, and its Mission with it. Needs `approval.decide`.
+///
+/// The [route] (page `green_ink`) names the Operation.
+class ExpiredGreenInkPage extends StatefulWidget {
+  const ExpiredGreenInkPage({
+    required this.board,
+    required this.route,
+    required this.onRoute,
+    super.key,
+  });
+
+  final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
+
+  @override
+  State<ExpiredGreenInkPage> createState() => _ExpiredGreenInkPageState();
+}
+
+class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
+  Future<_Read<ExpiredGreenInkSummary>>? _records;
+  bool _rearming = false;
+
+  OoScope get _scope => OoScope(widget.route, widget.board.greenInkOperations);
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  @override
+  void didUpdateWidget(ExpiredGreenInkPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route['operation_id'] != widget.route['operation_id']) {
+      _reload();
+    }
+  }
+
+  void _reload() {
+    final shown = _scope.shown;
+    setState(() {
+      _records = shown.isEmpty
+          ? null
+          : readEach(shown, widget.board.loadExpiredGreenInk, const []);
+    });
+  }
+
+  Future<void> _rearm(GreenInkRequestSummary request) async {
+    final note = await showDialog<String>(
+      context: context,
+      builder: (context) => _RearmDialog(request: request),
+    );
+    if (note == null || !mounted) return;
+    setState(() => _rearming = true);
+    try {
+      await widget.board.rearmGreenInk(
+        operationId: request.operationId,
+        requestId: request.id,
+        note: note.trim().isEmpty ? null : note.trim(),
+      );
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('It is waiting for a decision again.')),
+      );
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _rearming = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final operations = widget.board.greenInkOperations;
+    final scope = _scope;
+    if (operations.isEmpty) {
+      return const Center(
+        child: Text('No Operations grant approval.decide to this account.'),
+      );
+    }
+    final picker = OoOperationPicker(scope: scope, onRoute: widget.onRoute);
+    if (scope.unreadable) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            picker,
+            Expanded(
+              child: Center(
+                child: Text(
+                  'Operation ${widget.route['operation_id']} does not grant '
+                  'approval.decide to this account.',
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          picker,
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Steps no one decided in time. They count as refused until re-armed.',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh expired green ink',
+                onPressed: _rearming ? null : _reload,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: FutureBuilder<_Read<ExpiredGreenInkSummary>>(
+              future: _records,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(child: Text(snapshot.error.toString()));
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final read = snapshot.data!;
+                final several = scope.shown.length > 1;
+                if (read.rows.isEmpty && read.failed.isNotEmpty && !several) {
+                  return Center(child: Text(read.failed.values.single));
+                }
+                if (read.rows.isEmpty && read.failed.isEmpty) {
+                  return const OoEmptyState(
+                    icon: OoIconName.greenInk,
+                    title: 'No step has expired without a decision.',
+                    body:
+                        'A request no one decides before it expires counts as refused '
+                        'and is kept here.',
+                  );
+                }
+                return ListView(
+                  children: [
+                    if (read.failed.isNotEmpty)
+                      OoReadFailures(failed: read.failed, several: several),
+                    for (final (_, record) in read.rows)
+                      _ExpiredCard(
+                        board: widget.board,
+                        record: record,
+                        onRearm: _rearming || widget.board.demo
+                            ? null
+                            : () => _rearm(record.request),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpiredCard extends StatelessWidget {
+  const _ExpiredCard({
+    required this.board,
+    required this.record,
+    required this.onRearm,
+  });
+
+  final MissionBoard board;
+  final ExpiredGreenInkSummary record;
+  final VoidCallback? onRearm;
+
+  @override
+  Widget build(BuildContext context) {
+    final request = record.request;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${request.kind} · ${request.target}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OoLinkLine([
+                  (
+                    'Agent ${request.agent}',
+                    OoLinkTo.agent(
+                      request.agent,
+                      operation: request.operationId,
+                    ),
+                  ),
+                  (
+                    'Mission ${board.handleOf(request.operationId, request.missionId)}',
+                    OoLinkTo.mission(request.operationId, request.missionId),
+                  ),
+                ], style: DefaultTextStyle.of(context).style),
+                const Text(' · '),
+                OoTime(
+                  record.expiredAt,
+                  prefix: 'expired ',
+                  style: DefaultTextStyle.of(context).style,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(request.reason),
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: onRearm, child: const Text('Re-arm…')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RearmDialog extends StatefulWidget {
+  const _RearmDialog({required this.request});
+
+  final GreenInkRequestSummary request;
+
+  @override
+  State<_RearmDialog> createState() => _RearmDialogState();
+}
+
+class _RearmDialogState extends State<_RearmDialog> {
+  final _note = TextEditingController();
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = widget.request;
+    return AlertDialog(
+      title: const Text('Re-arm this request?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${request.agent} waits again for a decision to ${request.kind} '
+            '${request.target} in Mission ${request.missionId}.',
+          ),
+          TextField(
+            controller: _note,
+            decoration: const InputDecoration(labelText: 'Why (recorded)'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_note.text),
+          child: const Text('Re-arm'),
+        ),
+      ],
     );
   }
 }

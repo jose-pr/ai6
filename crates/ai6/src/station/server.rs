@@ -12919,7 +12919,15 @@ queue = 1
             if lapse == "revoked" {
                 state
                     .intake
-                    .revoke_approval("G", &request.id, "operator", now as f64 + 1.0)
+                    .revoke_approval(
+                        "G",
+                        &request.id,
+                        &crate::directorates::registry::approvals::Revocation::new(
+                            "operator",
+                            now as f64 + 1.0,
+                            None,
+                        ),
+                    )
                     .unwrap();
             } else {
                 let later = now + 601;

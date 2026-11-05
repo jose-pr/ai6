@@ -293,11 +293,15 @@ enum PoolCommand {
 /// Green ink: a person's approval of one irreversible step an Agent asked to take.
 #[derive(Debug, Subcommand)]
 enum GreenInkCommand {
-    /// List the steps waiting for a decision, oldest first.
+    /// List the steps waiting for a decision, oldest first, or with --expired those that expired
+    /// undecided, the newest first.
     List {
         /// AI6 Operation ID.
         #[arg(long)]
         operation: String,
+        /// List requests that expired with no decision instead.
+        #[arg(long)]
+        expired: bool,
     },
     /// Approve a waiting step, signed by you.
     Approve {
@@ -331,6 +335,24 @@ enum GreenInkCommand {
         /// AI6 Operation ID.
         #[arg(long)]
         operation: String,
+        /// Why, for the record.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Open a request that expired undecided again: it waits for a decision, and its Mission with
+    /// it.
+    Rearm {
+        /// Green ink request ID.
+        request_id: String,
+        /// AI6 Operation ID.
+        #[arg(long)]
+        operation: String,
+        /// Seconds it waits; as long as it first waited when omitted.
+        #[arg(long)]
+        expires_in: Option<u64>,
+        /// Why, for the record.
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -1031,6 +1053,7 @@ struct Decided {
     request: WaitingStep,
     decision: String,
     signer: String,
+    at: f64,
     expires_at: Option<f64>,
     revoked: Option<Revocation>,
 }
@@ -2063,7 +2086,25 @@ async fn green_ink(
 ) -> Result<(), String> {
     const PERMISSION: &str = "approval.decide";
     let (operation, request_id, action, body) = match command {
-        GreenInkCommand::List { operation } => {
+        GreenInkCommand::List {
+            operation,
+            expired: true,
+        } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::GET,
+                &[&operation, "green-ink", "expired"],
+            )?;
+            let lapsed: Vec<Decided> = send(request, PERMISSION, "expired green ink").await?;
+            print_expired(&lapsed);
+            return Ok(());
+        }
+        GreenInkCommand::List {
+            operation,
+            expired: false,
+        } => {
             let request = operation_request(
                 client,
                 server,
@@ -2073,6 +2114,31 @@ async fn green_ink(
             )?;
             let steps: Vec<WaitingStep> = send(request, PERMISSION, "green ink list").await?;
             print_waiting(&steps);
+            return Ok(());
+        }
+        GreenInkCommand::Rearm {
+            request_id,
+            operation,
+            expires_in,
+            note,
+        } => {
+            let mut body = serde_json::json!({});
+            if let Some(seconds) = expires_in {
+                body["expires_in_secs"] = seconds.into();
+            }
+            if let Some(note) = note {
+                body["note"] = note.into();
+            }
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::POST,
+                &[&operation, "green-ink", &request_id, "rearm"],
+            )?
+            .json(&body);
+            let step: WaitingStep = send(request, PERMISSION, "re-armed green ink").await?;
+            print_waiting(std::slice::from_ref(&step));
             return Ok(());
         }
         GreenInkCommand::Approve {
@@ -2104,7 +2170,14 @@ async fn green_ink(
         GreenInkCommand::Revoke {
             request_id,
             operation,
-        } => (operation, request_id, "revoke", serde_json::json!({})),
+            reason,
+        } => {
+            let mut body = serde_json::json!({});
+            if let Some(reason) = reason {
+                body["reason"] = reason.into();
+            }
+            (operation, request_id, "revoke", body)
+        }
     };
     let request = operation_request(
         client,
@@ -3081,6 +3154,23 @@ fn print_waiting(steps: &[WaitingStep]) {
             plain(&step.scope.kind),
             plain(&step.scope.target),
             step.expires_at,
+            plain(&step.reason),
+        );
+    }
+}
+
+fn print_expired(lapsed: &[Decided]) {
+    println!("REQUEST\tMISSION\tAGENT\tSTEP\tTARGET\tEXPIRED_UNIX\tREASON");
+    for decided in lapsed {
+        let step = &decided.request;
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{:.0}\t{}",
+            plain(&step.id),
+            plain(&step.mission),
+            plain(&step.agent),
+            plain(&step.scope.kind),
+            plain(&step.scope.target),
+            decided.at,
             plain(&step.reason),
         );
     }

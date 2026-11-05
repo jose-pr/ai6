@@ -2156,6 +2156,64 @@ class MissionBoard extends ChangeNotifier
     ];
   }
 
+  /// The requests of an Operation that expired with no decision, the newest first.
+  Future<List<ExpiredGreenInkSummary>> loadExpiredGreenInk(
+    String operationId,
+  ) async {
+    if (demo) {
+      return [
+        ExpiredGreenInkSummary(
+          request: _demoGreenInk(operationId).single,
+          expiredAt: _demoNow() - 3_600,
+        ),
+      ];
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/green-ink/expired',
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the expired green ink.',
+      );
+    }
+    return [
+      for (final record in jsonDecode(response.body) as List<dynamic>)
+        ExpiredGreenInkSummary.fromJson(record as Map<String, dynamic>),
+    ];
+  }
+
+  /// Opens a request that expired undecided again: it waits for a decision, and its Mission with
+  /// it.
+  Future<void> rearmGreenInk({
+    required String operationId,
+    required String requestId,
+    String? note,
+  }) async {
+    if (demo) {
+      throw StateError('Green ink decisions are unavailable in preview.');
+    }
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/green-ink/${Uri.encodeComponent(requestId)}/rearm',
+      body: {'note': ?note},
+    );
+    switch (response.statusCode) {
+      case 200:
+        await refresh();
+      case 403:
+        throw StateError(
+          'Your account lacks approval.decide in this Operation.',
+        );
+      case 404 || 409:
+        throw StateError('The request is no longer an expired one.');
+      default:
+        throw StateError('The gateway refused to re-arm the request.');
+    }
+  }
+
   /// Signs or refuses one request; an approval lasts `expiresInSecs` (one hour when null).
   Future<void> decideGreenInk({
     required String operationId,
@@ -4834,6 +4892,16 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
                     'inbox',
                     'Inbox',
                     GreenInkPage(board: board, route: route, onRoute: onRoute),
+                  ),
+                if (board.greenInkOperations.isNotEmpty)
+                  (
+                    'expired',
+                    'Expired',
+                    ExpiredGreenInkPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
                   ),
                 if (board.classAuthorizationOperations.isNotEmpty)
                   (

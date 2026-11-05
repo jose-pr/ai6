@@ -289,6 +289,10 @@ pub struct TextLimits {
     #[schema(title = "Longest green ink note")]
     #[map(default = TextLimits::default().green_ink_note_chars)]
     pub green_ink_note_chars: Limit,
+    /// How far back the list of expired green ink requests reaches when it is not told.
+    #[schema(title = "Expired green ink listed by default")]
+    #[map(default = TextLimits::default().green_ink_expired_window)]
+    pub green_ink_expired_window: TimeLimit,
     /// Characters of the reason for a held brief's decision.
     #[schema(title = "Longest reason for a held brief's decision")]
     #[map(default = TextLimits::default().held_reason_chars)]
@@ -321,6 +325,7 @@ impl Default for TextLimits {
             agent_reason_chars: Limit::at(512),
             green_ink_max_grant: TimeLimit::secs(365 * DAY),
             green_ink_note_chars: Limit::at(1_024),
+            green_ink_expired_window: TimeLimit::secs(30 * DAY),
             held_reason_chars: Limit::at(1_024),
             roster_target_bytes: Limit::at(512),
             roster_key_bytes: Limit::at(128),

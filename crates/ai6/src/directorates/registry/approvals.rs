@@ -4,7 +4,9 @@
 //! Every Station and Universal Exports read the same records, under the Registry lock:
 //! `approvals/pending/OPERATION/ID.json` until a decision, then
 //! `approvals/decided/OPERATION/ID.json`; `approvals/missions/OPERATION/MISSION.json` lists a
-//! Mission's request IDs; `class-authorizations/OPERATION/ID.json` holds standing approvals.
+//! Mission's request IDs; `class-authorizations/OPERATION/ID.json` holds standing approvals. A
+//! request that expired undecided stays decided as expired until a person re-arms it, which makes
+//! it pending again.
 //! Records are trusted like every other Registry record: the signer is whoever the writer
 //! authenticated, and nothing is signed cryptographically.
 
@@ -54,6 +56,38 @@ pub struct ApprovalRequest {
     /// authorisation lists in `proposed_roles`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_role: Option<String>,
+    /// Who last re-opened it after it expired undecided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rearmed: Option<Rearming>,
+}
+
+/// A person's re-opening of a request that expired undecided.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rearming {
+    /// The authenticated person.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
+    /// Why, in their words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// When the Mission's Station took it up, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub told_at: Option<f64>,
+}
+
+impl Rearming {
+    /// `by`'s re-opening at `at`, for the reason in `note`.
+    pub fn new(by: impl Into<String>, at: f64, note: Option<String>) -> Self {
+        Self {
+            by: by.into(),
+            at,
+            note,
+            told_at: None,
+        }
+    }
 }
 
 impl ApprovalRequest {
@@ -112,6 +146,7 @@ impl ApprovalRequest {
             requested_at: 0.0,
             expires_at: 0.0,
             proposed_role: None,
+            rearmed: None,
         };
         request.validate_fields(limits)?;
         Ok(request)
@@ -178,7 +213,7 @@ impl Decision {
     }
 }
 
-/// Who withdrew an approval or class authorisation, and when.
+/// Who withdrew an approval or class authorisation, when and why.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Revocation {
@@ -186,6 +221,20 @@ pub struct Revocation {
     pub by: String,
     /// When, as Unix seconds.
     pub at: f64,
+    /// Why, in their words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl Revocation {
+    /// `by`'s withdrawal at `at`, for the reason in `note`.
+    pub fn new(by: impl Into<String>, at: f64, note: Option<String>) -> Self {
+        Self {
+            by: by.into(),
+            at,
+            note,
+        }
+    }
 }
 
 /// A decision on one request.
@@ -702,14 +751,54 @@ pub trait ApprovalStore {
     /// `ruling.at`, a ruling that is not approve or reject, or an oversized note or signer.
     fn decide_approval(&self, operation: &str, id: &str, ruling: &Ruling) -> io::Result<Approval>;
 
-    /// Withdraws an approval before it expires. Revoking again returns the record.
+    /// Withdraws an approval before it expires. Revoking again returns the record as it was
+    /// first revoked.
     ///
     /// # Errors
     ///
     /// `NotFound` for an unknown or undecided request; `AlreadyExists` when it was not
-    /// approved; I/O errors otherwise.
-    fn revoke_approval(&self, operation: &str, id: &str, by: &str, at: f64)
-    -> io::Result<Approval>;
+    /// approved; `InvalidInput` for an oversized note; I/O errors otherwise.
+    fn revoke_approval(
+        &self,
+        operation: &str,
+        id: &str,
+        revocation: &Revocation,
+    ) -> io::Result<Approval>;
+
+    /// The Operation's requests that expired undecided at `since` or later, the newest first, up
+    /// to `[registry.limits.approvals] expired_listed`. Requests past their expiry at `now` are
+    /// recorded as expired first.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
+    /// Unreadable records are skipped.
+    fn expired_approvals(&self, operation: &str, since: f64, now: f64)
+    -> io::Result<Vec<Approval>>;
+
+    /// Re-opens a request that expired undecided: it is pending again until `expires_at`, as the
+    /// same request, and the Mission's Station takes it up.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for an unknown request; `AlreadyExists` when a person decided it or it is still
+    /// waiting; `InvalidInput` for an expiry not after `rearming.at` or an oversized note;
+    /// `InvalidData` when the Operation already has its most pending requests; I/O errors
+    /// otherwise.
+    fn rearm_approval(
+        &self,
+        operation: &str,
+        id: &str,
+        rearming: &Rearming,
+        expires_at: f64,
+    ) -> io::Result<ApprovalRequest>;
+
+    /// Records that the Mission's Station took up a re-armed request.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for a request that is not pending; I/O errors otherwise.
+    fn mark_rearming_told(&self, operation: &str, id: &str, at: f64) -> io::Result<()>;
 
     /// Records that the Agent was told of a decision.
     ///
@@ -896,11 +985,11 @@ impl ApprovalStore for FileRegistry {
         &self,
         operation: &str,
         id: &str,
-        by: &str,
-        at: f64,
+        revocation: &Revocation,
     ) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
+        validate_note(revocation.note.as_deref(), &self.limits.approvals)?;
         let _lock = self.lock()?;
         let path = self
             .approvals_dir("decided", operation)
@@ -915,13 +1004,78 @@ impl ApprovalStore for FileRegistry {
             ));
         }
         if approval.revoked.is_none() {
-            approval.revoked = Some(Revocation {
-                by: by.to_owned(),
-                at,
-            });
+            approval.revoked = Some(revocation.clone());
             self.write_json(&path, &approval)?;
         }
         Ok(approval)
+    }
+
+    fn expired_approvals(
+        &self,
+        operation: &str,
+        since: f64,
+        now: f64,
+    ) -> io::Result<Vec<Approval>> {
+        self.pending_approvals(operation, now)?;
+        let _lock = self.lock()?;
+        let mut expired = Vec::new();
+        for path in json_files(&self.approvals_dir("decided", operation))? {
+            if let Ok(Some(approval)) = self.read_json::<Approval>(&path)
+                && approval.request.operation == operation
+            {
+                expired.push(approval);
+            }
+        }
+        Ok(newest_expired(
+            expired,
+            since,
+            self.limits.approvals.expired_listed,
+        ))
+    }
+
+    fn rearm_approval(
+        &self,
+        operation: &str,
+        id: &str,
+        rearming: &Rearming,
+        expires_at: f64,
+    ) -> io::Result<ApprovalRequest> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        validate_rearming(rearming, expires_at, &self.limits.approvals)?;
+        let _lock = self.lock()?;
+        let approval = expired_undecided(self.status_locked(operation, id, rearming.at)?)?;
+        let pending = self.approvals_dir("pending", operation);
+        let most = self.limits.approvals.pending;
+        if !most.allows(count_json(&pending)? + 1) {
+            return Err(invalid_data(format!(
+                "the Operation has {most} requests waiting for green ink"
+            )));
+        }
+        let request = rearmed(approval.request, rearming, expires_at);
+        // The pending record first: a request with both is read as decided, so a crash between
+        // the two leaves it expired, to be re-armed again.
+        let file = format!("{id}.json");
+        self.write_json(&pending.join(&file), &request)?;
+        fs::remove_file(self.approvals_dir("decided", operation).join(&file))?;
+        Ok(request)
+    }
+
+    fn mark_rearming_told(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = self.lock()?;
+        let path = self
+            .approvals_dir("pending", operation)
+            .join(format!("{id}.json"));
+        let mut request = self.read_json::<ApprovalRequest>(&path)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no pending green ink request")
+        })?;
+        if let Some(rearming) = request.rearmed.as_mut().filter(|r| r.told_at.is_none()) {
+            rearming.told_at = Some(at);
+            self.write_json(&path, &request)?;
+        }
+        Ok(())
     }
 
     fn spend_approval(&self, operation: &str, id: &str, at: f64) -> io::Result<bool> {
@@ -1045,14 +1199,94 @@ impl ApprovalStore for FileRegistry {
                 io::Error::new(io::ErrorKind::NotFound, "no such class authorisation")
             })?;
         if record.revoked.is_none() {
-            record.revoked = Some(Revocation {
-                by: by.to_owned(),
-                at,
-            });
+            record.revoked = Some(Revocation::new(by, at, None));
             self.write_json(&path, &record)?;
         }
         Ok(record)
     }
+}
+
+/// What a request that expired undecided is once re-armed.
+pub(super) fn rearmed(
+    mut request: ApprovalRequest,
+    rearming: &Rearming,
+    expires_at: f64,
+) -> ApprovalRequest {
+    request.expires_at = expires_at;
+    request.rearmed = Some(rearming.clone());
+    request
+}
+
+/// The record of a request `status` found expired undecided, the only kind a person may re-arm.
+pub(super) fn expired_undecided(status: Option<ApprovalStatus>) -> io::Result<Approval> {
+    match status {
+        None => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "no such green ink request",
+        )),
+        Some(ApprovalStatus::Decided(approval)) if approval.decision == Decision::Expired => {
+            Ok(approval)
+        }
+        Some(ApprovalStatus::Decided(approval)) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("the request was {}", approval.decision.as_str()),
+        )),
+        Some(ApprovalStatus::Pending(_)) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "the request is still waiting",
+        )),
+    }
+}
+
+/// Of the decided `approvals`, those that expired undecided at `since` or later, the newest
+/// `most` first.
+pub(super) fn newest_expired(approvals: Vec<Approval>, since: f64, most: Limit) -> Vec<Approval> {
+    let mut expired: Vec<Approval> = approvals
+        .into_iter()
+        .filter(|approval| approval.decision == Decision::Expired && approval.at >= since)
+        .collect();
+    expired.sort_by(|left, right| {
+        right
+            .at
+            .total_cmp(&left.at)
+            .then_with(|| left.request.id.cmp(&right.request.id))
+    });
+    expired.truncate(most.or_max());
+    expired
+}
+
+pub(super) fn validate_note(note: Option<&str>, limits: &ApprovalLimits) -> io::Result<()> {
+    if note.is_some_and(|note| !valid_text(note, limits.note_bytes, true)) {
+        return Err(invalid_input(&format!(
+            "the note must be 1 to {} bytes without control characters other than newlines",
+            limits.note_bytes
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_rearming(
+    rearming: &Rearming,
+    expires_at: f64,
+    limits: &ApprovalLimits,
+) -> io::Result<()> {
+    validate_note(rearming.note.as_deref(), limits)?;
+    if !valid_text(&rearming.by, limits.signer_bytes, false) {
+        return Err(invalid_input(&format!(
+            "the person must be 1 to {} bytes",
+            limits.signer_bytes
+        )));
+    }
+    if !(rearming.at.is_finite()
+        && rearming.at > 0.0
+        && expires_at.is_finite()
+        && expires_at > rearming.at)
+    {
+        return Err(invalid_input(
+            "re-arming needs a positive time and an expiry after it",
+        ));
+    }
+    Ok(())
 }
 
 /// The record of a request no one decided before it expired: refused, signed by
@@ -1187,10 +1421,240 @@ mod tests {
         a_class_authorisation_matches_by_kind_glob_and_agent_and_stops_at_max_uses,
         a_class_authorisation_covers_roles_and_stops_when_revoked_or_expired,
         requests_are_bounded,
+        an_expired_request_lists_as_expired_and_not_pending,
+        a_rearmed_request_is_pending_and_decidable,
+        only_an_expired_undecided_request_is_rearmed,
+        a_revocation_keeps_its_note,
     );
 
     const NOW: f64 = 1_800_000_000.0;
     const HOUR: Duration = Duration::from_secs(3600);
+
+    fn an_expired_request_lists_as_expired_and_not_pending(store: &dyn Store) {
+        let registry = store.handle();
+        let first = request("first", "push", "origin:refs/heads/main").expiring(NOW, HOUR);
+        let second = request("second", "merge", "PR 7").expiring(NOW + 10.0, HOUR);
+        let live = request("live", "merge", "PR 8").expiring(NOW + 7200.0, HOUR);
+        for asked in [&first, &second, &live] {
+            registry.request_approval(asked).unwrap();
+        }
+        let later = NOW + 7200.0;
+        assert_eq!(
+            registry.pending_approvals("G", later).unwrap(),
+            vec![live.clone()]
+        );
+        let expired = registry.expired_approvals("G", 0.0, later).unwrap();
+        assert_eq!(
+            expired
+                .iter()
+                .map(|approval| (approval.request.id.as_str(), approval.decision))
+                .collect::<Vec<_>>(),
+            [
+                (second.id.as_str(), Decision::Expired),
+                (first.id.as_str(), Decision::Expired),
+            ],
+            "the newest first"
+        );
+        assert_eq!(expired[0].signer, EXPIRY_SIGNER);
+        let since = registry
+            .expired_approvals("G", first.expires_at + 1.0, later)
+            .unwrap();
+        assert_eq!(since.len(), 1);
+        assert_eq!(since[0].request.id, second.id);
+        assert!(
+            registry
+                .expired_approvals("L", 0.0, later)
+                .unwrap()
+                .is_empty()
+        );
+
+        // One a person refused is decided, not expired, and a sweep finds an expiry it has not
+        // yet recorded.
+        let refused = request("refused", "merge", "PR 9").expiring(later, HOUR);
+        registry.request_approval(&refused).unwrap();
+        registry
+            .decide_approval("G", &refused.id, &Ruling::reject("p", later + 1.0, None))
+            .unwrap();
+        let swept = registry
+            .expired_approvals("G", 0.0, later + 2.0 * 3600.0)
+            .unwrap();
+        assert_eq!(swept[0].request.id, live.id, "{swept:?}");
+        assert!(
+            swept.iter().all(|a| a.request.id != refused.id),
+            "{swept:?}"
+        );
+    }
+
+    fn a_rearmed_request_is_pending_and_decidable(store: &dyn Store) {
+        let registry = store.handle();
+        let asked = request("rearm", "push", "origin:refs/heads/main").expiring(NOW, HOUR);
+        registry.request_approval(&asked).unwrap();
+        let later = NOW + 7200.0;
+        assert!(registry.pending_approvals("G", later).unwrap().is_empty());
+        assert_eq!(
+            registry
+                .decide_approval("G", &asked.id, &Ruling::approve("p", later, later + 60.0))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists,
+            "an expired request cannot be decided"
+        );
+
+        let rearming = Rearming::new("person-m", later, Some("back from leave".to_owned()));
+        let reopened = registry
+            .rearm_approval("G", &asked.id, &rearming, later + 3600.0)
+            .unwrap();
+        assert_eq!(reopened.id, asked.id);
+        assert_eq!(reopened.requested_at, asked.requested_at);
+        assert_eq!(reopened.expires_at, later + 3600.0);
+        assert_eq!(reopened.rearmed.as_ref(), Some(&rearming));
+
+        assert_eq!(
+            registry.pending_approvals("G", later).unwrap(),
+            vec![reopened.clone()]
+        );
+        assert!(
+            registry
+                .expired_approvals("G", 0.0, later)
+                .unwrap()
+                .is_empty()
+        );
+        let statuses = registry.mission_approvals("G", "mission-1", later).unwrap();
+        assert!(matches!(statuses.as_slice(), [ApprovalStatus::Pending(_)]));
+
+        registry
+            .mark_rearming_told("G", &asked.id, later + 1.0)
+            .unwrap();
+        let told = registry.pending_approvals("G", later).unwrap();
+        assert_eq!(told[0].rearmed.as_ref().unwrap().told_at, Some(later + 1.0));
+        registry
+            .mark_rearming_told("G", &asked.id, later + 2.0)
+            .unwrap();
+        assert_eq!(
+            registry.pending_approvals("G", later).unwrap()[0]
+                .rearmed
+                .as_ref()
+                .unwrap()
+                .told_at,
+            Some(later + 1.0),
+            "the first time stands"
+        );
+
+        let decided = registry
+            .decide_approval(
+                "G",
+                &asked.id,
+                &Ruling::approve("signer", later + 3.0, later + 60.0),
+            )
+            .unwrap();
+        assert_eq!(decided.decision, Decision::Approved);
+        assert_eq!(decided.notified_at, None, "the Agent is told again");
+        assert!(decided.is_live(later + 4.0));
+        assert_eq!(decided.request.rearmed.unwrap().by, "person-m");
+
+        // Left undecided again, it expires again and may be re-armed again.
+        let twice = request("twice", "merge", "PR 1").expiring(NOW, HOUR);
+        registry.request_approval(&twice).unwrap();
+        registry
+            .rearm_approval(
+                "G",
+                &twice.id,
+                &Rearming::new("p", later, None),
+                later + 10.0,
+            )
+            .unwrap();
+        let swept = registry.expired_approvals("G", 0.0, later + 20.0).unwrap();
+        assert_eq!(swept[0].request.id, twice.id);
+        assert_eq!(swept[0].at, later + 10.0);
+        registry
+            .rearm_approval(
+                "G",
+                &twice.id,
+                &Rearming::new("p", later + 20.0, None),
+                later + 30.0,
+            )
+            .unwrap();
+    }
+
+    fn only_an_expired_undecided_request_is_rearmed(store: &dyn Store) {
+        let registry = store.handle();
+        let at = NOW + 7200.0;
+        let rearming = Rearming::new("p", at, None);
+        let rearm = |id: &str| registry.rearm_approval("G", id, &rearming, at + 60.0);
+        assert_eq!(
+            rearm("green-ink-none").unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+
+        let waiting = request("waiting", "push", "origin:refs/heads/main").expiring(at, HOUR);
+        registry.request_approval(&waiting).unwrap();
+        assert_eq!(
+            rearm(&waiting.id).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+
+        for (key, ruling) in [
+            ("approved", Ruling::approve("p", at, at + 60.0)),
+            ("refused", Ruling::reject("p", at, None)),
+        ] {
+            let asked = request(key, "merge", "PR 2").expiring(at - 10.0, HOUR);
+            registry.request_approval(&asked).unwrap();
+            registry.decide_approval("G", &asked.id, &ruling).unwrap();
+            assert_eq!(
+                rearm(&asked.id).unwrap_err().kind(),
+                io::ErrorKind::AlreadyExists
+            );
+        }
+
+        let lapsed = request("lapsed", "merge", "PR 3").expiring(NOW, HOUR);
+        registry.request_approval(&lapsed).unwrap();
+        for (bad, expires) in [
+            (Rearming::new("p", at, None), at),
+            (Rearming::new(" ", at, None), at + 60.0),
+            (Rearming::new("p", 0.0, None), 60.0),
+            (Rearming::new("p", at, Some(" ".to_owned())), at + 60.0),
+        ] {
+            assert_eq!(
+                registry
+                    .rearm_approval("G", &lapsed.id, &bad, expires)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput,
+                "{bad:?}"
+            );
+        }
+        assert_eq!(
+            registry
+                .mark_rearming_told("G", "green-ink-none", at)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    fn a_revocation_keeps_its_note(store: &dyn Store) {
+        let registry = store.handle();
+        let asked = request("revoked", "push", "origin:refs/heads/main").expiring(NOW, HOUR);
+        registry.request_approval(&asked).unwrap();
+        registry
+            .decide_approval("G", &asked.id, &Ruling::approve("p", NOW + 1.0, NOW + 60.0))
+            .unwrap();
+        let first = Revocation::new("person-q", NOW + 2.0, Some("wrong branch".to_owned()));
+        let revoked = registry.revoke_approval("G", &asked.id, &first).unwrap();
+        assert_eq!(revoked.revoked.as_ref(), Some(&first));
+        let again = registry
+            .revoke_approval("G", &asked.id, &Revocation::new("other", NOW + 3.0, None))
+            .unwrap();
+        assert_eq!(again.revoked.as_ref(), Some(&first), "the first one stands");
+        let bad = Revocation::new("p", NOW, Some("x".repeat(100_000)));
+        assert_eq!(
+            registry
+                .revoke_approval("G", &asked.id, &bad)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
 
     fn request(key: &str, kind: &str, target: &str) -> ApprovalRequest {
         ApprovalRequest::try_new(
@@ -1382,7 +1846,11 @@ mod tests {
             Some(again.id.clone())
         );
         let revoked = registry
-            .revoke_approval("G", &again.id, "operator-q", after_first)
+            .revoke_approval(
+                "G",
+                &again.id,
+                &Revocation::new("operator-q", after_first, None),
+            )
             .unwrap();
         assert_eq!(revoked.revoked.as_ref().unwrap().by, "operator-q");
         assert!(

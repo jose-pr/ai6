@@ -3,7 +3,8 @@
 //!
 //! Decisions are made elsewhere (Universal Exports writes them to the Registry), so the
 //! scheduler looks for them: a decision reaches a live Session as a message, or resumes a
-//! Session that ended its turn while it waited. A request nobody decides expires as refused.
+//! Session that ended its turn while it waited. A request nobody decides expires as refused; a
+//! person may re-arm it, and the Mission waits for it again.
 
 use std::sync::Arc;
 
@@ -426,6 +427,12 @@ pub(super) fn end_turn_waiting(
     true
 }
 
+/// A Mission's live Session and the gate writes to it go through.
+type LiveSession = (
+    Arc<std::sync::Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    super::SessionGate,
+);
+
 /// Tells Agents the decisions on their requests and lets their Missions go on once nothing
 /// they asked for is pending.
 pub(super) async fn deliver_decisions(state: &DaemonState) {
@@ -452,6 +459,20 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
         let pending = statuses
             .iter()
             .any(|status| matches!(status, ApprovalStatus::Pending(_)));
+        let rearmed = statuses
+            .iter()
+            .filter_map(|status| match status {
+                ApprovalStatus::Pending(request)
+                    if request
+                        .rearmed
+                        .as_ref()
+                        .is_some_and(|rearming| rearming.told_at.is_none()) =>
+                {
+                    Some(request.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         let untold = statuses
             .into_iter()
             .filter_map(|status| match status {
@@ -466,6 +487,9 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
                 .get(mission_id)
                 .map(|operation| (operation.session.clone(), operation.gate.clone()))
         });
+        for request in &rearmed {
+            take_up_rearmed(state, &mission, request, live.as_ref(), now).await;
+        }
         match live {
             Some((session, gate)) => {
                 for approval in &untold {
@@ -495,6 +519,78 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
             None => {}
         }
     }
+}
+
+/// Takes up a request a person re-armed: a working Mission waits for it as for a new request, and
+/// a live Session is told, having heard the request expired. A Mission no Session of which hears
+/// it is told with the decision.
+async fn take_up_rearmed(
+    state: &DaemonState,
+    mission: &Mission,
+    request: &ApprovalRequest,
+    live: Option<&LiveSession>,
+    now: f64,
+) {
+    if let Some((session, gate)) = live {
+        let message = AgentMessage {
+            text: rearmed_text(request),
+        };
+        let (session, gate) = (session.clone(), gate.clone());
+        let sent = tokio::task::spawn_blocking(move || {
+            gate.lock(&session)
+                .ok()
+                .is_some_and(|session| session.send_message(message).is_ok())
+        })
+        .await
+        .unwrap_or(false);
+        if !sent {
+            return;
+        }
+    }
+    let mission_id = mission.mission_id.as_str();
+    if mission.state == MissionState::Working {
+        hold(state, mission_id);
+    }
+    if let Err(error) = state
+        .intake
+        .mark_rearming_told(&request.operation, &request.id, now)
+    {
+        eprintln!(
+            "ai6: green ink request {:?} was re-armed but not marked: {error}",
+            request.id
+        );
+    }
+    queue_event(
+        state,
+        mission_id,
+        AgentEvent {
+            kind: GREEN_INK_EVENT.to_owned(),
+            text: Some(format!(
+                "waiting again for green ink to {} {} ({})",
+                request.scope.kind, request.scope.target, request.id
+            )),
+            data: None,
+            limit: None,
+            usage: None,
+            tools: Vec::new(),
+            quota: Vec::new(),
+        },
+    );
+}
+
+/// What the Agent is told of a request a person re-armed.
+fn rearmed_text(request: &ApprovalRequest) -> String {
+    format!(
+        "Green ink: request {} to {} {} was re-armed by {}: it is waiting for a decision again. \
+         Do not take the step before it is approved; the decision arrives as a message.",
+        request.id,
+        request.scope.kind,
+        request.scope.target,
+        request
+            .rearmed
+            .as_ref()
+            .map_or("a person", |rearming| rearming.by.as_str()),
+    )
 }
 
 /// Moves a Mission whose live Session no longer waits back to work.
@@ -1161,7 +1257,15 @@ mod tests {
 
         state
             .intake
-            .revoke_approval("G", &request_id, "operator-m", now(&state))
+            .revoke_approval(
+                "G",
+                &request_id,
+                &crate::directorates::registry::approvals::Revocation::new(
+                    "operator-m",
+                    now(&state),
+                    None,
+                ),
+            )
             .unwrap();
         assert!(
             hook(&environment, cwd, "git push origin main")
@@ -1311,6 +1415,100 @@ mod tests {
             .unwrap();
         let (_, chosen) = external_turn(&environment, cwd, "git push origin main").await;
         assert_eq!(chosen, "yes");
+        state.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_rearmed_request_holds_the_mission_and_its_decision_reaches_the_session() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "rearm");
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+        let request = ApprovalRequest::try_new(
+            "G",
+            MissionId::try_new(&mission_id).unwrap(),
+            SessionId::try_new("provider-session-remote").unwrap(),
+            "007",
+            ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
+            "the release is green",
+            "rearm-1",
+            &Default::default(),
+        )
+        .unwrap()
+        .expiring(now(&state) - 120.0, Duration::from_secs(60));
+        state.intake.request_approval(&request).unwrap();
+
+        // It lapses and the Agent is told; its Mission goes on working.
+        deliver_decisions(&state).await;
+        assert!(
+            told_about(&request.id)
+                .await
+                .iter()
+                .any(|(_, text)| text.contains("expired without a decision"))
+        );
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition(&mission_id, MissionState::Working)
+            .unwrap();
+
+        // What Universal Exports writes when a person re-arms it.
+        let at = now(&state);
+        state
+            .intake
+            .rearm_approval(
+                "G",
+                &request.id,
+                &crate::directorates::registry::approvals::Rearming::new("operator-m", at, None),
+                at + 600.0,
+            )
+            .unwrap();
+        deliver_decisions(&state).await;
+        let waiting = mission(&state, &mission_id);
+        assert_eq!(waiting.state, MissionState::Blocked);
+        assert_eq!(waiting.blocked_reason.as_deref(), Some(GREEN_INK_REASON));
+        assert!(
+            told_about(&request.id)
+                .await
+                .iter()
+                .any(|(_, text)| text.contains("re-armed by operator-m")),
+            "the Session hears it waits again"
+        );
+        assert!(
+            state.intake.pending_approvals("G", at).unwrap()[0]
+                .rearmed
+                .as_ref()
+                .unwrap()
+                .told_at
+                .is_some()
+        );
+
+        // Told once, whatever the Agent does next.
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition(&mission_id, MissionState::Working)
+            .unwrap();
+        deliver_decisions(&state).await;
+        assert_eq!(mission(&state, &mission_id).state, MissionState::Working);
+
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request.id,
+                &Ruling::approve("operator-m", at + 1.0, at + 60.0),
+            )
+            .unwrap();
+        deliver_decisions(&state).await;
+        assert!(
+            told_about(&request.id)
+                .await
+                .iter()
+                .any(|(_, text)| text.contains("approved by operator-m"))
+        );
         state.stopping.store(true, Ordering::Release);
     }
 

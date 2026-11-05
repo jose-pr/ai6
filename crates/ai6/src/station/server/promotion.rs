@@ -247,9 +247,11 @@ fn take_back(state: &DaemonState, grant: &ClearanceGrant, why: &str) {
         }
     }
     if let Some(approval) = &grant.approval {
-        let _ = state
-            .intake
-            .revoke_approval(&grant.operation, approval, &by, now);
+        let _ = state.intake.revoke_approval(
+            &grant.operation,
+            approval,
+            &crate::directorates::registry::approvals::Revocation::new(&by, now, None),
+        );
     }
     eprintln!(
         "ai6: Agent {:?} back at its configured clearance in {:?}: {why}",
