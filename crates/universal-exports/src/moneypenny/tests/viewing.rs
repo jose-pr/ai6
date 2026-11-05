@@ -37,7 +37,11 @@ async fn dashboard(served: &Served) -> String {
 
 /// `url` asked for with the page cookie `cookie`, when there is one, and `headers`, by a client
 /// that keeps no cookie of its own.
-async fn get_with(url: &str, cookie: Option<&str>, headers: &[(&str, &str)]) -> reqwest::Response {
+pub(super) async fn get_with(
+    url: &str,
+    cookie: Option<&str>,
+    headers: &[(&str, &str)],
+) -> reqwest::Response {
     let mut request = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()

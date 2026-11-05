@@ -28,7 +28,7 @@ use axum::http::header::{
     CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, LOCATION, ORIGIN,
     REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
 };
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -424,11 +424,25 @@ struct Inner {
     staged: HashMap<(String, String), Staged>,
     /// Feed reads in the current minute, by [`viewing`] key.
     reads: HashMap<String, (Instant, u32)>,
+    /// Hand-offs not yet used, by the digest of their token. In memory only, so a restart ends
+    /// them.
+    handoffs: HashMap<String, Handoff>,
     /// Why requests were refused, each logged once per page, viewer and reason.
     noted: HashSet<(String, String)>,
     /// What was logged, for the tests to read.
     #[cfg(test)]
     log: Vec<String>,
+}
+
+/// What a hand-off's single-use token stands for.
+#[derive(Debug, Clone)]
+pub(crate) struct Handoff {
+    pub(crate) page: String,
+    pub(crate) person: String,
+    /// The login the page cookie it sets will name, which must still stand when it is used.
+    pub(crate) sign_in: String,
+    /// Unix seconds.
+    pub(crate) expires: f64,
 }
 
 /// The key of one viewer's viewing of one page, which notes and read counts are kept by.
@@ -554,6 +568,48 @@ impl PageStore {
             Ok(end) if end / 1000.0 > now() => Ok(network),
             _ => Err("a view token that has expired; reload the page"),
         }
+    }
+
+    /// Makes a single-use token for `handoff`, keeping only its digest. A person past `most`
+    /// unused ones loses their oldest.
+    pub(crate) fn hand_off(&self, handoff: Handoff, most: usize) -> String {
+        let token = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let mut inner = self.state();
+        let at = now();
+        inner.handoffs.retain(|_, held| held.expires > at);
+        let person = handoff.person.clone();
+        inner.handoffs.insert(sha256_hex(token.as_bytes()), handoff);
+        loop {
+            let mine = inner
+                .handoffs
+                .iter()
+                .filter(|(_, held)| held.person == person);
+            if mine.clone().count() <= most {
+                break;
+            }
+            let Some(oldest) = mine
+                .min_by(|(_, one), (_, other)| one.expires.total_cmp(&other.expires))
+                .map(|(digest, _)| digest.clone())
+            else {
+                break;
+            };
+            inner.handoffs.remove(&oldest);
+        }
+        token
+    }
+
+    /// Spends the hand-off `token`, whatever comes of it: what it stands for, unless it was spent
+    /// already or has ended.
+    pub(crate) fn take_handoff(&self, token: &str) -> Option<Handoff> {
+        let handoff = self
+            .state()
+            .handoffs
+            .remove(&sha256_hex(token.as_bytes()))?;
+        (handoff.expires > now()).then_some(handoff)
     }
 
     /// Logs why a request for a page was refused, once for each [`viewing`] key and reason.
@@ -1344,6 +1400,114 @@ fn top_level(headers: &HeaderMap) -> bool {
 struct FrameQuery {
     /// `none`, `own` or `open`: a tighter network than the deployment's, for this opening.
     network: Option<String>,
+    /// A hand-off's single-use token, which [`handed_off`] spends.
+    handoff: Option<String>,
+}
+
+/// `GET /p/{id}/?handoff=`: a browser the app sent here with a hand-off and perhaps no cookie.
+/// Spends the token, then sets the page cookie and sends the browser to the page's clean address,
+/// so the token leaves the address bar. Anything but a good token for this page answers as a page
+/// that does not exist. Only a navigation spends one: another site's `<img>`, a prefetch or a
+/// `HEAD` would otherwise use it up, or set the cookie, without the person opening anything.
+async fn handed_off(
+    gateway: &Gateway,
+    id: &str,
+    token: &str,
+    network: Option<&str>,
+    method: &Method,
+    headers: &HeaderMap,
+) -> Response {
+    let navigation = *method == Method::GET
+        && !headers.contains_key("sec-purpose")
+        && headers
+            .get("sec-fetch-dest")
+            .is_none_or(|dest| dest == "document");
+    if !navigation || !matches!(network, None | Some("none" | "own" | "open")) {
+        return gone();
+    }
+    let Some(store) = gateway.pages.clone() else {
+        return gone();
+    };
+    let handoff = store.take_handoff(token);
+    let at = now();
+    let Some(page) = store
+        .get(id)
+        .filter(|page| !page.expires_at.is_some_and(|end| end <= at))
+    else {
+        return gone();
+    };
+    let Some(handoff) = handoff.filter(|handoff| handoff.page == page.id) else {
+        store.note(&page.id, "a hand-off spent, ended or for another page");
+        return gone();
+    };
+    let Some(viewer) = handoff_viewer(gateway, &store, &page, &handoff).await else {
+        return gone();
+    };
+    let registry = gateway.registry.clone();
+    let sign_in = handoff.sign_in.clone();
+    let Some(Ok(Ok(Some(login)))) = (match registry {
+        Some(registry) => {
+            Some(tokio::task::spawn_blocking(move || registry.login_by_id(&sign_in)).await)
+        }
+        None => None,
+    }) else {
+        store.note(
+            &viewing(&page.id, &viewer.id),
+            "a hand-off whose sign-in has ended",
+        );
+        return gone();
+    };
+    let seconds = login.expires_at() - now();
+    let Some(cookie) = page_access::handed_off_cookie(gateway, &handoff.sign_in, seconds) else {
+        return gone();
+    };
+    // The audit record comes before the browser holds the cookie.
+    if super::audit(
+        gateway,
+        &viewer,
+        "moneypenny.page.handoff_used",
+        String::new(),
+        Some(RESOURCE.to_owned()),
+        &page.id,
+    )
+    .await
+    .is_err()
+    {
+        store.note(&page.id, "a hand-off that could not be audited");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let mut clean = format!("{}/p/{}/", pages_base(gateway), percent(&page.id));
+    if let Some(network) = network {
+        clean.push_str(&format!("?network={network}"));
+    }
+    let mut response = see_other(&clean);
+    let answer = response.headers_mut();
+    answer.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    answer.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    page_access::append(answer, Some(cookie));
+    response
+}
+
+/// The person a hand-off stands for, when the page may still be shown to them.
+async fn handoff_viewer(
+    gateway: &Gateway,
+    store: &PageStore,
+    page: &Page,
+    handoff: &Handoff,
+) -> Option<Person> {
+    let Ok(viewer) = crate::person_by_id(gateway, handoff.person.clone()).await else {
+        store.note(&page.id, "a hand-off whose person cannot be found");
+        return None;
+    };
+    let limits = page_limits(gateway).await?;
+    if !may_view(gateway, page, &viewer, &limits).await {
+        store.note(
+            &viewing(&page.id, &viewer.id),
+            "a hand-off to someone who may not read the page",
+        );
+        return None;
+    }
+    Some(viewer)
 }
 
 /// `GET /p/{id}/`: a private page's frame, for its person and whom it is shared with, opened from
@@ -1355,8 +1519,13 @@ async fn frame(
     Query(query): Query<FrameQuery>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     certificates: Option<Extension<ClientCertificates>>,
+    method: Method,
     headers: HeaderMap,
 ) -> Response {
+    if let Some(token) = &query.handoff {
+        let network = query.network.as_deref();
+        return handed_off(&gateway, &id, token, network, &method, &headers).await;
+    }
     let (store, page, viewer, limits) =
         match asked(&gateway, &id, &headers, (connection, certificates)).await {
             Ok(asked) => asked,

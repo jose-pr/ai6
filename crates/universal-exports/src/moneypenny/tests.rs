@@ -4424,6 +4424,12 @@ async fn frame_url(served: &Served, bearer: &str, id: &str, network: Option<&str
         .as_str()
         .unwrap()
         .to_owned();
+    // These viewers come by their cookie otherwise: the hand-off has tests of its own.
+    let url = url
+        .split_once("?handoff=")
+        .or_else(|| url.split_once("&handoff="))
+        .map_or(url.as_str(), |(address, _)| address)
+        .to_owned();
     let url = match &served.pages_server {
         Some(_) => url,
         None => url.replacen(
@@ -6364,6 +6370,7 @@ async fn reading_what_agents_asked_to_create_marks_nothing_on_her_conversation()
 #[cfg(feature = "cli")]
 mod ambient;
 mod browser;
+mod handoff;
 mod images;
 mod opening;
 mod privacy;

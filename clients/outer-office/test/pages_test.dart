@@ -32,6 +32,9 @@ class FakeLauncher extends UrlLauncherPlatform with MockPlatformInterfaceMixin {
 
 class FakeActions implements PageActions {
   final opened = <(String, String?)>[];
+
+  /// Whether each ask was for a hand-off.
+  final handoffs = <bool>[];
   final remembered = <(String, bool)>[];
   final deleted = <String>[];
   final shared = <(String, List<String>)>[];
@@ -65,10 +68,18 @@ class FakeActions implements PageActions {
   }
 
   @override
-  Future<PageLink> open(String id, {String? network}) async {
+  Future<PageLink> open(
+    String id, {
+    String? network,
+    bool handoff = true,
+  }) async {
     opened.add((id, network));
+    handoffs.add(handoff);
+    final token = 'token-${opened.length}';
     return PageLink(
-      Uri.parse('https://pages.example/v/token-${opened.length}/'),
+      Uri.parse(
+        'https://pages.example/v/$token/${handoff ? '?handoff=$token' : ''}',
+      ),
       ooClock().millisecondsSinceEpoch / 1000 + 3600,
     );
   }
@@ -93,8 +104,9 @@ Map<String, Object?> fixture({num? expires}) => {
 
 Future<(FakeLauncher, FakeActions)> show(
   WidgetTester tester,
-  Map<String, Object?> data,
-) async {
+  Map<String, Object?> data, {
+  bool holdsCookie = false,
+}) async {
   final launcher = FakeLauncher();
   UrlLauncherPlatform.instance = launcher;
   final actions = FakeActions();
@@ -105,7 +117,11 @@ Future<(FakeLauncher, FakeActions)> show(
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: PageCard(data: data, actions: actions),
+        body: PageCard(
+          data: data,
+          actions: actions,
+          holdsCookie: (_) => holdsCookie,
+        ),
       ),
     ),
   );
@@ -148,10 +164,15 @@ void main() {
   });
 
   testWidgets(
-    'Open launches the link made when the card was shown, outside the app',
+    'Open launches the plain address at once in the browser that holds the cookie',
     (tester) async {
-      final (launcher, actions) = await show(tester, fixture());
-      expect(actions.opened, [('page-1', null)], reason: 'minted at once');
+      final (launcher, actions) = await show(
+        tester,
+        fixture(),
+        holdsCookie: true,
+      );
+      expect(actions.opened, [('page-1', null)], reason: 'asked at once');
+      expect(actions.handoffs, [false]);
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
       expect(launcher.launches, hasLength(1));
@@ -159,11 +180,25 @@ void main() {
       expect(url, 'https://pages.example/v/token-1/');
       expect(options.mode, PreferredLaunchMode.externalApplication);
       expect(options.webOnlyWindowName, '_blank');
-      expect(
-        actions.opened,
-        hasLength(1),
-        reason: 'no second link for a click',
-      );
+      expect(actions.opened, hasLength(1), reason: 'no second ask for a click');
+    },
+  );
+
+  testWidgets(
+    'on the desktop, or a browser with no cookie, Open asks for a hand-off and launches it',
+    (tester) async {
+      final (launcher, actions) = await show(tester, fixture());
+      expect(actions.handoffs, [false], reason: 'none is spent by being shown');
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(actions.handoffs, [false, true]);
+      final (url, options) = launcher.launches.single;
+      expect(url, 'https://pages.example/v/token-2/?handoff=token-2');
+      expect(options.mode, PreferredLaunchMode.externalApplication);
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(actions.handoffs, [false, true, true], reason: 'one for each');
+      expect(launcher.launches, hasLength(2));
     },
   );
 
@@ -180,7 +215,10 @@ void main() {
 
       await choose('Open with network off');
       expect(actions.opened.last, ('page-1', 'none'));
-      expect(launcher.launches.last.$1, 'https://pages.example/v/token-2/');
+      expect(
+        launcher.launches.last.$1,
+        'https://pages.example/v/token-2/?handoff=token-2',
+      );
       await choose('Remember');
       expect(actions.remembered, [('page-1', true)]);
       expect(find.text('Remembered'), findsOneWidget);

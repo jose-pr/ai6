@@ -687,8 +687,14 @@ feeds?}`, `unpublish_page {id}`, `pages`. A `path` is uploaded by the Station
 with `{files: [AssistantPageFile]}` or `{refused}`; `digest` is `page_call_digest(path)`); the
 call waits `upload_wait` for it and checks the manifest. Audit (`config:assistant` scope) comes
 before the page exists. The person's routes: `GET /v1/user/pages`, `POST /v1/user/pages/{id}/open
-{network?}` → `{url: "{pages base}/p/{id}/[?network=]", expires_at}`, `POST …/remember {remember}`,
-`DELETE …`; any other person gets 404. Page routes: `GET /p/{id}/[?network=]` (the frame: the bar
+{network?, handoff?}` → `{url: "{pages base}/p/{id}/?[network=&]handoff=", expires_at}`, a hand-off
+(audited `moneypenny.page.handoff`; single-use, in memory only, `handoff_ttl` long and at most
+`handoffs` per person, bound to the page, the person and the bearer's sign-in) or, with `handoff:
+false`, the plain address; `POST …/remember {remember}`, `DELETE …`; any other person gets 404.
+The first navigation to `/p/{id}/?handoff=` spends it (audited `moneypenny.page.handoff_used`),
+sets the page cookie, on the pages' own origin too, and answers 303 to the clean address; a second
+use, an ended token, another page's, or one for a sign-in that has ended answers as an unknown
+page, and a subresource request, a prefetch or a `HEAD` neither spends nor honours it. Page routes: `GET /p/{id}/[?network=]` (the frame: the bar
 and an `<iframe>` of `{token}/f/{entry}`; audited `moneypenny.page.opened`), `/p/{id}/{token}/f/{path}`
 (a file; a top-level request redirects to the frame), `/p/{id}/{token}/data/{feed}` and
 `…/f/data/{feed}` (`{data, at}`; 403 when feeds or the network are off or the viewer may not read

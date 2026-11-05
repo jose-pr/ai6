@@ -2,7 +2,8 @@
 //! API's own origin, which the gateway serves on TLS of its own here: a sign-in in the browser
 //! sets the page cookie, and the page then opens by itself in a new tab, runs as an opaque origin
 //! and reads its own files and feeds; a reload sent from another site opens it; another browser
-//! profile, given the same address, gets an unknown page's answer; a public link opens anywhere.
+//! profile, given the same address, gets an unknown page's answer; a public link opens anywhere;
+//! a fresh profile with no cookie opens a handed-off address, whose copy in another gets nothing.
 //! Skipped, and ignored by default, without it.
 
 use rcgen::{CertificateParams, KeyPair};
@@ -174,6 +175,39 @@ async fn pages_browser_a_signed_in_browser_opens_a_page_by_itself_and_another_ge
 
     // Another browser profile, given the copied address, gets nothing.
     let copied = other.open(&page).await;
+    let top = other.top(&copied).await;
+    assert_eq!(
+        (top["iframe"].clone(), top["bar"].clone()),
+        (json!(false), json!(false)),
+        "{top}"
+    );
+
+    // A browser that never signed in opens the address the app hands it, which leaves the address
+    // bar; a copy of that address in another browser gets nothing.
+    let handed = reqwest::Client::new()
+        .post(format!("{}/v1/user/pages/{id}/open", served.base))
+        .bearer_auth(&served.operator)
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()["url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(handed.contains("handoff="), "{handed}");
+    let mut fresh = Browser::start(&binary).await;
+    let tab = fresh.open(&handed).await;
+    assert_probe(
+        &fresh.probe(&tab).await,
+        true,
+        "status 200 at,data",
+        "handed off",
+    );
+    let top = fresh.top(&tab).await;
+    assert_eq!(top["url"], page.as_str(), "the token left the address bar");
+    let copied = other.open(&handed).await;
     let top = other.top(&copied).await;
     assert_eq!(
         (top["iframe"].clone(), top["bar"].clone()),

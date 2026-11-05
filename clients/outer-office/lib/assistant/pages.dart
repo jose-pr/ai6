@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -27,8 +28,10 @@ abstract interface class PageActions {
   Future<List<Map<String, Object?>>> list();
 
   /// A link to page [id]; with [network] `none`, one whose page may reach nothing outside its
-  /// own files.
-  Future<PageLink> open(String id, {String? network});
+  /// own files. It carries a hand-off, which a browser holding no page cookie signs in with,
+  /// once and for seconds; with [handoff] `false` it is the plain address, for a browser that
+  /// holds the cookie.
+  Future<PageLink> open(String id, {String? network, bool handoff = true});
 
   /// Keeps the page with no expiry, or lets it expire in a day.
   Future<void> remember(String id, {required bool remember});
@@ -52,6 +55,10 @@ abstract interface class PageActions {
 /// never a webview in the app.
 typedef PageLauncher = Future<bool> Function(Uri url);
 
+/// Whether a browser told to open [url] holds the page cookie: only this web app's own browser,
+/// on the origin its sign-in set the cookie for.
+bool holdsPageCookie(Uri url) => kIsWeb && url.origin == Uri.base.origin;
+
 /// Launches [url] outside the app, inside the click that asked.
 Future<bool> launchPage(Uri url) => launchUrl(
   url,
@@ -64,13 +71,16 @@ Future<bool> launchPage(Uri url) => launchUrl(
 /// with the network off, remembers or forgets it, shares it and deletes it. A page someone
 /// shared with the person says whose it is, and its menu only opens it.
 ///
-/// The link is minted when the card is shown and again before it ends, so a click launches at
-/// once, within the click's activation, where a browser lets a window open.
+/// The plain address is asked for when the card is shown and again before it ends, so a click in
+/// the browser that holds the page cookie launches at once, within the click's activation, where
+/// a browser lets a window open. Anywhere else a click asks for a hand-off, which lasts seconds
+/// and works once, and launches that.
 class PageCard extends StatefulWidget {
   const PageCard({
     required this.data,
     required this.actions,
     this.launcher = launchPage,
+    this.holdsCookie = holdsPageCookie,
     super.key,
   });
 
@@ -79,6 +89,9 @@ class PageCard extends StatefulWidget {
   final Map<String, Object?>? data;
   final PageActions actions;
   final PageLauncher launcher;
+
+  /// Whether the browser a link launches in holds the page cookie for it.
+  final bool Function(Uri url) holdsCookie;
 
   @override
   State<PageCard> createState() => _PageCardState();
@@ -113,7 +126,7 @@ class _PageCardState extends State<PageCard> {
   Future<void> _mint() async {
     _renew?.cancel();
     try {
-      final link = await widget.actions.open(_id);
+      final link = await widget.actions.open(_id, handoff: false);
       if (!mounted) return;
       setState(() {
         _link = link;
@@ -134,12 +147,12 @@ class _PageCardState extends State<PageCard> {
 
   Future<void> _open({String? network}) async {
     final ready = _link;
-    if (network == null && ready != null) {
+    if (network == null && ready != null && widget.holdsCookie(ready.url)) {
       await widget.launcher(ready.url);
       return;
     }
-    // A link of another profile is minted on demand: it launches at the end of the click's
-    // turn, which a browser may take for a pop-up, so the plain Open stays the quick path.
+    // A hand-off or a link of another profile is minted on demand: it launches at the end of the
+    // click's turn, which a browser may take for a pop-up, so the plain Open stays the quick path.
     final link = await widget.actions.open(_id, network: network);
     await widget.launcher(link.url);
   }

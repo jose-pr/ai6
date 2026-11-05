@@ -489,12 +489,16 @@ pub(crate) async fn list(
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct OpenRequest {
     network: Option<String>,
+    /// `false` for the plain address, for a browser that already holds the page cookie.
+    handoff: Option<bool>,
 }
 
-/// `POST /v1/user/pages/{id}/open {network?}`: where the page opens, `{url, expires_at}`: its own
-/// address, with the network asked for, which any request that names a person who may read the
-/// page opens, and `expires_at` when an opening from it lasts until (`open_ttl`, or until the page
-/// goes). Only the person whose page it is, or someone a share names, may ask; any other gets 404,
+/// `POST /v1/user/pages/{id}/open {network?, handoff?}`: where the page opens, `{url, expires_at}`:
+/// its own address, with the network asked for and a hand-off, a single-use token that signs a
+/// browser with no page cookie in to the page as this login, `expires_at` when it ends
+/// (`handoff_ttl`). With `handoff: false`, the plain address, which any request that names a person
+/// who may read the page opens, and `expires_at` when an opening from it lasts until (`open_ttl`,
+/// or until the page goes). Only the person whose page it is, or someone a share names, may ask; any other gets 404,
 /// an administrator included.
 pub(crate) async fn open(
     State(gateway): State<Gateway>,
@@ -502,14 +506,16 @@ pub(crate) async fn open(
     UrlPath(id): UrlPath<String>,
     request: Option<Json<OpenRequest>>,
 ) -> Result<Json<Value>, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let token = bearer(&headers)?;
+    let person = resolve_user(&gateway, token).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     let page = store.get(&id).ok_or_else(ApiError::not_found)?;
     let limits = page_limits(&gateway).await?;
     if !pages::may_view(&gateway, &page, &person, &limits).await {
         return Err(ApiError::not_found());
     }
-    let network = match request.and_then(|Json(request)| request.network).as_deref() {
+    let request = request.map_or_else(OpenRequest::default, |Json(request)| request);
+    let network = match request.network.as_deref() {
         None => None,
         Some(network @ ("none" | "own" | "open")) => Some(network.to_owned()),
         Some(_) => return Err(ApiError::bad_request()),
@@ -523,10 +529,43 @@ pub(crate) async fn open(
         pages::pages_base(&gateway),
         pages::percent(&page.id)
     );
-    if let Some(network) = network {
+    if let Some(network) = &network {
         url.push_str(&format!("?network={network}"));
     }
-    Ok(Json(json!({"url": url, "expires_at": expires})))
+    if request.handoff == Some(false) {
+        return Ok(Json(json!({"url": url, "expires_at": expires})));
+    }
+    // The login of the bearer that asked: the page cookie will name it, and end with it.
+    let digest = crate::access_token_digest(token);
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let login = tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::unauthorized)?;
+    audit(
+        &gateway,
+        &person,
+        "moneypenny.page.handoff",
+        String::new(),
+        Some(RESOURCE.to_owned()),
+        &page.id,
+    )
+    .await
+    .map_err(|_| ApiError::unavailable())?;
+    let ends = (now() + limits.handoff_ttl.0.as_secs_f64()).min(expires);
+    let handoff = store.hand_off(
+        pages::Handoff {
+            page: page.id.clone(),
+            person: person.id.clone(),
+            sign_in: login.sign_in().unwrap_or(login.token_id()).to_owned(),
+            expires: ends,
+        },
+        limits.handoffs.or_max(),
+    );
+    let joint = if network.is_some() { '&' } else { '?' };
+    url.push_str(&format!("{joint}handoff={handoff}"));
+    Ok(Json(json!({"url": url, "expires_at": ends})))
 }
 
 #[derive(Deserialize)]

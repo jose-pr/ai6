@@ -828,7 +828,7 @@ pub struct AssistantGatewayLimits { pub conversations_per_person, conversations,
     proposal_ttl, hello_timeout, max_wait, sweep_every, shared_base_wait: Seconds }
 pub struct AssistantPageLimits { pub max_file_bytes, max_page_bytes, max_page_files, max_pages,
     max_person_bytes, max_total_bytes, inline_bytes, title_chars, max_feeds, feed_reads_per_minute,
-    staged_uploads: Limit, pub default_ttl, open_ttl, upload_wait, stage_ttl, sweep_every: Seconds,
+    staged_uploads, handoffs: Limit, pub default_ttl, open_ttl, handoff_ttl, upload_wait, stage_ttl, sweep_every: Seconds,
     pub scripts, feeds, frame, sharing: bool, pub network: PageNetwork }   // [assistant.pages]; open by
     // default; validate() refuses a zero; never a weakening (a quota moves either way)
 #[non_exhaustive] pub enum PageNetwork { Open, Own, None }   // serde lowercase; as_str(), tighter(other)

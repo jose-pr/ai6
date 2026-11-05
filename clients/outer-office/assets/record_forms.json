@@ -4670,6 +4670,34 @@
               "description": "Seconds a frame's view token, which the page's files and feeds are named under, is valid. A reload names a new one.",
               "default": 3600.0
             },
+            "handoff_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A hand-off to a browser lasts",
+              "description": "Seconds a hand-off, the single-use token an app's request gives a browser that holds no page cookie, may wait to be used. A restart ends one not yet used.",
+              "default": 30.0
+            },
+            "handoffs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Unused hand-offs per person",
+              "description": "Hand-offs one person holds unused at once; past it, their oldest ends.",
+              "default": 16
+            },
             "upload_wait": {
               "type": "number",
               "minimum": 0,
@@ -4780,6 +4808,8 @@
             "staged_uploads": 64,
             "default_ttl": 86400.0,
             "open_ttl": 3600.0,
+            "handoff_ttl": 30.0,
+            "handoffs": 16,
             "upload_wait": 30.0,
             "stage_ttl": 300.0,
             "sweep_every": 60.0,

@@ -573,6 +573,15 @@ pub struct AssistantPageLimits {
     #[schema(title = "A view of a page lasts")]
     #[map(default = AssistantPageLimits::default().open_ttl)]
     pub open_ttl: Seconds,
+    /// Seconds a hand-off, the single-use token an app's request gives a browser that holds no
+    /// page cookie, may wait to be used. A restart ends one not yet used.
+    #[schema(title = "A hand-off to a browser lasts")]
+    #[map(default = AssistantPageLimits::default().handoff_ttl)]
+    pub handoff_ttl: Seconds,
+    /// Hand-offs one person holds unused at once; past it, their oldest ends.
+    #[schema(title = "Unused hand-offs per person")]
+    #[map(default = AssistantPageLimits::default().handoffs)]
+    pub handoffs: Limit,
     /// Seconds a publish waits for the Station's files.
     #[schema(title = "Wait for a Station's files")]
     #[map(default = AssistantPageLimits::default().upload_wait)]
@@ -633,6 +642,8 @@ impl Default for AssistantPageLimits {
             staged_uploads: Limit::at(64),
             default_ttl: Seconds::new(24 * 3_600),
             open_ttl: Seconds::new(3_600),
+            handoff_ttl: Seconds::new(30),
+            handoffs: Limit::at(16),
             upload_wait: Seconds::new(30),
             stage_ttl: Seconds::new(300),
             sweep_every: Seconds::new(60),

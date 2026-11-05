@@ -727,9 +727,9 @@ enum PagesCommand {
     /// List your pages, then those shared with you: id, kind, size, expiry, title and whose
     /// a shared one is.
     List,
-    /// Print a page's address. It opens in a browser that signed in to the app, or that the
-    /// gateway's page authenticator names, for you and whom the page is shared with; for anyone
-    /// else it is a page that does not exist.
+    /// Print a page's address with a hand-off: open it at once in a browser, which it signs in to
+    /// the page for your login. It works once and for the seconds the gateway sets (30 by
+    /// default); after it, the browser opens the address without the token by itself.
     Open {
         /// The page's id.
         id: String,

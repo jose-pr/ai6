@@ -1149,14 +1149,18 @@ class MissionBoard extends ChangeNotifier
 
   /// A link to one of the person's pages (`POST /v1/user/pages/{id}/open`): where to open it
   /// outside the app and when it stops working; with [network] `none`, a link whose page can
-  /// reach nothing but its own files.
+  /// reach nothing but its own files; with [handoff] `false`, the plain address.
   @override
-  Future<PageLink> open(String id, {String? network}) async {
+  Future<PageLink> open(
+    String id, {
+    String? network,
+    bool handoff = true,
+  }) async {
     if (demo) throw StateError('Pages are unavailable in preview.');
     final response = await _userRequest(
       'POST',
       '/v1/user/pages/${Uri.encodeComponent(id)}/open',
-      body: {'network': ?network},
+      body: {'network': ?network, if (!handoff) 'handoff': false},
     );
     if (response.statusCode != 200) {
       throw GatewayRefused(

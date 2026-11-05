@@ -140,12 +140,17 @@ fn cookie_path(gateway: &Gateway) -> Option<String> {
     if config.origin.is_some() {
         return None;
     }
+    Some(pages_path(gateway))
+}
+
+/// The path of the pages' base.
+fn pages_path(gateway: &Gateway) -> String {
     let base = crate::moneypenny::pages::pages_base(gateway);
     let after_scheme = base.find("://").map_or(0, |at| at + 3);
     let path = base[after_scheme..]
         .find('/')
         .map_or("", |at| &base[after_scheme + at..]);
-    Some(format!("{path}/"))
+    format!("{path}/")
 }
 
 /// The `Set-Cookie` that names `sign_in` to the page routes for `seconds`; `None` where pages
@@ -160,6 +165,22 @@ pub(crate) fn set_page_cookie(
     let max_age = seconds.ceil().clamp(0.0, f64::from(u32::MAX)) as u64;
     HeaderValue::from_str(&format!(
         "{PAGE_COOKIE}={value}; Path={path}; HttpOnly; Secure; SameSite=None; Max-Age={max_age}"
+    ))
+    .ok()
+}
+
+/// The `Set-Cookie` a hand-off answers with, from the pages' own routes: it can set the cookie
+/// where a sign-in at the API cannot, on an origin of the pages' own.
+pub(crate) fn handed_off_cookie(
+    gateway: &Gateway,
+    sign_in: &str,
+    seconds: f64,
+) -> Option<HeaderValue> {
+    let value = format!("{sign_in}.{}", mark(gateway, sign_in)?);
+    let max_age = seconds.ceil().clamp(0.0, f64::from(u32::MAX)) as u64;
+    HeaderValue::from_str(&format!(
+        "{PAGE_COOKIE}={value}; Path={}; HttpOnly; Secure; SameSite=None; Max-Age={max_age}",
+        pages_path(gateway)
     ))
     .ok()
 }
