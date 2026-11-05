@@ -763,7 +763,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `HttpOnly`, `Secure`, `SameSite=None`, `Path=/pages/`, checked against the sign-in each
   request, ended by signing out). Neither counts under `/v1`. Anyone else gets what an unknown
   page gets (404), an ended sign-in is told it is signed out (403), and the page's files and
-  feeds also need the view token the frame names for its viewer. The link to
+  feeds also need the view token the frame names for its viewer. A browser with no page cookie
+  gets one by a hand-off: the desktop app, `ai6ctl` and the web app where pages have their own
+  origin open an address with a single-use token (`POST /v1/user/pages/{id}/open`,
+  `[assistant.pages] handoff_ttl`, `handoffs`), which sets the cookie and redirects to the clean
+  address; both are audited. The link to
   send someone is the app's, `#/pages?page_id=ID`, which opens Her pages at that page after
   sign-in. A person may give a page a public link (`PUT /v1/user/pages/{id}/public`, the card's
   menu, `ai6ctl pages public`), which needs no sign-in, serves no feeds, lasts until turned off

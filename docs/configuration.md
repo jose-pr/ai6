@@ -104,8 +104,6 @@ station_token = { provider = "file", key = "station-token" }   # a Station publi
 listen = "127.0.0.1:7082"             # loopback, behind the HTTPS reverse proxy
 public_origin = "https://ai6.example" # required
 proxy_secret = { provider = "file", key = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
-state_dir = "/var/lib/unex"           # verified provider libraries, and a default Registry
-proxy_secret = { file = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
 state_dir = "/var/lib/unex"           # verified provider libraries, pages, and a default Registry
 
 [unex.plugins]                        # the gateway's provider libraries, as [station.plugins]
@@ -1450,6 +1448,8 @@ never a weakening, and nothing is evicted when one is lowered. Pages are open by
 | `staged_uploads` | 64 | **Uploads held from Stations.** Pages Universal Exports keeps staged from Stations at once. |
 | `default_ttl` | 86,400 (a day) | **Keep a page for.** Seconds a page lives unless remembered. |
 | `open_ttl` | 3,600 | **A view of a page lasts.** Seconds a frame's view token, which the page's files and feeds are named under, is valid. A reload names a new one. |
+| `handoff_ttl` | 30 | **A hand-off to a browser lasts.** Seconds a hand-off, the single-use token an app's request gives a browser that holds no page cookie, may wait to be used. A restart ends one not yet used. |
+| `handoffs` | 16 | **Unused hand-offs per person.** Hand-offs one person holds unused at once; past it, their oldest ends. |
 | `upload_wait` | 30 | **Wait for a Station's files.** Seconds a publish waits for the Station's files. |
 | `stage_ttl` | 300 | **Keep an unclaimed upload for.** Seconds a staged upload no call claims is kept. |
 | `sweep_every` | 60 | **Sweep expired pages every.** Seconds between sweeps of expired pages, links and staged uploads. |

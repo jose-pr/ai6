@@ -938,7 +938,7 @@ styles and images of a bundle load as they are; anything else (a PDF included) d
 
 A page is kept for a day unless you **Remember** it, counts toward quotas
 (`[assistant.pages]`, [Moneypenny's limits](configuration.md#moneypennys-limits)) and is audited
-(`moneypenny.page.published`, `.opened`, `.remembered`, `.forgotten`, `.shared`, `.public`,
+(`moneypenny.page.published`, `.opened`, `.handoff`, `.handoff_used`, `.remembered`, `.forgotten`, `.shared`, `.public`,
 `.deleted`, `.expired`). A page is private: only you, and whoever you share it with, can ask for
 a link to it. Another person, an administrator included, gets 404 from `POST
 /v1/user/pages/{id}/open`, exactly as for a page that does not exist.
@@ -977,8 +977,19 @@ Who is asking is named by, in order:
   only this gateway's pages directory can make. Each request checks the sign-in still stands, so
   signing out, or the sign-in running out, ends it at once, and the browser is told to drop it at
   sign-out. A browser whose sign-in has ended is told so (`403`, "You are signed out"). The
-  app's renewals and a reload's resume set it again. Where pages have an origin of their own, a
-  sign-in at the app cannot set it there, and only the page authenticator names viewers.
+  app's renewals and a reload's resume set it again.
+
+**A browser with no page cookie** gets one from the app. The desktop app, `ai6ctl pages open`, and
+the web app where pages have an origin of their own (a sign-in at the app cannot set the cookie
+there) open a page by asking `POST /v1/user/pages/{id}/open`, which makes a **hand-off**: a token
+in the address (`?handoff=`) that works once, for `[assistant.pages] handoff_ttl` (30 seconds), for
+that page and your sign-in. The browser's first navigation there spends it, sets the page cookie
+and is sent on to the clean address, so the token leaves the address bar and a bookmark or a reload
+works from then on. A second use, one that has run out, one for another page or for a sign-in that
+has ended answers as a page that does not exist. Making one is audited
+(`moneypenny.page.handoff`), as is using one (`moneypenny.page.handoff_used`). They are held in
+memory, so a restart ends those not yet used, and a person holds at most `handoffs` (16) at once.
+The web app on the API's own origin needs none, and opens the plain address (`{"handoff": false}`).
 
 None of these counts under `/v1`: the API keeps its bearer token, and a request carrying only a
 certificate, a front door's header or the page cookie is refused there (`401`), so a page's own

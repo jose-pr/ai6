@@ -218,7 +218,9 @@ page_authenticator_config = { trust = "ca", ca_file = "people-ca.pem", account =
 
 A browser holding certificates offers them when it connects, prompting where it cannot choose.
 A page on an origin of its own (`[unex.pages] origin`) has no sign-in to set the cookie there,
-so only the page authenticator names its viewers.
+so the page authenticator or an app's [hand-off](assistant.md#pages-she-publishes) names its
+viewers. A front door's access log sees a hand-off's token in the query: it works once, for
+seconds, and is spent by the time the log is read.
 
 Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{session_id}`
 (a Session's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither
