@@ -20,6 +20,7 @@ pub ai6_diptel::SessionState::Abandoned
 pub ai6_diptel::SessionState::Blocked
 pub ai6_diptel::SessionState::Done
 pub ai6_diptel::SessionState::Failed
+pub ai6_diptel::SessionState::Held
 pub ai6_diptel::SessionState::Parked
 pub ai6_diptel::SessionState::Quarantined
 pub ai6_diptel::SessionState::Queued

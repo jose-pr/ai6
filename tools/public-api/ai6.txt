@@ -469,6 +469,7 @@ pub const ai6::directorates::m::access::NOT_DELEGABLE: [&str; 3]
 pub const ai6::directorates::m::access::OPERATION_ACTIONS: &[&str]
 pub const ai6::directorates::m::access::RESERVED_ROLES: [&str; 4]
 pub const ai6::directorates::m::access::SCOPE_KINDS: [&str; 5]
+pub const ai6::directorates::m::access::STATION_ACTIONS: &[&str]
 pub fn ai6::directorates::m::access::access_from_toml(&str, ai6::bounds::Limit) -> core::result::Result<ai6::EffectiveAccess, ai6::directorates::m::access::AccessPolicyError>
 pub fn ai6::directorates::m::access::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::directorates::m::access::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
@@ -528,6 +529,7 @@ pub const ai6::directorates::m::approvals::ISSUE_ASSIGN: &str
 pub const ai6::directorates::m::approvals::ISSUE_CLOSE: &str
 pub const ai6::directorates::m::approvals::ISSUE_COMMENT: &str
 pub const ai6::directorates::m::approvals::ISSUE_CREATE: &str
+pub const ai6::directorates::m::approvals::NO_APPROVAL_REASON: &str
 pub const ai6::directorates::m::approvals::SAFE_HOUSE_DELETE: &str
 pub trait ai6::directorates::m::approvals::Repository
 pub fn ai6::directorates::m::approvals::Repository::config(&self, &ai6::directorates::m::approvals::GitContext, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, alloc::string::String>
@@ -1398,8 +1400,13 @@ pub fn ai6::directorates::m::issues::IssuePolicy::validate(&self) -> core::resul
 pub fn ai6::directorates::m::issues::IssuePolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::issues::IssuePolicy
 pub fn ai6::directorates::m::issues::IssuePolicy::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::issues::SourcePage
+pub ai6::directorates::m::issues::SourcePage::project: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::issues::SourcePage::provider: alloc::string::String
+pub ai6::directorates::m::issues::SourcePage::web: alloc::string::String
 pub fn ai6::directorates::m::issues::compose_status(ai6::directorates::m::cover::Disclosure, &str) -> alloc::string::String
 pub fn ai6::directorates::m::issues::is_ready_label(core::option::Option<&ai6::directorates::m::roster::Operation>, &str) -> bool
+pub fn ai6::directorates::m::issues::source_pages(&toml::table::Table) -> alloc::vec::Vec<ai6::directorates::m::issues::SourcePage>
 pub mod ai6::directorates::m::limits
 #[non_exhaustive] pub enum ai6::directorates::m::limits::OnLimit
 pub ai6::directorates::m::limits::OnLimit::Backup
@@ -1510,6 +1517,7 @@ pub ai6::directorates::m::mission::MissionState::Blocked
 pub ai6::directorates::m::mission::MissionState::Blown
 pub ai6::directorates::m::mission::MissionState::Done
 pub ai6::directorates::m::mission::MissionState::Failed
+pub ai6::directorates::m::mission::MissionState::Held
 pub ai6::directorates::m::mission::MissionState::Parked
 pub ai6::directorates::m::mission::MissionState::Quarantined
 pub ai6::directorates::m::mission::MissionState::Queued
@@ -1549,6 +1557,7 @@ pub fn ai6::directorates::m::mission::MissionStore::due_parked(&self, i64) -> al
 pub fn ai6::directorates::m::mission::MissionStore::expose(&mut self, &str, &[alloc::string::String]) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::fail_for(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::get(&self, &str) -> core::option::Option<&ai6::directorates::m::mission::Mission>
+pub fn ai6::directorates::m::mission::MissionStore::hold_for(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::list(&self) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::note_denied_tools(&mut self, &str, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
@@ -1974,9 +1983,11 @@ pub fn ai6::directorates::m::roster::AgentQuery<'a>::tags(self, &'a [alloc::stri
 pub ai6::directorates::m::roster::AgentRole::id: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::policy: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::purpose: alloc::string::String
+pub ai6::directorates::m::roster::AgentRole::require_approval_before_done: bool
 pub ai6::directorates::m::roster::AgentRole::review: ai6::directorates::m::review::ReviewChoice
 impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::roster::AgentRole::requiring_approval_before_done(self, bool) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::AgentRole::with_review(self, ai6::directorates::m::review::ReviewChoice) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRoute
@@ -2119,6 +2130,7 @@ pub mod ai6::directorates::m::scorecard
 #[non_exhaustive] pub enum ai6::directorates::m::scorecard::Judgment
 pub ai6::directorates::m::scorecard::Judgment::Blown
 pub ai6::directorates::m::scorecard::Judgment::BudgetStop
+pub ai6::directorates::m::scorecard::Judgment::Disputed
 pub ai6::directorates::m::scorecard::Judgment::Done
 pub ai6::directorates::m::scorecard::Judgment::Failed
 pub ai6::directorates::m::scorecard::Judgment::HandedOff
@@ -2130,7 +2142,7 @@ pub ai6::directorates::m::scorecard::Judgment::Unrecorded
 pub ai6::directorates::m::scorecard::Judgment::WaitingOnPerson
 pub ai6::directorates::m::scorecard::Judgment::Withdrawn
 impl ai6::directorates::m::scorecard::Judgment
-pub const ai6::directorates::m::scorecard::Judgment::ALL: [Self; 12]
+pub const ai6::directorates::m::scorecard::Judgment::ALL: [Self; 13]
 pub fn ai6::directorates::m::scorecard::Judgment::as_str(self) -> &'static str
 pub fn ai6::directorates::m::scorecard::Judgment::is_fault(self) -> bool
 pub fn ai6::directorates::m::scorecard::Judgment::is_judged(self) -> bool
@@ -2379,6 +2391,7 @@ pub fn ai6::directorates::m::unex_limits::LoginTable::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::TextLimits
 pub ai6::directorates::m::unex_limits::TextLimits::access_name_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::TextLimits::agent_reason_chars: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::green_ink_expired_window: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::TextLimits::green_ink_max_grant: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::TextLimits::green_ink_note_chars: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::TextLimits::held_reason_chars: ai6::bounds::Limit
@@ -4230,13 +4243,20 @@ pub ai6::directorates::registry::approvals::Approval::signer: alloc::string::Str
 pub ai6::directorates::registry::approvals::Approval::spent_at: core::option::Option<f64>
 impl ai6::directorates::registry::approvals::Approval
 pub fn ai6::directorates::registry::approvals::Approval::is_live(&self, f64) -> bool
+#[non_exhaustive] pub struct ai6::directorates::registry::approvals::ApprovalLink
+pub ai6::directorates::registry::approvals::ApprovalLink::label: alloc::string::String
+pub ai6::directorates::registry::approvals::ApprovalLink::url: alloc::string::String
+impl ai6::directorates::registry::approvals::ApprovalLink
+pub fn ai6::directorates::registry::approvals::ApprovalLink::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::approvals::ApprovalRequest
 pub ai6::directorates::registry::approvals::ApprovalRequest::agent: alloc::string::String
 pub ai6::directorates::registry::approvals::ApprovalRequest::expires_at: f64
 pub ai6::directorates::registry::approvals::ApprovalRequest::id: alloc::string::String
+pub ai6::directorates::registry::approvals::ApprovalRequest::links: alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalLink>
 pub ai6::directorates::registry::approvals::ApprovalRequest::mission: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::registry::approvals::ApprovalRequest::operation: alloc::string::String
 pub ai6::directorates::registry::approvals::ApprovalRequest::proposed_role: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::approvals::ApprovalRequest::rearmed: core::option::Option<ai6::directorates::registry::approvals::Rearming>
 pub ai6::directorates::registry::approvals::ApprovalRequest::reason: alloc::string::String
 pub ai6::directorates::registry::approvals::ApprovalRequest::requested_at: f64
 pub ai6::directorates::registry::approvals::ApprovalRequest::scope: ai6::directorates::m::approvals::ActionScope
@@ -4245,6 +4265,7 @@ impl ai6::directorates::registry::approvals::ApprovalRequest
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f64, core::time::Duration) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::proposing_role(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str, &ai6::directorates::registry::limits::ApprovalLimits) -> core::io::error::Result<Self>
+pub fn ai6::directorates::registry::approvals::ApprovalRequest::with_links(self, alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalLink>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::approvals::ClassAuthorization
 pub ai6::directorates::registry::approvals::ClassAuthorization::agents: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::approvals::ClassAuthorization::clearance_min: alloc::string::String
@@ -4271,9 +4292,19 @@ pub fn ai6::directorates::registry::approvals::ClassAuthorization::new(impl core
 pub fn ai6::directorates::registry::approvals::ClassAuthorization::validate(&self, &ai6::directorates::registry::limits::ApprovalLimits) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::approvals::ClassAuthorization::with_clearance_min(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::approvals::ClassAuthorization::with_max_uses(self, u32) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::approvals::Rearming
+pub ai6::directorates::registry::approvals::Rearming::at: f64
+pub ai6::directorates::registry::approvals::Rearming::by: alloc::string::String
+pub ai6::directorates::registry::approvals::Rearming::note: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::approvals::Rearming::told_at: core::option::Option<f64>
+impl ai6::directorates::registry::approvals::Rearming
+pub fn ai6::directorates::registry::approvals::Rearming::new(impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::directorates::registry::approvals::Revocation
 pub ai6::directorates::registry::approvals::Revocation::at: f64
 pub ai6::directorates::registry::approvals::Revocation::by: alloc::string::String
+pub ai6::directorates::registry::approvals::Revocation::note: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::approvals::Revocation
+pub fn ai6::directorates::registry::approvals::Revocation::new(impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::approvals::Ruling
 pub ai6::directorates::registry::approvals::Ruling::at: f64
 pub ai6::directorates::registry::approvals::Ruling::decision: ai6::directorates::registry::approvals::Decision
@@ -4290,13 +4321,16 @@ pub fn ai6::directorates::registry::approvals::ApprovalStore::approval(&self, &s
 pub fn ai6::directorates::registry::approvals::ApprovalStore::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
@@ -4304,13 +4338,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
@@ -4318,13 +4355,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 pub mod ai6::directorates::registry::assistant_log
@@ -4468,13 +4508,16 @@ pub fn ai6::directorates::registry::backend::ApprovalStore::approval(&self, &str
 pub fn ai6::directorates::registry::backend::ApprovalStore::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::backend::ApprovalStore::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::ApprovalStore::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::ApprovalStore::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::backend::ApprovalStore::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::backend::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
@@ -4482,13 +4525,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
@@ -4496,13 +4542,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 pub trait ai6::directorates::registry::backend::AssistantLogStore
@@ -4865,30 +4914,39 @@ pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&
 pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 pub trait ai6::directorates::registry::backend::SessionStore
+pub fn ai6::directorates::registry::backend::SessionStore::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::SessionStore::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::backend::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::backend::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::backend::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -5472,7 +5530,11 @@ pub fn ai6::directorates::registry::limits::AgentRoleLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::ApprovalLimits
 pub ai6::directorates::registry::limits::ApprovalLimits::class_authorizations: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ApprovalLimits::class_entries: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ApprovalLimits::expired_listed: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ApprovalLimits::idempotency_key_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ApprovalLimits::link_label_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ApprovalLimits::link_url_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ApprovalLimits::links: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ApprovalLimits::mission_requests: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ApprovalLimits::name_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ApprovalLimits::note_bytes: ai6::bounds::Limit
@@ -5621,11 +5683,13 @@ pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) ->
 pub ai6::directorates::registry::limits::SessionLimits::exposure_source_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::exposure_sources: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::exposures: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::SessionLimits::final_report_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::id_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::recent_event_chars: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::recent_events: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::record_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::records: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::SessionLimits::verdict_note_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::SessionLimits
 pub fn ai6::directorates::registry::limits::SessionLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::SleeperLimits
@@ -6215,6 +6279,15 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&sel
 pub fn ai6::directorates::registry::reviews::tally(&[ai6::directorates::registry::reviews::MissionReview]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::reviews::ReviewTally>
 pub fn ai6::directorates::registry::reviews::update_mission_review(&dyn ai6::directorates::registry::reviews::MissionReviewStore, (&str, ai6::directorates::m::review::ReviewGate), usize, impl core::ops::function::FnMut(&mut ai6::directorates::registry::reviews::MissionReview) -> bool) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub mod ai6::directorates::registry::sessions
+#[non_exhaustive] pub enum ai6::directorates::registry::sessions::OutcomeVerdict
+pub ai6::directorates::registry::sessions::OutcomeVerdict::Confirmed
+pub ai6::directorates::registry::sessions::OutcomeVerdict::Disputed
+pub ai6::directorates::registry::sessions::OutcomeVerdict::FailedVerification
+impl ai6::directorates::registry::sessions::OutcomeVerdict
+pub const ai6::directorates::registry::sessions::OutcomeVerdict::ALL: [Self; 3]
+pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::as_str(self) -> &'static str
+pub fn ai6::directorates::registry::sessions::OutcomeVerdict::from_name(&str) -> core::option::Option<Self>
+pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::is_fault(self) -> bool
 #[non_exhaustive] pub enum ai6::directorates::registry::sessions::SessionError
 pub ai6::directorates::registry::sessions::SessionError::Ended
 pub ai6::directorates::registry::sessions::SessionError::Exists
@@ -6222,6 +6295,7 @@ pub ai6::directorates::registry::sessions::SessionError::HeldBy(alloc::string::S
 pub ai6::directorates::registry::sessions::SessionError::Io(core::io::error::Error)
 pub ai6::directorates::registry::sessions::SessionError::NotFound
 pub ai6::directorates::registry::sessions::SessionError::Stale
+pub ai6::directorates::registry::sessions::SessionError::Unsettled(alloc::string::String)
 impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::sessions::SessionError
 pub fn ai6::directorates::registry::sessions::SessionError::from(core::io::error::Error) -> Self
 impl core::error::Error for ai6::directorates::registry::sessions::SessionError
@@ -6235,6 +6309,20 @@ pub ai6::directorates::registry::sessions::SessionStatus::Lost
 pub ai6::directorates::registry::sessions::SessionStatus::Parked
 impl ai6::directorates::registry::sessions::SessionStatus
 pub fn ai6::directorates::registry::sessions::SessionStatus::is_closed(self) -> bool
+#[non_exhaustive] pub struct ai6::directorates::registry::sessions::FinalReport
+pub ai6::directorates::registry::sessions::FinalReport::at: f64
+pub ai6::directorates::registry::sessions::FinalReport::mission_id: alloc::string::String
+pub ai6::directorates::registry::sessions::FinalReport::session_id: alloc::string::String
+pub ai6::directorates::registry::sessions::FinalReport::text: alloc::string::String
+impl ai6::directorates::registry::sessions::FinalReport
+pub fn ai6::directorates::registry::sessions::FinalReport::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, &str, f64, ai6::bounds::Limit) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::sessions::MissionVerdict
+pub ai6::directorates::registry::sessions::MissionVerdict::at: f64
+pub ai6::directorates::registry::sessions::MissionVerdict::by: alloc::string::String
+pub ai6::directorates::registry::sessions::MissionVerdict::note: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::MissionVerdict::verdict: ai6::directorates::registry::sessions::OutcomeVerdict
+impl ai6::directorates::registry::sessions::MissionVerdict
+pub fn ai6::directorates::registry::sessions::MissionVerdict::new(ai6::directorates::registry::sessions::OutcomeVerdict, impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::directorates::registry::sessions::NewSession
 impl ai6::directorates::registry::sessions::NewSession
 pub fn ai6::directorates::registry::sessions::NewSession::attempt(&self) -> u32
@@ -6292,9 +6380,11 @@ pub ai6::directorates::registry::sessions::SessionRecord::session_id: alloc::str
 pub ai6::directorates::registry::sessions::SessionRecord::station: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
 pub ai6::directorates::registry::sessions::SessionRecord::theater: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::verdict: core::option::Option<ai6::directorates::registry::sessions::MissionVerdict>
 pub ai6::directorates::registry::sessions::SessionRecord::window: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+pub fn ai6::directorates::registry::sessions::SessionRecord::takes_verdict(&self) -> core::result::Result<(), ai6::directorates::registry::sessions::SessionError>
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionResult
 pub ai6::directorates::registry::sessions::SessionResult::denied_tools: u32
 pub ai6::directorates::registry::sessions::SessionResult::reason: core::option::Option<alloc::string::String>
@@ -6316,30 +6406,39 @@ pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc:
 pub fn ai6::directorates::registry::sessions::SessionUpdate::result(self, ai6::directorates::registry::sessions::SessionResult) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::status(self, ai6::directorates::registry::sessions::SessionStatus) -> Self
 pub trait ai6::directorates::registry::sessions::SessionStore
+pub fn ai6::directorates::registry::sessions::SessionStore::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sessions::SessionStore::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::sessions::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sessions::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sessions::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sessions::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sessions::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sessions::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -6490,13 +6589,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
@@ -6579,10 +6681,13 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -6743,13 +6848,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
@@ -6832,10 +6940,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -8601,6 +8712,7 @@ pub ai6::Ingest::Updated
 #[non_exhaustive] pub enum ai6::Judgment
 pub ai6::Judgment::Blown
 pub ai6::Judgment::BudgetStop
+pub ai6::Judgment::Disputed
 pub ai6::Judgment::Done
 pub ai6::Judgment::Failed
 pub ai6::Judgment::HandedOff
@@ -8612,7 +8724,7 @@ pub ai6::Judgment::Unrecorded
 pub ai6::Judgment::WaitingOnPerson
 pub ai6::Judgment::Withdrawn
 impl ai6::directorates::m::scorecard::Judgment
-pub const ai6::directorates::m::scorecard::Judgment::ALL: [Self; 12]
+pub const ai6::directorates::m::scorecard::Judgment::ALL: [Self; 13]
 pub fn ai6::directorates::m::scorecard::Judgment::as_str(self) -> &'static str
 pub fn ai6::directorates::m::scorecard::Judgment::is_fault(self) -> bool
 pub fn ai6::directorates::m::scorecard::Judgment::is_judged(self) -> bool
@@ -8689,6 +8801,15 @@ impl ai6::directorates::registry::bona_fides::Origin
 pub const fn ai6::directorates::registry::bona_fides::Origin::as_str(self) -> &'static str
 impl core::fmt::Display for ai6::directorates::registry::bona_fides::Origin
 pub fn ai6::directorates::registry::bona_fides::Origin::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::OutcomeVerdict
+pub ai6::OutcomeVerdict::Confirmed
+pub ai6::OutcomeVerdict::Disputed
+pub ai6::OutcomeVerdict::FailedVerification
+impl ai6::directorates::registry::sessions::OutcomeVerdict
+pub const ai6::directorates::registry::sessions::OutcomeVerdict::ALL: [Self; 3]
+pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::as_str(self) -> &'static str
+pub fn ai6::directorates::registry::sessions::OutcomeVerdict::from_name(&str) -> core::option::Option<Self>
+pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::is_fault(self) -> bool
 #[non_exhaustive] pub enum ai6::PageNetwork
 pub ai6::PageNetwork::None
 pub ai6::PageNetwork::Open
@@ -8884,6 +9005,7 @@ pub ai6::SessionError::HeldBy(alloc::string::String)
 pub ai6::SessionError::Io(core::io::error::Error)
 pub ai6::SessionError::NotFound
 pub ai6::SessionError::Stale
+pub ai6::SessionError::Unsettled(alloc::string::String)
 impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::sessions::SessionError
 pub fn ai6::directorates::registry::sessions::SessionError::from(core::io::error::Error) -> Self
 impl core::error::Error for ai6::directorates::registry::sessions::SessionError
@@ -9229,9 +9351,11 @@ pub ai6::AgentResume::working_directory: alloc::string::String
 pub ai6::AgentRole::id: alloc::string::String
 pub ai6::AgentRole::policy: alloc::string::String
 pub ai6::AgentRole::purpose: alloc::string::String
+pub ai6::AgentRole::require_approval_before_done: bool
 pub ai6::AgentRole::review: ai6::directorates::m::review::ReviewChoice
 impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::roster::AgentRole::requiring_approval_before_done(self, bool) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::AgentRole::with_review(self, ai6::directorates::m::review::ReviewChoice) -> Self
 #[non_exhaustive] pub struct ai6::AgentRoleLimits
@@ -9302,7 +9426,11 @@ pub fn ai6::directorates::registry::approvals::Approval::is_live(&self, f64) -> 
 #[non_exhaustive] pub struct ai6::ApprovalLimits
 pub ai6::ApprovalLimits::class_authorizations: ai6::bounds::Limit
 pub ai6::ApprovalLimits::class_entries: ai6::bounds::Limit
+pub ai6::ApprovalLimits::expired_listed: ai6::bounds::Limit
 pub ai6::ApprovalLimits::idempotency_key_bytes: ai6::bounds::Limit
+pub ai6::ApprovalLimits::link_label_bytes: ai6::bounds::Limit
+pub ai6::ApprovalLimits::link_url_bytes: ai6::bounds::Limit
+pub ai6::ApprovalLimits::links: ai6::bounds::Limit
 pub ai6::ApprovalLimits::mission_requests: ai6::bounds::Limit
 pub ai6::ApprovalLimits::name_bytes: ai6::bounds::Limit
 pub ai6::ApprovalLimits::note_bytes: ai6::bounds::Limit
@@ -9313,13 +9441,20 @@ pub ai6::ApprovalLimits::record_bytes: ai6::bounds::Limit
 pub ai6::ApprovalLimits::signer_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::ApprovalLimits
 pub fn ai6::directorates::registry::limits::ApprovalLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::ApprovalLink
+pub ai6::ApprovalLink::label: alloc::string::String
+pub ai6::ApprovalLink::url: alloc::string::String
+impl ai6::directorates::registry::approvals::ApprovalLink
+pub fn ai6::directorates::registry::approvals::ApprovalLink::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::ApprovalRequest
 pub ai6::ApprovalRequest::agent: alloc::string::String
 pub ai6::ApprovalRequest::expires_at: f64
 pub ai6::ApprovalRequest::id: alloc::string::String
+pub ai6::ApprovalRequest::links: alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalLink>
 pub ai6::ApprovalRequest::mission: ai6::directorates::m::identity::MissionId
 pub ai6::ApprovalRequest::operation: alloc::string::String
 pub ai6::ApprovalRequest::proposed_role: core::option::Option<alloc::string::String>
+pub ai6::ApprovalRequest::rearmed: core::option::Option<ai6::directorates::registry::approvals::Rearming>
 pub ai6::ApprovalRequest::reason: alloc::string::String
 pub ai6::ApprovalRequest::requested_at: f64
 pub ai6::ApprovalRequest::scope: ai6::directorates::m::approvals::ActionScope
@@ -9328,6 +9463,7 @@ impl ai6::directorates::registry::approvals::ApprovalRequest
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::expiring(self, f64, core::time::Duration) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::proposing_role(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::approvals::ApprovalRequest::try_new(impl core::convert::Into<alloc::string::String>, ai6::directorates::m::identity::MissionId, ai6::directorates::m::identity::SessionId, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::approvals::ActionScope, impl core::convert::Into<alloc::string::String>, &str, &ai6::directorates::registry::limits::ApprovalLimits) -> core::io::error::Result<Self>
+pub fn ai6::directorates::registry::approvals::ApprovalRequest::with_links(self, alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalLink>) -> Self
 pub struct ai6::AssistantCable
 pub ai6::AssistantCable::body: core::option::Option<alloc::string::String>
 pub ai6::AssistantCable::cable_id: core::option::Option<alloc::string::String>
@@ -10367,13 +10503,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
@@ -10456,10 +10595,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -10557,6 +10699,13 @@ pub ai6::FiledBrief::attempts: u32
 pub ai6::FiledBrief::brief: ai6::directorates::registry::store::Brief
 pub ai6::FiledBrief::outcome: core::option::Option<serde_json::value::Value>
 pub ai6::FiledBrief::state: alloc::string::String
+#[non_exhaustive] pub struct ai6::FinalReport
+pub ai6::FinalReport::at: f64
+pub ai6::FinalReport::mission_id: alloc::string::String
+pub ai6::FinalReport::session_id: alloc::string::String
+pub ai6::FinalReport::text: alloc::string::String
+impl ai6::directorates::registry::sessions::FinalReport
+pub fn ai6::directorates::registry::sessions::FinalReport::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, &str, f64, ai6::bounds::Limit) -> Self
 #[non_exhaustive] pub struct ai6::Finding
 pub ai6::Finding::detail: alloc::string::String
 pub ai6::Finding::kind: ai6::directorates::m::vetting::FindingKind
@@ -10920,6 +11069,13 @@ pub struct ai6::MissionUsage
 pub ai6::MissionUsage::daily_cost_micro_usd: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub ai6::MissionUsage::sessions: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::medical::usage::UsageTotals>
 pub ai6::MissionUsage::total: ai6::directorates::medical::usage::UsageTotals
+#[non_exhaustive] pub struct ai6::MissionVerdict
+pub ai6::MissionVerdict::at: f64
+pub ai6::MissionVerdict::by: alloc::string::String
+pub ai6::MissionVerdict::note: core::option::Option<alloc::string::String>
+pub ai6::MissionVerdict::verdict: ai6::directorates::registry::sessions::OutcomeVerdict
+impl ai6::directorates::registry::sessions::MissionVerdict
+pub fn ai6::directorates::registry::sessions::MissionVerdict::new(ai6::directorates::registry::sessions::OutcomeVerdict, impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::ModelCard
 pub ai6::ModelCard::model: core::option::Option<alloc::string::String>
 pub ai6::ModelCard::standing: ai6::directorates::m::scorecard::Standing
@@ -11284,6 +11440,13 @@ pub struct ai6::ReadSpec
 pub ai6::ReadSpec::limit: u64
 pub ai6::ReadSpec::offset: u64
 pub ai6::ReadSpec::path: alloc::string::String
+#[non_exhaustive] pub struct ai6::Rearming
+pub ai6::Rearming::at: f64
+pub ai6::Rearming::by: alloc::string::String
+pub ai6::Rearming::note: core::option::Option<alloc::string::String>
+pub ai6::Rearming::told_at: core::option::Option<f64>
+impl ai6::directorates::registry::approvals::Rearming
+pub fn ai6::directorates::registry::approvals::Rearming::new(impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::RecordForm
 pub ai6::RecordForm::form: serde_json::value::Value
 pub ai6::RecordForm::key: ai6::directorates::m::records::RecordKey
@@ -11425,6 +11588,9 @@ pub ai6::Reviewer::weight: u32
 pub struct ai6::Revocation
 pub ai6::Revocation::at: f64
 pub ai6::Revocation::by: alloc::string::String
+pub ai6::Revocation::note: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::approvals::Revocation
+pub fn ai6::directorates::registry::approvals::Revocation::new(impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::RoleDef
 pub ai6::RoleDef::actions: alloc::vec::Vec<alloc::string::String>
 pub ai6::RoleDef::description: core::option::Option<alloc::string::String>
@@ -11806,11 +11972,13 @@ pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, i
 pub ai6::SessionLimits::exposure_source_bytes: ai6::bounds::Limit
 pub ai6::SessionLimits::exposure_sources: ai6::bounds::Limit
 pub ai6::SessionLimits::exposures: ai6::bounds::Limit
+pub ai6::SessionLimits::final_report_bytes: ai6::bounds::Limit
 pub ai6::SessionLimits::id_bytes: ai6::bounds::Limit
 pub ai6::SessionLimits::recent_event_chars: ai6::bounds::Limit
 pub ai6::SessionLimits::recent_events: ai6::bounds::Limit
 pub ai6::SessionLimits::record_bytes: ai6::bounds::Limit
 pub ai6::SessionLimits::records: ai6::bounds::Limit
+pub ai6::SessionLimits::verdict_note_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::SessionLimits
 pub fn ai6::directorates::registry::limits::SessionLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::SessionRecord
@@ -11837,9 +12005,11 @@ pub ai6::SessionRecord::session_id: alloc::string::String
 pub ai6::SessionRecord::station: alloc::string::String
 pub ai6::SessionRecord::status: ai6::directorates::registry::sessions::SessionStatus
 pub ai6::SessionRecord::theater: core::option::Option<alloc::string::String>
+pub ai6::SessionRecord::verdict: core::option::Option<ai6::directorates::registry::sessions::MissionVerdict>
 pub ai6::SessionRecord::window: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::sessions::SessionRecord
 pub fn ai6::directorates::registry::sessions::SessionRecord::leased_at(&self, f64) -> bool
+pub fn ai6::directorates::registry::sessions::SessionRecord::takes_verdict(&self) -> core::result::Result<(), ai6::directorates::registry::sessions::SessionError>
 pub struct ai6::SessionRecordFile
 pub ai6::SessionRecordFile::format: alloc::string::String
 pub ai6::SessionRecordFile::path: alloc::string::String
@@ -11940,6 +12110,10 @@ pub ai6::SourceLimits::name_bytes: ai6::bounds::Limit
 pub ai6::SourceLimits::report_attempts: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::SourceLimits
 pub fn ai6::directorates::registry::limits::SourceLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::SourcePage
+pub ai6::SourcePage::project: core::option::Option<alloc::string::String>
+pub ai6::SourcePage::provider: alloc::string::String
+pub ai6::SourcePage::web: alloc::string::String
 pub struct ai6::SourcePoll
 pub ai6::SourcePoll::cursor: core::option::Option<alloc::string::String>
 pub struct ai6::SourceRead
@@ -12032,13 +12206,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
@@ -12121,10 +12298,13 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -12385,6 +12565,7 @@ pub ai6::TerminalOffer::tty: bool
 #[non_exhaustive] pub struct ai6::TextLimits
 pub ai6::TextLimits::access_name_bytes: ai6::bounds::Limit
 pub ai6::TextLimits::agent_reason_chars: ai6::bounds::Limit
+pub ai6::TextLimits::green_ink_expired_window: ai6::bounds::TimeLimit
 pub ai6::TextLimits::green_ink_max_grant: ai6::bounds::TimeLimit
 pub ai6::TextLimits::green_ink_note_chars: ai6::bounds::Limit
 pub ai6::TextLimits::held_reason_chars: ai6::bounds::Limit
@@ -12865,6 +13046,7 @@ pub const ai6::HOLD_KIND: &str
 pub const ai6::LOCAL_THEATER: &str
 pub const ai6::MAX_CABLE_FANOUT: usize
 pub const ai6::NOT_DELEGABLE: [&str; 3]
+pub const ai6::NO_APPROVAL_REASON: &str
 pub const ai6::NO_OPERATION: &str
 pub const ai6::NO_REVIEW: &str
 pub const ai6::OPERATION_ACTIONS: &[&str]
@@ -12883,6 +13065,7 @@ pub const ai6::SCOPE_KINDS: [&str; 5]
 pub const ai6::SCRIPT_ENVIRONMENT: [&str; 14]
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
+pub const ai6::STATION_ACTIONS: &[&str]
 pub trait ai6::AccessTokenStore
 pub fn ai6::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -13024,13 +13207,16 @@ pub fn ai6::ApprovalStore::approval(&self, &str, &str, f64) -> core::io::error::
 pub fn ai6::ApprovalStore::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::ApprovalStore::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::ApprovalStore::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::ApprovalStore::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::ApprovalStore::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::ApprovalStore::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::ApprovalStore::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::ApprovalStore::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::ApprovalStore::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::ApprovalStore::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::ApprovalStore::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
@@ -13038,13 +13224,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
@@ -13052,13 +13241,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
-pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
 pub trait ai6::AssistantLogStore
@@ -13453,30 +13645,39 @@ pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&
 pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
 pub trait ai6::SessionStore
+pub fn ai6::SessionStore::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::SessionStore::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::SessionStore::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_session(&self, &str, &str, u64, ai6::directorates::registry::sessions::SessionUpdate) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
 pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
@@ -13789,6 +13990,7 @@ pub async fn ai6::serve_with_plugins_and_capacity<F>(core::net::socket_addr::Soc
 pub fn ai6::settings_from_table<T: guatiao::value::convert::FromValue>(toml::table::Table) -> core::result::Result<T, alloc::string::String>
 pub fn ai6::settled_cursor(&str, u64) -> core::option::Option<alloc::string::String>
 pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem, &ai6::directorates::registry::limits::SourceLimits) -> ai6::directorates::registry::store::Brief
+pub fn ai6::source_pages(&toml::table::Table) -> alloc::vec::Vec<ai6::directorates::m::issues::SourcePage>
 pub fn ai6::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError
 pub fn ai6::utc_day(i64) -> alloc::string::String

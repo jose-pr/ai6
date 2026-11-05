@@ -321,6 +321,7 @@ pub fn universal_exports::LoginLimits::default() -> Self
 pub universal_exports::MissionAttempt::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
 pub universal_exports::MissionAttempt::attempt: u32
 pub universal_exports::MissionAttempt::checkpoint_branch: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::final_report: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::handle: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::lost: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::predecessor: core::option::Option<alloc::string::String>
@@ -330,6 +331,7 @@ pub universal_exports::MissionAttempt::session_id: alloc::string::String
 pub universal_exports::MissionAttempt::station: alloc::string::String
 pub universal_exports::MissionAttempt::status: alloc::string::String
 pub universal_exports::MissionAttempt::theater: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::verdict: core::option::Option<ai6::directorates::registry::sessions::MissionVerdict>
 #[non_exhaustive] pub struct universal_exports::MissionIssues
 pub universal_exports::MissionIssues::entries: alloc::vec::Vec<universal_exports::EntryView>
 pub universal_exports::MissionIssues::issues: alloc::vec::Vec<universal_exports::IssueView>
