@@ -906,7 +906,8 @@ renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
   at each home. A changed login is sealed and written with a revision check, and an older value
   never replaces a newer one: a copy made from a revision since replaced is kept only if it plainly
   ends later. A copy that lost its login is never kept: a harness whose refresh was refused removes
-  its file or blanks its tokens, and the Station puts the Registry's copy back. A Station that went
+  its file or blanks its tokens, and the Station puts the Registry's copy back; a file reached through
+  a link, or past `[registry.limits.accounts] sealed_bytes`, counts as gone. A Station that went
   down with a renewed copy writes it when it returns, under the same check.
 - **Other Stations learn at their next poll.** A revision that moved is opened and written over the
   Session's files in place, each file replaced whole.

@@ -26,6 +26,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::pools::{Account, AccountKind, AccountPool};
 use super::sealing::{Recipient, Vault, VaultError};
+use crate::bounds::Limit;
 use crate::directorates::registry::accounts::{AccountRef, LoginState, RenewalLease};
 use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::SealedExpect;
@@ -54,15 +55,23 @@ impl Drop for LoginFiles {
 }
 
 impl LoginFiles {
-    /// Reads `files` from `home`; a file that is not there is left out. Nothing else is read.
+    /// Reads `files` from `home`; a file that is not there is left out, and so is one reached
+    /// through a link or larger than `largest`, since a Session's commands can put anything in
+    /// its home and what is read here is sealed for other Stations. Nothing else is read.
     ///
     /// # Errors
     ///
     /// Any failure but a missing file, naming the path.
-    pub fn read(home: &Path, files: &[String]) -> io::Result<Self> {
+    pub fn read(home: &Path, files: &[String], largest: Limit) -> io::Result<Self> {
         let mut read = BTreeMap::new();
         for file in files {
             let path = home.join(file);
+            let plain = plain_path(home, Path::new(file))
+                && std::fs::symlink_metadata(&path)
+                    .is_ok_and(|found| found.is_file() && largest.allows(found.len()));
+            if !plain {
+                continue;
+            }
             match std::fs::read(&path) {
                 Ok(bytes) => {
                     read.insert(file.clone(), bytes);
@@ -91,6 +100,13 @@ impl LoginFiles {
             let at = |error: io::Error| {
                 io::Error::new(error.kind(), format!("{}: {error}", path.display()))
             };
+            // The file itself may be a link: replacing it leaves what it pointed at alone.
+            if !plain_path(home, Path::new(file).parent().unwrap_or(Path::new(""))) {
+                return Err(at(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a link stands in its way",
+                )));
+            }
             let parent = path.parent().unwrap_or(home);
             std::fs::create_dir_all(parent).map_err(at)?;
             private_dirs(home, parent).map_err(at)?;
@@ -190,6 +206,21 @@ impl LoginFiles {
         }
         None
     }
+}
+
+/// Whether no part of `file` under `home` is a link, so what is read or written there is the home's
+/// own and not whatever a Session pointed it at.
+fn plain_path(home: &Path, file: &Path) -> bool {
+    let mut path = home.to_path_buf();
+    for part in file.components() {
+        path.push(part);
+        match std::fs::symlink_metadata(&path) {
+            Ok(found) if found.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+    }
+    true
 }
 
 fn wipe(value: &mut serde_json::Value) {
@@ -364,6 +395,11 @@ impl From<io::Error> for LoginError {
     }
 }
 
+/// The most a login's file may hold: no more than the Registry would keep of it.
+fn largest_file(vault: &Vault) -> Limit {
+    vault.registry().limits().accounts.sealed_bytes
+}
+
 /// Seals the login in `dir` to `stations` as `account`'s, replacing one it had. Nothing is taken
 /// from `dir`.
 ///
@@ -378,7 +414,7 @@ pub fn add_login(
     stations: &[Recipient],
     now: f64,
 ) -> Result<u64, LoginError> {
-    let login = LoginFiles::read(dir, files)?;
+    let login = LoginFiles::read(dir, files, largest_file(vault))?;
     if let Some(file) = files.iter().find(|file| login.get(file).is_none()) {
         return Err(LoginError::Missing(file.clone()));
     }
@@ -568,7 +604,7 @@ impl SessionLogin {
         registry_revision: Option<u64>,
         now: f64,
     ) -> Result<Synced, LoginError> {
-        let on_disk = LoginFiles::read(&self.home, &self.files)?;
+        let on_disk = LoginFiles::read(&self.home, &self.files, largest_file(vault))?;
         if on_disk.digest() == self.digest {
             if registry_revision.is_none_or(|held| held == self.revision) {
                 return Ok(Synced::Unchanged);
@@ -905,7 +941,7 @@ fn renew_once(
             .tempdir_in(scratch)?;
         before.write(home.path())?;
         let end = renewer.renew(account, home.path(), timeout);
-        let after = LoginFiles::read(home.path(), account.login_files())?;
+        let after = LoginFiles::read(home.path(), account.login_files(), largest_file(vault))?;
         // A token the provider has already rotated must not be lost, whatever the exit status.
         if let Some(fault) = after.fault_against(&before, account.login_files()) {
             return Ok(Outcome::Failed(format!("{fault} ({})", describe(&end))));

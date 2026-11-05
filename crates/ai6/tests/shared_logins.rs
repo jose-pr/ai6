@@ -290,7 +290,8 @@ fn a_login_renews_on_one_station_then_on_the_other(location: &str) {
     set_provider(&provider_file, "second-login", 1);
     seed(&seeder, root.path(), "second-login");
     until(root.path(), "the round to carry on at the survivor", || {
-        login_of(registry.as_ref()).filter(|login| login.revision >= before + 2 && login.lease.is_none())
+        login_of(registry.as_ref())
+            .filter(|login| login.revision >= before + 2 && login.lease.is_none())
     });
     let state = provider_state(&provider_file);
     assert_eq!(state["refreshes"], 2);

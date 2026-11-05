@@ -4091,7 +4091,7 @@ pub struct RegistrySecrets;   // ::new(Arc<Vault>): SecretProvider `registry`, r
 // lost its tokens or ends sooner is never kept, and exit status proves nothing (Grok exits 0 when refused).
 pub fn sealed_name(account: &AccountRef) -> String;   // "login/<pool>/<account>"
 pub fn add_login(vault, account, dir: &Path, files: &[String], stations: &[Recipient], now) -> Result<u64, LoginError>;   // reads dir, removes nothing
-pub struct LoginFiles;   // ::read(home, files) .write(home) .get(file) .expires_at(); Debug shows paths; wiped on drop
+pub struct LoginFiles;   // ::read(home, files, largest) .write(home) .get(file) .expires_at(); Debug shows paths; wiped on drop
 pub struct SessionLogin { pub account, pub files, pub home, pub revision, pub started, .. }   // kept beside the home as <home>.login.json
 impl SessionLogin { pub fn materialize(vault, account, files, home) -> Result<Self, LoginError>;
     pub fn recall(home) -> Option<Self>; pub fn remove(&self) -> io::Result<()>; pub fn harness_starts(&mut self);

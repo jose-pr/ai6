@@ -224,6 +224,7 @@ backend_tests!(
     a_station_that_died_with_a_copy_made_stale_loses_it,
     a_harness_that_was_refused_does_not_replace_the_login_and_its_home_is_put_back,
     a_blanked_login_does_not_replace_the_one_in_the_registry,
+    a_file_past_the_limit_or_a_link_is_no_login,
     the_round_renews_one_near_its_end_with_sessions_running_and_neither_is_signed_out,
     one_lease_holder_however_many_stations_ask,
     a_login_of_unknown_end_is_renewed_by_its_age,
@@ -483,6 +484,52 @@ fn a_blanked_login_does_not_replace_the_one_in_the_registry(store: &dyn Store) {
         session.sync(&a, Some(1), NOW + 2.0).unwrap(),
         Synced::Renewed(2)
     );
+}
+
+fn a_file_past_the_limit_or_a_link_is_no_login(store: &dyn Store) {
+    let registry = store.handle();
+    let a = station(&registry, "a");
+    let root = tempfile::tempdir().unwrap();
+    add(&a, root.path(), NOW + 100.0, &["a"]);
+    let home = root.path().join("home");
+    let mut session = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let largest = registry.limits().accounts.sealed_bytes.get().unwrap();
+    std::fs::write(home.join(FILE), vec![b'x'; largest as usize + 1]).unwrap();
+    let synced = session.sync(&a, Some(1), NOW + 1.0).unwrap();
+    assert!(matches!(synced, Synced::Restored(1, _)), "{synced:?}");
+    assert_eq!(refresh_in_home(&home), PLANTED);
+
+    // What a Session points its login file at is not sealed for other Stations.
+    let elsewhere = root.path().join("elsewhere");
+    std::fs::write(
+        &elsewhere,
+        r#"{"refresh_token":"another-secret","expires_at":1890000000}"#,
+    )
+    .unwrap();
+    std::fs::remove_file(home.join(FILE)).unwrap();
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&elsewhere, home.join(FILE)).is_ok();
+    // Windows lets only some accounts make a link.
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(&elsewhere, home.join(FILE)).is_ok();
+    if linked {
+        let synced = session.sync(&a, Some(1), NOW + 2.0).unwrap();
+        assert!(matches!(synced, Synced::Restored(1, _)), "{synced:?}");
+        assert_eq!(revision(registry.as_ref()), Some(1));
+        // The home's copy replaces the link itself, and what it pointed at stays as it was.
+        assert_eq!(refresh_in_home(&home), PLANTED);
+        assert!(
+            !std::fs::symlink_metadata(home.join(FILE))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            std::fs::read_to_string(&elsewhere)
+                .unwrap()
+                .contains("another-secret")
+        );
+    }
 }
 
 fn the_round_renews_one_near_its_end_with_sessions_running_and_neither_is_signed_out(
@@ -965,7 +1012,10 @@ fn a_planted_login_appears_in_no_row_notice_error_or_debug(store: &dyn Store) {
         session.sync(&a, revision(registry.as_ref()), NOW)
     ));
     seen.push(format!("{session:?} {a:?} {account:?}"));
-    seen.push(format!("{:?}", LoginFiles::read(&home, &files()).unwrap()));
+    seen.push(format!(
+        "{:?}",
+        LoginFiles::read(&home, &files(), crate::bounds::Limit::UNBOUNDED).unwrap()
+    ));
     seen.push(c.open(&sealed_name(&reference())).unwrap_err().to_string());
     let refused = SessionLogin::materialize(&c, &reference(), &files(), &root.path().join("c"));
     seen.push(format!("{refused:?}"));
