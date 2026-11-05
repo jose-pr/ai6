@@ -81,6 +81,7 @@ pub universal_exports::BoardAccount::kind: alloc::string::String
 pub universal_exports::BoardAccount::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub universal_exports::BoardAccount::last_used: core::option::Option<f64>
 pub universal_exports::BoardAccount::limited_until: core::option::Option<f64>
+pub universal_exports::BoardAccount::login: core::option::Option<universal_exports::pools::BoardLogin>
 pub universal_exports::BoardAccount::max_concurrent: core::option::Option<usize>
 pub universal_exports::BoardAccount::other_sessions: usize
 pub universal_exports::BoardAccount::pool: alloc::string::String

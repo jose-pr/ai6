@@ -2779,6 +2779,73 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::list(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::list_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::q::logins
+pub enum ai6::directorates::q::logins::LoginError
+pub ai6::directorates::q::logins::LoginError::Io(core::io::error::Error)
+pub ai6::directorates::q::logins::LoginError::Missing(alloc::string::String)
+pub ai6::directorates::q::logins::LoginError::Vault(ai6::directorates::q::sealing::VaultError)
+impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::logins::LoginError
+pub fn ai6::directorates::q::logins::LoginError::from(ai6::directorates::q::sealing::VaultError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::q::logins::LoginError
+pub fn ai6::directorates::q::logins::LoginError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::q::logins::LoginError
+impl core::fmt::Display for ai6::directorates::q::logins::LoginError
+pub fn ai6::directorates::q::logins::LoginError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum ai6::directorates::q::logins::NoticeKind
+pub ai6::directorates::q::logins::NoticeKind::Failed
+pub ai6::directorates::q::logins::NoticeKind::Leased(alloc::string::String)
+pub ai6::directorates::q::logins::NoticeKind::MayLapse
+pub ai6::directorates::q::logins::NoticeKind::NeedsPerson
+pub ai6::directorates::q::logins::NoticeKind::Renewed
+pub ai6::directorates::q::logins::NoticeKind::Unchanged
+pub enum ai6::directorates::q::logins::RenewEnd
+pub ai6::directorates::q::logins::RenewEnd::Failed(core::option::Option<i32>)
+pub ai6::directorates::q::logins::RenewEnd::NotRun(alloc::string::String)
+pub ai6::directorates::q::logins::RenewEnd::Success
+pub enum ai6::directorates::q::logins::Synced
+pub ai6::directorates::q::logins::Synced::Renewed(u64)
+pub ai6::directorates::q::logins::Synced::Restored(u64, &'static str)
+pub ai6::directorates::q::logins::Synced::Rewritten(u64)
+pub ai6::directorates::q::logins::Synced::Unchanged
+pub struct ai6::directorates::q::logins::CommandRenewer
+impl ai6::directorates::q::logins::LoginRenewer for ai6::directorates::q::logins::CommandRenewer
+pub fn ai6::directorates::q::logins::CommandRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub struct ai6::directorates::q::logins::LoginFiles(_)
+impl ai6::directorates::q::logins::LoginFiles
+pub fn ai6::directorates::q::logins::LoginFiles::expires_at(&self) -> core::option::Option<f64>
+pub fn ai6::directorates::q::logins::LoginFiles::get(&self, &str) -> core::option::Option<&[u8]>
+pub fn ai6::directorates::q::logins::LoginFiles::read(&std::path::Path, &[alloc::string::String]) -> core::io::error::Result<Self>
+pub fn ai6::directorates::q::logins::LoginFiles::write(&self, &std::path::Path) -> core::io::error::Result<()>
+impl core::fmt::Debug for ai6::directorates::q::logins::LoginFiles
+pub fn ai6::directorates::q::logins::LoginFiles::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::directorates::q::logins::LoginFiles
+pub fn ai6::directorates::q::logins::LoginFiles::drop(&mut self)
+pub struct ai6::directorates::q::logins::LoginNotice
+pub ai6::directorates::q::logins::LoginNotice::account: ai6::directorates::registry::accounts::AccountRef
+pub ai6::directorates::q::logins::LoginNotice::kind: ai6::directorates::q::logins::NoticeKind
+pub ai6::directorates::q::logins::LoginNotice::text: alloc::string::String
+pub struct ai6::directorates::q::logins::SessionLogin
+pub ai6::directorates::q::logins::SessionLogin::account: ai6::directorates::registry::accounts::AccountRef
+pub ai6::directorates::q::logins::SessionLogin::files: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::logins::SessionLogin::home: std::path::PathBuf
+pub ai6::directorates::q::logins::SessionLogin::revision: u64
+pub ai6::directorates::q::logins::SessionLogin::started: u64
+impl ai6::directorates::q::logins::SessionLogin
+pub fn ai6::directorates::q::logins::SessionLogin::harness_starts(&mut self)
+pub fn ai6::directorates::q::logins::SessionLogin::materialize(&ai6::directorates::q::sealing::Vault, &ai6::directorates::registry::accounts::AccountRef, &[alloc::string::String], &std::path::Path) -> core::result::Result<Self, ai6::directorates::q::logins::LoginError>
+pub fn ai6::directorates::q::logins::SessionLogin::recall(&std::path::Path) -> core::option::Option<Self>
+pub fn ai6::directorates::q::logins::SessionLogin::remove(&self) -> core::io::error::Result<()>
+pub fn ai6::directorates::q::logins::SessionLogin::sync(&mut self, &ai6::directorates::q::sealing::Vault, core::option::Option<u64>, f64) -> core::result::Result<ai6::directorates::q::logins::Synced, ai6::directorates::q::logins::LoginError>
+pub trait ai6::directorates::q::logins::LoginRenewer: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::logins::LoginRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+impl ai6::directorates::q::logins::LoginRenewer for ai6::directorates::q::logins::CommandRenewer
+pub fn ai6::directorates::q::logins::CommandRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub fn ai6::directorates::q::logins::add_login(&ai6::directorates::q::sealing::Vault, &ai6::directorates::registry::accounts::AccountRef, &std::path::Path, &[alloc::string::String], &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<u64, ai6::directorates::q::logins::LoginError>
+pub fn ai6::directorates::q::logins::assign_renewals(&dyn ai6::directorates::registry::backend::RegistryBackend, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &str, &[alloc::string::String], &ai6::station::limits::AccountLimits, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
+pub fn ai6::directorates::q::logins::login_accounts<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>) -> alloc::vec::Vec<(ai6::directorates::registry::accounts::AccountRef, &'a ai6::Account)>
+pub fn ai6::directorates::q::logins::renewal_due(&ai6::directorates::registry::accounts::LoginState, &ai6::station::limits::AccountLimits, f64) -> bool
+pub fn ai6::directorates::q::logins::run_leases(&ai6::directorates::q::sealing::Vault, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &dyn ai6::directorates::q::logins::LoginRenewer, &std::path::Path, &ai6::station::limits::AccountLimits, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
+pub fn ai6::directorates::q::logins::sealed_name(&ai6::directorates::registry::accounts::AccountRef) -> alloc::string::String
 pub mod ai6::directorates::q::outbound
 pub enum ai6::directorates::q::outbound::Refusal
 pub ai6::directorates::q::outbound::Refusal::CredentialPattern
@@ -3292,6 +3359,79 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub mod ai6::directorates::q::sealing
+#[non_exhaustive] pub enum ai6::directorates::q::sealing::VaultError
+pub ai6::directorates::q::sealing::VaultError::Conflict
+pub ai6::directorates::q::sealing::VaultError::Conflict::held: core::option::Option<u64>
+pub ai6::directorates::q::sealing::VaultError::NoKey(alloc::string::String)
+pub ai6::directorates::q::sealing::VaultError::NotFound
+pub ai6::directorates::q::sealing::VaultError::NotNamed
+pub ai6::directorates::q::sealing::VaultError::Registry(core::io::error::Error)
+pub ai6::directorates::q::sealing::VaultError::Sealing
+pub ai6::directorates::q::sealing::VaultError::Unreadable
+pub ai6::directorates::q::sealing::VaultError::Unverified(alloc::string::String)
+impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::logins::LoginError
+pub fn ai6::directorates::q::logins::LoginError::from(ai6::directorates::q::sealing::VaultError) -> Self
+impl core::convert::From<ai6::directorates::registry::sealed::SealedWriteError> for ai6::directorates::q::sealing::VaultError
+pub fn ai6::directorates::q::sealing::VaultError::from(ai6::directorates::registry::sealed::SealedWriteError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::q::sealing::VaultError
+pub fn ai6::directorates::q::sealing::VaultError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::q::sealing::VaultError
+impl core::fmt::Display for ai6::directorates::q::sealing::VaultError
+pub fn ai6::directorates::q::sealing::VaultError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::Opened
+pub ai6::directorates::q::sealing::Opened::revision: u64
+pub ai6::directorates::q::sealing::Opened::stations: alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub ai6::directorates::q::sealing::Opened::value: zeroize::Zeroizing<alloc::string::String>
+impl core::fmt::Debug for ai6::directorates::q::sealing::Opened
+pub fn ai6::directorates::q::sealing::Opened::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::Recipient
+impl ai6::directorates::q::sealing::Recipient
+pub fn ai6::directorates::q::sealing::Recipient::named(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::q::sealing::Recipient::pinned(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::q::sealing::Recipient::station(&self) -> &str
+pub struct ai6::directorates::q::sealing::RegistrySecretFields
+pub ai6::directorates::q::sealing::RegistrySecretFields::stations: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub struct ai6::directorates::q::sealing::RegistrySecrets
+impl ai6::directorates::q::sealing::RegistrySecrets
+pub fn ai6::directorates::q::sealing::RegistrySecrets::new(alloc::sync::Arc<ai6::directorates::q::sealing::Vault>) -> Self
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::sealing::RegistrySecrets
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub struct ai6::directorates::q::sealing::SealingKey(_)
+impl ai6::directorates::q::sealing::SealingKey
+pub fn ai6::directorates::q::sealing::SealingKey::generate() -> Self
+pub fn ai6::directorates::q::sealing::SealingKey::open_or_create(&std::path::Path) -> core::io::error::Result<Self>
+pub fn ai6::directorates::q::sealing::SealingKey::public_key(&self) -> ai6::directorates::q::sealing::SealingPublicKey
+impl core::fmt::Debug for ai6::directorates::q::sealing::SealingKey
+pub fn ai6::directorates::q::sealing::SealingKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::SealingPublicKey(_)
+impl ai6::directorates::q::sealing::SealingPublicKey
+pub fn ai6::directorates::q::sealing::SealingPublicKey::parse(&str) -> core::option::Option<Self>
+pub fn ai6::directorates::q::sealing::SealingPublicKey::to_text(&self) -> alloc::string::String
+impl core::fmt::Debug for ai6::directorates::q::sealing::SealingPublicKey
+pub fn ai6::directorates::q::sealing::SealingPublicKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::Vault
+impl ai6::directorates::q::sealing::Vault
+pub fn ai6::directorates::q::sealing::Vault::add_station(&self, &str, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, impl core::convert::Into<alloc::string::String>, alloc::sync::Arc<ai6::directorates::q::sealing::SealingKey>) -> Self
+pub fn ai6::directorates::q::sealing::Vault::open(&self, &str) -> core::result::Result<ai6::directorates::q::sealing::Opened, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::registry(&self) -> &dyn ai6::directorates::registry::backend::RegistryBackend
+pub fn ai6::directorates::q::sealing::Vault::remove_station(&self, &str, &str, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::replace(&self, &str, &str, u64, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::seal_to(&self, &str, &str, &[ai6::directorates::q::sealing::Recipient], ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::station(&self) -> &str
+impl core::fmt::Debug for ai6::directorates::q::sealing::Vault
+pub fn ai6::directorates::q::sealing::Vault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const ai6::directorates::q::sealing::REGISTRY_PROVIDER: &str
+pub const ai6::directorates::q::sealing::SEALING_KEY_FILE: &str
 pub mod ai6::directorates::q::secret_kind
 pub mod ai6::directorates::q::secret_kind::builtin
 pub struct ai6::directorates::q::secret_kind::builtin::EnvSecrets
@@ -3418,6 +3558,7 @@ pub ai6::directorates::q::secret_kind::SecretStore::value: guatiao::value::secre
 pub struct ai6::directorates::q::secret_kind::SecretStored
 pub ai6::directorates::q::secret_kind::SecretStored::revision: core::option::Option<alloc::string::String>
 pub const ai6::directorates::q::secret_kind::BUILT_IN: [&str; 3]
+pub const ai6::directorates::q::secret_kind::REGISTRY_PROVIDER: &str
 pub const ai6::directorates::q::secret_kind::RESERVED_FIELDS: [&str; 7]
 pub trait ai6::directorates::q::secret_kind::SecretProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::secret_kind::SecretProvider::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -3429,6 +3570,16 @@ pub fn ai6::directorates::q::secret_kind::SecretProvider::read_in(&self, &guatia
 pub fn ai6::directorates::q::secret_kind::SecretProvider::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::secret_kind::SecretProvider::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::secret_kind::SecretProvider::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::sealing::RegistrySecrets
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
 pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -3778,15 +3929,22 @@ impl ai6::Account
 pub fn ai6::Account::concurrency(&self) -> core::option::Option<usize>
 pub fn ai6::Account::dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::Account::env(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::Account::files(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn ai6::Account::keeps_login_files(&self) -> bool
 pub fn ai6::Account::kind(&self) -> ai6::AccountKind
 pub fn ai6::Account::label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::labels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn ai6::Account::login_dir(&self) -> core::option::Option<&std::path::Path>
+pub fn ai6::Account::login_files(&self) -> &[alloc::string::String]
 pub fn ai6::Account::max_concurrent(self, usize) -> Self
 pub fn ai6::Account::name(&self) -> &str
 pub fn ai6::Account::new(impl core::convert::Into<alloc::string::String>, ai6::AccountKind) -> Self
 pub fn ai6::Account::priority(self, i64) -> Self
 pub fn ai6::Account::priority_value(&self) -> i64
+pub fn ai6::Account::renew_command(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn ai6::Account::renew_env(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::Account::renewal(&self) -> &[alloc::string::String]
+pub fn ai6::Account::renewal_env(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn ai6::Account::secret(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::secret_name(&self) -> core::option::Option<&str>
 pub fn ai6::Account::variable(&self, &str) -> core::option::Option<alloc::string::String>
@@ -3986,6 +4144,16 @@ pub fn ai6::directorates::q::SecretProvider::read_in(&self, &guatiao::value::val
 pub fn ai6::directorates::q::SecretProvider::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::SecretProvider::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::SecretProvider::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::sealing::RegistrySecrets
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
 pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -4046,6 +4214,7 @@ pub struct ai6::directorates::registry::accounts::AccountCandidate
 pub ai6::directorates::registry::accounts::AccountCandidate::account: alloc::string::String
 pub ai6::directorates::registry::accounts::AccountCandidate::max_concurrent: core::option::Option<usize>
 pub ai6::directorates::registry::accounts::AccountCandidate::priority: i64
+pub ai6::directorates::registry::accounts::AccountCandidate::sealed_login: bool
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::AccountClaim
 pub ai6::directorates::registry::accounts::AccountClaim::expires: f64
 pub ai6::directorates::registry::accounts::AccountClaim::mission: alloc::string::String
@@ -4085,6 +4254,7 @@ pub ai6::directorates::registry::accounts::AccountState::active: alloc::vec::Vec
 pub ai6::directorates::registry::accounts::AccountState::daily_tokens: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub ai6::directorates::registry::accounts::AccountState::last_used: core::option::Option<f64>
 pub ai6::directorates::registry::accounts::AccountState::limited_until: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::AccountState::login: core::option::Option<ai6::directorates::registry::accounts::LoginState>
 pub ai6::directorates::registry::accounts::AccountState::profiles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountProfile>
 pub ai6::directorates::registry::accounts::AccountState::windows: alloc::vec::Vec<ai6::directorates::registry::accounts::QuotaWindow>
 impl ai6::directorates::registry::accounts::AccountState
@@ -4094,6 +4264,20 @@ pub fn ai6::directorates::registry::accounts::AccountState::live_claims(&self, f
 pub fn ai6::directorates::registry::accounts::AccountState::new(ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::accounts::AccountState::profile(&self) -> core::option::Option<ai6::directorates::registry::accounts::AccountProfile>
 pub fn ai6::directorates::registry::accounts::AccountState::tokens_on_day(&self, i64) -> u64
+#[non_exhaustive] pub struct ai6::directorates::registry::accounts::LoginState
+pub ai6::directorates::registry::accounts::LoginState::checked_at: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::LoginState::expires_at: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::LoginState::failures: u32
+pub ai6::directorates::registry::accounts::LoginState::lease: core::option::Option<ai6::directorates::registry::accounts::RenewalLease>
+pub ai6::directorates::registry::accounts::LoginState::needs_person: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::accounts::LoginState::next_try: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::LoginState::renewed_at: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::LoginState::revision: u64
+pub ai6::directorates::registry::accounts::LoginState::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::accounts::LoginState::warned_at: core::option::Option<f64>
+impl ai6::directorates::registry::accounts::LoginState
+pub fn ai6::directorates::registry::accounts::LoginState::leased_at(&self, f64) -> core::option::Option<&ai6::directorates::registry::accounts::RenewalLease>
+pub fn ai6::directorates::registry::accounts::LoginState::usable_by(&self, &str) -> bool
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::QuotaWindow
 pub ai6::directorates::registry::accounts::QuotaWindow::name: alloc::string::String
 pub ai6::directorates::registry::accounts::QuotaWindow::observed_at: f64
@@ -4106,8 +4290,12 @@ pub fn ai6::directorates::registry::accounts::QuotaWindow::resets_at(self, f64) 
 pub fn ai6::directorates::registry::accounts::QuotaWindow::status(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::use_at(&self, f64, u16) -> u16
 pub fn ai6::directorates::registry::accounts::QuotaWindow::used_permille(self, u16) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::accounts::RenewalLease
+pub ai6::directorates::registry::accounts::RenewalLease::station: alloc::string::String
+pub ai6::directorates::registry::accounts::RenewalLease::until: f64
 pub trait ai6::directorates::registry::accounts::AccountStore
 pub fn ai6::directorates::registry::accounts::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::accounts::AccountStore::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::accounts::AccountStore::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::accounts::AccountStore::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::accounts::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -4119,6 +4307,7 @@ pub fn ai6::directorates::registry::accounts::AccountStore::report_quota(&self, 
 pub fn ai6::directorates::registry::accounts::AccountStore::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -4130,6 +4319,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::report_quota(&self, &ai6::
 pub fn ai6::directorates::registry::sql::SqlRegistry::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::store::FileRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -4139,7 +4329,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::release_account(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::renew_account_claims(&self, &str, &[alloc::string::String], core::time::Duration, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::report_quota(&self, &ai6::directorates::registry::accounts::AccountRef, &[ai6::directorates::registry::accounts::QuotaWindow]) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
-pub fn ai6::directorates::registry::accounts::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64, u16) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
+pub fn ai6::directorates::registry::accounts::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64, u16, &str) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub mod ai6::directorates::registry::agent_records
 #[non_exhaustive] pub enum ai6::directorates::registry::agent_records::AgentOutcome
 pub ai6::directorates::registry::agent_records::AgentOutcome::Abandoned
@@ -4445,6 +4635,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&se
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::AccountStore
 pub fn ai6::directorates::registry::backend::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::backend::AccountStore::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::backend::AccountStore::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::backend::AccountStore::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -4456,6 +4647,7 @@ pub fn ai6::directorates::registry::backend::AccountStore::report_quota(&self, &
 pub fn ai6::directorates::registry::backend::AccountStore::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -4467,6 +4659,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::report_quota(&self, &ai6::
 pub fn ai6::directorates::registry::sql::SqlRegistry::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::store::FileRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -4899,8 +5092,29 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::SealedStore
+pub fn ai6::directorates::registry::backend::SealedStore::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::SealedStore::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::SealedStore::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::backend::SealedStore::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::backend::SealedStore::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::backend::SealedStore::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::store::FileRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 pub trait ai6::directorates::registry::backend::SessionContextStore
 pub fn ai6::directorates::registry::backend::SessionContextStore::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
 pub fn ai6::directorates::registry::backend::SessionContextStore::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
@@ -5509,6 +5723,7 @@ pub mod ai6::directorates::registry::limits
 pub ai6::directorates::registry::limits::AccountLimits::claims: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::AccountLimits::kept_days: u32
 pub ai6::directorates::registry::limits::AccountLimits::record_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::AccountLimits::sealed_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::AccountLimits::windows: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::AccountLimits
 pub fn ai6::directorates::registry::limits::AccountLimits::default() -> Self
@@ -6278,6 +6493,63 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, 
 pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::reviews::tally(&[ai6::directorates::registry::reviews::MissionReview]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::reviews::ReviewTally>
 pub fn ai6::directorates::registry::reviews::update_mission_review(&dyn ai6::directorates::registry::reviews::MissionReviewStore, (&str, ai6::directorates::m::review::ReviewGate), usize, impl core::ops::function::FnMut(&mut ai6::directorates::registry::reviews::MissionReview) -> bool) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub mod ai6::directorates::registry::sealed
+pub enum ai6::directorates::registry::sealed::SealedExpect
+pub ai6::directorates::registry::sealed::SealedExpect::Absent
+pub ai6::directorates::registry::sealed::SealedExpect::Any
+pub ai6::directorates::registry::sealed::SealedExpect::Revision(u64)
+#[non_exhaustive] pub enum ai6::directorates::registry::sealed::SealedWriteError
+pub ai6::directorates::registry::sealed::SealedWriteError::Conflict
+pub ai6::directorates::registry::sealed::SealedWriteError::Conflict::held: core::option::Option<u64>
+pub ai6::directorates::registry::sealed::SealedWriteError::Io(core::io::error::Error)
+impl core::convert::From<ai6::directorates::registry::sealed::SealedWriteError> for ai6::directorates::q::sealing::VaultError
+pub fn ai6::directorates::q::sealing::VaultError::from(ai6::directorates::registry::sealed::SealedWriteError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::sealed::SealedWriteError
+pub fn ai6::directorates::registry::sealed::SealedWriteError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::registry::sealed::SealedWriteError
+impl core::fmt::Display for ai6::directorates::registry::sealed::SealedWriteError
+pub fn ai6::directorates::registry::sealed::SealedWriteError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::registry::sealed::SealedCopy
+pub ai6::directorates::registry::sealed::SealedCopy::key: alloc::string::String
+pub ai6::directorates::registry::sealed::SealedCopy::sealed: alloc::string::String
+impl core::fmt::Debug for ai6::directorates::registry::sealed::SealedCopy
+pub fn ai6::directorates::registry::sealed::SealedCopy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::registry::sealed::SealedRecord
+pub ai6::directorates::registry::sealed::SealedRecord::copies: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>
+pub ai6::directorates::registry::sealed::SealedRecord::name: alloc::string::String
+pub ai6::directorates::registry::sealed::SealedRecord::revision: u64
+pub ai6::directorates::registry::sealed::SealedRecord::written_at: f64
+pub ai6::directorates::registry::sealed::SealedRecord::written_by: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::sealed::StationSealingKey
+pub ai6::directorates::registry::sealed::StationSealingKey::certificate: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sealed::StationSealingKey::public_key: alloc::string::String
+pub ai6::directorates::registry::sealed::StationSealingKey::scheme: core::option::Option<u16>
+pub ai6::directorates::registry::sealed::StationSealingKey::signature: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sealed::StationSealingKey::station: alloc::string::String
+impl ai6::directorates::registry::sealed::StationSealingKey
+pub fn ai6::directorates::registry::sealed::StationSealingKey::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sealed::StationSealingKey::signed(self, alloc::string::String, u16, alloc::string::String) -> Self
+pub trait ai6::directorates::registry::sealed::SealedStore
+pub fn ai6::directorates::registry::sealed::SealedStore::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sealed::SealedStore::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sealed::SealedStore::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::sealed::SealedStore::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::sealed::SealedStore::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::sealed::SealedStore::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::store::FileRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 pub mod ai6::directorates::registry::sessions
 #[non_exhaustive] pub enum ai6::directorates::registry::sessions::OutcomeVerdict
 pub ai6::directorates::registry::sessions::OutcomeVerdict::Confirmed
@@ -6571,6 +6843,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::open(&str) -> core::io::er
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -6680,6 +6953,13 @@ impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directora
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
@@ -6830,6 +7110,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::root(&self) -> &std::pa
 pub fn ai6::directorates::registry::store::FileRegistry::with_limits(self, ai6::directorates::registry::limits::RegistryLimits) -> Self
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::store::FileRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -6939,6 +7220,13 @@ impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directora
 pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::store::FileRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
@@ -8020,10 +8308,12 @@ impl core::fmt::Display for ai6::station::identity::StationIdentityError
 pub fn ai6::station::identity::StationIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const ai6::station::identity::IDENTITY_FILE: &str
 pub const ai6::station::identity::STATION_ALPN: &[u8]
+pub fn ai6::station::identity::check_sealing_key(&ai6::directorates::registry::sealed::StationSealingKey, core::option::Option<&str>) -> core::result::Result<(), ()>
 pub fn ai6::station::identity::client_config(&coqui_peer_tls::identity::Identity, &coqui_peer::id::PeerId, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer_tls::config::Built<rustls::client::client_conn::ClientConfig>, ai6::station::identity::StationIdentityError>
 pub fn ai6::station::identity::open_identity(&std::path::Path) -> core::result::Result<coqui_peer_tls::identity::Identity, ai6::station::identity::StationIdentityError>
 pub fn ai6::station::identity::open_peers(&std::path::Path, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer::store::TrustStore, ai6::station::identity::StationIdentityError>
 pub fn ai6::station::identity::server_config(&coqui_peer_tls::identity::Identity, &coqui_peer_tls::trust::Trust, &coqui_peer_tls::policy::Policy) -> core::result::Result<coqui_peer_tls::config::Built<rustls::server::server_conn::ServerConfig>, ai6::station::identity::StationIdentityError>
+pub fn ai6::station::identity::sign_sealing_key(&coqui_peer_tls::identity::Identity, &str, &str) -> core::result::Result<ai6::directorates::registry::sealed::StationSealingKey, alloc::string::String>
 pub fn ai6::station::identity::trust_peers(coqui_peer::store::TrustStore) -> coqui_peer_tls::trust::Trust
 pub mod ai6::station::limits
 #[non_exhaustive] pub struct ai6::station::limits::AccountLimits
@@ -8033,6 +8323,14 @@ pub ai6::station::limits::AccountLimits::login_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::model_probe_timeout: ai6::bounds::TimeLimit
 pub ai6::station::limits::AccountLimits::model_probes: ai6::bounds::Limit
 pub ai6::station::limits::AccountLimits::models_every: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_after: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_attempts: ai6::bounds::Limit
+pub ai6::station::limits::AccountLimits::renew_backoff: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_backoff_max: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_every: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_lease: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::AccountLimits::renew_within: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::reset_grace: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::unknown_use_permille: u16
 impl core::default::Default for ai6::station::limits::AccountLimits
@@ -8454,6 +8752,7 @@ pub fn ai6::station::server::StationConfig::with_protected_path(self, impl core:
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
+pub fn ai6::station::server::StationConfig::with_sealing_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
@@ -9136,15 +9435,22 @@ impl ai6::Account
 pub fn ai6::Account::concurrency(&self) -> core::option::Option<usize>
 pub fn ai6::Account::dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::Account::env(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::Account::files(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn ai6::Account::keeps_login_files(&self) -> bool
 pub fn ai6::Account::kind(&self) -> ai6::AccountKind
 pub fn ai6::Account::label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::labels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn ai6::Account::login_dir(&self) -> core::option::Option<&std::path::Path>
+pub fn ai6::Account::login_files(&self) -> &[alloc::string::String]
 pub fn ai6::Account::max_concurrent(self, usize) -> Self
 pub fn ai6::Account::name(&self) -> &str
 pub fn ai6::Account::new(impl core::convert::Into<alloc::string::String>, ai6::AccountKind) -> Self
 pub fn ai6::Account::priority(self, i64) -> Self
 pub fn ai6::Account::priority_value(&self) -> i64
+pub fn ai6::Account::renew_command(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn ai6::Account::renew_env(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::Account::renewal(&self) -> &[alloc::string::String]
+pub fn ai6::Account::renewal_env(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn ai6::Account::secret(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::secret_name(&self) -> core::option::Option<&str>
 pub fn ai6::Account::variable(&self, &str) -> core::option::Option<alloc::string::String>
@@ -9153,6 +9459,7 @@ pub struct ai6::AccountCandidate
 pub ai6::AccountCandidate::account: alloc::string::String
 pub ai6::AccountCandidate::max_concurrent: core::option::Option<usize>
 pub ai6::AccountCandidate::priority: i64
+pub ai6::AccountCandidate::sealed_login: bool
 #[non_exhaustive] pub struct ai6::AccountClaim
 pub ai6::AccountClaim::expires: f64
 pub ai6::AccountClaim::mission: alloc::string::String
@@ -9174,6 +9481,7 @@ pub fn ai6::directorates::registry::accounts::AccountClaimRequest::unknown_use(s
 pub ai6::AccountLimits::claims: ai6::bounds::Limit
 pub ai6::AccountLimits::kept_days: u32
 pub ai6::AccountLimits::record_bytes: ai6::bounds::Limit
+pub ai6::AccountLimits::sealed_bytes: ai6::bounds::Limit
 pub ai6::AccountLimits::windows: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::AccountLimits
 pub fn ai6::directorates::registry::limits::AccountLimits::default() -> Self
@@ -9217,6 +9525,7 @@ pub ai6::AccountState::active: alloc::vec::Vec<ai6::directorates::registry::acco
 pub ai6::AccountState::daily_tokens: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub ai6::AccountState::last_used: core::option::Option<f64>
 pub ai6::AccountState::limited_until: core::option::Option<f64>
+pub ai6::AccountState::login: core::option::Option<ai6::directorates::registry::accounts::LoginState>
 pub ai6::AccountState::profiles: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountProfile>
 pub ai6::AccountState::windows: alloc::vec::Vec<ai6::directorates::registry::accounts::QuotaWindow>
 impl ai6::directorates::registry::accounts::AccountState
@@ -10485,6 +10794,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::root(&self) -> &std::pa
 pub fn ai6::directorates::registry::store::FileRegistry::with_limits(self, ai6::directorates::registry::limits::RegistryLimits) -> Self
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::store::FileRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -10594,6 +10904,13 @@ impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directora
 pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::store::FileRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
@@ -10906,6 +11223,20 @@ impl ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::record_bytes(&self) -> ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::LoginState
+pub ai6::LoginState::checked_at: core::option::Option<f64>
+pub ai6::LoginState::expires_at: core::option::Option<f64>
+pub ai6::LoginState::failures: u32
+pub ai6::LoginState::lease: core::option::Option<ai6::directorates::registry::accounts::RenewalLease>
+pub ai6::LoginState::needs_person: core::option::Option<alloc::string::String>
+pub ai6::LoginState::next_try: core::option::Option<f64>
+pub ai6::LoginState::renewed_at: core::option::Option<f64>
+pub ai6::LoginState::revision: u64
+pub ai6::LoginState::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::LoginState::warned_at: core::option::Option<f64>
+impl ai6::directorates::registry::accounts::LoginState
+pub fn ai6::directorates::registry::accounts::LoginState::leased_at(&self, f64) -> core::option::Option<&ai6::directorates::registry::accounts::RenewalLease>
+pub fn ai6::directorates::registry::accounts::LoginState::usable_by(&self, &str) -> bool
 #[non_exhaustive] pub struct ai6::LoginTable
 pub ai6::LoginTable::address_window: ai6::bounds::Seconds
 pub ai6::LoginTable::forget_every: u64
@@ -11494,6 +11825,9 @@ impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&self) -> ai6::bounds::Limit
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::RenewalLease
+pub ai6::RenewalLease::station: alloc::string::String
+pub ai6::RenewalLease::until: f64
 pub struct ai6::Reply
 pub ai6::Reply::author: alloc::string::String
 pub ai6::Reply::author_id: alloc::string::String
@@ -12188,6 +12522,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::open(&str) -> core::io::er
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -12297,6 +12632,13 @@ impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directora
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 impl ai6::directorates::registry::sessions::SessionStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::file_final_report(&self, &ai6::directorates::registry::sessions::FinalReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::FinalReport>>
@@ -12440,6 +12782,7 @@ pub fn ai6::station::server::StationConfig::with_protected_path(self, impl core:
 pub fn ai6::station::server::StationConfig::with_resources_every(self, core::time::Duration) -> Self
 pub fn ai6::station::server::StationConfig::with_roles(self, impl core::iter::traits::collect::IntoIterator<Item = ai6::station::server::StationRole>) -> Self
 pub fn ai6::station::server::StationConfig::with_safe_house_hygiene(self, ai6::station::safehouse::SafeHouseHygiene) -> Self
+pub fn ai6::station::server::StationConfig::with_sealing_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::station::server::StationConfig::with_terminal(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::StationConfig::with_theater(self, ai6::directorates::m::theaters::Theater) -> Self
@@ -13093,6 +13436,7 @@ impl ai6::AccountLogin for ai6::CommandLogin
 pub fn ai6::CommandLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::path::Path, &str) -> core::result::Result<(), alloc::string::String>
 pub trait ai6::AccountStore
 pub fn ai6::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::AccountStore::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::AccountStore::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::AccountStore::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::AccountStore::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -13104,6 +13448,7 @@ pub fn ai6::AccountStore::report_quota(&self, &ai6::directorates::registry::acco
 pub fn ai6::AccountStore::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -13115,6 +13460,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::report_quota(&self, &ai6::
 pub fn ai6::directorates::registry::sql::SqlRegistry::withdraw_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str) -> core::io::error::Result<()>
 impl ai6::directorates::registry::accounts::AccountStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
+pub fn ai6::directorates::registry::store::FileRegistry::change_login(&self, &ai6::directorates::registry::accounts::AccountRef, &mut dyn core::ops::function::FnMut(&mut core::option::Option<ai6::directorates::registry::accounts::LoginState>)) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::LoginState>>
 pub fn ai6::directorates::registry::store::FileRegistry::claim_account(&self, &ai6::directorates::registry::accounts::AccountClaimRequest, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::accounts::AccountState>>
 pub fn ai6::directorates::registry::store::FileRegistry::clear_account_limit(&self, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::declare_account(&self, &ai6::directorates::registry::accounts::AccountRef, &str, &ai6::directorates::registry::accounts::AccountProfile) -> core::io::error::Result<()>
@@ -13534,8 +13880,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
@@ -13572,6 +13918,27 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseSession>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession> where Self: core::marker::Sized + core::marker::Send + 'static
+pub trait ai6::SealedStore
+pub fn ai6::SealedStore::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::SealedStore::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::SealedStore::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::SealedStore::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::SealedStore::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::SealedStore::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
+impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::remove_sealed(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_revisions(&self) -> core::io::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealed_value(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::SealedRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::sealing_key(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sealed::StationSealingKey>>
+pub fn ai6::directorates::registry::store::FileRegistry::store_sealed(&self, &str, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::sealed::SealedCopy>, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::registry::sealed::SealedWriteError>
 pub trait ai6::SecretProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SecretProvider::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SecretProvider::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -13582,6 +13949,16 @@ pub fn ai6::SecretProvider::read_in(&self, &guatiao::value::value::Value, guatia
 pub fn ai6::SecretProvider::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::SecretProvider::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::SecretProvider::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::sealing::RegistrySecrets
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::lease_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::read_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::revoke(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::q::sealing::RegistrySecrets::store_in(&self, &guatiao::value::value::Value, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::secret_kind::SecretProvider for ai6::directorates::q::secret_kind::builtin::EnvSecrets
 pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::secret_kind::builtin::EnvSecrets::fields_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -13926,7 +14303,7 @@ pub fn ai6::applicable_review(&ai6::directorates::m::review::PolicyLookup<'_>) -
 pub fn ai6::cable_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::check_change(&ai6::AccessPolicy, &ai6::AccessPolicy, &ai6::Editor, &ai6::EffectiveAccess, &ai6::Lineage) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::check_operation_change(&str, &ai6::OperationAccess, &ai6::OperationAccess, &ai6::Editor, &ai6::EffectiveAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
-pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64, u16) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
+pub fn ai6::choose_account<'a>(ai6::PoolStrategy, &'a [ai6::directorates::registry::accounts::AccountCandidate], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::registry::accounts::AccountState>, core::option::Option<&str>, f64, u16, &str) -> core::option::Option<&'a ai6::directorates::registry::accounts::AccountCandidate>
 pub fn ai6::choose_panel(&ai6::directorates::m::review::ReviewPolicy, &ai6::directorates::m::review::PanelCandidate, &[ai6::directorates::m::review::PanelCandidate]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::review::Reviewer>, ai6::directorates::m::review::PanelRefusal>
 pub fn ai6::choose_pools<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&[alloc::string::String]>, core::option::Option<&str>) -> ai6::PoolChoice<'a>
 pub fn ai6::choose_route(ai6::PoolStrategy, &[ai6::RouteStanding], u16) -> core::option::Option<usize>
