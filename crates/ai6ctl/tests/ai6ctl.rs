@@ -906,7 +906,8 @@ async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
     assert!(printed[0].starts_with("# the last 30 days;"), "{printed:?}");
     assert!(printed[1].starts_with("AGENT\tROUTE\tJUDGED\tFAILURE_RATE\tSAMPLE\tDONE\tFAILED\t"));
     assert!(
-        printed[2].starts_with("007\tall\t2\t50%\tSMALL\t1\t1\t0\t0\t0\t0\t0\t0\t0\t0\t1\t0\t0\t0\t"),
+        printed[2]
+            .starts_with("007\tall\t2\t50%\tSMALL\t1\t1\t0\t0\t0\t0\t0\t0\t0\t0\t1\t0\t0\t0\t"),
         "{}",
         printed[2]
     );

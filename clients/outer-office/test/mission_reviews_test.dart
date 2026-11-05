@@ -157,6 +157,21 @@ void main() {
     );
   }
 
+  testWidgets('a profile that holds mission.review offers the overrule', (
+    tester,
+  ) async {
+    final board = await _board(['mission.read', 'mission.review'], []);
+    expect(board.hasOperationAction('G', 'mission.review'), isTrue);
+    await _show(
+      tester,
+      1280,
+      MissionReviewsSection(board: board, operationId: 'G', missionId: 'm1'),
+    );
+    expect(find.text('Pass it'), findsOneWidget);
+    expect(find.text('Send it back'), findsOneWidget);
+    expect(find.text('Refuse it'), findsOneWidget);
+  });
+
   testWidgets(
     'a person with mission.review decides over the panel with a reason',
     (tester) async {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `GET /v1/user/profile` reads its Operation and Station actions from `ai6::OPERATION_ACTIONS` and the new
+  `ai6::STATION_ACTIONS` instead of a list of its own, which left out `mission.review` (so Outer Office
+  never offered the overrule), `session.context` and the `issue.*` actions. The lists are in catalog order.
+
 ### Added
 
 - A settled Source item reopens as its Mission's next attempt (same UID and handle): an

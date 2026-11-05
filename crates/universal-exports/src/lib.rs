@@ -20,6 +20,8 @@ mod moneypenny;
 mod page_access;
 mod pools;
 #[cfg(test)]
+mod profile_tests;
+#[cfg(test)]
 mod rename_tests;
 mod reviews;
 mod roster;
@@ -3804,7 +3806,7 @@ async fn user_profile(
         for station in &station_records {
             let station_id = station.station().to_owned();
             let mut actions = Vec::new();
-            for action in ["station.read", "station.configure", "audit.read"] {
+            for &action in ai6::STATION_ACTIONS {
                 let allowed = authorizer
                     .authorize(AuthorizationRequest {
                         person: authorization_person.clone(),
@@ -3842,29 +3844,7 @@ async fn user_profile(
         let mut operations = Vec::new();
         for operation_id in operation_ids {
             let mut actions = Vec::new();
-            for action in [
-                "mission.read",
-                "mission.status",
-                "product.read",
-                "memory.write",
-                "compartment.cover",
-                "mission.create",
-                "mission.control",
-                "mission.verify",
-                "approval.decide",
-                "approval.class",
-                "session.read",
-                "session.input",
-                "audit.read",
-                "agent.read",
-                "agent.configure",
-                "pool.read",
-                "pool.manage",
-                "cable.send",
-                "cable.read",
-                "access.read",
-                "access.manage",
-            ] {
+            for &action in ai6::OPERATION_ACTIONS {
                 let allowed = authorizer
                     .authorize(operation_request(
                         authorization_person.clone(),
@@ -8330,13 +8310,13 @@ mod tests {
         assert_eq!(
             operator_profile["operations"][0]["actions"],
             serde_json::json!([
-                "mission.read",
-                "mission.create",
-                "session.read",
-                "session.input",
-                "audit.read",
+                "agent.configure",
                 "agent.read",
-                "agent.configure"
+                "audit.read",
+                "mission.create",
+                "mission.read",
+                "session.input",
+                "session.read",
             ])
         );
         let station_access = operator_profile["stations"].as_array().unwrap();
@@ -8346,7 +8326,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             worker_access["actions"],
-            serde_json::json!(["station.read", "station.configure", "audit.read"])
+            serde_json::json!(["audit.read", "station.configure", "station.read"])
         );
         let initial_settings = client
             .get(format!("{base}/v1/user/stations/worker/settings"))

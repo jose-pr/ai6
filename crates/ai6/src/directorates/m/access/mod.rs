@@ -104,6 +104,9 @@ pub const ACTIONS: &[&str] = &[
     "station.read",
 ];
 
+/// The actions that mean something on a Station, at `station:<id>`.
+pub const STATION_ACTIONS: &[&str] = &["audit.read", "station.configure", "station.read"];
+
 /// The actions that mean something on an Operation: a role bound at `operation:<id>` grants
 /// only these there, and an Operation's own roles may hold only these.
 pub const OPERATION_ACTIONS: &[&str] = &[

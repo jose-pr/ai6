@@ -77,6 +77,8 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
                               // assistant.memory.admin on config:assistant reads another
                               // person's memory; access.read / access.manage read and change
                               // a policy at config:access (global) or operation:<id>
+pub const STATION_ACTIONS: &[&str];     // those that mean something at station:<id>: audit.read,
+                              // station.configure, station.read
 pub const OPERATION_ACTIONS: &[&str];   // the ACTIONS that mean something on an Operation:
                               // agent.*, approval.*, cable.*, mission.*, pool.*, session.*,
                               // audit.read, access.read, access.manage, compartment.cover,
