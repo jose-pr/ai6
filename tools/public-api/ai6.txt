@@ -2814,7 +2814,7 @@ pub struct ai6::directorates::q::logins::LoginFiles(_)
 impl ai6::directorates::q::logins::LoginFiles
 pub fn ai6::directorates::q::logins::LoginFiles::expires_at(&self) -> core::option::Option<f64>
 pub fn ai6::directorates::q::logins::LoginFiles::get(&self, &str) -> core::option::Option<&[u8]>
-pub fn ai6::directorates::q::logins::LoginFiles::read(&std::path::Path, &[alloc::string::String]) -> core::io::error::Result<Self>
+pub fn ai6::directorates::q::logins::LoginFiles::read(&std::path::Path, &[alloc::string::String], ai6::bounds::Limit) -> core::io::error::Result<Self>
 pub fn ai6::directorates::q::logins::LoginFiles::write(&self, &std::path::Path) -> core::io::error::Result<()>
 impl core::fmt::Debug for ai6::directorates::q::logins::LoginFiles
 pub fn ai6::directorates::q::logins::LoginFiles::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
