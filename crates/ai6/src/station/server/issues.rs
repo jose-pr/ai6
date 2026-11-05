@@ -1208,6 +1208,7 @@ impl IssueDesk {
             kind: kind.to_owned(),
             target: link.name(),
             reason: reason.to_owned(),
+            links: Vec::new(),
             idempotency_key: key[..key.len().min(64)].to_owned(),
             exposed: always,
         };

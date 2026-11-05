@@ -297,6 +297,18 @@ pub struct ApprovalLimits {
     #[schema(title = "Expired requests listed")]
     #[map(default = ApprovalLimits::default().expired_listed)]
     pub expired_listed: Limit,
+    /// Links one request may carry.
+    #[schema(title = "Links per request")]
+    #[map(default = ApprovalLimits::default().links)]
+    pub links: Limit,
+    /// Bytes of a link's label.
+    #[schema(title = "Longest link label", format = "bytes")]
+    #[map(default = ApprovalLimits::default().link_label_bytes)]
+    pub link_label_bytes: Limit,
+    /// Bytes of a link's address.
+    #[schema(title = "Longest link address", format = "bytes")]
+    #[map(default = ApprovalLimits::default().link_url_bytes)]
+    pub link_url_bytes: Limit,
 }
 
 impl Default for ApprovalLimits {
@@ -314,6 +326,9 @@ impl Default for ApprovalLimits {
             pattern_bytes: Limit::at(256),
             name_bytes: Limit::at(128),
             expired_listed: Limit::at(200),
+            links: Limit::at(8),
+            link_label_bytes: Limit::at(128),
+            link_url_bytes: Limit::at(1_024),
         }
     }
 }

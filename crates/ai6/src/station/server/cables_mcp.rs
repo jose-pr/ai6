@@ -42,6 +42,7 @@ use crate::directorates::m::identity::{MissionId, SessionId};
 use crate::directorates::medical::exposure::{
     BRIEF_COMPARTMENT, BRIEF_EXPOSURE_KEY, ExposureGate, Restriction, cable_source,
 };
+use crate::directorates::registry::approvals::ApprovalLink;
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
     Cable, CableEndpoint, CablePrincipal, CableRelay, CableRelayError, CableScope,
@@ -1870,10 +1871,22 @@ struct RequestApprovalArgs {
     /// What the step acts on: for push, REMOTE:REF such as origin:refs/heads/main; otherwise
     /// a short name such as "PR 42" or "tag v1.2.0".
     target: String,
-    /// Why the step is needed, for the operator who decides. Do not include secrets.
+    /// Why the step is needed, for the operator who decides, in Markdown. Do not include secrets.
     reason: String,
+    /// What the request is about, for the operator to open: a pull request, a build, a ticket.
+    /// Each `url` is https.
+    #[serde(default)]
+    links: Vec<RequestLinkArgs>,
     /// Stable retry key; asking again with it returns the same request and its status.
     idempotency_key: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RequestLinkArgs {
+    /// What to call it.
+    label: String,
+    /// The https address.
+    url: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -2147,6 +2160,11 @@ impl CableTools {
             kind: args.kind,
             target: args.target,
             reason: args.reason,
+            links: args
+                .links
+                .into_iter()
+                .map(|link| ApprovalLink::new(link.label, link.url))
+                .collect(),
             idempotency_key: args.idempotency_key,
             exposed: self.exposure.restricts(Restriction::Approvals),
         };

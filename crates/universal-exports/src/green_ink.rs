@@ -203,6 +203,29 @@ pub(crate) async fn pending(
     Ok(Json(requests))
 }
 
+/// `GET /v1/user/operations/{operation_id}/green-ink/sources`: where the Operation's Sources are
+/// read on the web, so the page can link what a reason names. Empty on a gateway with no roster.
+pub(crate) async fn sources(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(operation_id): Path<String>,
+) -> Result<Json<Vec<ai6::SourcePage>>, ApiError> {
+    let (_, operation, _) = authorized(&gateway, &headers, operation_id, "approval.decide").await?;
+    let Some(roster) = gateway.roster.clone() else {
+        return Ok(Json(Vec::new()));
+    };
+    let wanted = operation.to_string();
+    let pages = tokio::task::spawn_blocking(move || {
+        let snapshot = roster.load("").ok()?;
+        Some(ai6::source_pages(
+            &snapshot.roster.operation(&wanted).ok()?.sources,
+        ))
+    })
+    .await
+    .map_err(|_| ApiError::internal())?;
+    Ok(Json(pages.unwrap_or_default()))
+}
+
 /// `GET /v1/user/operations/{operation_id}/green-ink/expired?since=`: the requests that expired
 /// undecided, the newest first. Re-arming one takes it out of the list.
 pub(crate) async fn expired(

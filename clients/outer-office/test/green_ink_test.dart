@@ -60,6 +60,9 @@ class FakeGreenInk {
     if (path.endsWith('/green-ink')) {
       return http.Response(jsonEncode(decided ? [] : [pendingRequest()]), 200);
     }
+    if (path.endsWith('/green-ink/sources')) {
+      return http.Response(jsonEncode(const <Object>[]), 200);
+    }
     if (path.endsWith('/green-ink/expired')) {
       return http.Response(
         jsonEncode(

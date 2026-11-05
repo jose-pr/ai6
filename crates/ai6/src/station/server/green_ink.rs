@@ -21,7 +21,7 @@ use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::roster::Roster;
 use crate::directorates::registry::agent_records::AgentOutcome;
 use crate::directorates::registry::approvals::{
-    Approval, ApprovalRequest, ApprovalStatus, Decision,
+    Approval, ApprovalLink, ApprovalRequest, ApprovalStatus, Decision,
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -43,6 +43,7 @@ pub(super) struct Asked {
     pub(super) kind: String,
     pub(super) target: String,
     pub(super) reason: String,
+    pub(super) links: Vec<ApprovalLink>,
     pub(super) idempotency_key: String,
     /// Whether the Session's exposure keeps it from class authorisations.
     pub(super) exposed: bool,
@@ -163,6 +164,7 @@ impl Desk {
             &state.intake.limits().approvals,
         )
         .map_err(|e| e.to_string())?
+        .with_links(asked.links)
         .expiring(now, policy.request_ttl());
         let registry = &state.intake;
         let unavailable = |error: std::io::Error| format!("the request was not recorded: {error}");
@@ -849,7 +851,20 @@ mod tests {
 
     /// A Station with one queued Mission of a unique ID for Agent 007 of Operation G.
     fn station(root: &FsPath, name: &str) -> (DaemonState, String) {
-        let state = test_state(root, "", AGENTS);
+        station_with(root, name, AGENTS)
+    }
+
+    /// As [`station`], for steps a loaded machine may take longer over than the Watchdog waits.
+    fn patient_station(root: &FsPath, name: &str) -> (DaemonState, String) {
+        station_with(
+            root,
+            name,
+            &AGENTS.replace("stall_timeout = 5", "stall_timeout = 600"),
+        )
+    }
+
+    fn station_with(root: &FsPath, name: &str, agents: &str) -> (DaemonState, String) {
+        let state = test_state(root, "", agents);
         let mission_id = format!("green-ink-{name}-{}", std::process::id());
         state
             .missions
@@ -934,6 +949,33 @@ mod tests {
 
     /// What the mock was told, waiting for it: a message reaches the harness on the ACP
     /// connection's thread, after `send_message` has returned.
+    /// Whether a Session is told `words` about `request_id` within the time a message may take.
+    async fn is_told(request_id: &str, words: &str) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if recorded_about(request_id)
+                .iter()
+                .any(|(_, text)| text.contains(words))
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Stops a test's mock Session however the test ends: a Session waiting for green ink has its
+    /// Watchdog paused, and its event pump would keep the test's runtime from closing.
+    struct StopAtEnd(DaemonState);
+
+    impl Drop for StopAtEnd {
+        fn drop(&mut self) {
+            self.0.stopping.store(true, Ordering::Release);
+        }
+    }
+
     async fn told_about(request_id: &str) -> Vec<(String, String)> {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -1419,9 +1461,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_request_keeps_the_links_its_agent_gave_and_refuses_a_bad_one() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = patient_station(root.path(), "links");
+        let _stop = StopAtEnd(state.clone());
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_state(&state, &mission_id, MissionState::Blocked).await;
+
+        let mut bad = push_main("links-bad");
+        bad["links"] = serde_json::json!([{ "label": "PR", "url": "http://a.example/1" }]);
+        let refused = call_tool(&state, &mission_id, bad).await;
+        assert!(refused.contains("https"), "{refused}");
+        assert!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .is_empty()
+        );
+
+        let mut good = push_main("links-good");
+        good["links"] = serde_json::json!([
+            { "label": "PR 42", "url": "https://github.com/o/n/pull/42" },
+        ]);
+        let answer: serde_json::Value =
+            serde_json::from_str(&call_tool(&state, &mission_id, good).await).unwrap();
+        assert_eq!(answer["status"], "pending", "{answer}");
+        let pending = state.intake.pending_approvals("G", now(&state)).unwrap();
+        assert_eq!(
+            pending[0].links,
+            [ApprovalLink::new("PR 42", "https://github.com/o/n/pull/42")]
+        );
+    }
+
+    #[tokio::test]
     async fn a_rearmed_request_holds_the_mission_and_its_decision_reaches_the_session() {
         let root = tempfile::tempdir().unwrap();
-        let (state, mission_id) = station(root.path(), "rearm");
+        let (state, mission_id) = patient_station(root.path(), "rearm");
+        let _stop = StopAtEnd(state.clone());
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
         let request = ApprovalRequest::try_new(
@@ -1440,12 +1517,7 @@ mod tests {
 
         // It lapses and the Agent is told; its Mission goes on working.
         deliver_decisions(&state).await;
-        assert!(
-            told_about(&request.id)
-                .await
-                .iter()
-                .any(|(_, text)| text.contains("expired without a decision"))
-        );
+        assert!(is_told(&request.id, "expired without a decision").await);
         state
             .missions
             .lock()
@@ -1469,10 +1541,7 @@ mod tests {
         assert_eq!(waiting.state, MissionState::Blocked);
         assert_eq!(waiting.blocked_reason.as_deref(), Some(GREEN_INK_REASON));
         assert!(
-            told_about(&request.id)
-                .await
-                .iter()
-                .any(|(_, text)| text.contains("re-armed by operator-m")),
+            is_told(&request.id, "re-armed by operator-m").await,
             "the Session hears it waits again"
         );
         assert!(
@@ -1503,13 +1572,7 @@ mod tests {
             )
             .unwrap();
         deliver_decisions(&state).await;
-        assert!(
-            told_about(&request.id)
-                .await
-                .iter()
-                .any(|(_, text)| text.contains("approved by operator-m"))
-        );
-        state.stopping.store(true, Ordering::Release);
+        assert!(is_told(&request.id, "approved by operator-m").await);
     }
 
     #[tokio::test]
@@ -1563,6 +1626,7 @@ mod tests {
             kind: kind.to_owned(),
             target: target.to_owned(),
             reason: "routine".to_owned(),
+            links: Vec::new(),
             idempotency_key: format!("{kind}-{target}"),
             exposed: false,
         }

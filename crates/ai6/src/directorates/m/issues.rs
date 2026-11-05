@@ -390,6 +390,61 @@ pub fn compose_status(disclosure: Disclosure, phase: &str) -> String {
     }
 }
 
+/// Where a person reads a tracker instance of an Operation, for linking to what it holds.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SourcePage {
+    /// `github`, `gitlab` or `jira`.
+    pub provider: String,
+    /// The repository's or project's page, or a Jira site's root.
+    pub web: String,
+    /// A Jira project's key; a Jira instance reading by query alone has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+}
+
+/// The web pages of an Operation's `sources`, from the settings its providers read: `github`
+/// (`repo`, `api_url`), `gitlab` (`project`, `api_url`) and `jira` (`site`, `project`). An instance
+/// of another provider, or one not served over `https`, has none.
+pub fn source_pages(sources: &toml::Table) -> Vec<SourcePage> {
+    sources
+        .iter()
+        .filter_map(|(name, source)| {
+            let table = source.as_table();
+            let get = |key: &str| table.and_then(|table| table.get(key)?.as_str());
+            let provider = get("provider").unwrap_or(name);
+            let target = source.as_str();
+            let (web, project) = match provider {
+                "github" => {
+                    let repo = get("repo").or(get("target")).or(target)?;
+                    let api = get("api_url").unwrap_or("https://api.github.com");
+                    let root = match api.trim_end_matches('/') {
+                        "https://api.github.com" => "https://github.com",
+                        other => other.strip_suffix("/api/v3")?,
+                    };
+                    (format!("{root}/{repo}"), None)
+                }
+                "gitlab" => {
+                    let project = get("project").or(get("target")).or(target)?;
+                    let api = get("api_url").unwrap_or("https://gitlab.com/api/v4");
+                    let root = api.trim_end_matches('/').strip_suffix("/api/v4")?;
+                    (format!("{root}/{project}"), None)
+                }
+                "jira" => {
+                    let site = get("site")?.trim_end_matches('/').to_owned();
+                    (site, get("project").or(get("target")).map(str::to_owned))
+                }
+                _ => return None,
+            };
+            web.starts_with("https://").then(|| SourcePage {
+                provider: provider.to_owned(),
+                web,
+                project,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +453,83 @@ mod tests {
         let policy: IssuePolicy = crate::directorates::m::records::from_toml(text)?;
         policy.validate()?;
         Ok(policy)
+    }
+
+    #[test]
+    fn each_provider_names_its_page() {
+        let sources: toml::Table = toml::from_str(
+            r#"
+            github = "o/n"
+            jira = "GUA"
+
+            [board]
+            provider = "github"
+            repo = "o/board"
+
+            [own]
+            provider = "github"
+            repo = "o/own"
+            api_url = "https://ghe.example/api/v3/"
+
+            [lab]
+            provider = "gitlab"
+            project = "g/s/n"
+            api_url = "https://gitlab.example/api/v4"
+
+            [gitlab]
+            project = "g/n"
+
+            [tracker]
+            provider = "jira"
+            site = "https://example.atlassian.net/"
+            project = "OPS"
+
+            [query]
+            provider = "jira"
+            site = "https://other.atlassian.net"
+            jql = "labels = ready"
+
+            [plain]
+            provider = "github"
+            repo = "o/local"
+            api_url = "http://127.0.0.1:1/api/v3"
+
+            [odd]
+            provider = "github"
+            repo = "o/odd"
+            api_url = "https://proxy.example/github"
+
+            [custom]
+            provider = "tickets"
+            site = "https://tickets.example"
+            "#,
+        )
+        .unwrap();
+        let pages: Vec<_> = source_pages(&sources)
+            .into_iter()
+            .map(|page| (page.provider, page.web, page.project))
+            .collect();
+        let page = |provider: &str, web: &str, project: Option<&str>| {
+            (
+                provider.to_owned(),
+                web.to_owned(),
+                project.map(str::to_owned),
+            )
+        };
+        assert_eq!(
+            pages,
+            [
+                page("github", "https://github.com/o/board", None),
+                page("github", "https://github.com/o/n", None),
+                page("gitlab", "https://gitlab.com/g/n", None),
+                page("gitlab", "https://gitlab.example/g/s/n", None),
+                page("github", "https://ghe.example/o/own", None),
+                page("jira", "https://other.atlassian.net", None),
+                page("jira", "https://example.atlassian.net", Some("OPS")),
+            ],
+            "a bare Jira key has no site, and http, unknown API roots and other providers have \
+             no page"
+        );
     }
 
     #[test]

@@ -60,6 +60,7 @@ pub use directorates::m::harness::{
     ProjectSettings,
 };
 pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
+pub use directorates::m::issues::{SourcePage, source_pages};
 pub use directorates::m::placement::{
     AgentFacts, DEFAULT_MAX_CPU_PERCENT, DEFAULT_MIN_FREE_MEMORY_MB, ExecutionMode,
     OperationPolicy, Placement, PlacementChoice, PlacementRejection, PlacementRequest,
@@ -169,8 +170,8 @@ pub use directorates::registry::agent_records::{
     OperationRecord,
 };
 pub use directorates::registry::approvals::{
-    Approval, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision, EXPIRY_SIGNER,
-    Rearming, Revocation, Ruling,
+    Approval, ApprovalLink, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision,
+    EXPIRY_SIGNER, Rearming, Revocation, Ruling,
 };
 pub use directorates::registry::assistant_log::{
     AssistantConversation, AssistantLogEntry, AssistantTurn,

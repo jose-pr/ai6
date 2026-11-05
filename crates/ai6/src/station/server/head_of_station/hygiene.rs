@@ -338,6 +338,7 @@ fn remove_with_green_ink(
                     reason.trim(),
                     state.station.limits().head_of_station.reason_bytes.or_max(),
                 ),
+                links: Vec::new(),
                 idempotency_key: scope.target.clone(),
                 // Never a class authorisation: a person of the owning Operation decides.
                 exposed: true,

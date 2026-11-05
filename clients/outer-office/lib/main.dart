@@ -2133,6 +2133,9 @@ class MissionBoard extends ChangeNotifier
       kind: 'push',
       target: 'origin:refs/heads/main',
       reason: 'The release branch passed review; push it to main.',
+      links: const [
+        GreenInkLink(label: 'PR 42', url: 'https://github.com/o/n/pull/42'),
+      ],
       requestedAt: _demoNow() - 420,
       expiresAt: _demoNow() + 82_800,
     ),
@@ -2154,6 +2157,35 @@ class MissionBoard extends ChangeNotifier
       for (final request in jsonDecode(response.body) as List<dynamic>)
         GreenInkRequestSummary.fromJson(request as Map<String, dynamic>),
     ];
+  }
+
+  /// Where an Operation's Sources are read on the web, to link what a reason names, read once
+  /// each sign-in. Not knowing costs only the links.
+  Future<List<SourcePageSummary>> loadSourcePages(String operationId) =>
+      _sourcePages[operationId] ??= _readSourcePages(operationId);
+
+  final _sourcePages = <String, Future<List<SourcePageSummary>>>{};
+
+  Future<List<SourcePageSummary>> _readSourcePages(String operationId) async {
+    if (demo) {
+      return const [
+        SourcePageSummary(provider: 'github', web: 'https://github.com/o/n'),
+      ];
+    }
+    try {
+      final response = await _userRequest(
+        'GET',
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+            '/green-ink/sources',
+      );
+      if (response.statusCode != 200) return const [];
+      return [
+        for (final page in jsonDecode(response.body) as List<dynamic>)
+          SourcePageSummary.fromJson(page as Map<String, dynamic>),
+      ];
+    } on Object {
+      return const [];
+    }
   }
 
   /// The requests of an Operation that expired with no decision, the newest first.
@@ -2734,6 +2766,7 @@ class MissionBoard extends ChangeNotifier
     heldBriefs = const [];
     missionProposals = const [];
     greenInkRequests = const [];
+    _sourcePages.clear();
     controls = const {};
     requests = const {};
     userSession = null;

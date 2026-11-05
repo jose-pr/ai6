@@ -10,6 +10,9 @@ import '../shell/oo_freshness.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
 import '../theme/oo_icon.dart';
+import 'green_ink_reason.dart';
+
+export 'green_ink_reason.dart' show GreenInkLink, SourcePageSummary;
 
 /// An Agent's request to take one irreversible step, waiting for green ink.
 @immutable
@@ -25,6 +28,7 @@ class GreenInkRequestSummary {
     required this.reason,
     required this.requestedAt,
     required this.expiresAt,
+    this.links = const [],
   });
 
   final String id;
@@ -37,8 +41,11 @@ class GreenInkRequestSummary {
   final String kind;
   final String target;
 
-  /// The Agent's own words: untrusted text.
+  /// The Agent's own words: untrusted Markdown.
   final String reason;
+
+  /// What the request is about, as the Agent named it: untrusted too.
+  final List<GreenInkLink> links;
   final double requestedAt;
 
   /// When the request expires as refused.
@@ -55,6 +62,10 @@ class GreenInkRequestSummary {
       kind: scope['kind'] as String,
       target: scope['target'] as String,
       reason: json['reason'] as String,
+      links: [
+        for (final link in json['links'] as List<dynamic>? ?? const [])
+          GreenInkLink.fromJson(link as Map<String, dynamic>),
+      ],
       requestedAt: (json['requested_at'] as num).toDouble(),
       expiresAt: (json['expires_at'] as num).toDouble(),
     );
@@ -435,7 +446,13 @@ class _GreenInkPageState extends State<GreenInkPage> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text(request.reason),
+                            GreenInkReason(
+                              reason: request.reason,
+                              links: request.links,
+                              sources: widget.board.loadSourcePages(
+                                request.operationId,
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 8,
@@ -703,7 +720,11 @@ class _ExpiredCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text(request.reason),
+            GreenInkReason(
+              reason: request.reason,
+              links: request.links,
+              sources: board.loadSourcePages(request.operationId),
+            ),
             const SizedBox(height: 8),
             OutlinedButton(onPressed: onRearm, child: const Text('Re-arm…')),
           ],

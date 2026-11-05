@@ -59,6 +59,62 @@ pub struct ApprovalRequest {
     /// Who last re-opened it after it expired undecided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rearmed: Option<Rearming>,
+    /// What the request is about, for the signer to open; the Agent's own words and addresses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<ApprovalLink>,
+}
+
+/// An address an Agent gives with a request: a pull request, a build, a ticket.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalLink {
+    /// What to call it.
+    pub label: String,
+    /// The `https` address.
+    pub url: String,
+}
+
+impl ApprovalLink {
+    /// A link to `url` called `label`.
+    pub fn new(label: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            url: url.into(),
+        }
+    }
+
+    fn validate(&self, limits: &ApprovalLimits) -> io::Result<()> {
+        if !valid_text(&self.label, limits.link_label_bytes, false) {
+            return Err(invalid_input(&format!(
+                "a link's label must be 1 to {} bytes without control characters",
+                limits.link_label_bytes
+            )));
+        }
+        if !limits.link_url_bytes.allows(self.url.len()) || !is_plain_https(&self.url) {
+            return Err(invalid_input(&format!(
+                "a link's address must be https, name a host and carry no credentials, in at \
+                 most {} bytes",
+                limits.link_url_bytes
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Whether `url` is an `https` address with a host. A signer reads where a link goes from its
+/// host, so credentials, which can put another name there, and what browsers read as a slash are
+/// refused, as are spaces and control characters, which no address needs.
+fn is_plain_https(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    !authority.is_empty()
+        && !authority.contains('@')
+        && !url.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || character == '\\'
+        })
 }
 
 /// A person's re-opening of a request that expired undecided.
@@ -91,6 +147,13 @@ impl Rearming {
 }
 
 impl ApprovalRequest {
+    /// Adds what the request is about, for the signer to open.
+    #[must_use]
+    pub fn with_links(mut self, links: Vec<ApprovalLink>) -> Self {
+        self.links = links;
+        self
+    }
+
     /// Names the role a proposed Mission asks for.
     #[must_use]
     pub fn proposing_role(mut self, role: Option<String>) -> Self {
@@ -147,6 +210,7 @@ impl ApprovalRequest {
             expires_at: 0.0,
             proposed_role: None,
             rearmed: None,
+            links: Vec::new(),
         };
         request.validate_fields(limits)?;
         Ok(request)
@@ -170,6 +234,15 @@ impl ApprovalRequest {
                 "the reason must be 1 to {} bytes without control characters other than newlines",
                 limits.reason_bytes
             )));
+        }
+        if !limits.links.allows(self.links.len()) {
+            return Err(invalid_input(&format!(
+                "a request carries at most {} links",
+                limits.links
+            )));
+        }
+        for link in &self.links {
+            link.validate(limits)?;
         }
         Ok(())
     }
@@ -1425,6 +1498,7 @@ mod tests {
         a_rearmed_request_is_pending_and_decidable,
         only_an_expired_undecided_request_is_rearmed,
         a_revocation_keeps_its_note,
+        a_request_with_links_round_trips,
     );
 
     const NOW: f64 = 1_800_000_000.0;
@@ -1629,6 +1703,111 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::NotFound
+        );
+    }
+
+    fn a_request_with_links_round_trips(store: &dyn Store) {
+        let registry = store.handle();
+        let links = vec![
+            ApprovalLink::new("PR 42", "https://github.com/o/n/pull/42"),
+            ApprovalLink::new("Build", "https://ci.example/build/7?step=2#log"),
+        ];
+        let asked = request("linked", "merge", "PR 42")
+            .with_links(links.clone())
+            .expiring(NOW, HOUR);
+        registry.request_approval(&asked).unwrap();
+        assert_eq!(
+            registry.pending_approvals("G", NOW).unwrap()[0].links,
+            links
+        );
+        let decided = registry
+            .decide_approval("G", &asked.id, &Ruling::approve("p", NOW + 1.0, NOW + 60.0))
+            .unwrap();
+        assert_eq!(decided.request.links, links);
+
+        // The largest request the default limits let through still fits its record.
+        let limits = ApprovalLimits::default();
+        let most = vec![
+            ApprovalLink::new(
+                "l".repeat(limits.link_label_bytes.or_max()),
+                format!(
+                    "https://h/{}",
+                    "u".repeat(limits.link_url_bytes.or_max() - 10)
+                ),
+            );
+            limits.links.or_max()
+        ];
+        let full = ApprovalRequest::try_new(
+            "G",
+            MissionId::try_new("mission-1").unwrap(),
+            SessionId::try_new("provider-session-1").unwrap(),
+            "007",
+            ActionScope::try_new("merge", "PR 43").unwrap(),
+            "r".repeat(limits.reason_bytes.or_max()),
+            "full",
+            &limits,
+        )
+        .unwrap()
+        .with_links(most)
+        .expiring(NOW, HOUR);
+        registry.request_approval(&full).unwrap();
+        registry
+            .decide_approval(
+                "G",
+                &full.id,
+                &Ruling::approve("p", NOW + 1.0, NOW + 60.0)
+                    .with_note("n".repeat(limits.note_bytes.or_max())),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn links_are_checked() {
+        let limits = ApprovalLimits::default();
+        let with = |link: ApprovalLink| {
+            request("link", "merge", "PR 1")
+                .with_links(vec![link])
+                .expiring(NOW, HOUR)
+                .validate(&limits)
+        };
+        for url in [
+            "https://a.example",
+            "https://a.example/x?y=1#z",
+            "https://a.example:8443/x",
+        ] {
+            assert!(with(ApprovalLink::new("ok", url)).is_ok(), "{url}");
+        }
+        for url in [
+            "http://a.example/x",
+            "HTTPS://a.example/x",
+            "ftp://a.example/x",
+            "javascript:alert(1)",
+            "https://",
+            "https:///x",
+            "https://user:pw@a.example/x",
+            "https://a.example@evil.example/x",
+            "https://a.example\\@evil.example/x",
+            "https://a.example/x y",
+            "https://a.example/\nx",
+            "/relative",
+            "",
+        ] {
+            assert_eq!(
+                with(ApprovalLink::new("bad", url)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{url}"
+            );
+        }
+        for label in ["", " ", "a\nb"] {
+            assert!(with(ApprovalLink::new(label, "https://a.example")).is_err());
+        }
+        let too_many = vec![ApprovalLink::new("l", "https://a.example"); 9];
+        assert!(
+            request("many", "merge", "PR 1")
+                .with_links(too_many)
+                .expiring(NOW, HOUR)
+                .validate(&limits)
+                .is_err()
         );
     }
 
