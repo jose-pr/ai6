@@ -131,7 +131,7 @@ profile = "strict"                    # strict, report or off; default strict wi
 keep_verified = 8                     # verified copies kept besides those loaded; 0 keeps none of them, "none" means no limit
 
 [station.identity]
-dir = "/var/lib/ai6"                  # identity.pem and peers/; default: the state directory
+dir = "/var/lib/ai6"                  # identity.pem, peers/ and sealing.key; default: the state directory
 
 [station.secrets]
 dir = "secrets"                       # where loadout secret files are read; default secrets/ beside this file
@@ -240,6 +240,7 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `claims` | 1,024 | **Live claims per account.** Live claims on one account; past it the oldest is dropped. |
 | `windows` | 8 | **Quota windows per account.** Quota windows kept per account. |
 | `kept_days` | 8 | **Days of token counts per account.** Days of token counts kept per account. |
+| `sealed_bytes` | 4 MiB | **Largest sealed value.** Bytes of one sealed value's record, every Station's copy together. |
 <!-- schema:registry.limits.accounts:end -->
 
 `[registry.limits.agents]`
@@ -1133,6 +1134,14 @@ provider applied before it was a key; the provider's API header lists them with 
 | `models_every` | 3,600 | **Look at the models every.** Seconds between this Station's looks at the models each account and route may use; 0 never looks on its own. |
 | `model_probes` | 4 | **Model listings at once.** Accounts and routes a look at the models asks at once; `null` asks every one at once, and 0 asks none, so a look changes nothing. |
 | `model_probe_timeout` | 20 | **Longest model listing.** Seconds a look waits for one account's or route's model listing; one that takes longer keeps the list it had before, or is unknown. |
+| `renew_every` | 600 | **Between login renewal rounds.** Seconds between the Headquarters Station's rounds over the logins kept in the Registry; 0 runs none. |
+| `renew_within` | 3,600 | **Renew a login this long before it ends.** Seconds before a login's known end at which a round renews it: well before its harness's own threshold, so a Session's harness has no reason to. |
+| `renew_after` | 518,400 (6 days) | **Renew a login of unknown end after.** Seconds since a login was last renewed at which a round renews it, where its end cannot be read. |
+| `renew_timeout` | 120 | **Longest login renewal.** Seconds a login's renewal command may take; never past its lease. |
+| `renew_lease` | 300 | **A login's renewal lease lasts.** Seconds a Station holds a login's renewal lease; another may take it after that. |
+| `renew_backoff` | 300 | **First wait after a failed renewal.** Seconds before the first retry of a failed renewal; each failure doubles it. |
+| `renew_backoff_max` | 21,600 | **Longest wait after a failed renewal.** The longest wait between retries of a failed renewal, in seconds. |
+| `renew_attempts` | 5 | **Failed renewals before a person is needed.** Failed renewals in a row before an account is marked as needing a person; `null` never marks one. |
 <!-- schema:record.station.accounts:end -->
 
 `[approvals]`: green ink steps.

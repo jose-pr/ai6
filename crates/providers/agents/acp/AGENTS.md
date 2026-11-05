@@ -69,3 +69,24 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
   lost later is `failed` with the agent's exit status and those lines.
 - An interrupted turn the agent answers `cancelled` is `completed`; one it cancels by itself is
   `cancelled` with the text `TURN_CANCELLED` (`coqui_acp_provider`'s).
+
+## Grok's login kept in the Registry
+
+Grok runs under this handler. A `harness-login` pool account with `files = [".grok/auth.json"]`. Measured on
+1.0.70 with a fake login and a loopback stand-in, never a real one:
+
+- The file is `$GROK_HOME/auth.json`, else `$HOME/.grok/`; a map keyed by issuer and client, with `key`,
+  `refresh_token` and an RFC 3339 `expires_at`. `auth.json.lock` beside it holds `pid:time` and is no login.
+- `grok models` renews with no model turn within `GROK_AUTH_EARLY_INVALIDATION_SECS` (default 300) of the
+  end, and stores the rotated token. At 15 minutes left it does nothing. A round needs
+  `renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }` at `renew_within`, kept well below a new
+  token's life: with a window past it, one command refreshed five times, since each reader judged the fresh
+  token near its end.
+- A refused refresh removes `auth.json` and still exits 0, printing that it is not authenticated.
+- A running harness keeps its token in memory: a rewritten file is ignored on its next request, despite the
+  documented hot reload, and taken after a 401. So a Session rewritten in place goes on with its old access
+  token until that is refused.
+- Its guide gives 7-day tokens, 30 days where the server gives no end.
+- Unmeasured: whether the provider rotates the refresh token, and whether an old access token stays good
+  after a renewal, which is what sharing rests on. Keep `max_concurrent = 1` until the live run across two
+  hosts says otherwise.

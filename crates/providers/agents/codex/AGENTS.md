@@ -342,6 +342,24 @@ wait is `start_timeout_ms` plus `request_timeout_ms`; no answer, or one without 
 with the reason. `cargo test -p ai6-agent-codex -- --ignored live_` with `AI6_TEST_LIVE_HARNESSES=1`
 runs it against the installed program.
 
+## A login kept in the Registry
+
+A `harness-login` pool account with `files = [".codex/auth.json"]`. The home needs
+`cli_auth_credentials_store = "file"` in `.codex/config.toml` (add it to `files`), or `auto` may use the
+OS keyring. Measured on 0.164.0 with a fake login and a loopback stand-in, never a real one, and from the
+source at tag `rust-v0.164.0`:
+
+- It refreshes by itself when the access token's JWT `exp` is within 5 minutes, else when `last_refresh`
+  is over 8 days old (source). On a 401 it reloads the file, then refreshes (source).
+- `codex login status` never renews. `codex app-server`, asked `account/read` with `refreshToken: true`,
+  renews even a day from the end, and with `false`, or `model/list`, within the window. It exits as soon
+  as its input ends, before answering: a `renew_command` must hold its input open
+  (`sh -c '{ printf ...; sleep 10; } | codex app-server'`).
+- A refused refresh leaves the file as it was and reports no account; a code of `refresh_token_reused`,
+  `refresh_token_expired` or `refresh_token_invalidated` is permanent (source).
+- Unmeasured: whether the provider rotates the refresh token, whether an old access token stays good
+  after a renewal, and how long an unused refresh token lasts. Keep `max_concurrent = 1`.
+
 ## Gotchas
 
 The Codex executable must be available to the terminal environment. Tests use protocol

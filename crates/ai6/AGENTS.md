@@ -3959,6 +3959,10 @@ Stations coordinate through the Registry:
 ```rust
 pub const STATION_ALPN: &[u8] = b"ai6-station/1";
 pub const IDENTITY_FILE: &str = "identity.pem";
+/// The sealing key `public_key` of `station`, signed by this identity, which signs and never decrypts.
+pub fn sign_sealing_key(identity: &Identity, station: &str, public_key: &str) -> Result<StationSealingKey, String>;
+/// A signature it carries must hold; `fingerprint`, when named, must be its certificate's.
+pub fn check_sealing_key(record: &StationSealingKey, fingerprint: Option<&str>) -> Result<(), ()>;
 pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>;
 pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError>;
 pub fn trust_peers(store: TrustStore) -> Trust;
@@ -4035,7 +4039,10 @@ impl AccountKind {
 pub const CREDENTIAL_VARIABLES: &[&str];   // every provider credential variable a pooled Session is stripped of
 #[non_exhaustive] pub enum PoolStrategy { Headroom /* default */, RoundRobin, Priority }   // "headroom" | "round_robin" | "priority"
 pub struct Account;   // Account::new(name, kind) .secret(name) .dir(path) .env(var) .priority(i64) .max_concurrent(n) .label(k, v)
+                      // HarnessLogin only: .files(paths in a home) .renew_command(argv) .renew_env(k, v)
 impl Account { pub fn name(&self) -> &str; pub fn kind(&self) -> AccountKind;
+    pub fn login_files(&self) -> &[String]; pub fn keeps_login_files(&self) -> bool;   // sealed in the Registry
+    pub fn renewal(&self) -> &[String]; pub fn renewal_env(&self) -> &BTreeMap<String, String>;
     pub fn secret_name(&self) -> Option<&str>;        // `secret`, else the account's name; None for ConfigDir
     pub fn login_dir(&self) -> Option<&Path>; pub fn priority_value(&self) -> i64;
     pub fn concurrency(&self) -> Option<usize>; pub fn labels(&self) -> &BTreeMap<String, String>;
@@ -4064,6 +4071,39 @@ pub fn choose_route(strategy: PoolStrategy, open: &[RouteStanding], unknown_use:
 pub trait AccountLogin: Send + Sync {
     fn login(&self, pool: &AccountPool, account: &Account, home: &Path, credential: &str) -> Result<(), String>;
 }
+// directorates::q::sealing (feature `daemon`): values sealed to named Stations. X25519 sealed boxes
+// (crypto_box). What is sealed names its recipients, so a record edited in the Registry redirects nothing.
+pub const SEALING_KEY_FILE: &str;   // "sealing.key", beside identity.pem
+pub struct SealingKey;   // ::generate() ::open_or_create(path) .public_key(); Debug shows the public half
+pub struct SealingPublicKey;   // .to_text() ::parse(text): base64
+pub enum VaultError { NotFound, NotNamed, Unreadable, NoKey(String), Unverified(String), Sealing, Conflict { held: Option<u64> }, Registry(io::Error) }
+pub struct Recipient;   // Recipient::named(station) .pinned(fingerprint): its key must be signed by that identity
+pub struct Opened { pub value: Zeroizing<String>, pub revision: u64, pub stations: BTreeSet<String>, .. }
+pub struct Vault;   // Vault::new(registry, station, Arc<SealingKey>)
+impl Vault { pub fn station(&self) -> &str; pub fn registry(&self) -> &dyn RegistryBackend;
+    pub fn open(&self, name: &str) -> Result<Opened, VaultError>;
+    pub fn seal_to(&self, name, value, stations: &[Recipient], expect: SealedExpect, now) -> Result<u64, VaultError>;   // caller need not be named
+    pub fn replace(&self, name, value, expect: u64, now) -> Result<u64, VaultError>;       // holder only, to the Stations sealed inside
+    pub fn add_station(&self, name, station: &Recipient, now) -> Result<u64, VaultError>;  // holder only
+    pub fn remove_station(&self, name, station: &str, now) -> Result<u64, VaultError>; }   // holder only; what it opened stays with it
+pub struct RegistrySecrets;   // ::new(Arc<Vault>): SecretProvider `registry`, read answers a revision, store refuses another with GUATIAO_ERR_BUSY
+// directorates::q::logins (feature `daemon`): harness logins kept sealed. Only files decide: a copy that
+// lost its tokens or ends sooner is never kept, and exit status proves nothing (Grok exits 0 when refused).
+pub fn sealed_name(account: &AccountRef) -> String;   // "login/<pool>/<account>"
+pub fn add_login(vault, account, dir: &Path, files: &[String], stations: &[Recipient], now) -> Result<u64, LoginError>;   // reads dir, removes nothing
+pub struct LoginFiles;   // ::read(home, files) .write(home) .get(file) .expires_at(); Debug shows paths; wiped on drop
+pub struct SessionLogin { pub account, pub files, pub home, pub revision, pub started, .. }   // kept beside the home as <home>.login.json
+impl SessionLogin { pub fn materialize(vault, account, files, home) -> Result<Self, LoginError>;
+    pub fn recall(home) -> Option<Self>; pub fn remove(&self) -> io::Result<()>; pub fn harness_starts(&mut self);
+    pub fn sync(&mut self, vault, registry_revision: Option<u64>, now) -> Result<Synced, LoginError>; }
+pub enum Synced { Unchanged, Renewed(u64), Rewritten(u64), Restored(u64, &'static str) }
+pub trait LoginRenewer: Send + Sync { fn renew(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd; }
+pub struct CommandRenewer;   // HOME and USERPROFILE at home, renew_env, PATH and what Windows needs; output never read
+pub fn renewal_due(login: &LoginState, limits: &station::limits::AccountLimits, now: f64) -> bool;
+pub fn login_accounts(pools) -> Vec<(AccountRef, &Account)>;
+pub fn assign_renewals(registry, logins, headquarters: &str, live: &[String], limits, now) -> io::Result<Vec<LoginNotice>>;   // one lease, one write
+pub fn run_leases(vault, logins, renewer: &dyn LoginRenewer, scratch: &Path, limits, now) -> io::Result<Vec<LoginNotice>>;   // this Station's leases
+pub struct LoginNotice { pub account: AccountRef, pub kind: NoticeKind, pub text: String }   // Leased(station), Renewed, Unchanged, Failed, NeedsPerson, MayLapse
 /// Runs `<login_command> login <flag>` with CODEX_HOME=home and the credential plus a newline
 /// on stdin, output discarded; killed after the timeout (default 60 s).
 #[derive(Default)] pub struct CommandLogin;   // .with_timeout(Duration)

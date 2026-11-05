@@ -317,7 +317,8 @@ it, and a failed step's output is withheld from the round (`ai6 theater provisio
 Stations do not connect to each other: they coordinate through the Registry, and each publishes to
 Universal Exports. With the `station-tls` feature a Station still has an identity of its own, a
 persistent certificate kept in `identity.pem` in its state directory, with the peers it trusts under
-`peers/`. `ai6 identity` prints its fingerprint (`sha256:` and 64 hex digits), `ai6 peer waiting` lists
+`peers/`, and beside it the [sealing key](agents.md#logins-kept-in-the-registry) logins are sealed to, published
+in the Registry and signed by this identity. `ai6 identity` prints its fingerprint (`sha256:` and 64 hex digits), `ai6 peer waiting` lists
 what is waiting in that store, and `ai6 peer accept FINGERPRINT` pins one; any spelling of a
 fingerprint is read, grouped base32 included.
 

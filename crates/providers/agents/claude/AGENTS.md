@@ -419,6 +419,22 @@ model names (`gemini-free`) are not in it. The answer's `account` is never read.
 `unknown` with the reason. `cargo test -p ai6-agent-claude -- --ignored live_` with
 `AI6_TEST_LIVE_HARNESSES=1` runs it against the installed program.
 
+## A login kept in the Registry
+
+A `harness-login` pool account with `files = [".claude/.credentials.json"]`. Measured on 2.1.318 with a
+fake login and a loopback stand-in, never a real one:
+
+- The file is `$CLAUDE_CONFIG_DIR/.credentials.json`, else `$HOME/.claude/`. macOS's Keychain holds it
+  unless that refuses. An account's Session gets `HOME`; `CLAUDE_CONFIG_DIR` is stripped.
+- `claude auth status` renews with no model turn, only within 5 minutes of `expiresAt` (fixed in the
+  program, no setting), and writes the rotated refresh token. Further from its end it does nothing, so
+  `renew_every` must be under 5 minutes for a round to catch it, and that is the same window a Session's
+  harness refreshes in: a round cannot get ahead of one.
+- A refused refresh (`invalid_grant`) blanks `accessToken` and `refreshToken` and sets `expiresAt` to 0.
+- A running harness reloads when the file's mtime moves and recovers from disk on a 401 (program text).
+- Unmeasured: whether the provider rotates the refresh token (the owner reports it does), and whether an
+  old access token stays good after a renewal. Keep `max_concurrent = 1`.
+
 ## Gotchas
 
 The Claude executable must be available to the terminal environment. The gate is best

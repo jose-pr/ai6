@@ -112,6 +112,19 @@ agy is not signed in (`ANTIGRAVITY_APP_DATA_DIR` does not move it). A pool's acc
 `harness-login` hands over nothing and keeps count of its limits. Four processes sharing one `HOME`
 at once each finished its turn, on the stand-in model.
 
+## A login kept in the Registry
+
+A `harness-login` pool account with `files = [".gemini/antigravity-cli/antigravity-oauth-token"]`. Seen in
+1.4.12's help and program text only, since the only binary here sits beside a live login: Go's `oauth2`
+token shape (`token.access_token`, `refresh_token`, `expiry`) and a token source that saves what it
+refreshes. `agy models` lists models; whether it renews is unmeasured.
+
+Unmeasured, and assumed unsafe until seen with a throwaway login: its refresh threshold, whether the
+provider rotates the token, whether a running harness re-reads the file, what a refused refresh does, and
+how long an unused login lasts. Keep `max_concurrent = 1` and set no `renew_command`, which leaves it to
+its next real use with a warning before it lapses.
+
+
 ## What a Session may do
 
 Rules go in `--settings`' `permissions` (`allow`, `deny`), never saved by agy. Every launch also

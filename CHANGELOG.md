@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Harness logins kept sealed in the Registry. A `harness-login` account with `files` has its login
+  sealed separately to each Station named, opened only by those Stations' own sealing keys
+  (`sealing.key` beside `identity.pem`, its public half published and signed by the identity), and
+  written under a home of the Session's own. What a harness renews comes back under a revision
+  check, an older or emptied copy never replacing a newer one, and a revision that moved reaches
+  other Stations' Sessions at their next poll. A renewal round at the Headquarters Station leases one
+  Station at a time to run an account's `renew_command` before the login ends, with
+  `[accounts] renew_every` (600 s), `renew_within` (1 h), `renew_after` (6 days), `renew_timeout`
+  (120 s), `renew_lease` (300 s), `renew_backoff` (300 s), `renew_backoff_max` (6 h) and
+  `renew_attempts` (5). An account that will not renew is marked as needing a person and its Sessions
+  go on to the next route. The `registry` secret provider serves any sealed value. The pool board
+  shows a login's Stations, end, last renewal, lease holder and state. `[registry.limits.accounts]
+  sealed_bytes` (4 MiB). The commands to add a login come later.
 - A settled Source item reopens as its Mission's next attempt (same UID and handle): an
   instance's `reopen` is `label` (the default: a label added since AI6 last read the item, its own
   status and Agent labels aside), `comment` (also a comment, not AI6's, by someone the tracker lets

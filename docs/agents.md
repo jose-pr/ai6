@@ -721,6 +721,11 @@ Three are built in, so they work before anything loads:
 | `env` | an environment variable of the Station | none | a weakening: every process the Station starts inherits it |
 | `inline` | none | none | the value is the field `value`; a weakening: it sits in the configuration |
 
+A fourth, `registry`, keeps a value in the Registry, sealed separately to each Station named: `key`
+is the value's name, and a new value is sealed to the field `stations` (default the Station storing
+it). A Station makes it itself, so it needs a Registry and a sealing key and no bootstrap file can
+read from it. See [Logins kept in the Registry](#logins-kept-in-the-registry).
+
 Others load from `[station.plugins]` like any provider, under the same checks. A provider may lease
 (a vault whose leases expire): the Station then asks for a lease of the lease's time and revokes it
 when the lease ends; a provider that does not lease is read.
@@ -803,7 +808,7 @@ kind = "openai-api-key"
 | `anthropic-auth-token` | `ANTHROPIC_AUTH_TOKEN` |
 | `openai-api-key`, `codex-access-token` | a `CODEX_HOME` the Station makes for the Mission and logs in with `codex login --with-api-key` or `--with-access-token`, the value on standard input |
 | `config-dir` | `dir` as `CLAUDE_CONFIG_DIR` (handler `claude`) or `CODEX_HOME` (`codex`) |
-| `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget |
+| `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget. With `files`, the login is [kept in the Registry](#logins-kept-in-the-registry) and written under a home of the Session's own |
 
 `env = "VAR"` puts the value (or directory) in another variable; a handler other than
 `claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
@@ -865,6 +870,78 @@ given; pooled Sessions always get one. Other variables that point a harness else
 (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) are left as the
 Agent's environment sets them: an Agent that sets them sends its pooled Sessions there with
 the account's credential.
+
+### Logins kept in the Registry
+
+A harness that keeps a refreshable login in files can have it sealed in the Registry rather than
+copied between hosts, where one host renewing can sign out the others and nothing carries the new
+token anywhere. Name the files on a `harness-login` account:
+
+```toml
+[pool.grok-free.account.shared]
+kind = "harness-login"
+files = [".grok/auth.json"]            # relative to a home, none with `..`
+max_concurrent = 1                     # see "May it be shared?" below
+renew_command = ["grok", "models"]     # default: none, so it is left to its next real use
+renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
+```
+
+- **What the Registry holds.** Ciphertext, one sealed box per Station named, and who is named. A
+  dump, a backup, Universal Exports and a person with `pool.read` get nothing, and a Station not
+  named cannot open it. A Station that is compromised exposes every login sealed to it, which is
+  the limit of this. What is sealed names who it is sealed to, with their keys, so writing a Station
+  into a record gives it nothing at the next renewal: another Station is added by one that holds
+  the login.
+- **A Station's key.** Each Station has a sealing key of its own, `sealing.key` beside its
+  `identity.pem`, made at its first start (mode `0600`; on Windows the access list it inherits).
+  Its public half is published in the Registry, signed by the Station's identity, so a person who
+  holds the fingerprint `ai6 identity` prints can tell it from one written there by someone else.
+  The identity's own key is not used: it signs TLS, may come from a CA, and may be replaced.
+- **A Session.** The account is claimed as any other, and only on a Station the login names. The
+  login is written under a home the Station makes for the Mission (`HOME`, and `USERPROFILE` on
+  Windows), which is why the harness must run on the Station's own host, and a home is removed once
+  its Mission is over. A Session's commands can read those files, as they can a login on a shared
+  host: a Session that runs commands where that matters still needs a container Theater.
+- **What a harness renews comes back.** At every configuration poll and check-in the Station looks
+  at each home. A changed login is sealed and written with a revision check, and an older value
+  never replaces a newer one: a copy made from a revision since replaced is kept only if it plainly
+  ends later. A copy that lost its login is never kept: a harness whose refresh was refused removes
+  its file or blanks its tokens, and the Station puts the Registry's copy back. A Station that went
+  down with a renewed copy writes it when it returns, under the same check.
+- **Other Stations learn at their next poll.** A revision that moved is opened and written over the
+  Session's files in place, each file replaced whole.
+- **The renewal round.** At `[accounts] renew_every` the Headquarters Station looks at each login
+  whose end is within `renew_within`, or, where its files do not say when it ends, that has not
+  been renewed for `renew_after`. It grants one Station the renewal lease (itself when the login
+  names it, else a named Station), one Registry write that fails while another lease is good. Only
+  the holder runs `renew_command`, in a throwaway home, for at most `renew_timeout` and never past
+  its lease (`renew_lease`). Only the files decide how it went, since a refused CLI may exit with
+  success. A failure waits `renew_backoff`, doubled each time up to `renew_backoff_max`, and
+  `renew_attempts` of them mark the account as needing a person: audited
+  (`pool.login.needs_person`), on the timeline of each Operation that may draw it (`account`,
+  `needs_person`), and on the board. Its Sessions then go to the next account or route. All of this
+  is in the Registry, so the next Headquarters Station carries on where this one stopped. With no
+  `renew_command`, a login is left to its next real use and a person is told it may lapse.
+- **The board.** `pool.read` shows the Stations named, when the login ends, when it was last
+  renewed, who holds its lease and why a person is needed: never the login.
+- **A Session whose token was refused** fails with a line naming the renewal under it, and a resume
+  takes the current login.
+
+The value of a login reaches no record, log, error or response, and what a renewal command prints is
+never read.
+
+**May it be shared?** `max_concurrent` keeps its meaning: several Sessions may share a login, across
+Stations. Whether that is safe depends on the CLI and on its provider. What each measured CLI does is
+below; nothing here was run against a real login, and whether a provider rotates a refresh token and
+whether an old access token stays good after a renewal are unmeasured for all of them. Until they are,
+set `max_concurrent = 1` for a login whose provider may rotate; a person may set more, as a weakening.
+
+| CLI, version | Files | Moved by | Renews with no model turn | Refused refresh | A running harness |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code 2.1.318 | `.claude/.credentials.json` (macOS: Keychain) | `CLAUDE_CONFIG_DIR`, `HOME` | `claude auth status`, within 5 minutes of its end only | blanks the tokens | reloads when the file changes, and from disk on a 401 |
+| Codex 0.164.0 | `.codex/auth.json` with `cli_auth_credentials_store = "file"` | `CODEX_HOME`, `HOME` | `codex app-server`, asked `account/read` with `refreshToken: true` while its input stays open; `codex login status` does not | leaves the file | reloads from disk on a 401, then refreshes |
+| Grok 1.0.70 | `.grok/auth.json` | `GROK_HOME`, `HOME` | `grok models`, within `GROK_AUTH_EARLY_INVALIDATION_SECS` (300) of its end; keep that below a new token's life, or one command refreshes several times | removes the file, and still exits 0 | keeps its token in memory, takes a rewritten file after a 401 |
+| Antigravity CLI 1.4.12 | `.gemini/antigravity-cli/antigravity-oauth-token` | `HOME` | unmeasured: `agy models` exists | unmeasured | unmeasured |
 
 ### Routes
 
