@@ -179,7 +179,46 @@ is 443:
 | `/pages/` | The gateway, unless `[unex.pages] origin` gives [her pages](assistant.md#pages-she-publishes) their own origin |
 | Anything else | The files of `build/web`, with no fallback to `index.html`: the app's routes are in the fragment of its URL, so `/` is the only page |
 
-The proxy must not add a `Content-Security-Policy` of its own to `/pages/`: a browser enforces every policy it receives, so the app's would block a page's scripts, and each page has its own sandbox policy from the gateway. In nginx, an `add_header` in the `location` stops the server's being inherited. It must pass `Cookie` and `Set-Cookie` under `/pages/` as they are: a viewer's link opens only in the browser holding the cookie its first request set (`ai6_page`, its path that one link), so a proxy that drops it opens every link once and never again.
+The proxy must not add a `Content-Security-Policy` of its own to `/pages/`: a browser enforces every policy it receives, so the app's would block a page's scripts, and each page has its own sandbox policy from the gateway. In nginx, an `add_header` in the `location` stops the server's being inherited. It must pass `Cookie` and `Set-Cookie` under `/pages/` and `/v1/auth/` as they are: a page opened by itself names its viewer by the page cookie a sign-in sets (`ai6_pages`, for `/pages/`), unless the page authenticator below names them.
+
+### Pages by themselves
+
+A page's address, `{pages base}/p/{id}/`, opens by itself (a bookmark, a reload, a new tab), and
+every request under it names its viewer, never under `/v1`. In a browser that signed in to Outer
+Office the page cookie does that. To name viewers with what the connection already carries, give
+the `unex` record a **page authenticator**: `page_authenticator`, a request-taking Authenticator,
+and `page_authenticator_config`. It sees the request's headers (but not its cookies), its TCP
+peer and the client certificates the browser proved on the gateway's own TLS; `Valid` names the
+person through the directory, `Unknown` falls through to the page cookie, and anything else
+refuses. It is consulted for pages alone: the API answers `401` to a request that carries only a
+certificate or a proxy's header.
+
+Behind a front door that verifies client certificates or signs people in, `coqui_access_proxy`
+reads what it forwards, trusted only from its own addresses:
+
+```toml
+# unex.toml, the unex record of a configuration directory
+page_authenticator = "coqui_access_proxy"
+page_authenticator_config = { trusted = ["127.0.0.1"], user_header = "X-Remote-User", certificate_header = "X-Client-Cert", certificate_encoding = "pem-url", account = [{ field = "subject.cn", by = "name" }] }
+```
+
+The proxy sets the header itself on every request (nginx: `proxy_set_header X-Client-Cert
+$ssl_client_escaped_cert;`), so a browser's own copy never reaches the gateway.
+
+With no front door, the gateway serves TLS itself when `ai6.cfg` names its certificate
+(`[unex.tls] certificate` and `key`, PEM files), may then listen on any address, and asks every
+browser for a client certificate it does not require; `coqui_access_mtls` decides what one is
+worth:
+
+```toml
+# unex.toml, the unex record of a configuration directory
+page_authenticator = "coqui_access_mtls"
+page_authenticator_config = { trust = "ca", ca_file = "people-ca.pem", account = [{ field = "san.email", by = "email" }] }
+```
+
+A browser holding certificates offers them when it connects, prompting where it cannot choose.
+A page on an origin of its own (`[unex.pages] origin`) has no sign-in to set the cookie there,
+so only the page authenticator names its viewers.
 
 Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{session_id}`
 (a Session's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither

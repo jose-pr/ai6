@@ -48,6 +48,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   hash: a handler library built before it is refused until it is built again.
 - `[accounts] model_probes` (4) and `model_probe_timeout` (20 s): how many accounts and routes a
   look at the models asks at once, and how long each is waited for.
+- Moneypenny reads an Operation's tracker items as they are now (`source_item`, `source_items`):
+  the gateway relays the read to the Headquarters Station, which holds the tracker's token, and
+  answers with the item, its comments and which of them are AI6's, bounded by `[assistant.gateway]
+  source_comments`, `source_items`, `source_wait`, `source_reads` and `source_answer_bytes` and
+  the Station's `[sources] read_wait` and `read_bytes`.
+- Images in Moneypenny's chat: the web app takes a pasted or picked PNG, JPEG, GIF or WebP
+  (at most `[assistant.limits] images` of `image_bytes` each), the gateway keeps it beside her
+  pages for as long as the conversation log keeps the message, the job names it by digest and
+  the Station reads its bytes for a handler that takes images (Claude Code); one that does not
+  is told so. A click on an image, or on an SVG she drew, enlarges it.
+- A page's address, the key of its view tokens and its cookie outlive a gateway restart; pages
+  are kept in the gateway's state directory by default, which it names at start, and a refusal a
+  person could not see the reason for is logged once.
 
 - Moneypenny's conversation log: with a Registry, Universal Exports keeps every entry of every
   conversation as it arrives, with her tool calls and their arguments, each answer's size and
@@ -742,10 +755,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Operation where they hold `mission.read`, audited as `moneypenny.page.shared`; each viewer's
   feeds run with that viewer's permissions, a viewer no share names any longer loses the link
   at once, and `[assistant.pages] sharing = false` turns sharing off and shares grant nothing.
-  A page is private: the link the app opens is the viewer's own and works only in the browser
-  whose first request set its cookie (`ai6_page`, `HttpOnly`, `Secure`, `SameSite=Strict`, its
-  path that one link), so a copied address answers 404 exactly as an unknown link does, and the
-  page's files and feeds answer only to a second token the gateway's frame names. The link to
+  A page is private: its address, `{pages base}/p/{id}/`, opens by itself (a bookmark, a
+  reload, a new tab, another device), and every request under it names its viewer and checks
+  the page for them: by the page authenticator (the `unex` record's `page_authenticator`, such
+  as `coqui_access_mtls` on the gateway's own TLS, `[unex.tls]`, or `coqui_access_proxy`
+  behind a front door), else by the page cookie a sign-in in a browser sets (`ai6_pages`,
+  `HttpOnly`, `Secure`, `SameSite=None`, `Path=/pages/`, checked against the sign-in each
+  request, ended by signing out). Neither counts under `/v1`. Anyone else gets what an unknown
+  page gets (404), an ended sign-in is told it is signed out (403), and the page's files and
+  feeds also need the view token the frame names for its viewer. The link to
   send someone is the app's, `#/pages?page_id=ID`, which opens Her pages at that page after
   sign-in. A person may give a page a public link (`PUT /v1/user/pages/{id}/public`, the card's
   menu, `ai6ctl pages public`), which needs no sign-in, serves no feeds, lasts until turned off

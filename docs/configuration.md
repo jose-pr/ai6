@@ -105,6 +105,8 @@ listen = "127.0.0.1:7082"             # loopback, behind the HTTPS reverse proxy
 public_origin = "https://ai6.example" # required
 proxy_secret = { provider = "file", key = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
 state_dir = "/var/lib/unex"           # verified provider libraries, and a default Registry
+proxy_secret = { file = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
+state_dir = "/var/lib/unex"           # verified provider libraries, pages, and a default Registry
 
 [unex.plugins]                        # the gateway's provider libraries, as [station.plugins]
 
@@ -112,9 +114,13 @@ state_dir = "/var/lib/unex"           # verified provider libraries, and a defau
 chief = ["account:root"]              # account:NAME, person:ID or group:NAME
 
 [unex.pages]                          # the pages Moneypenny publishes
-dir = "pages"                         # where they are kept (default: pages beside this file)
+dir = "/var/lib/unex/pages"           # where they are kept (default: pages in state_dir)
 origin = "https://pages.example.net"  # their own origin; omit to serve them under /pages/ here
 listen = "127.0.0.1:7083"             # the loopback listener of that origin
+
+[unex.tls]                            # the gateway serves TLS itself, with no reverse proxy
+certificate = "unex.pem"              # its chain, PEM; with key, listen may be any address
+key = "unex-key.pem"
 
 [station]                             # a Station and the ai6 command
 id = "hq-1"                           # default: made up once and kept in the state directory
@@ -843,6 +849,8 @@ in a provider's configuration is reported as a weakening: name a file there inst
 | `accounts_config` | none | **Accounts provider's configuration.** The Accounts provider's configuration. |
 | `proxy_user_header` | none | **Reverse proxy's user header.** The sanitized header a trusted reverse proxy sets to the signed-in user. |
 | `proxy_lookup_by` | `name` | **Directory attribute of the proxy's user.** The Directory attribute that resolves the reverse proxy's user. |
+| `page_authenticator` | none | **Page viewers' authenticator.** The Authenticator provider ID that names the person asking for one of Moneypenny's pages from the request itself: `coqui_access_mtls` on the gateway's own TLS, `coqui_access_proxy` behind a front door. It answers only under the pages' base, never for `/v1`. Pages know a person by the page cookie alone. |
+| `page_authenticator_config` | none | **Page viewers' authenticator's configuration.** The page authenticator's configuration. |
 | `login_tries_per_address` | 5 | **Tries a minute per client address.** Password or key tries a minute from one client address. |
 | `login_tries_per_name` | 10 | **Tries in ten minutes per account name.** Tries in ten minutes for one account name, from anywhere. |
 | `client_address_header` | none | **Reverse proxy's client address header.** The header a trusted proxy sets to the client address. |
@@ -1048,6 +1056,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | `replies_read` | 10 | **Replies shown of a linked issue.** Stored replies `issue_read` shows of a linked issue, newest first. |
 | `reopen_watch_every` | 300 | **Read settled items every.** Seconds between rounds reading the newest settled items again, so a label taken off one is seen and its return reopens it. |
 | `reopen_watch` | 20 | **Settled items read per round.** Settled items read in each of those rounds, per tracker instance, newest first; each is one request to the tracker. |
+| `read_wait` | 20 | **Wait for a live tracker read.** Seconds one ask for a live tracker read waits at Universal Exports before asking again. |
+| `read_bytes` | 16 KiB | **Longest live tracker read asked for.** The most bytes of one live tracker read Universal Exports asks for. |
 <!-- schema:record.station.sources:end -->
 
 `[transports]`
@@ -1337,6 +1347,8 @@ Universal Exports when it starts.
 | `page_file_bytes` | 8 MiB | **Largest file read for a page.** Bytes of one file the Station reads to publish a page. |
 | `page_files` | 200 | **Files read for a page.** Files the Station reads to publish one page. |
 | `page_bytes` | 16 MiB | **All the files read for a page.** Bytes over all the files of one page the Station reads. |
+| `images` | 4 | **Images in one message.** Images one message carries. |
+| `image_bytes` | 5 MiB | **Largest image in a message.** Bytes of one image a message carries. |
 <!-- schema:record.assistant.limits:end -->
 
 `[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job and harness
@@ -1410,6 +1422,11 @@ report; `unlocked_stale` when the desk starts.
 | `log_bytes` | 1 GiB | **Her conversation log, in size.** Bytes of her conversation log kept, every conversation's together; the oldest entries go first, and `none` keeps every entry. |
 | `log_prune_every` | 3,600 | **Trim her conversation log every.** Seconds between two passes that drop what her conversation log keeps no longer. |
 | `log_flush_timeout` | 10 | **Wait for her conversation log at a stop for.** Seconds a stopping gateway waits for her conversation log to keep what is still queued; `none` waits for all of it. |
+| `source_comments` | 10 | **Comments read of a tracker item.** Comments of a tracker item `source_item` reads, the latest. |
+| `source_items` | 50 | **Tracker items listed.** Items `source_items` lists. |
+| `source_wait` | 30 | **Wait for a live tracker read.** Seconds a live tracker read waits for the Headquarters Station to answer. |
+| `source_reads` | 32 | **Live tracker reads waiting.** Live tracker reads waiting for the Headquarters Station at once. |
+| `source_answer_bytes` | 1 MiB | **Longest live tracker read answer.** Bytes of the Headquarters Station's answer to one live tracker read. |
 <!-- schema:record.assistant.gateway:end -->
 
 `[assistant.pages]`: the pages she publishes and how they are served, read at each use, so a
@@ -1432,14 +1449,14 @@ never a weakening, and nothing is evicted when one is lowered. Pages are open by
 | `feed_reads_per_minute` | 60 | **Feed reads a minute, per link.** Feed reads one link makes in a minute. |
 | `staged_uploads` | 64 | **Uploads held from Stations.** Pages Universal Exports keeps staged from Stations at once. |
 | `default_ttl` | 86,400 (a day) | **Keep a page for.** Seconds a page lives unless remembered. |
-| `open_ttl` | 3,600 | **A link to a page lasts.** Seconds a link to a page is valid. |
+| `open_ttl` | 3,600 | **A view of a page lasts.** Seconds a frame's view token, which the page's files and feeds are named under, is valid. A reload names a new one. |
 | `upload_wait` | 30 | **Wait for a Station's files.** Seconds a publish waits for the Station's files. |
 | `stage_ttl` | 300 | **Keep an unclaimed upload for.** Seconds a staged upload no call claims is kept. |
 | `sweep_every` | 60 | **Sweep expired pages every.** Seconds between sweeps of expired pages, links and staged uploads. |
 | `scripts` | `true` | **Run pages' scripts.** Whether a page's scripts run. |
 | `network` | `open` | **What a page may reach.** What a page may reach from the browser. |
 | `feeds` | `true` | **Dashboards read live feeds.** Whether dashboards may read live feeds. |
-| `frame` | `true` | **Show the classification bar.** Whether a page's frame shows the classification bar. The page stays in the gateway's frame either way, which keeps a viewer's link in the browser that opened it. |
+| `frame` | `true` | **Show the classification bar.** Whether a page's frame shows the classification bar. The page stays in the gateway's frame either way, which names the view token of its files and feeds. |
 | `sharing` | `true` | **People may share pages.** Whether a person may share a page. |
 | `max_shares` | 32 | **Subjects a page is shared with.** Subjects one page is shared with. |
 | `public` | `true` | **People may make public links.** Whether a person may give a page a public link, which opens it for anyone holding the link, with no sign-in and no feeds. Off, every public link stops answering. |

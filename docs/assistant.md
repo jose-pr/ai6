@@ -218,6 +218,7 @@ says so. When the person signs out, her tools stop working.
 | `compartments` | The compartments you may read: what each grants, what it covers and who is read in, leaving out what you may not see |
 | `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Session |
 | `missions`, `mission` | Missions with their Sessions, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
+| `source_item`, `source_items` | An Operation's tracker items as they are now: one with its state, labels, assignees, latest comments (each author's role and date) and the Missions linked to it; or the items its sources find, by title |
 | `timeline` | An Operation's activity |
 | `pools` | Account pools: Sessions, quota windows, tokens today |
 | `held_briefs`, `mission_proposals`, `issue_proposals` | Work waiting for a person |
@@ -230,6 +231,19 @@ says so. When the person signs out, her tools stop working.
 
 Results reach her as data, marked as such: briefs, issue bodies and Agent output inside them
 were written by others, and her instructions say never to follow what they say.
+
+`source_item` and `source_items` read the tracker live, so "what blocks X?" is answered from
+the ticket and its comments rather than from a Mission's state. Universal Exports holds no
+tracker token: it queues the read, the Headquarters Station takes it
+(`GET /v1/station/source-reads/next`), reads through the Operation's own Source and Tracker
+providers and answers (`POST /v1/station/source-reads/{id}/result`). The person's routes are
+`GET /v1/user/operations/{id}/source-item?tracker=&item=` and `…/source-items?tracker=&query=`,
+which need `mission.read` there. `[assistant.gateway]` sets how many comments
+(`source_comments`, 10) and items (`source_items`, 50) are read, how long a read waits for the
+Headquarters Station (`source_wait`, 30 s; a read nobody answers says so), how many may wait at
+once (`source_reads`, 32) and the longest answer (`source_answer_bytes`, 1 MiB); the Station's
+`[sources]` sets how long it waits for a read (`read_wait`) and the longest one it takes
+(`read_bytes`).
 
 ## Changes she proposes, you confirm
 
@@ -936,7 +950,7 @@ SUBJECT...`) names whom it reaches, in place of whom it reached: `person:ID`, `g
 included; only one where you do). An empty list shares it with nobody. A viewer's feeds run with
 that viewer's own permissions, so they see only what they may read; a report shows what you
 could read when she made it, to everyone it reaches. A viewer no share names any longer loses
-their link at once, as does one read out of the compartment or losing `mission.read`. Only you
+their page at their next request, as does one read out of the compartment or losing `mission.read`. Only you
 change its shares, remember, forget or delete it; the bar tells a viewer it was shared by you.
 **Her pages**, in her chat's menu, lists your pages and then those shared with you. An
 administrator turns sharing off with `[assistant.pages] sharing = false`, and existing shares then
@@ -944,26 +958,55 @@ grant nothing; `max_shares` (32) bounds the subjects of one page.
 
 **The link to give someone is the app's**: `https://APP/#/pages?page_id=ID` (the Share dialog
 copies it) opens Her pages on that page once they sign in, and they open it from there; anyone
-the page is hidden from is told there is no such page. The link the app opens in a browser tab,
-`{pages base}/v/{token}/`, is the viewer's own: minted when they click, valid for an hour, bound
-to their sign-in (signing out ends it), to a network profile and to the browser that first asks
-for it. That first request sets a cookie, `ai6_page`, `HttpOnly`, `Secure` and
-`SameSite=Strict`, whose path is that link alone, and every later request needs it: a reload in
-that browser works, and the same address anywhere else answers 404, exactly as a link that never
-existed. The page runs in the gateway's frame under a second token the frame names, never in an
-address bar, which ends with the link; its files and feeds answer only to that token, which only
-the page's own scripts can learn, and they could already read what it reads. Until the first
-request, the link opens for whoever holds it; the app opens it as it mints it, so that is one
-launch. `ai6ctl pages open` prints one to open at once in your browser. Where pages have an
-origin of their own on another registrable domain than the app's, the app's tab is another
-site: Chrome and Edge 156 then keep the `SameSite=Strict` cookie from a reload of that tab,
-which answers 404, and the page is opened again from the app. On the app's own origin or a
-sibling subdomain, a reload works.
+the page is hidden from is told there is no such page.
+
+**A page has an address of its own**, `{pages base}/p/{id}/`, which the app opens in a browser
+tab and which works by itself too: a bookmark, a new tab, a reload, a link from another site, the
+same address on another of your devices. Every request under it, the frame, the page's files and
+its feeds alike, names who is asking and is checked against the page at that moment; anyone the
+page is hidden from, and anyone it cannot name, gets what a page that does not exist gets (404).
+Who is asking is named by, in order:
+
+- the gateway's **page authenticator**, the `unex` record's `page_authenticator` with its
+  `page_authenticator_config`: `coqui_access_mtls` when the gateway serves TLS itself and the
+  browser holds a client certificate (`[unex.tls]` in `ai6.cfg`), or `coqui_access_proxy` behind
+  a front door that verified a certificate or signed someone in and says so in a header it sets,
+  trusted only from the proxy's own addresses (see [Access](access.md#pages-by-themselves));
+- else the **page cookie**, `ai6_pages`, which signing in from a browser sets for the pages' path:
+  `HttpOnly`, `Secure`, `SameSite=None`, `Path=/pages/`, naming that sign-in by its ID and a mark
+  only this gateway's pages directory can make. Each request checks the sign-in still stands, so
+  signing out, or the sign-in running out, ends it at once, and the browser is told to drop it at
+  sign-out. A browser whose sign-in has ended is told so (`403`, "You are signed out"). The
+  app's renewals and a reload's resume set it again. Where pages have an origin of their own, a
+  sign-in at the app cannot set it there, and only the page authenticator names viewers.
+
+None of these counts under `/v1`: the API keeps its bearer token, and a request carrying only a
+certificate, a front door's header or the page cookie is refused there (`401`), so a page's own
+scripts, which run with them, cannot act as you.
+
+The cookie is `SameSite=None` because of what browsers send for a sandboxed page, measured in
+Chrome and Edge: the page's own scripts, styles, images and fetches come from an opaque origin,
+and carry a `SameSite=None` cookie and nothing stricter, so a `Lax` cookie would leave a page
+without its own files. Another site's requests for the same addresses carry it too, so the
+page's files and feeds also sit under a **view token** the frame names for that viewer and that
+opening (`{pages base}/p/{id}/{token}/f/…`): a keyed mark of the page, the viewer, the network and
+when it ends (`open_ttl`, an hour), never in an address bar. It opens nothing by itself, and
+another site, which cannot read the frame, does not know it. A page's script fetches its feeds,
+and any of its own files, with `fetch(url, {credentials: "include"})`: without its credentials
+a fetch from an opaque origin sends no cookie. `?network=none` (or `own`) on the address opens it
+with a tighter network.
+
+The key of the view tokens and page cookies is `.key` in `ai6.cfg`'s `[unex.pages] dir` (by
+default `pages` in the gateway's state directory, which the gateway names at start), so a
+restart of the gateway keeps every open page and every cookie working. A refusal the person
+could not see the reason for is logged once for each page and viewer: a file or feed the page
+does not have, a view token that is not theirs or has run out, a viewer who may no longer read
+the page.
 
 Opening shows the gateway's **classification bar** over the page: "Made by Moneypenny for you,
 not part of Outer Office", the title, kind and expiry. The close control hides the bar for that
 view; a reload shows it again. `[assistant.pages] frame = false` drops the bar; the page still
-runs in the gateway's frame, which is what keeps its link in one browser, and a page's file
+runs in the gateway's frame, which names its view token, and a page's file
 asked for on its own is sent to the frame.
 
 A **public link** is your choice (the card's menu, `PUT /v1/user/pages/{id}/public {on}`,
@@ -979,10 +1022,10 @@ under the app's address.
 Pages are open by default: scripts run and they may fetch from anywhere, because a dashboard
 may need a chart library or an API. What they cannot do is act as the app. Every response
 carries `Content-Security-Policy: sandbox ...` without `allow-same-origin`, so the page is an
-opaque origin with no cookie, storage or sign-in of its host, `/v1` answers it no CORS header,
+opaque origin that reads no cookie, storage or sign-in of its host, `/v1` answers it no CORS header,
 and it cannot navigate the top window. Dashboards read **live** data: each feed is a read tool
 with input fixed at publish, run when the page asks for `data/NAME` (from a file at the top
-of the page, such as its `index.html`) as the link's viewer, so a viewer sees only what their own
+of the page, such as its `index.html`) as the page's viewer, so a viewer sees only what their own
 permissions allow and a revoked grant applies at once. A bundle with a top-level `data/`
 directory is refused, so no file can stand in for a feed.
 Feeds read; they never propose or send. Options, set by an administrator for everyone:
@@ -992,7 +1035,7 @@ page with the network off.
 
 The remaining risk, plainly: a dashboard she made after reading text someone else wrote can be
 steered to read, through its declared feeds, whatever its viewer may read, and send it anywhere
-for as long as the link lives, and nothing on the page says what she read. Feeds are read-only
+for as long as the page is open, and nothing on the page says what she read. Feeds are read-only
 and fixed at publish, so it can neither change anything nor read past them. `network`, `feeds`
 and opening with the network off are the tighter options. On the API's own origin the address
 bar shows the app's host, so a page can draw a faithful sign-in: a separate origin removes that
@@ -1032,6 +1075,21 @@ expects (a stream-json interrupt request for Claude Code, `turn/interrupt` for C
 conversation then shows "You stopped Moneypenny's answer.", her harness stays up for the next
 message, and she is told with that message that she was stopped. Stop with nothing being
 answered does nothing.
+
+**Images.** In a browser, a screenshot pasted anywhere in the app, or picked with **Add an
+image**, goes with the next message: PNG, JPEG, WebP or GIF, told apart by their bytes, at most
+`[assistant.limits] images` (4) of at most `image_bytes` (5 MiB) each. The composer shows them
+as thumbnails, each with a control that takes it away. The desktop app has no clipboard or file
+picker for images. The message frame carries them as `images: [{media_type, data}]`, base64;
+Universal Exports checks each, keeps it once per person by its SHA-256 beside the pages
+(`.images/` in `[unex.pages] dir`, for as long as her conversation log keeps the message), and
+names it by digest in the conversation (`data.images` of the person's entry) and in the job. The
+Station reads the bytes (`GET /v1/station/assistant/images/{sha256}`, for a conversation it
+runs) and gives them to a harness whose handler takes images, in the same turn as the text; the
+Claude handler sends each as an image block. A handler that takes none (Codex, Antigravity CLI,
+an `acp` agent) refuses the message and says why. Any image in the conversation, the person's
+or one of her drawings, opens enlarged on a click, where it pans and zooms; the person's are
+read back with `GET /v1/user/moneypenny/images/{sha256}`, which answers only them.
 
 ## Her conversation log
 
