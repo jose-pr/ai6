@@ -127,13 +127,11 @@ pub struct Mission {
     /// The plan its Agent submitted, until it is put up for review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
-    /// Which claim of its Registry brief this Station runs it for ([`Lease::attempt`]); a later
-    /// claim of a brief whose Mission ended here is the Mission's next attempt. `None` for a
-    /// Mission not run from the Registry's queue.
-    ///
-    /// [`Lease::attempt`]: crate::directorates::registry::store::Lease::attempt
+    /// The content digest of the Registry brief this Station runs it from: another brief for
+    /// a Mission that ended here is its next attempt, and the same one claimed again is a lapse
+    /// recovered. `None` for a Mission not run from the Registry's queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim: Option<u32>,
+    pub brief_digest: Option<String>,
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -274,7 +272,7 @@ impl MissionStore {
             exposure: Vec::new(),
             provenance: None,
             waiting: None,
-            claim: None,
+            brief_digest: None,
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -694,22 +692,26 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Records which claim of its Registry brief this Station runs the Mission for.
-    pub fn record_claim(&mut self, mission_id: &str, claim: u32) -> Result<Mission, MissionError> {
+    /// Records the content digest of the Registry brief this Station runs the Mission from.
+    pub fn record_brief_digest(
+        &mut self,
+        mission_id: &str,
+        digest: &str,
+    ) -> Result<Mission, MissionError> {
         let mut next = self.missions.clone();
         let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
-        if mission.claim == Some(claim) {
+        if mission.brief_digest.as_deref() == Some(digest) {
             return Ok(mission.clone());
         }
-        mission.claim = Some(claim);
+        mission.brief_digest = Some(digest.to_owned());
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
         Ok(updated)
     }
 
-    /// Queues a Mission that ended as its next attempt, for `claim` of its brief, which may say
-    /// more than it did (`prompt`): an item's new comments, a Sleeper's next window. Unlike
+    /// Queues a Mission that ended as its next attempt, from another brief (its `digest`), which
+    /// may say more than the last (`prompt`): an item's new comments, a Sleeper's next window. Unlike
     /// [`retry`](Self::retry), the attempt does not continue an interrupted one: this Station's
     /// hold on the last Session is let go, and the next start records a new one after it.
     pub fn reopen(
@@ -717,7 +719,7 @@ impl MissionStore {
         mission_id: &str,
         agent_id: String,
         prompt: String,
-        claim: u32,
+        digest: &str,
     ) -> Result<Mission, MissionError> {
         if prompt.trim().is_empty() {
             return Err(MissionError::EmptyPrompt);
@@ -739,7 +741,7 @@ impl MissionStore {
         mission.state = MissionState::Queued;
         mission.prompt = prompt;
         mission.agent_id = Some(agent_id);
-        mission.claim = Some(claim);
+        mission.brief_digest = Some(digest.to_owned());
         mission.parked_until = None;
         mission.blocked_reason = None;
         mission.failure = None;

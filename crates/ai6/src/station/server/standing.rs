@@ -307,6 +307,53 @@ mod tests {
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
+    /// A lease that lapsed after its Mission ended here, recovered and claimed again, is the
+    /// same attempt: its outcome is filed and nothing runs twice.
+    #[tokio::test]
+    async fn the_same_brief_claimed_again_after_a_lapse_is_filed_and_not_run_again() {
+        let root = tempfile::tempdir().unwrap();
+        let state = standing_state(root.path(), false);
+        let mut warned = BTreeSet::new();
+        fire_due_sleepers(
+            state.intake.as_ref(),
+            &state.roster,
+            "test",
+            FIRST + 60,
+            &mut warned,
+        );
+        assert!(schedule_intake_once(&state));
+        let mission = standing_mission(&state);
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, &mission, MissionState::Done).await;
+
+        assert!(
+            state
+                .intake
+                .renew(&mission, "test", std::time::Duration::from_nanos(1))
+                .unwrap()
+        );
+        let lapsed = loop {
+            if let Some(lease) = state.intake.expired().unwrap().into_iter().next() {
+                break lease;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        };
+        assert_eq!(lapsed.attempt(), 1);
+        state.intake.recover(&lapsed, 5, "other").unwrap().unwrap();
+
+        assert!(schedule_intake_once(&state));
+        assert!(schedule_intake_once(&state));
+        assert_eq!(
+            state.intake.filed_brief(&mission).unwrap().unwrap().state,
+            "done"
+        );
+        schedule_queued_once(&state).await;
+        assert_eq!(runs(&state, &mission).len(), 1, "it ran once");
+        state
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
     #[tokio::test]
     async fn a_resuming_window_takes_up_the_last_attempts_provider_session() {
         let root = tempfile::tempdir().unwrap();

@@ -71,6 +71,7 @@ use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
 use crate::directorates::m::theaters::{LOCAL_THEATER, Theater, TheaterAccess, Theaters};
+use crate::directorates::m::vetting::content_digest;
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::medical::quarantine::IncidentKind;
 use crate::directorates::medical::usage::UsageTracker;
@@ -1831,7 +1832,6 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
                 &brief,
                 &mission_id,
                 (operation_id, agent_id, role_id),
-                lease.attempt(),
             )
         {
             let _ = finish_intake_claim(
@@ -3332,12 +3332,17 @@ fn configured_agent_role(
         .map_err(|error| error.to_string())
 }
 
-/// Whether `existing`, a Mission of this Station's book, ended and its brief was claimed again
-/// since (`claim`): a reopened item or a standing Sleeper's next window, its next attempt.
-fn claimed_again(existing: &Mission, operation_id: &str, claim: u32) -> bool {
+/// Whether `brief` is the next attempt of `existing`, a Mission of this Station's book that
+/// ended: another brief for it, a reopened item or a standing Sleeper's next window. The same
+/// brief claimed again is a lapse recovered, not an attempt. A Mission that records no brief
+/// is judged by what it was told.
+fn is_next_attempt(existing: &Mission, operation_id: &str, brief: &Brief) -> bool {
     is_terminal_state(existing.state)
         && existing.operation_id.as_deref() == Some(operation_id)
-        && existing.claim.is_some_and(|ran| claim > ran)
+        && match &existing.brief_digest {
+            Some(ran) => *ran != content_digest(brief),
+            None => existing.prompt != brief.prompt(),
+        }
 }
 
 fn create_intake_mission(
@@ -3345,7 +3350,6 @@ fn create_intake_mission(
     brief: &Brief,
     mission_id: &MissionId,
     (operation_id, agent_id, role_id): (String, String, Option<String>),
-    claim: u32,
 ) -> Result<(), String> {
     // An attempt this Station gave up as lost may come back to it as the next one.
     let (ended_here, again) = state
@@ -3358,7 +3362,7 @@ fn create_intake_mission(
                 is_terminal_state(existing.state)
                     && existing.operation_id.as_deref() == Some(operation_id.as_str())
                     && existing.prompt == brief.prompt(),
-                claimed_again(existing, &operation_id, claim),
+                is_next_attempt(existing, &operation_id, brief),
             )
         });
     let retry = ended_here && recovery::retries_lost_attempt(state, mission_id.as_str());
@@ -3367,9 +3371,10 @@ fn create_intake_mission(
         .missions
         .lock()
         .map_err(|_| "Mission book lock was poisoned".to_owned())?;
+    let digest = content_digest(brief);
     if again && !retry {
         missions
-            .reopen(mission_id.as_str(), agent_id, brief.prompt(), claim)
+            .reopen(mission_id.as_str(), agent_id, brief.prompt(), &digest)
             .map_err(|error| format!("could not queue the Mission's next attempt: {error:?}"))?;
         return missions
             .record_name(
@@ -3384,9 +3389,9 @@ fn create_intake_mission(
             .retry(mission_id.as_str(), Some(agent_id))
             .map_err(|error| format!("could not queue the Mission again: {error:?}"))?;
         return missions
-            .record_claim(mission_id.as_str(), claim)
+            .record_brief_digest(mission_id.as_str(), &digest)
             .map(drop)
-            .map_err(|error| format!("could not record the Mission's claim: {error:?}"));
+            .map_err(|error| format!("could not record the Mission's brief: {error:?}"));
     }
     if let Some(existing) = missions.get(mission_id.as_str()) {
         if existing.operation_id.as_deref() == Some(operation_id.as_str())
@@ -3414,8 +3419,8 @@ fn create_intake_mission(
         )
         .map_err(|error| format!("could not record the Mission's name: {error:?}"))?;
     missions
-        .record_claim(mission_id.as_str(), claim)
-        .map_err(|error| format!("could not record the Mission's claim: {error:?}"))?;
+        .record_brief_digest(mission_id.as_str(), &digest)
+        .map_err(|error| format!("could not record the Mission's brief: {error:?}"))?;
     if let Some(handle) = &brief.handle {
         missions
             .record_handle(mission_id.as_str(), handle.clone())
@@ -3463,7 +3468,7 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
         .cloned();
     if let Some(existing) = existing {
         let operation = existing.operation_id.as_deref().unwrap_or_default();
-        if !claimed_again(&existing, operation, lease.attempt()) {
+        if !is_next_attempt(&existing, operation, &brief) {
             if existing.prompt != brief.prompt() {
                 return Err(format!("Mission ID {mission_id} is already in use"));
             }
@@ -3514,7 +3519,7 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
             Ok((operation_id, agent, role_id))
         }),
     }?;
-    create_intake_mission(state, &brief, &mission_id, assignment, lease.attempt())
+    create_intake_mission(state, &brief, &mission_id, assignment)
 }
 
 fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()> {
@@ -11393,7 +11398,6 @@ queue = 1
             &brief,
             &MissionId::try_new("mission-t").unwrap(),
             ("G".to_owned(), "007".to_owned(), None),
-            1,
         )
         .unwrap();
         // Another Station's first attempt: this one holds nothing and its record is closed to
@@ -11492,7 +11496,6 @@ queue = 1
             &brief,
             &MissionId::try_new(&mission_id).unwrap(),
             ("G".to_owned(), "007".to_owned(), None),
-            1,
         )
         .unwrap();
         start_mission_by_id(&state, &mission_id).await;
@@ -11599,7 +11602,6 @@ queue = 1
             &brief,
             &MissionId::try_new("mission-s").unwrap(),
             ("G".to_owned(), "007".to_owned(), None),
-            1,
         )
         .unwrap();
         assert_eq!(

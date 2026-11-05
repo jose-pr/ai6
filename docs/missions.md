@@ -756,7 +756,8 @@ when the instance's `reopen` says so:
 
 The attempt is briefed from the item as it reads now, and from the comments that reopened it,
 quoted as untrusted data as the item is. Nothing reopens while an attempt is queued, held or
-running. Each reopen is audited (`mission.reopened`) and on the Operation's timeline (`source`,
+running. Each attempt has its own count of claims, so `intake_attempts` bounds the lapses of
+that attempt alone, here and for a standing Sleeper's windows. Each reopen is audited (`mission.reopened`) and on the Operation's timeline (`source`,
 `reopened`, with the reason).
 
 To see a label taken off, the Headquarters Station reads the newest settled items of each such

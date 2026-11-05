@@ -1200,8 +1200,9 @@ pub trait BriefStore {
     fn enter_brief(&self, brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>;
 
     /// Queues `brief` as the next attempt of the Mission `entry` already names, when that
-    /// Mission's brief finished and `again` accepts the brief as filed. The Mission keeps its UID,
-    /// its handle and the count of its claims, so the next claim is its next attempt; what the
+    /// Mission's brief finished and `again` accepts the brief as filed. The Mission keeps its UID
+    /// and its handle; the count of its claims starts again, so the `max_attempts` a
+    /// [`recover`](Self::recover) is given bounds the lapses of this attempt alone, and what the
     /// last attempt filed (its outcome, its report and its spent provenance) is dropped. The
     /// provenance is `brief`'s own.
     ///
@@ -1853,6 +1854,11 @@ impl BriefStore for FileRegistry {
         // Queued first: a crash before the old record goes leaves it finished and queued, as a
         // brief finished without a claim is, never neither.
         self.write_brief(&self.root.join("new").join(format!("{key}.json")), &entered)?;
+        match fs::remove_file(self.root.join("attempts").join(format!("{key}.json"))) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         let finished = self.root.join(&filed.state);
         for suffix in ["outcome.json", "reported", "provenance", "log", "json"] {
             match fs::remove_file(finished.join(format!("{key}.{suffix}"))) {

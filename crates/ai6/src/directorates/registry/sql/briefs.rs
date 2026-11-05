@@ -774,7 +774,7 @@ impl BriefStore for SqlRegistry {
             }
             tx.execute(
                 "UPDATE ai6_briefs SET state = 'new', brief = $2, provenance = $3, outcome = NULL, \
-                 transcript = NULL, report_attempts = 0, reported = $4, \
+                 transcript = NULL, attempts = 0, report_attempts = 0, reported = $4, \
                  finished_provenance = NULL, cancel_requested_at = NULL, revision = $5 \
                  WHERE key = $1",
                 &[

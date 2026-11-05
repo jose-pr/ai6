@@ -2848,7 +2848,7 @@ mod reopen_tests {
                     |record| record.action == "mission.reopened" && record.target.starts_with(&key)
                 )
         );
-        assert_eq!(settle(registry, 2), key, "attempt 2 of the same Mission");
+        assert_eq!(settle(registry, 1), key, "the same Mission's next attempt");
     }
 
     fn an_item_that_never_reopens_stays_finished(store: &dyn Store) {
@@ -2927,7 +2927,7 @@ mod reopen_tests {
             Some(ReplyState::Delivered)
         );
         assert_eq!(reopened(registry), ["1 new comment(s)"]);
-        assert_eq!(settle(registry, 2), key);
+        assert_eq!(settle(registry, 1), key);
         assert!(
             crate::station::issues::weakenings(&roster)
                 .iter()

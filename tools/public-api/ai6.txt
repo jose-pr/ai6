@@ -1505,7 +1505,7 @@ pub fn ai6::directorates::m::mission::MissionState::as_str(self) -> &'static str
 pub struct ai6::directorates::m::mission::Mission
 pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::blocked_reason: core::option::Option<alloc::string::String>
-pub ai6::directorates::m::mission::Mission::claim: core::option::Option<u32>
+pub ai6::directorates::m::mission::Mission::brief_digest: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::cover: core::option::Option<ai6::directorates::m::cover::CoverReport>
 pub ai6::directorates::m::mission::Mission::denied_tools: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::exposure: alloc::vec::Vec<alloc::string::String>
@@ -1540,12 +1540,12 @@ pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsR
 pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::quarantine(&mut self, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::reassign(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
-pub fn ai6::directorates::m::mission::MissionStore::record_claim(&mut self, &str, u32) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::record_brief_digest(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_handle(&mut self, &str, alloc::string::String) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_name(&mut self, &str, alloc::string::String) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_provenance(&mut self, &str, ai6::directorates::registry::bona_fides::Provenance) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_review_naming(&mut self, &str, ai6::directorates::m::review::BriefNaming) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
-pub fn ai6::directorates::m::mission::MissionStore::reopen(&mut self, &str, alloc::string::String, alloc::string::String, u32) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::reopen(&mut self, &str, alloc::string::String, alloc::string::String, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::retry(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>

@@ -489,7 +489,7 @@ mod tests {
     use crate::directorates::registry::sessions::NewSession;
     use crate::directorates::registry::sources::{Ingest, SourceItem};
     use crate::directorates::registry::store::{
-        Brief, DEFAULT_LEASE, FileRegistry, MissionProposal, Reentry,
+        Brief, DEFAULT_LEASE, FileRegistry, LeaseRecovery, MissionProposal, Reentry,
     };
     use crate::directorates::registry::suite::{Store, backend_tests, brief};
     use std::collections::{BTreeMap, BTreeSet};
@@ -514,7 +514,82 @@ mod tests {
         a_renamed_item_keeps_its_new_handle_when_polled_again,
         run_handles_follow_the_current_handle_only_for_new_runs,
         follow_ups_take_the_items_handle_and_a_number_from_two,
+        a_reopened_item_has_its_own_count_of_lapses,
+        a_brief_never_reentered_keeps_its_count_of_lapses,
     );
+
+    /// Claims the only queued brief as `attempt`, lets its lease lapse and recovers it under a
+    /// limit of two claims.
+    fn lapse_claim(
+        registry: &dyn crate::directorates::registry::suite::TestRegistry,
+        attempt: u32,
+    ) -> LeaseRecovery {
+        let lease = registry
+            .claim_with_lease(None, "hq", DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .expect("a brief is queued");
+        assert_eq!(lease.attempt(), attempt);
+        let lapsed = crate::directorates::registry::suite::lapse(registry, lease.key(), "hq");
+        registry
+            .recover(&lapsed, 2, "other")
+            .unwrap()
+            .expect("an expired lease is recovered")
+    }
+
+    fn a_reopened_item_has_its_own_count_of_lapses(store: &dyn Store) {
+        let registry = store.handle();
+        let item = source_item("o/r#7", Some("7"), Some("gh"));
+        registry
+            .ingest_source_item("G", "github", &item, "hq")
+            .unwrap();
+        assert_eq!(lapse_claim(registry.as_ref(), 1), LeaseRecovery::Requeued);
+        let lease = registry
+            .claim_with_lease(None, "hq", DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .unwrap();
+        assert_eq!(lease.attempt(), 2, "the first attempt spent its count");
+        let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
+        registry
+            .finish(&claimed, &serde_json::json!({}), true, None, Some("hq"))
+            .unwrap();
+
+        let reopened = crate::directorates::registry::sources::reopened_brief(
+            ("G", "github"),
+            &item,
+            &[],
+            &Default::default(),
+            "hq",
+        );
+        let entry = crate::directorates::registry::sources::source_entry("G", "github", &item);
+        assert!(matches!(
+            registry
+                .reenter_brief(&reopened, &entry, &|_| true)
+                .unwrap(),
+            Reentry::Queued(_)
+        ));
+        assert_eq!(
+            registry.filed_brief(lease.key()).unwrap().unwrap().attempts,
+            0,
+            "the next attempt has made no claim yet"
+        );
+        assert_eq!(
+            lapse_claim(registry.as_ref(), 1),
+            LeaseRecovery::Requeued,
+            "its own full count"
+        );
+        assert_eq!(lapse_claim(registry.as_ref(), 2), LeaseRecovery::Failed);
+    }
+
+    fn a_brief_never_reentered_keeps_its_count_of_lapses(store: &dyn Store) {
+        let registry = store.handle();
+        let entered = registry
+            .enter_brief(&brief("once"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        assert_eq!(lapse_claim(registry.as_ref(), 1), LeaseRecovery::Requeued);
+        assert_eq!(lapse_claim(registry.as_ref(), 2), LeaseRecovery::Failed);
+        let filed = registry.filed_brief(&entered.key()).unwrap().unwrap();
+        assert_eq!((filed.state.as_str(), filed.attempts), ("failed", 2));
+    }
 
     fn follow_ups_take_the_items_handle_and_a_number_from_two(store: &dyn Store) {
         let registry = store.handle();
@@ -780,7 +855,11 @@ mod tests {
             .claim_with_lease(None, "station-a", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .unwrap();
-        assert_eq!((again.key(), again.attempt()), (key.as_str(), 2));
+        assert_eq!(
+            (again.key(), again.attempt()),
+            (key.as_str(), 1),
+            "the next attempt counts its claims from one"
+        );
         let claimed = registry.read_claimed(again.key()).unwrap().unwrap();
         assert!(crate::directorates::registry::sources::reportable(
             &claimed, "github"
@@ -801,7 +880,7 @@ mod tests {
         );
         assert!(matches!(
             registry.reenter_brief(&reopened, &entry, &|_| false).unwrap(),
-            Reentry::Unchanged(filed) if filed.state == "done" && filed.attempts == 2
+            Reentry::Unchanged(filed) if filed.state == "done" && filed.attempts == 1
         ));
         let unknown = crate::directorates::registry::sources::source_entry(
             "ai6",

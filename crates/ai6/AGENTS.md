@@ -2149,9 +2149,9 @@ resolve_mission(id: &str) -> io::Result<Option<MissionHandle>>  // UID, dropped 
 rename_mission(mission_id: &str, handle: &str) -> io::Result<MissionHandle>  // NotFound / InvalidInput / AlreadyExists
 enter_brief(brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>  // AlreadyExists when the entry's brief is in any state
 reenter_brief(brief: &Brief, entry: &MissionEntry, again: &dyn Fn(&Brief) -> bool) -> io::Result<Reentry>
-    // the Mission `entry` names, finished and accepted by `again`, queued again as `brief`: same UID,
-    // handle and claim count (the next claim is its next attempt); its outcome, report marks and
-    // spent provenance dropped; provenance is the brief's own
+    // the Mission `entry` names, finished and accepted by `again`, queued again as `brief`: same UID
+    // and handle; the claim count starts again, so `recover`'s `max_attempts` bounds this attempt's
+    // lapses alone; its outcome, report marks and spent provenance dropped; provenance is the brief's own
 #[non_exhaustive] pub enum Reentry { Queued(Brief), Unchanged(FiledBrief) /* in flight, or refused */, Unknown }
 claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
 lease(key: &str) -> io::Result<Option<Lease>>
@@ -3431,7 +3431,7 @@ reply round, which then marks the reply delivered. The snapshot is refreshed whi
 in flight, on each poll of the settled item, and for the newest `[sources] reopen_watch` settled
 items per instance every `reopen_watch_every`. Reopens are audited `mission.reopened` and on the
 timeline as `source`/`reopened`; `comment` is a start-up weakening. A Station whose book holds the
-ended Mission and claims its brief again (`Mission::claim` lower than the lease's attempt) queues
+ended Mission and claims another brief for it (`Mission::brief_digest` differs) queues
 it with `MissionStore::reopen` (new prompt and name, the Session hold let go).
 
 ## Sleepers (`ai6::directorates::registry::sleepers`)
@@ -4867,12 +4867,13 @@ it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
 `Abandoned` Mission again as a new attempt, for `agent_id` when given and otherwise its
 Agent; it keeps `session_ids` and the safe house report, and refuses every other state
-with `InvalidTransition`. `reopen(id, agent_id, prompt, claim)` queues a `Done`, `Failed`,
+with `InvalidTransition`. `reopen(id, agent_id, prompt, digest)` queues a `Done`, `Failed`,
 `Blown` or `Abandoned` Mission as its next attempt for a later claim of its brief (a reopened
-item, a standing Sleeper's window): the new prompt, the Agent, `Mission.claim`, and the launch
+item, a standing Sleeper's window): the new prompt, the Agent, `Mission.brief_digest`, and the launch
 manifest's Session hold and runner let go, so the next start records a run after the last
-(`InvalidTransition` otherwise). `record_claim(id, claim)` records `Mission.claim`
-(`Option<u32>`, serde default: which claim of its Registry brief the Mission runs for). A
+(`InvalidTransition` otherwise). `record_brief_digest(id, digest)` records `Mission.brief_digest`
+(`Option<String>`, serde default: the brief the Mission runs from; the same brief claimed
+again is a lapse recovered, not an attempt). A
 parked Mission leaves `Parked` through `Working`, `Failed`, `Abandoned` or `requeue_for`,
 and any transition clears `parked_until`.
 `quarantined` means Medical or an operator stopped the work because its Agent is

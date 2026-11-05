@@ -612,6 +612,7 @@ pub(super) mod tests {
         approval_covers_one_exact_definition,
         each_station_s_round_is_its_own_brief_narrowed_to_it,
         a_standing_sleeper_s_windows_are_attempts_of_one_mission,
+        a_standing_sleeper_past_the_attempt_limit_still_requeues_a_lapse,
     );
 
     /// 2026-10-25T10:00:00Z
@@ -647,7 +648,7 @@ pub(super) mod tests {
                 .claim_with_lease(None, "hq", crate::DEFAULT_LEASE, BTreeMap::new())
                 .unwrap()
                 .unwrap();
-            assert_eq!((lease.key(), lease.attempt()), (key.as_str(), attempt));
+            assert_eq!((lease.key(), lease.attempt()), (key.as_str(), 1));
             let claimed = headquarters.read_claimed(&key).unwrap().unwrap();
             assert_eq!(
                 window_of(&claimed),
@@ -700,6 +701,62 @@ pub(super) mod tests {
             .collect();
         rounds.sort();
         assert_eq!(rounds, ["G-deps-2", "G-deps-3"]);
+    }
+
+    fn a_standing_sleeper_past_the_attempt_limit_still_requeues_a_lapse(store: &dyn Store) {
+        use crate::directorates::registry::store::LeaseRecovery;
+        use crate::directorates::registry::suite::lapse;
+        const LIMIT: u32 = 2;
+        let registry = store.handle();
+        let standing = Sleeper {
+            standing: true,
+            ..nightly()
+        };
+        let window = |day: i64| at("2026-10-25") + 3 * 3600 + day * 86_400;
+        let fire = |day: i64| {
+            registry
+                .fire_sleeper("G", "deps", &standing, (window(day), None), "hq")
+                .unwrap()
+        };
+        let claim = || {
+            registry
+                .claim_with_lease(None, "hq", crate::DEFAULT_LEASE, BTreeMap::new())
+                .unwrap()
+                .expect("the window's attempt is queued")
+        };
+        for day in 0..=i64::from(LIMIT) {
+            assert_eq!(fire(day), Fire::Queued);
+            let lease = claim();
+            assert_eq!(lease.attempt(), 1, "window {day}");
+            let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
+            registry
+                .finish(
+                    &claimed,
+                    &serde_json::json!({"state": "done"}),
+                    true,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(fire(i64::from(LIMIT) + 1), Fire::Queued);
+        let lease = claim();
+        let key = lease.key().to_owned();
+        let lapsed = lapse(registry.as_ref(), &key, "hq");
+        assert_eq!(
+            registry.recover(&lapsed, LIMIT, "other").unwrap(),
+            Some(LeaseRecovery::Requeued),
+            "a window's first lapse, however many windows came before"
+        );
+        let again = claim();
+        assert_eq!((again.key(), again.attempt()), (key.as_str(), 2));
+        let lapsed = lapse(registry.as_ref(), &key, "hq");
+        assert_eq!(
+            registry.recover(&lapsed, LIMIT, "other").unwrap(),
+            Some(LeaseRecovery::Failed),
+            "the limit still bounds the lapses of one attempt"
+        );
     }
 
     #[test]
