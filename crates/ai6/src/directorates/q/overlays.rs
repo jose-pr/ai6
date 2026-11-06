@@ -88,6 +88,21 @@ pub const MANIFEST: &str = "overlay.cfg";
 /// it and no `overlay.cfg` is refused rather than read as having no manifest.
 pub const LATER_MANIFEST: &str = "OVERLAY.md";
 
+/// Why an overlay asks for hooks, which a later AOS edition runs: a `hooks` table in its manifest,
+/// or a `hook.<ext>` script at its root, by the extensions a default script takes. A `pre-tool`
+/// hook can deny a call, so an overlay is refused rather than run without the guards its author
+/// wrote. `None` when it asks for none.
+pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String> {
+    if manifest.contains_key("hooks") {
+        return Some(format!("{MANIFEST} declares [hooks]"));
+    }
+    defaults::DEFAULT_SCRIPTS
+        .iter()
+        .map(|(extension, _, _)| format!("hook{extension}"))
+        .find(|path| files.contains(path))
+        .map(|path| format!("it ships {path}"))
+}
+
 /// Where an overlay comes from.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +224,12 @@ pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, 
         Document::new()
     };
     let tree = OverlayTree::from_paths(digest.files.keys().cloned());
+    if let Some(why) = hooks_asked(&manifest, &tree) {
+        return Err(format!(
+            "{why}: this AI6 does not run overlay hooks yet, so the overlay is refused rather than \
+             run without them"
+        ));
+    }
     let issues = validate(&manifest, Some(&tree));
     let skills = skills_of(&manifest, &tree)
         .into_iter()

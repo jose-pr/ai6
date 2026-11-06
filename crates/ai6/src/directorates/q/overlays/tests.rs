@@ -413,3 +413,34 @@ fn an_overlay_md_with_no_overlay_cfg_is_refused_and_never_read_as_no_manifest() 
     let read = read_overlay(root.path(), &OverlayLimits::default()).unwrap();
     assert_eq!(read.manifest["name"], "tools");
 }
+
+#[test]
+fn an_overlay_asking_for_hooks_is_refused_naming_what_asks() {
+    for (path, text, named) in [
+        (
+            "overlay.cfg",
+            "[hooks]\npre-tool = \"hooks/check.sh\"\n",
+            "declares [hooks]",
+        ),
+        ("hook.sh", "#!/bin/sh\nexit 0\n", "ships hook.sh"),
+        ("hook.py", "print()\n", "ships hook.py"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join(path), text).unwrap();
+        std::fs::write(root.path().join("rules.md"), "a\n").unwrap();
+        let refusal = read_overlay(root.path(), &OverlayLimits::default()).unwrap_err();
+        assert!(refusal.contains(named), "{path}: {refusal}");
+        assert!(
+            refusal.contains("does not run overlay hooks yet"),
+            "{refusal}"
+        );
+    }
+    // Only a root script by a default script's extension is one: these are files like any other.
+    let root = tempfile::tempdir().unwrap();
+    for path in ["hook.txt", "hooks.sh"] {
+        std::fs::write(root.path().join(path), "x\n").unwrap();
+    }
+    std::fs::create_dir_all(root.path().join("kb")).unwrap();
+    std::fs::write(root.path().join("kb/hook.sh"), "x\n").unwrap();
+    assert!(read_overlay(root.path(), &OverlayLimits::default()).is_ok());
+}

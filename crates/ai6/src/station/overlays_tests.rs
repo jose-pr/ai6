@@ -1120,3 +1120,24 @@ fn an_overlay_md_with_no_overlay_cfg_refuses_the_session_naming_the_file() {
             .exists()
     );
 }
+
+#[test]
+fn an_overlay_with_a_hook_refuses_the_session_naming_it() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[("hook.sh", "#!/bin/sh\n"), ("kb/a.md", "a\n")],
+    );
+    let pin = crate::directorates::q::overlays::tree_digest(&dir, &OverlayLimits::default().tree())
+        .unwrap()
+        .digest;
+    let list = records([OverlayRecord::new("tools", OverlayFrom::Path(dir)).pinned(pin)]);
+    let refusal = case.prepare(&["tools"], &[], &list).err().unwrap();
+    assert!(refusal.contains("ships hook.sh"), "{refusal}");
+    assert!(
+        refusal.contains("does not run overlay hooks yet"),
+        "{refusal}"
+    );
+}
