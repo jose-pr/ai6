@@ -27,6 +27,7 @@ mod meta;
 
 pub use client::{
     AcpOptions, AcpSession, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, DisconnectDetail,
+    ExtensionHandler, Notifier,
 };
 #[cfg_attr(not(feature = "daemon"), allow(unused_imports))]
 pub(crate) use client::{duration_of, ends_turn};

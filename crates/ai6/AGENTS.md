@@ -1437,6 +1437,8 @@ impl TransportAccess {
 #[non_exhaustive]
 pub enum AgentMode { Auto, Local, RemoteHands }        // default Auto; as_str() -> "auto" | "local" | "remote-hands"
 #[non_exhaustive]
+pub enum CableReach { Required, Optional }  // default Required; TOML `cables`: "required" | "optional"
+#[non_exhaustive]
 pub enum Egress { Direct, Proxy(String), Station, Isolated }  // TOML: "direct", { proxy = URL }, "station", "none"
 impl Egress { pub fn kind(&self) -> EgressKind; }
 #[non_exhaustive]
@@ -1465,6 +1467,8 @@ pub struct Theater {
     pub runner: Option<RunnerSettings>,
     pub requires: Option<Requirements>,      // what Sessions need there; unchecked when absent
     pub provision: Option<ProvisionSpec>,    // how `ai6 theater provision` installs it; never published
+    pub cables: CableReach,                  // Optional: a wrapped harness with no `forward` starts
+                                             // without Cables, a weakening; omitted when Required
 }
 impl Theater {
     pub fn new(id: impl Into<String>, access: TheaterAccess) -> Self;
@@ -1476,6 +1480,7 @@ impl Theater {
     pub fn with_runner(self, runner: RunnerSettings) -> Self;
     pub fn with_requirements(self, requires: Requirements) -> Self;
     pub fn with_provision(self, provision: ProvisionSpec) -> Self;
+    pub fn with_cables(self, cables: CableReach) -> Self;
     pub fn weakenings(&self) -> Vec<String>;    // settings looser than their defaults
     pub fn summary(&self) -> TheaterSummary;     // no capabilities: the Station adds them
 }
@@ -1496,6 +1501,7 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub resources: Option<Resources>,        // `local`: the Station's sample; else the newer of the
                                              // resources-only sample and the report's
     pub sessions: usize,                     // the Station's running Sessions there; omitted when 0
+    pub cables: CableReach,                  // omitted when Required
 }
 impl TheaterSummary { pub fn local() -> Self; }
 pub fn is_sha256_pin(pin: &str) -> bool;    // "sha256:" and 64 hex digits
@@ -3853,13 +3859,15 @@ pub fn duplex() -> (Channel, Channel);                       // in-memory pair (
 #[non_exhaustive] pub struct LaunchMeta { pub mission_id, pub agent_id, pub initial_context, pub clearance,
     pub environment: BTreeMap<String,String>, pub model, pub effort, pub max_cost_micro_usd,
     pub project_settings, pub project_mcp, pub answer_only, pub assistant, pub handler: Option<HandlerSpec>,
-    pub terminal: Option<String> }
+    pub terminal: Option<String>, pub key: Option<String>,
+    pub cables: bool }               // a field runner gives the harness a Cable endpoint relayed over this connection
 impl LaunchMeta { pub fn from_start(&AgentStart) -> Self; pub fn into_start(self, prompt: String,
     working_directory: String) -> AgentStart; pub fn with_handler(self, HandlerSpec) -> Self;
-    pub fn with_terminal(self, Option<String>) -> Self; pub fn to_value(&self) -> Value }
+    pub fn with_terminal(self, Option<String>) -> Self; pub fn with_key(self, impl Into<String>) -> Self;
+    pub fn with_cables(self, bool) -> Self; pub fn to_value(&self) -> Value }
 #[non_exhaustive] pub struct ResumeMeta { /* as AgentResume: session_id, message, clearance, environment, ... */ }
 impl ResumeMeta { pub fn from_resume(&AgentResume) -> Self; pub fn into_resume(self, working_directory: String)
-    -> AgentResume; /* with_handler, with_terminal, to_value as LaunchMeta */ }
+    -> AgentResume; /* with_handler, with_terminal, with_key, with_cables, to_value as LaunchMeta */ }
 
 // Re-exported from `coqui_acp`, the ACP client the Session is built on (pinned by revision):
 // `Decider` as PermissionDecider, `Decision` as PermissionDecision, PermissionRequest,
@@ -3883,8 +3891,14 @@ pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, n
     pub limit_phrases: Vec<String>,                   // empty: no failure is a limit
     pub disconnect_detail: Option<DisconnectDetail>,  // what became of a lost agent
     pub text_flush_bytes: usize,                      // DEFAULT_TEXT_FLUSH_BYTES (65536); any value
-    pub max_tool_kinds: usize }                       // DEFAULT_MAX_TOOL_KINDS (4096); any value
+    pub max_tool_kinds: usize,                        // DEFAULT_MAX_TOOL_KINDS (4096); any value
+    pub extensions: Option<Arc<dyn ExtensionHandler>> }  // the agent's `_` notifications but `_ai6/event`
 pub type DisconnectDetail = Box<dyn FnOnce() -> Option<String> + Send>;  // asked at most once
+/// Handed each extension notification as the Session's reader takes it: return at once.
+pub trait ExtensionHandler: Send + Sync { fn handle(&self, method: &str, params: &Value, reply: Notifier); }
+#[derive(Clone)] pub struct Notifier;   // notifies the agent on the Session's connection while it is held
+impl Notifier { pub fn new(send: impl Fn(&str, Value) -> bool + Send + Sync + 'static) -> Self;
+    pub fn notify(&self, method: &str, params: Value) -> bool; }  // whether it was taken
 pub struct AcpSession;           // implements AgentSession
 impl AcpSession {
     /// initialize -> (authenticate) -> session/new | session/resume | session/load -> config
@@ -5339,7 +5353,10 @@ Session's added. A new start for the Mission ends a wrapper an earlier one left.
 Mission on another host works in the bound Operation's path or the Theater's `workdir`
 (absolute; POSIX or Windows paths are accepted on any Station), with no safe house.
 The Cable endpoint reaches a harness on another host through a reverse forward on the
-Theater's loopback, re-opened on the same port when a read had to wait for the link.
+Theater's loopback, re-opened on the same port when a read had to wait for the link. Placement
+(`execution_mode`) rules the wrapper out on a transport without `forward` unless the Theater
+says `cables = "optional"` (`CableReach`), and such a Session then starts with no Cable
+endpoint, logged as a weakening.
 This private listener is for
 daemon health, provider discovery and Universal Exports-to-daemon operations; user-facing
 Station and Mission operations belong to Universal Exports's authenticated API.
@@ -5403,8 +5420,7 @@ connections may be open. `initialize` advertises `authMethods: [{id: "ai6-runner
   start marker (no `event`) carries `terminal`, `handler` and `last`. `_ai6/ack {sessionId,
   seq}` stores the cursor. `session/cancel` interrupts, `session/close` ends the Session and
   its harness, `_ai6/session_status {key}` answers handler, terminal, `session_id`, `ended`,
-  `last`, `cursor` (`-32002` when unknown) and `_ai6/cable {key, upstream}` points the Cable
-  relay at the Station's endpoint. A `completed` event answers the waiting prompt `end_turn`, a
+  `last`, `cursor` (`-32002` when unknown). A `completed` event answers the waiting prompt `end_turn`, a
   `cancelled` one (or `blocked` with `TURN_CANCELLED`) `cancelled`, a `failed` or `limit` one an
   error.
 
@@ -5417,9 +5433,15 @@ such a Session up as lost); ended Sessions older than `keep_ended` (seven days) 
 when a runner starts. `serve` builds providers with `[providers.<id>]` when a request gives no
 configuration, and records its settings in `SETTINGS_FILE`; `ai6 runner serve --settings PATH`
 (`-`: standard input, which `--detach` writes to `SETTINGS_FILE` and passes on) reads them.
-When the start environment carries `AI6_CABLE_MCP_URL` and `_TOKEN`, the runner starts a
-loopback relay with its own URL and token, gives the harness those, and relays to the
-Station's endpoint, which `_ai6/cable` replaces. Stopping the runner stops its harnesses and
+When the launch's `LaunchMeta::cables` (or `ResumeMeta::cables`) is set, the runner starts a
+loopback relay with its own URL and token and gives the harness those as `AI6_CABLE_MCP_URL`
+and `_TOKEN` (any it was handed are dropped). Each HTTP request goes to the connection bound to
+the Session now as `_ai6/cable_request {sessionId, id, method, headers, body}` (base64 body,
+MCP's headers only); that Station answers with `_ai6/cable_answer {sessionId, id, status,
+headers}`, then `{data}` pieces and `{end}`, or `{error}`, and the relay sends
+`_ai6/cable_cancel {sessionId, id}` when the harness stops reading. With no Station bound the
+relay answers 503; a connection that ends drops its open requests (502). On `session/resume`
+the connection is bound before the harness starts. Stopping the runner stops its harnesses and
 closes its connections.
 
 `ai6 runner connect [--state-dir D]` connects to the loopback port within `connect_timeout` of
@@ -5442,16 +5464,19 @@ connect [--state-dir D]` on a terminal through the Theater's transport (`command
 input, starts the runner when none answers. The Theater's `runner` settings
 `connect_timeout_ms` (30000), `initialize_timeout_ms` (20000) and `request_timeout_ms` (30000)
 bound those steps. A launch is an `AcpSession` with `close_on_drop` and `fail_on_disconnect`
-off; `RemoteSession` wraps it: one read waits at most `read_wait` for an event, a dropped
+off, and, for a Session with a Cable endpoint, `AcpOptions::extensions` set to a `CableTunnel`
+that answers the relayed requests from the Session's endpoint with its bearer (at most
+`[runner] cable_streams` at once, reaching it within `cable_connect_timeout`), on that and on
+every later connection; the launch environment carries neither the endpoint's URL nor its
+bearer. `RemoteSession` wraps it: one read waits at most `read_wait` for an event, a dropped
 connection costs only time, the next `next_event` attaches again with `session/load` after the
-last event taken, and the Station re-opens its Cable forward and repoints the relay once it is
-through again. Past the Operation's `lost_after_secs` out of reach it probes once more and, if
+last event taken. Past the Operation's `lost_after_secs` out of reach it probes once more and, if
 the runner is gone (or answers not found for the Session), gives the Session up as lost (see
 Recovery). A Session another connection took over stops reading (`detached`). The start records
 the runner Session's key in the launch record before the harness starts. Shutdown and losing
 the Session lease let go without stopping the harness; the Mission stays Working, so a restarted
 Station re-attaches to the same runner Session (a parked Mission is resumed instead) and
-repoints the Cable relay at its own endpoint. Events are acknowledged when the Station asks for
+answers its Cable relay from its own endpoint. Events are acknowledged when the Station asks for
 the next one, and closing the Session acknowledges what it took, so nothing is replayed after
 it. Watchdog terminal-output checks (blocked prompt, loops) do not see a harness on a runner;
 its events still count as activity.

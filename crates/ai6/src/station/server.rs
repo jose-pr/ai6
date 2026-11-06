@@ -5,6 +5,8 @@ mod agents;
 #[cfg(feature = "publisher")]
 mod assistant;
 mod bona_fides;
+#[cfg(test)]
+mod cable_reach_tests;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
 #[cfg(feature = "cables-mcp")]
@@ -110,8 +112,6 @@ use crate::station::publisher::MissionPublication;
 #[cfg(feature = "publisher")]
 use crate::station::publisher::{self, Config as PublisherConfig, Publisher, SessionTelemetry};
 use crate::station::reach::ReachWatch;
-#[cfg(feature = "cables-mcp")]
-use crate::station::runner::Upstream;
 use crate::station::runner::client::{RemoteSession, RunnerLink};
 use crate::station::runner::{Launch, SessionReport};
 use crate::station::safehouse::SafeHouse;
@@ -2589,63 +2589,23 @@ struct RunnerAttachment {
     key: String,
     /// Set when this Station lets go: closing its side then leaves the harness running.
     detached: Arc<AtomicBool>,
-    /// The reverse forward that carries the harness's Cable requests to this Station, for a
-    /// runner on another host.
-    #[cfg_attr(
-        not(feature = "cables-mcp"),
-        allow(dead_code, reason = "only the Cable endpoint is forwarded")
-    )]
-    forward: Arc<Mutex<Option<crate::directorates::q::transport::Forward>>>,
 }
 
-/// How the harness on a Theater reaches this Station's Cable endpoint, and the forward that
-/// carries it when the Theater is another host.
+/// How the harness of the detached wrapper reaches this Station's Cable endpoint: a reverse
+/// forward from a loopback port on its Theater, re-opened on the same port when the link
+/// comes back.
 #[cfg(feature = "cables-mcp")]
 struct CableRoute {
-    upstream: Upstream,
-    transport: Option<(Arc<TransportClient>, String)>,
+    transport: Arc<TransportClient>,
+    target: String,
 }
 
-/// The Station's Cable endpoint as a harness on `theater_id` reaches it: the endpoint itself on
-/// the Station's own host, else a reverse forward from a loopback port on the Theater.
-///
-/// Opening a forward blocks; call this from `spawn_blocking`.
-#[cfg(feature = "cables-mcp")]
-fn cable_route(
-    state: &DaemonState,
-    own_host: bool,
-    theater_id: &str,
-    endpoint: (&str, std::net::SocketAddr, &str),
-    forward: &Mutex<Option<crate::directorates::q::transport::Forward>>,
-) -> Result<CableRoute, String> {
-    let (url, address, token) = endpoint;
-    if own_host {
-        return Ok(CableRoute {
-            upstream: Upstream {
-                url: url.to_owned(),
-                token: token.to_owned(),
-            },
-            transport: None,
-        });
-    }
-    let client = state.transports.client(theater_id)?;
-    let target = address.to_string();
-    let url = reopen_forward(&client, &target, forward, None)?;
-    Ok(CableRoute {
-        upstream: Upstream {
-            url,
-            token: token.to_owned(),
-        },
-        transport: Some((client, target)),
-    })
-}
-
-/// Routes the Station's Cable endpoint to the harness on a runner's Theater, pointing
-/// `environment` at it.
+/// Opens the reverse forward that carries the wrapped harness's Cable requests on `theater_id`
+/// to `endpoint`, and points `environment` at it.
 #[cfg(feature = "cables-mcp")]
 async fn route_cables(
     state: &DaemonState,
-    plan: (bool, &str),
+    theater_id: &str,
     endpoint: Option<&cables_mcp::Endpoint>,
     forward: &Arc<Mutex<Option<crate::directorates::q::transport::Forward>>>,
     environment: &mut BTreeMap<String, String>,
@@ -2653,30 +2613,50 @@ async fn route_cables(
     let Some(endpoint) = endpoint else {
         return Ok(None);
     };
-    let (own_host, theater_id) = (plan.0, plan.1.to_owned());
-    let (url, address, token) = (
-        endpoint.url().to_owned(),
-        endpoint.address(),
-        endpoint.token().to_owned(),
-    );
-    let (worker_state, worker_forward) = (state.clone(), forward.clone());
-    let route = tokio::task::spawn_blocking(move || {
-        cable_route(
-            &worker_state,
-            own_host,
-            &theater_id,
-            (&url, address, &token),
-            &worker_forward,
-        )
+    let target = endpoint.address().to_string();
+    let (worker_state, worker_forward, theater_id) =
+        (state.clone(), forward.clone(), theater_id.to_owned());
+    let (route, url) = tokio::task::spawn_blocking(move || {
+        let transport = worker_state.transports.client(&theater_id)?;
+        let url = reopen_forward(&transport, &target, &worker_forward, None)?;
+        Ok::<_, String>((CableRoute { transport, target }, url))
     })
     .await
     .map_err(|error| runtime_error(format!("Cable forward worker failed: {error}")))?
     .map_err(configuration_error)?;
-    environment.insert(
-        crate::station::runner::CABLE_URL_KEY.to_owned(),
-        route.upstream.url.clone(),
-    );
+    environment.insert(crate::station::runner::CABLE_URL_KEY.to_owned(), url);
     Ok(Some(route))
+}
+
+/// What answers a runner Session's Cable requests: this Station's endpoint for the Session.
+/// The endpoint's own address and bearer stay here; the harness is given the runner's relay.
+#[cfg(feature = "cables-mcp")]
+fn runner_cables(
+    state: &DaemonState,
+    endpoint: Option<&cables_mcp::Endpoint>,
+    environment: &mut BTreeMap<String, String>,
+) -> Option<(String, String, crate::station::limits::RunnerLimits)> {
+    let endpoint = endpoint?;
+    environment.remove(crate::station::runner::CABLE_URL_KEY);
+    environment.remove(crate::station::runner::CABLE_TOKEN_KEY);
+    Some((
+        endpoint.url().to_owned(),
+        endpoint.token().to_owned(),
+        state.station.limits().runner.clone(),
+    ))
+}
+
+/// The tunnel that answers runner Session `key`'s Cable requests, if it has an endpoint.
+#[cfg(feature = "cables-mcp")]
+fn cable_tunnel(
+    key: &str,
+    endpoint: Option<&(String, String, crate::station::limits::RunnerLimits)>,
+) -> Option<Arc<dyn crate::directorates::section_00::acp::ExtensionHandler>> {
+    endpoint.map(|(url, token, limits)| {
+        Arc::new(crate::station::runner::CableTunnel::new(
+            key, url, token, limits,
+        )) as Arc<dyn crate::directorates::section_00::acp::ExtensionHandler>
+    })
 }
 
 /// Opens the reverse forward to `target` on `port` (any port when `None`), replacing the one
@@ -2718,8 +2698,8 @@ fn reopen_forward(
     Ok(url)
 }
 
-/// The Station's side of a Session on a runner. A Session on another host re-opens its Cable
-/// forward when the link comes back, and repoints the runner's relay at it.
+/// The Station's side of a Session on a runner; `cables` answers the harness's Cable requests
+/// on every connection to the runner.
 fn runner_session(
     link: Arc<RunnerLink>,
     key: &str,
@@ -2727,48 +2707,50 @@ fn runner_session(
     session: Option<AcpSession>,
     attachment: &RunnerAttachment,
     reach: ReachWatch,
-    #[cfg(feature = "cables-mcp")] route: Option<&CableRoute>,
+    cables: Option<Arc<dyn crate::directorates::section_00::acp::ExtensionHandler>>,
 ) -> guatiao::library::Object<dyn AgentSession> {
-    let session = RemoteSession::drive(
-        link.clone(),
+    RemoteSession::drive(
+        link,
         key,
         session,
         session_id,
         attachment.detached.clone(),
         reach,
-    );
-    #[cfg(feature = "cables-mcp")]
-    if let Some(CableRoute {
-        upstream,
-        transport: Some((client, target)),
-    }) = route
-    {
-        let (client, target, token) = (client.clone(), target.clone(), upstream.token.clone());
-        let (forward, key) = (attachment.forward.clone(), key.to_owned());
-        return session
-            .on_relink(move || {
-                let port = forward
-                    .lock()
-                    .ok()
-                    .and_then(|slot| slot.as_ref().map(|open| open.info().remote_port));
-                match reopen_forward(&client, &target, &forward, port) {
-                    Ok(url) => {
-                        let upstream = Upstream {
-                            url,
-                            token: token.clone(),
-                        };
-                        if let Err(error) = link.set_cable(&key, &upstream) {
-                            eprintln!(
-                                "ai6: runner Session {key:?} Cable relay not repointed: {error}"
-                            );
-                        }
-                    }
-                    Err(error) => eprintln!("ai6: runner Session {key:?}: {error}"),
-                }
-            })
-            .into_object();
+    )
+    .with_cables(cables)
+    .into_object()
+}
+
+/// Whether the harness of Mission `mission_id` on `theater_id` reaches its Cable endpoint. Only
+/// the detached wrapper's harness can lack a way, on a transport without `forward`; placement
+/// rules that out unless the Theater says `cables = "optional"`, and then the Session starts
+/// without Cables, which is logged.
+#[cfg(feature = "cables-mcp")]
+fn cables_reachable(
+    state: &DaemonState,
+    mission_id: &str,
+    theater_id: &str,
+    wrapped: bool,
+) -> bool {
+    let Some(summary) = wrapped
+        .then(|| state.transports.summary(theater_id, false))
+        .flatten()
+    else {
+        return true;
+    };
+    let forwards = summary
+        .capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.forward);
+    if forwards || summary.cables != crate::directorates::m::theaters::CableReach::Optional {
+        return true;
     }
-    session.into_object()
+    eprintln!(
+        "ai6: Mission {mission_id:?} is weakened: it starts without Cables, since Theater \
+         {theater_id:?} has no runner, its transport has no `forward` and it says \
+         cables = \"optional\""
+    );
+    false
 }
 
 /// Tells the harness gate of a Session with a Cable endpoint how long to wait for this
@@ -2831,8 +2813,8 @@ impl HarnessTerminal {
             .watched_by(reach.clone());
         #[cfg(feature = "cables-mcp")]
         if let Some(CableRoute {
-            transport: Some((client, target)),
-            ..
+            transport: client,
+            target,
         }) = route
         {
             let (client, target, forward) = (client.clone(), target.clone(), forward.clone());
@@ -4763,59 +4745,62 @@ async fn start_mission(
         );
     }
     #[cfg(feature = "cables-mcp")]
-    let mut cables_mcp =
-        if let Some(operation_id) = mission.operation_id.as_deref().filter(|_| !review) {
-            let theater = state
-                .roster
-                .operation(operation_id)
-                .ok()
-                .and_then(|operation| operation.theater.clone());
-            let endpoint = cables_mcp::Endpoint::start_with_exposure(
-                state.cables.clone(),
-                CablePrincipal::try_new(
-                    agent.id.clone(),
-                    operation_id.to_owned(),
-                    theater,
-                    state.station_id.clone(),
-                    None,
-                    Some(mission.mission_id.to_string()),
-                )
-                .map_err(|_| runtime_error("Cable Mission identity is invalid"))?,
-                state.intake.clone(),
-                agent.clearance == "00",
-                exposure.clone(),
+    let mut cables_mcp = if let Some(operation_id) = mission
+        .operation_id
+        .as_deref()
+        .filter(|_| !review && cables_reachable(&state, &mission_id, &theater_id, wrapped))
+    {
+        let theater = state
+            .roster
+            .operation(operation_id)
+            .ok()
+            .and_then(|operation| operation.theater.clone());
+        let endpoint = cables_mcp::Endpoint::start_with_exposure(
+            state.cables.clone(),
+            CablePrincipal::try_new(
+                agent.id.clone(),
+                operation_id.to_owned(),
+                theater,
+                state.station_id.clone(),
+                None,
+                Some(mission.mission_id.to_string()),
             )
-            .await
-            .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
-            endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
-            endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
-            if plan_stage {
-                endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
-            }
-            endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
-            endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
-            if let Some(role) = mission.role_id.as_deref() {
-                endpoint.set_mission_role(role);
-            }
-            if round.is_some() {
-                endpoint.open_station_tools(head_of_station::Desk::new(
-                    state.clone(),
-                    mission.mission_id.as_str(),
-                ));
-            }
-            endpoint.add_environment(&mut environment);
-            gate_environment(&state, &mut environment);
-            initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
-            Some(endpoint)
-        } else {
-            None
-        };
+            .map_err(|_| runtime_error("Cable Mission identity is invalid"))?,
+            state.intake.clone(),
+            agent.clearance == "00",
+            exposure.clone(),
+        )
+        .await
+        .map_err(|error| runtime_error(format!("Cable MCP listener failed: {error}")))?;
+        endpoint.open_green_ink(green_ink::Desk::new(state.clone()));
+        endpoint.open_issue_tools(issues::IssueDesk::new(state.clone()));
+        if plan_stage {
+            endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
+        }
+        endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
+        endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
+        if let Some(role) = mission.role_id.as_deref() {
+            endpoint.set_mission_role(role);
+        }
+        if round.is_some() {
+            endpoint.open_station_tools(head_of_station::Desk::new(
+                state.clone(),
+                mission.mission_id.as_str(),
+            ));
+        }
+        endpoint.add_environment(&mut environment);
+        gate_environment(&state, &mut environment);
+        initial_context.push(cables_mcp::INSTRUCTIONS.to_owned());
+        Some(endpoint)
+    } else {
+        None
+    };
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
-    let cable = if runner.is_some() || wrapped {
+    let cable = if wrapped {
         route_cables(
             &state,
-            (plan.own_host, &theater_id),
+            &theater_id,
             cables_mcp.as_ref(),
             &forward,
             &mut environment,
@@ -4824,6 +4809,10 @@ async fn start_mission(
     } else {
         None
     };
+    #[cfg(feature = "cables-mcp")]
+    let relayed = runner
+        .as_ref()
+        .and_then(|_| runner_cables(&state, cables_mcp.as_ref(), &mut environment));
     #[cfg(feature = "cables-mcp")]
     let theater_mcp = if remote_hands {
         let (endpoint, instructions) = start_theater_tools(
@@ -4987,7 +4976,6 @@ async fn start_mission(
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
         key,
         detached: Arc::new(AtomicBool::new(false)),
-        forward: forward.clone(),
     });
     let reach = recovery::reach_watch(&state, mission.operation_id.as_deref());
     // The lost attempt's harness, if its runner kept it, must not work beside this one.
@@ -5048,10 +5036,11 @@ async fn start_mission(
             let session_attachment = RunnerAttachment {
                 key: key.clone(),
                 detached: attachment.detached.clone(),
-                forward: attachment.forward.clone(),
             };
             #[cfg(feature = "cables-mcp")]
-            let route = cable;
+            let cables = cable_tunnel(&key, relayed.as_ref());
+            #[cfg(not(feature = "cables-mcp"))]
+            let cables = None;
             let (worker_state, worker_mission) = (state.clone(), mission_id.clone());
             let worker_reach = reach.clone();
             tokio::task::spawn_blocking(move || {
@@ -5059,7 +5048,7 @@ async fn start_mission(
                 if let Some(stale) = stale_runner_session {
                     let _ = link.close_session(&stale);
                 }
-                let (report, started) = link.launch(&key, &handler, launch)?;
+                let (report, started) = link.launch(&key, &handler, launch, cables.clone())?;
                 record_runner_session(&worker_state, &worker_mission, &report);
                 Ok(runner_session(
                     link,
@@ -5068,8 +5057,7 @@ async fn start_mission(
                     Some(started),
                     &session_attachment,
                     worker_reach,
-                    #[cfg(feature = "cables-mcp")]
-                    route.as_ref(),
+                    cables,
                 ))
             })
             .await
@@ -5747,8 +5735,9 @@ async fn resume_mission(
         )),
     };
     #[cfg(feature = "cables-mcp")]
-    let cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref().filter(|_| !review)
-    {
+    let cables_mcp = if let Some(operation_id) = mission.operation_id.as_deref().filter(|_| {
+        !review && cables_reachable(&state, &mission_id, &resume_theater, resume_wrapped)
+    }) {
         let theater = state
             .roster
             .operation(operation_id)
@@ -5839,10 +5828,10 @@ async fn resume_mission(
     drop(resumed_theater_environment);
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
-    let cable = if runner.is_some() || resume_wrapped {
+    let cable = if resume_wrapped {
         route_cables(
             &state,
-            (resume_own_host, &resume_theater),
+            &resume_theater,
             cables_mcp.as_ref(),
             &forward,
             &mut environment,
@@ -5851,6 +5840,10 @@ async fn resume_mission(
     } else {
         None
     };
+    #[cfg(feature = "cables-mcp")]
+    let relayed = runner
+        .as_ref()
+        .and_then(|_| runner_cables(&state, cables_mcp.as_ref(), &mut environment));
     // A harness a runner still supervises keeps the environment it started with, and the
     // account its Session record names.
     if reattach.is_some() {
@@ -5941,7 +5934,6 @@ async fn resume_mission(
             |report| report.key.clone(),
         ),
         detached: Arc::new(AtomicBool::new(false)),
-        forward: forward.clone(),
     });
     let reach = recovery::reach_watch(&state, mission.operation_id.as_deref());
     #[cfg(feature = "publisher")]
@@ -5996,27 +5988,25 @@ async fn resume_mission(
             let session_attachment = RunnerAttachment {
                 key: key.clone(),
                 detached: attachment.detached.clone(),
-                forward: attachment.forward.clone(),
             };
             #[cfg(feature = "cables-mcp")]
-            let route = cable;
+            let cables = cable_tunnel(&key, relayed.as_ref());
+            #[cfg(not(feature = "cables-mcp"))]
+            let cables = None;
             let reattaching = reattach.is_some();
             let mut resumed_over: Option<AcpSession> = None;
             let (worker_state, worker_mission) = (state.clone(), mission_id.clone());
             let worker_reach = reach.clone();
             tokio::task::spawn_blocking(move || {
                 let expected_session_id = resume_request.session_id.clone();
-                if reattaching {
-                    #[cfg(feature = "cables-mcp")]
-                    if let Some(route) = &route
-                        && let Err(error) = link.set_cable(&key, &route.upstream)
-                    {
-                        eprintln!("ai6: runner Session {key:?} Cable relay not repointed: {error}");
-                    }
-                } else {
+                if !reattaching {
                     link.ensure()?;
-                    let (report, started) =
-                        link.launch(&key, &handler, Launch::Resume(resume_request))?;
+                    let (report, started) = link.launch(
+                        &key,
+                        &handler,
+                        Launch::Resume(resume_request),
+                        cables.clone(),
+                    )?;
                     record_runner_session(&worker_state, &worker_mission, &report);
                     if another_session(report.session_id.as_ref(), &expected_session_id) {
                         let _ = link.close_session(&key);
@@ -6031,8 +6021,7 @@ async fn resume_mission(
                     resumed_over,
                     &session_attachment,
                     worker_reach,
-                    #[cfg(feature = "cables-mcp")]
-                    route.as_ref(),
+                    cables,
                 );
                 // A re-attached harness is still in its turn; the message is the next one.
                 if reattaching && let Some(text) = message {
@@ -9263,6 +9252,7 @@ queue = 1
         version = "0.0.0",
         providers = [
             MockHandler,
+            super::cable_reach_tests::MockCablesHandler,
             MockLimitedHandler,
             super::accounts::testing::MockPooledHandler,
             MockSpendHandler,
@@ -10203,6 +10193,7 @@ queue = 1
             serde_json::json!([
                 "mock-agent",
                 "mock-author",
+                "mock-cables",
                 "mock-denied",
                 "mock-drip",
                 "mock-limit",
@@ -14569,12 +14560,10 @@ queue = 1
             "the runner kept the events spooled while the link was down"
         );
         wait_for_state(&state, "mission-1", MissionState::Done).await;
-        #[cfg(feature = "cables-mcp")]
-        assert!(
-            forwards.load(Ordering::Acquire) >= 2,
-            "the Cable forward was opened again after the link came back"
+        assert_eq!(
+            forwards.load(Ordering::Acquire),
+            0,
+            "a runner's Session reaches its Cables over the runner's connection, with no forward"
         );
-        #[cfg(not(feature = "cables-mcp"))]
-        let _ = forwards;
     }
 }

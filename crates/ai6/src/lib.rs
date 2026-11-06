@@ -99,9 +99,9 @@ pub use directorates::m::stewardship::{
     propose as propose_from_scorecard, roles_left_empty, route_name,
 };
 pub use directorates::m::theaters::{
-    AgentMode, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind, EphemeralAccess,
-    LOCAL_THEATER, RunnerSettings, SshAccess, Theater, TheaterAccess, TheaterError, TheaterKind,
-    TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
+    AgentMode, CableReach, DEFAULT_KEEP_FAILED, DEFAULT_KEEP_FAILED_HOURS, Egress, EgressKind,
+    EphemeralAccess, LOCAL_THEATER, RunnerSettings, SshAccess, Theater, TheaterAccess,
+    TheaterError, TheaterKind, TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
 pub use directorates::m::unex_limits::{
     ControlLimits, LoginTable, TextLimits, UnexGatewayLimits, UnexLimits, UnexTimelineLimits,

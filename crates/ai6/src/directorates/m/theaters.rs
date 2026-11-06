@@ -309,6 +309,33 @@ impl AgentMode {
     }
 }
 
+/// Whether a Session on a Theater must reach its Cable endpoint.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CableReach {
+    /// A way to the endpoint is part of what the Theater must offer: field mode without one
+    /// is ruled out, with the reason.
+    #[default]
+    Required,
+    /// A Session that has no way to its endpoint starts without one, a reported weakening.
+    Optional,
+}
+
+impl CableReach {
+    /// The name used in configuration and on the wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::Optional => "optional",
+        }
+    }
+
+    fn is_required(&self) -> bool {
+        *self == Self::Required
+    }
+}
+
 /// How a Theater reaches the provider's API.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -466,6 +493,9 @@ pub struct Theater {
     /// How `ai6 theater provision` installs what the Theater lacks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provision: Option<ProvisionSpec>,
+    /// Whether a Session here must reach its Cable endpoint.
+    #[serde(default, skip_serializing_if = "CableReach::is_required")]
+    pub cables: CableReach,
 }
 
 impl Theater {
@@ -482,6 +512,7 @@ impl Theater {
             runner: None,
             requires: None,
             provision: None,
+            cables: CableReach::default(),
         }
     }
 
@@ -541,6 +572,13 @@ impl Theater {
         self
     }
 
+    /// Sets whether a Session here must reach its Cable endpoint.
+    #[must_use]
+    pub fn with_cables(mut self, cables: CableReach) -> Self {
+        self.cables = cables;
+        self
+    }
+
     /// The settings looser than their defaults, each in a sentence an operator can act on.
     pub fn weakenings(&self) -> Vec<String> {
         let mut weakened = Vec::new();
@@ -560,6 +598,13 @@ impl Theater {
             weakened.push(
                 "runner.command or runner.state_dir: the configuration names a program or \
                  directory this Station uses on its own host"
+                    .to_owned(),
+            );
+        }
+        if self.cables == CableReach::Optional {
+            weakened.push(
+                "cables = \"optional\": a Session with no way to its Cable endpoint here starts \
+                 without one, so it cannot send or read Cables"
                     .to_owned(),
             );
         }
@@ -602,6 +647,7 @@ impl Theater {
             made_for: None,
             resources: None,
             sessions: 0,
+            cables: self.cables,
         }
     }
 
@@ -831,6 +877,9 @@ pub struct TheaterSummary {
     /// Sessions the Station is running on the Theater.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub sessions: usize,
+    /// Whether a Session here must reach its Cable endpoint.
+    #[serde(default, skip_serializing_if = "CableReach::is_required")]
+    pub cables: CableReach,
 }
 
 fn is_zero(count: &usize) -> bool {
@@ -924,6 +973,8 @@ impl Theaters {
             requires: Option<Requirements>,
             #[serde(default)]
             provision: Option<ProvisionSpec>,
+            #[serde(default)]
+            cables: CableReach,
         }
         let document = Document::deserialize(document).map_err(|e| TheaterError(e.to_string()))?;
         let mut theaters = Self::default();
@@ -939,6 +990,7 @@ impl Theaters {
                 runner: definition.runner,
                 requires: definition.requires,
                 provision: definition.provision,
+                cables: definition.cables,
             })?;
         }
         Ok(theaters)

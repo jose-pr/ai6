@@ -1007,10 +1007,16 @@ pub struct RunnerLimits {
     #[schema(title = "Largest request through the Cable relay", format = "bytes")]
     #[map(default = RunnerLimits::default().cable_request_bytes)]
     pub cable_request_bytes: Limit,
-    /// Seconds a runner's Cable relay may take to reach the Station.
-    #[schema(title = "The Cable relay reaches the Station within")]
+    /// Seconds the Station may take to reach its own Cable endpoint for a request a runner
+    /// relays.
+    #[schema(title = "The Station reaches its Cable endpoint within")]
     #[map(default = RunnerLimits::default().cable_connect_timeout)]
     pub cable_connect_timeout: Seconds,
+    /// Requests through a runner's Cable relay the Station answers at once for one Session;
+    /// past it a request is refused until one ends.
+    #[schema(title = "Cable relay requests open at once")]
+    #[map(default = RunnerLimits::default().cable_streams)]
+    pub cable_streams: Limit,
     /// Seconds one read by the Station of a runner's Session waits for an event.
     #[schema(title = "One read of a Session waits")]
     #[map(default = RunnerLimits::default().read_wait)]
@@ -1060,6 +1066,7 @@ impl Default for RunnerLimits {
             keep_ended: Seconds::new(7 * DAY),
             cable_request_bytes: Limit::at(4 * MIB),
             cable_connect_timeout: Seconds::new(10),
+            cable_streams: Limit::at(64),
             read_wait: Seconds::new(1),
             connect_timeout: Seconds::new(5),
             answer_wait: Seconds::new(10),

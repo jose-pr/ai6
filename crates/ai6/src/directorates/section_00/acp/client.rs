@@ -92,10 +92,51 @@ pub struct AcpOptions {
     /// The tool calls whose kind is kept, by which a later message about one that does not say
     /// its kind is judged; past it the oldest is forgotten, and such a message is of unknown kind.
     pub max_tool_kinds: usize,
+    /// Answers the agent's extension notifications other than [`EVENT_NOTIFICATION`]; without
+    /// one they are dropped.
+    pub extensions: Option<Arc<dyn ExtensionHandler>>,
 }
 
 /// Asked at most once, when a connection has ended mid-turn without being closed.
 pub type DisconnectDetail = Box<dyn FnOnce() -> Option<String> + Send>;
+
+/// What a Session does with the agent's extension notifications (methods starting with `_`)
+/// other than [`EVENT_NOTIFICATION`]. They are handed over as they are read, by whoever reads
+/// the Session's events, so a handler returns at once and does its work elsewhere.
+pub trait ExtensionHandler: Send + Sync {
+    /// `method` and `params` as the agent sent them; `reply` notifies the agent back on the same
+    /// connection for as long as the Session holds it.
+    fn handle(&self, method: &str, params: &Value, reply: Notifier);
+}
+
+/// Sends notifications to an agent on the connection a Session holds; once the Session is
+/// gone, nothing is sent.
+#[derive(Clone)]
+pub struct Notifier(Arc<SendNotification>);
+
+/// Sends one notification and says whether the connection took it.
+type SendNotification = dyn Fn(&str, Value) -> bool + Send + Sync;
+
+impl Notifier {
+    /// A notifier that hands each notification to `send`, which says whether it was taken.
+    pub fn new(send: impl Fn(&str, Value) -> bool + Send + Sync + 'static) -> Self {
+        Self(Arc::new(send))
+    }
+
+    fn of(session: &Arc<Session>) -> Self {
+        let session = Arc::downgrade(session);
+        Self::new(move |method, params| {
+            session
+                .upgrade()
+                .is_some_and(|session| session.notify(method, params).is_ok())
+        })
+    }
+
+    /// Sends `method` with `params`; whether the connection took it.
+    pub fn notify(&self, method: &str, params: Value) -> bool {
+        (self.0)(method, params)
+    }
+}
 
 /// The default of [`AcpOptions::text_flush_bytes`]: 64 KiB.
 pub const DEFAULT_TEXT_FLUSH_BYTES: usize = 64 * 1024;
@@ -129,6 +170,7 @@ impl Default for AcpOptions {
             limit_phrases: Vec::new(),
             text_flush_bytes: DEFAULT_TEXT_FLUSH_BYTES,
             max_tool_kinds: DEFAULT_MAX_TOOL_KINDS,
+            extensions: None,
         }
     }
 }
@@ -297,12 +339,13 @@ fn provider_error(message: impl AsRef<str>) -> ProviderError {
 
 /// One ACP connection to an agent, driven as an [`AgentSession`].
 pub struct AcpSession {
-    session: Session,
+    session: Arc<Session>,
     /// Whoever reads the agent's events holds this, as the single reader.
     reader: Mutex<()>,
     state: Mutex<State>,
     events_capability: bool,
     limit_phrases: Vec<String>,
+    extensions: Option<Arc<dyn ExtensionHandler>>,
 }
 
 impl AcpSession {
@@ -343,9 +386,10 @@ impl AcpSession {
                 },
                 ..State::default()
             }),
-            session,
+            session: Arc::new(session),
             events_capability,
             limit_phrases: options.limit_phrases,
+            extensions: options.extensions,
         };
         if events_capability && waits {
             // A façade starts its operation on the first prompt, and a resumed one says it is
@@ -504,6 +548,14 @@ impl AcpSession {
     }
 
     fn absorb(&self, incoming: Event) {
+        if let Event::Extension { method, params } = &incoming
+            && method != EVENT_NOTIFICATION
+        {
+            if let Some(handler) = &self.extensions {
+                handler.handle(method, params, Notifier::of(&self.session));
+            }
+            return;
+        }
         let Ok(mut state) = self.state.lock() else {
             return;
         };

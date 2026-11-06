@@ -13,7 +13,7 @@ use agent_client_protocol::{
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
 
-use super::{Hosted, Launch, Runner, lock_of};
+use super::{Hosted, Launch, Runner, cable, lock_of};
 use crate::directorates::section_00::acp::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, LAUNCH_META_KEY, LaunchMeta, RUNNER_TOKEN_METHOD,
     ResumeMeta, UNBOUNDED_LINE_BYTES, ends_turn,
@@ -34,6 +34,65 @@ pub(super) struct Binding {
     stop: AtomicBool,
     stream: TcpStream,
     cx: ConnectionTo<Client>,
+    /// The harness's Cable requests this connection carries to its Station.
+    cables: cable::Pending,
+}
+
+impl Binding {
+    fn new(
+        key: String,
+        launch: Option<(LaunchMeta, String)>,
+        hosted: Option<Arc<Hosted>>,
+        stream: TcpStream,
+        cx: ConnectionTo<Client>,
+    ) -> Self {
+        Self {
+            key,
+            launch: Mutex::new(launch),
+            hosted: Mutex::new(hosted),
+            pending: Mutex::new(Vec::new()),
+            stop: AtomicBool::new(false),
+            stream,
+            cx,
+            cables: cable::Pending::default(),
+        }
+    }
+
+    /// Stops feeding this connection; the Cable requests it carried end unanswered.
+    fn release(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        self.cables.clear();
+    }
+
+    /// Carries a harness's Cable request to this connection's Station, unless the connection
+    /// was let go.
+    pub(super) fn open_cable(self: &Arc<Self>, request: &cable::Request) -> Option<cable::Opened> {
+        if self.stop.load(Ordering::SeqCst) {
+            return None;
+        }
+        let message =
+            UntypedMessage::new(cable::REQUEST, serde_json::to_value(request).ok()?).ok()?;
+        let answers = self.cables.add(request.id);
+        if self.cx.send_notification(message).is_err() {
+            self.cables.remove(request.id);
+            return None;
+        }
+        let (binding, id) = (Arc::downgrade(self), request.id);
+        Some(cable::Opened {
+            answers,
+            cancel: Box::new(move || {
+                let Some(binding) = binding.upgrade() else {
+                    return;
+                };
+                binding.cables.remove(id);
+                if let Ok(message) =
+                    UntypedMessage::new(cable::CANCEL, json!({"sessionId": binding.key, "id": id}))
+                {
+                    let _ = binding.cx.send_notification(message);
+                }
+            }),
+        })
+    }
 }
 
 struct Connection {
@@ -92,15 +151,27 @@ pub(super) fn serve_connection(
             )
             .connect_to(lines),
     );
-    if let Some(binding) = lock_of(&connection.binding).take() {
-        binding.stop.store(true, Ordering::SeqCst);
-        let mut bindings = lock_of(&connection.runner.inner.bindings);
-        if bindings
-            .get(&binding.key)
-            .is_some_and(|bound| Arc::ptr_eq(bound, &binding))
-        {
-            bindings.remove(&binding.key);
+    let bound = lock_of(&connection.binding).clone();
+    if let Some(binding) = bound {
+        unbind(&connection, &binding);
+    }
+}
+
+/// Lets `binding` go: the connection no longer holds its Session, unless another took it.
+fn unbind(connection: &Connection, binding: &Arc<Binding>) {
+    binding.release();
+    {
+        let mut held = lock_of(&connection.binding);
+        if held.as_ref().is_some_and(|held| Arc::ptr_eq(held, binding)) {
+            *held = None;
         }
+    }
+    let mut bindings = lock_of(&connection.runner.inner.bindings);
+    if bindings
+        .get(&binding.key)
+        .is_some_and(|bound| Arc::ptr_eq(bound, binding))
+    {
+        bindings.remove(&binding.key);
     }
 }
 
@@ -188,20 +259,6 @@ fn dispatch(
             serde_json::to_value(hosted.report())
                 .map_err(|error| Error::internal_error().data(error.to_string()))
         })(),
-        "_ai6/cable" => (|| {
-            let key = key_of(params)?;
-            let hosted = runner.hosted(key).ok_or_else(|| not_found(key))?;
-            let upstream: super::Upstream =
-                serde_json::from_value(params.get("upstream").cloned().unwrap_or(Value::Null))
-                    .map_err(|_| Error::invalid_params())?;
-            match lock_of(&hosted.cable).as_ref() {
-                Some(proxy) => {
-                    proxy.set_upstream(upstream);
-                    Ok(json!({}))
-                }
-                None => Err(Error::invalid_params().data("the Session has no Cable endpoint")),
-            }
-        })(),
         "session/new" => (|| {
             let launch: LaunchMeta = launch_meta(params)?;
             let key = launch
@@ -215,18 +272,16 @@ fn dispatch(
                 .to_owned();
             bind(
                 connection,
-                Arc::new(Binding {
-                    key: key.clone(),
-                    launch: Mutex::new(Some((launch, cwd))),
-                    hosted: Mutex::new(None),
-                    pending: Mutex::new(Vec::new()),
-                    stop: AtomicBool::new(false),
-                    stream: connection
+                Arc::new(Binding::new(
+                    key.clone(),
+                    Some((launch, cwd)),
+                    None,
+                    connection
                         .stream
                         .try_clone()
                         .map_err(|error| Error::internal_error().data(error.to_string()))?,
-                    cx: cx.clone(),
-                }),
+                    cx.clone(),
+                )),
             );
             Ok(json!({"sessionId": key}))
         })(),
@@ -249,29 +304,34 @@ fn dispatch(
                 .handler
                 .clone()
                 .ok_or_else(|| Error::invalid_params().data("the launch names no handler"))?;
-            let pinned = meta.terminal.clone();
-            let hosted = connection
-                .handle
-                .block_on(runner.launch(
-                    &key,
-                    &spec,
-                    pinned.as_deref(),
-                    Launch::Resume(meta.into_resume(cwd)),
-                ))
-                .map_err(|reason| Error::internal_error().data(reason))?;
-            let binding = Arc::new(Binding {
-                key: key.clone(),
-                launch: Mutex::new(None),
-                hosted: Mutex::new(Some(hosted.clone())),
-                pending: Mutex::new(Vec::new()),
-                stop: AtomicBool::new(false),
-                stream: connection
+            let (pinned, cables) = (meta.terminal.clone(), meta.cables);
+            // Bound before the harness starts, so the Cable requests it makes as it starts
+            // reach this connection's Station.
+            let binding = Arc::new(Binding::new(
+                key.clone(),
+                None,
+                None,
+                connection
                     .stream
                     .try_clone()
                     .map_err(|error| Error::internal_error().data(error.to_string()))?,
-                cx: cx.clone(),
-            });
+                cx.clone(),
+            ));
             bind(connection, binding.clone());
+            let hosted = match connection.handle.block_on(runner.launch(
+                &key,
+                &spec,
+                pinned.as_deref(),
+                Launch::Resume(meta.into_resume(cwd)),
+                cables,
+            )) {
+                Ok(hosted) => hosted,
+                Err(reason) => {
+                    unbind(connection, &binding);
+                    return Err(Error::internal_error().data(reason));
+                }
+            };
+            *lock_of(&binding.hosted) = Some(hosted.clone());
             feed(connection, &binding, &hosted, 0);
             Ok(json!({"sessionId": key}))
         })(),
@@ -283,18 +343,16 @@ fn dispatch(
                 .and_then(|meta| meta.get(AFTER_KEY))
                 .and_then(Value::as_u64)
                 .unwrap_or_else(|| lock_of(&hosted.spool).cursor());
-            let binding = Arc::new(Binding {
-                key: key.to_owned(),
-                launch: Mutex::new(None),
-                hosted: Mutex::new(Some(hosted.clone())),
-                pending: Mutex::new(Vec::new()),
-                stop: AtomicBool::new(false),
-                stream: connection
+            let binding = Arc::new(Binding::new(
+                key.to_owned(),
+                None,
+                Some(hosted.clone()),
+                connection
                     .stream
                     .try_clone()
                     .map_err(|error| Error::internal_error().data(error.to_string()))?,
-                cx: cx.clone(),
-            });
+                cx.clone(),
+            ));
             bind(connection, binding.clone());
             feed(connection, &binding, &hosted, after);
             Ok(json!({}))
@@ -349,7 +407,7 @@ fn bind(connection: &Arc<Connection>, binding: Arc<Binding>) {
     if let Some(old) = superseded
         && !Arc::ptr_eq(&old, &binding)
     {
-        old.stop.store(true, Ordering::SeqCst);
+        old.release();
         if let Ok(message) = UntypedMessage::new(
             EVENT_NOTIFICATION,
             json!({
@@ -417,13 +475,14 @@ fn prompt(connection: &Arc<Connection>, params: &Value, responder: Responder<Val
                     Error::invalid_params().data("the launch names no handler"),
                 );
             };
-            let pinned = launch.terminal.clone();
+            let (pinned, cables) = (launch.terminal.clone(), launch.cables);
             let start = launch.into_start(text, cwd);
             match connection.handle.block_on(connection.runner.launch(
                 &binding.key,
                 &spec,
                 pinned.as_deref(),
                 Launch::Start(start),
+                cables,
             )) {
                 Ok(hosted) => {
                     lock_of(&binding.pending).push(responder);
@@ -444,6 +503,18 @@ fn handle_notification(connection: &Arc<Connection>, message: &UntypedMessage) {
     let Ok(key) = key_of(params) else {
         return;
     };
+    if message.method() == cable::ANSWER {
+        let bound = lock_of(&connection.binding)
+            .clone()
+            .filter(|binding| binding.key == key);
+        if let (Some(binding), Ok(answer)) = (
+            bound,
+            serde_json::from_value::<cable::Answer>(params.clone()),
+        ) {
+            binding.cables.deliver(answer);
+        }
+        return;
+    }
     let Some(hosted) = connection.runner.hosted(key) else {
         return;
     };

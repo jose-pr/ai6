@@ -15,15 +15,15 @@ use guatiao::Bytes;
 use guatiao::Status;
 use guatiao::library::{Object, ProviderError};
 
-use super::{Launch, RunnerHandoff, SETTINGS_FILE, SessionReport, Upstream};
+use super::{Launch, RunnerHandoff, SETTINGS_FILE, SessionReport};
 use crate::directorates::m::identity::SessionId;
 use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
 use crate::directorates::q::terminal::{STREAM_COLS, Spec, TerminalSession};
 use crate::directorates::q::transport::{RunSpec, TransportClient, describe};
 use crate::directorates::section_00::acp::{
-    AcpOptions, AcpSession, Authenticate, Exchange, HandlerSpec, LAUNCH_META_KEY, LaunchMeta,
-    RUNNER_TOKEN_METHOD, ResumeMeta, RpcFailure, TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
-    duration_of,
+    AcpOptions, AcpSession, Authenticate, Exchange, ExtensionHandler, HandlerSpec, LAUNCH_META_KEY,
+    LaunchMeta, RUNNER_TOKEN_METHOD, ResumeMeta, RpcFailure, TerminalIo, UNBOUNDED_LINE_BYTES,
+    UNBOUNDED_MS, duration_of,
 };
 use crate::directorates::section_00::agent::provider_session_id;
 use crate::station::limits::RunnerLimits;
@@ -387,14 +387,17 @@ impl RunnerLink {
     }
 
     /// Launches a harness on the runner under `key`, and answers what it reports with the
-    /// Session that drives it.
+    /// Session that drives it. With `cables`, the runner gives the harness a Cable endpoint and
+    /// `cables` answers what it relays.
     pub(crate) fn launch(
         &self,
         key: &str,
         handler: &HandlerSpec,
         launch: Launch,
+        cables: Option<Arc<dyn ExtensionHandler>>,
     ) -> Result<(SessionReport, AcpSession), String> {
         let connection = self.connect().map_err(|Unreachable(why)| why)?;
+        let relayed = cables.is_some();
         let mut options = AcpOptions {
             authenticate: connection.authenticate,
             initialize_timeout_ms: self.timeouts.initialize_ms,
@@ -403,6 +406,7 @@ impl RunnerLink {
             close_grace_ms: UNBOUNDED_MS,
             close_on_drop: false,
             fail_on_disconnect: false,
+            extensions: cables,
             ..AcpOptions::default()
         };
         match launch {
@@ -415,6 +419,7 @@ impl RunnerLink {
                         .with_handler(handler.clone())
                         .with_terminal(self.terminal.clone())
                         .with_key(key)
+                        .with_cables(relayed)
                         .to_value(),
                 );
             }
@@ -427,6 +432,7 @@ impl RunnerLink {
                         .with_handler(handler.clone())
                         .with_terminal(self.terminal.clone())
                         .with_key(key)
+                        .with_cables(relayed)
                         .to_value(),
                 );
             }
@@ -454,8 +460,14 @@ impl RunnerLink {
         Ok((report, session))
     }
 
-    /// Attaches to Session `key`, asking the runner to replay what followed event `after`.
-    pub(crate) fn attach(&self, key: &str, after: u64) -> Result<AcpSession, AttachError> {
+    /// Attaches to Session `key`, asking the runner to replay what followed event `after`;
+    /// `cables` answers the Cable requests the runner relays over the connection.
+    pub(crate) fn attach(
+        &self,
+        key: &str,
+        after: u64,
+        cables: Option<Arc<dyn ExtensionHandler>>,
+    ) -> Result<AcpSession, AttachError> {
         let connection = self
             .connect()
             .map_err(|Unreachable(why)| AttachError::Unreachable(why))?;
@@ -470,6 +482,7 @@ impl RunnerLink {
             close_grace_ms: UNBOUNDED_MS,
             close_on_drop: false,
             fail_on_disconnect: false,
+            extensions: cables,
             ..AcpOptions::default()
         };
         AcpSession::connect(connection.lines, options, connection.on_close).map_err(|error| {
@@ -495,28 +508,6 @@ impl RunnerLink {
                 .map(Some)
                 .map_err(|error| error.to_string()),
             Some(Err(RpcFailure { code, .. })) if code == NOT_FOUND => Ok(None),
-            Some(Err(failure)) => Err(format!("the runner refused: {}", failure.message)),
-            None => Err("the runner gave no answer".to_owned()),
-        }
-    }
-
-    /// Points Session `key`'s Cable relay at the Station's endpoint.
-    #[cfg_attr(
-        not(feature = "cables-mcp"),
-        allow(
-            dead_code,
-            reason = "only a Station with Cable tools repoints the relay"
-        )
-    )]
-    pub(crate) fn set_cable(&self, key: &str, upstream: &Upstream) -> Result<(), String> {
-        let mut answers = self
-            .exchange(vec![(
-                "_ai6/cable".to_owned(),
-                serde_json::json!({"key": key, "upstream": upstream}),
-            )])
-            .map_err(|Unreachable(why)| why)?;
-        match answers.pop() {
-            Some(Ok(_)) => Ok(()),
             Some(Err(failure)) => Err(format!("the runner refused: {}", failure.message)),
             None => Err("the runner gave no answer".to_owned()),
         }
@@ -599,7 +590,8 @@ pub(crate) struct RemoteSession {
     key: String,
     inner: Mutex<Inner>,
     detached: Arc<AtomicBool>,
-    relink: Option<Box<dyn Fn() + Send + Sync>>,
+    /// Answers the Cable requests the runner relays, on every connection to it.
+    cables: Option<Arc<dyn ExtensionHandler>>,
     reach: ReachWatch,
 }
 
@@ -635,18 +627,16 @@ impl RemoteSession {
                 superseded: false,
             }),
             detached,
-            relink: None,
+            cables: None,
             reach,
         }
     }
 
-    /// Runs `relink` after a connection is made again following one that was lost.
-    #[cfg_attr(
-        not(feature = "cables-mcp"),
-        allow(dead_code, reason = "only the Cable forward needs re-opening")
-    )]
-    pub(crate) fn on_relink(mut self, relink: impl Fn() + Send + Sync + 'static) -> Self {
-        self.relink = Some(Box::new(relink));
+    /// Answers the harness's Cable requests with `cables` on each connection made from now on;
+    /// a Session launched with them was given them at its launch.
+    #[must_use]
+    pub(crate) fn with_cables(mut self, cables: Option<Arc<dyn ExtensionHandler>>) -> Self {
+        self.cables = cables;
         self
     }
 
@@ -747,15 +737,15 @@ impl AgentSession for RemoteSession {
             }
             return Ok(None);
         }
-        match self.link.attach(&self.key, inner.after) {
+        match self
+            .link
+            .attach(&self.key, inner.after, self.cables.clone())
+        {
             Ok(session) => {
                 self.reach.reached();
                 inner.session = Some(session);
                 if std::mem::take(&mut inner.unreachable) {
                     eprintln!("ai6: runner Session {:?} is reachable again", self.key);
-                    if let Some(relink) = &self.relink {
-                        relink();
-                    }
                 }
             }
             Err(AttachError::NoSession(why)) => self.reach.lose(format!(

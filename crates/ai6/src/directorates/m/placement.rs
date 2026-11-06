@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::directorates::m::roster::{Agent, AgentRoute, Roster, RosterError, RouteRef};
 use crate::directorates::m::scorecard::ScorecardPolicy;
 use crate::directorates::m::theaters::{
-    AgentMode, EgressKind, LOCAL_THEATER, TheaterKind, TheaterSummary,
+    AgentMode, CableReach, EgressKind, LOCAL_THEATER, TheaterKind, TheaterSummary,
 };
 use crate::directorates::q::transport::Capabilities;
 use crate::directorates::registry::store::StationRecord;
@@ -909,11 +909,13 @@ fn assumed_own_host() -> Capabilities {
 /// How a Session would run on `theater`, or the capability that is missing.
 ///
 /// Field mode runs the harness on the Theater and needs a route to the provider's API. A
-/// runner there supervises it with its own providers; on another host the Station reaches
-/// the runner with `run`. Without a runner, the Station's own host needs `terminal` and
-/// `files`, and another host needs, for the detached wrapper the Station supervises over the
-/// transport, `run`, `files`, a POSIX host and a declared harness. Remote-hands mode runs the
-/// harness on the Station and needs only the transport's `run`. `agents` can force either.
+/// runner there supervises it with its own providers, and carries its Cable requests to the
+/// Station; on another host the Station reaches the runner with `run`. Without a runner, the
+/// Station's own host needs `terminal` and `files`, and another host needs, for the detached
+/// wrapper the Station supervises over the transport, `run`, `files`, a POSIX host, a declared
+/// harness and `forward`, which takes the harness to its Cable endpoint, unless the Theater
+/// says `cables = "optional"`. Remote-hands mode runs the harness on the Station and needs only
+/// the transport's `run`. `agents` can force either.
 pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String> {
     if let Some(reason) = &theater.unavailable {
         return Err(format!("the Station cannot reach it: {reason}"));
@@ -956,6 +958,12 @@ pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>
             Some("windows") => wrapper.push("a POSIX host"),
             None => wrapper.push("a known POSIX host (the transport has not reported its os)"),
             Some(_) => {}
+        }
+        if !capabilities.forward && theater.cables == CableReach::Required {
+            wrapper.push(
+                "the `forward` capability that takes the harness to its Cable endpoint \
+                 (or `cables = \"optional\"`, which starts it without Cables)",
+            );
         }
         if !wrapper.is_empty() {
             field_missing.push(format!(
@@ -1619,15 +1627,33 @@ mod tests {
             "agents = \"local\" needs the `run` capability to reach its runner"
         );
 
-        // Without one, a POSIX host with `run`, `files` and a declared harness gets the
-        // detached wrapper.
+        // Without one, a POSIX host with `run`, `files`, `forward` and a declared harness gets
+        // the detached wrapper.
         let posix = Capabilities {
             os: Some("linux".to_owned()),
+            forward: true,
             ..runs()
         };
         let mut wrapper = remote("box", Some(posix.clone()));
         wrapper.harnesses = vec!["claude".to_owned()];
         assert_eq!(mode_of(&wrapper), Ok(ExecutionMode::Field));
+
+        // Without `forward` its harness has no way to its Cable endpoint: field mode is ruled
+        // out, unless the Theater accepts Sessions without Cables.
+        let mut sealed = wrapper.clone();
+        sealed.capabilities = Some(Capabilities {
+            forward: false,
+            ..posix.clone()
+        });
+        assert_eq!(mode_of(&sealed), Ok(ExecutionMode::RemoteHands));
+        let reason = mode_of(&local_only(sealed.clone())).unwrap_err();
+        assert!(
+            reason
+                .contains("the `forward` capability that takes the harness to its Cable endpoint"),
+            "{reason}"
+        );
+        sealed.cables = CableReach::Optional;
+        assert_eq!(mode_of(&local_only(sealed)), Ok(ExecutionMode::Field));
 
         let mut windows = wrapper.clone();
         windows.capabilities = Some(Capabilities {

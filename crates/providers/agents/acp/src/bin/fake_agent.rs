@@ -8,6 +8,13 @@
 //! `FAKE_RESUME=1` advertises `session/resume`, `FAKE_DIE=1` exits mid-turn after writing
 //! `FAKE_LAST_WORDS` (or its own) to standard error, and `FAKE_OPTIONS=1` says what a Session
 //! can start with before any Session: a model option of two values.
+//!
+//! `FAKE_CABLES=JSON` has it use the `ai6-cables` MCP server its Session was given: it lists
+//! the tools, then makes each call of the array (`{"tool", "args"}`), repeating one that has
+//! `"until": TEXT` until the answers so far hold TEXT or `FAKE_CABLES_WAIT_MS` (30000) pass.
+//! A call with `"reply_to": TEXT` is given the `cable_id` of a Cable read earlier whose body holds
+//! TEXT. Its reply says `tools:NAME,...` and then `TOOL=>ANSWERS` for each call, on lines of their
+//! own.
 
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +34,193 @@ fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
+/// A client of one MCP server over streamable HTTP, as much of it as the fake needs.
+struct Mcp {
+    url: String,
+    headers: Vec<(String, String)>,
+    session: Option<String>,
+    agent: ureq::Agent,
+    next: u64,
+}
+
+impl Mcp {
+    /// The server named `name` among a Session's `mcpServers`.
+    fn of(servers: &Value, name: &str) -> Option<Self> {
+        let server = servers
+            .as_array()?
+            .iter()
+            .find(|server| server["name"] == name)?;
+        let headers = server["headers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|header| {
+                Some((
+                    header["name"].as_str()?.to_owned(),
+                    header["value"].as_str()?.to_owned(),
+                ))
+            })
+            .collect();
+        Some(Self {
+            url: server["url"].as_str()?.to_owned(),
+            headers,
+            session: None,
+            agent: ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .build()
+                .into(),
+            next: 1,
+        })
+    }
+
+    /// Sends one JSON-RPC message; a request's answer, or `Null` for a notification.
+    fn send(&mut self, method: &str, params: Value, notification: bool) -> Result<Value, String> {
+        let id = self.next;
+        self.next += 1;
+        let mut message = json!({"jsonrpc": "2.0", "method": method, "params": params});
+        if !notification {
+            message["id"] = json!(id);
+        }
+        let mut request = self
+            .agent
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream");
+        for (name, value) in &self.headers {
+            request = request.header(name, value);
+        }
+        if let Some(session) = &self.session {
+            request = request
+                .header("mcp-session-id", session)
+                .header("mcp-protocol-version", "2025-06-18");
+        }
+        let mut response = request
+            .send(message.to_string())
+            .map_err(|error| format!("{method}: {error}"))?;
+        if let Some(session) = response.headers().get("mcp-session-id") {
+            self.session = session.to_str().ok().map(str::to_owned);
+        }
+        let status = response.status().as_u16();
+        let body = response
+            .body_mut()
+            .read_to_string()
+            .map_err(|error| format!("{method}: {error}"))?;
+        if notification {
+            return Ok(Value::Null);
+        }
+        if status != 200 {
+            return Err(format!("{method}: HTTP {status}: {body}"));
+        }
+        let answer = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .chain(std::iter::once(body.as_str()))
+            .filter_map(|text| serde_json::from_str::<Value>(text.trim()).ok())
+            .find(|value| value["id"] == json!(id))
+            .ok_or_else(|| format!("{method}: no answer in {body:?}"))?;
+        match answer.get("error") {
+            Some(error) => Err(format!("{method}: {error}")),
+            None => Ok(answer["result"].clone()),
+        }
+    }
+
+    fn connect(&mut self) -> Result<Vec<String>, String> {
+        self.send(
+            "initialize",
+            json!({"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "ai6-acp-fake-agent", "version": "0"}}),
+            false,
+        )?;
+        self.send("notifications/initialized", json!({}), true)?;
+        let listed = self.send("tools/list", json!({}), false)?;
+        Ok(listed["tools"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+            .collect())
+    }
+
+    /// The text a tool call answers, an error's included.
+    fn call(&mut self, tool: &str, args: &Value) -> String {
+        match self.send(
+            "tools/call",
+            json!({"name": tool, "arguments": args}),
+            false,
+        ) {
+            Ok(result) => result["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|part| part["text"].as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            Err(error) => format!("ERROR {error}"),
+        }
+    }
+}
+
+/// What `FAKE_CABLES` asks of the Cable tools, in the reply's words.
+fn use_cables(servers: &Value, script: &str) -> String {
+    let Ok(Value::Array(steps)) = serde_json::from_str::<Value>(script) else {
+        return "cables:unreadable script".to_owned();
+    };
+    let Some(mut mcp) = Mcp::of(servers, "ai6-cables") else {
+        return "cables:no ai6-cables server".to_owned();
+    };
+    let tools = match mcp.connect() {
+        Ok(tools) => tools,
+        Err(error) => return format!("cables:{error}"),
+    };
+    let wait = std::time::Duration::from_millis(
+        var("FAKE_CABLES_WAIT_MS")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(30_000),
+    );
+    let mut lines = vec![format!("tools:{}", tools.join(","))];
+    // A read hands each Cable over once, so a later step may wait for what an earlier one read.
+    let mut seen = String::new();
+    for step in steps {
+        let tool = step["tool"].as_str().unwrap_or_default();
+        let mut args = step.get("args").cloned().unwrap_or_else(|| json!({}));
+        if let Some(text) = step["reply_to"].as_str()
+            && let Some(cable) = cable_read(&lines, text)
+        {
+            args["cable_id"] = json!(cable);
+        }
+        let deadline = std::time::Instant::now() + wait;
+        let mut answers = vec![mcp.call(tool, &args)];
+        seen.push_str(&answers[0]);
+        if let Some(until) = step["until"].as_str() {
+            while !seen.contains(until) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                let answer = mcp.call(tool, &args);
+                seen.push_str(&answer);
+                answers.push(answer);
+            }
+        }
+        answers.retain(|answer| answer != "[]");
+        lines.push(format!("{tool}=>{}", answers.join(" | ")));
+    }
+    lines.join("\n")
+}
+
+/// The `cable_id` of a Cable among the reply lines' reads whose body holds `text`.
+fn cable_read(lines: &[String], text: &str) -> Option<String> {
+    lines
+        .iter()
+        .filter_map(|line| line.strip_prefix("read_cables=>"))
+        .flat_map(|answers| answers.split(" | "))
+        .filter_map(|answer| serde_json::from_str::<Vec<Value>>(answer).ok())
+        .flatten()
+        .find(|cable| {
+            cable["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(text))
+        })
+        .and_then(|cable| cable["cable_id"].as_str().map(str::to_owned))
+}
+
 fn update(cx: &ConnectionTo<Client>, update: Value) {
     if let Ok(message) = UntypedMessage::new(
         "session/update",
@@ -42,6 +236,7 @@ fn handle(
     cx: ConnectionTo<Client>,
     cwd: &Arc<std::sync::Mutex<String>>,
     held: &Held,
+    servers: &Arc<Mutex<Value>>,
 ) {
     let params = message.params().clone();
     match message.method() {
@@ -67,6 +262,7 @@ fn handle(
         }
         "session/new" | "session/resume" => {
             *cwd.lock().unwrap() = params["cwd"].as_str().unwrap_or_default().to_owned();
+            *servers.lock().unwrap() = params["mcpServers"].clone();
             let _ = responder.respond(json!({"sessionId": "fake-1"}));
         }
         "session/close" => {
@@ -91,6 +287,7 @@ fn handle(
         "session/prompt" => {
             let cwd = cwd.lock().unwrap().clone();
             let held = held.clone();
+            let servers = servers.lock().unwrap().clone();
             std::thread::spawn(move || {
                 let prompt = params["prompt"][0]["text"].as_str().unwrap_or_default();
                 if let Some(data) = var("FAKE_ERROR_DATA")
@@ -131,6 +328,10 @@ fn handle(
                         " env:{}",
                         std::env::var(&name).unwrap_or_else(|_| "unset".to_owned())
                     ));
+                }
+                if let Some(script) = var("FAKE_CABLES") {
+                    reply.push('\n');
+                    reply.push_str(&use_cables(&servers, &script));
                 }
                 if let Some(kind) = var("FAKE_UNASKED") {
                     update(
@@ -190,6 +391,7 @@ fn main() {
         return;
     };
     let cwd = Arc::new(std::sync::Mutex::new(String::new()));
+    let servers = Arc::new(Mutex::new(Value::Null));
     let held: Held = Arc::default();
     let for_prompts = held.clone();
     let _ = futures::executor::block_on(
@@ -199,7 +401,7 @@ fn main() {
                 async move |message: UntypedMessage,
                             responder: Responder<Value>,
                             cx: ConnectionTo<Client>| {
-                    handle(message, responder, cx, &cwd, &for_prompts);
+                    handle(message, responder, cx, &cwd, &for_prompts, &servers);
                     Ok(())
                 },
                 on_receive_request!(),

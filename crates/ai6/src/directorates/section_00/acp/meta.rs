@@ -78,6 +78,10 @@ pub struct LaunchMeta {
     /// The name the Station gave the Session on a field runner; it is the ACP session ID there.
     #[serde(default)]
     pub key: Option<String>,
+    /// Whether a field runner gives the harness a Cable endpoint, relayed to the Station over
+    /// this connection.
+    #[serde(default)]
+    pub cables: bool,
 }
 
 impl LaunchMeta {
@@ -100,6 +104,7 @@ impl LaunchMeta {
             handler: None,
             terminal: None,
             key: None,
+            cables: false,
         }
     }
 
@@ -121,6 +126,13 @@ impl LaunchMeta {
     #[must_use]
     pub fn with_key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    /// Asks a field runner for a Cable endpoint relayed over this connection.
+    #[must_use]
+    pub fn with_cables(mut self, cables: bool) -> Self {
+        self.cables = cables;
         self
     }
 
@@ -219,6 +231,10 @@ pub struct ResumeMeta {
     /// The name the Station gave the Session on a field runner.
     #[serde(default)]
     pub key: Option<String>,
+    /// Whether a field runner gives the harness a Cable endpoint, relayed to the Station over
+    /// this connection.
+    #[serde(default)]
+    pub cables: bool,
 }
 
 impl ResumeMeta {
@@ -242,6 +258,7 @@ impl ResumeMeta {
             handler: None,
             terminal: None,
             key: None,
+            cables: false,
         }
     }
 
@@ -263,6 +280,13 @@ impl ResumeMeta {
     #[must_use]
     pub fn with_key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    /// Asks a field runner for a Cable endpoint relayed over this connection.
+    #[must_use]
+    pub fn with_cables(mut self, cables: bool) -> Self {
+        self.cables = cables;
         self
     }
 

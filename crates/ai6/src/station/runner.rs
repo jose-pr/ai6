@@ -17,6 +17,9 @@
 //! supervised; it ends their Sessions with a `lost` event, which a Station takes as the
 //! Session lost.
 //!
+//! A Session the Station asks Cables for gets a Cable endpoint on the runner's loopback, which
+//! carries the harness's requests over the attached Station's connection (`cable`).
+//!
 //! The state directory holds `runner.json` (where the runner listens, while it runs),
 //! `token`, `runner.lock`, `settings.json` (the [`RunnerHandoff`] it runs by) and
 //! `sessions/<key>/` with `events.jsonl`, `cursor` and `session.json`.
@@ -50,7 +53,8 @@ use coqui_acp_provider::{AgentEvent, AgentSession};
 
 #[cfg(feature = "cables-mcp")]
 pub(crate) use cable::URL_KEY as CABLE_URL_KEY;
-pub(crate) use cable::Upstream;
+#[cfg(feature = "cables-mcp")]
+pub(crate) use cable::{CableTunnel, TOKEN_KEY as CABLE_TOKEN_KEY};
 
 const INFO_FILE: &str = "runner.json";
 const TOKEN_FILE: &str = "token";
@@ -518,6 +522,20 @@ struct Hosted {
     cable: Mutex<Option<cable::CableProxy>>,
 }
 
+/// The way a Session's Cable relay reaches the Station: the connection bound to it now.
+struct BoundStation {
+    runner: std::sync::Weak<Inner>,
+    key: String,
+}
+
+impl cable::Route for BoundStation {
+    fn open(&self, request: &cable::Request) -> Option<cable::Opened> {
+        let inner = self.runner.upgrade()?;
+        let binding = lock_of(&inner.bindings).get(&self.key).cloned()?;
+        binding.open_cable(request)
+    }
+}
+
 fn lock_of<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -890,14 +908,16 @@ impl Runner {
             .map_err(|refusal| format!("this runner cannot start the harness: {refusal}"))
     }
 
-    /// Starts or resumes the harness of Session `key` on `handler`, supervised from now on.
-    /// The Session exists, with its failure in its spool, even when the harness does not start.
+    /// Starts or resumes the harness of Session `key` on `handler`, supervised from now on,
+    /// with a Cable endpoint relayed to the attached Station when `cables` asks for one. The
+    /// Session exists, with its failure in its spool, even when the harness does not start.
     async fn launch(
         &self,
         key: &str,
         handler: &HandlerSpec,
         pinned: Option<&str>,
         mut launch: Launch,
+        cables: bool,
     ) -> Result<Arc<Hosted>, String> {
         if self.inner.stopping.load(Ordering::Acquire) {
             return Err("the runner is stopping".to_owned());
@@ -959,9 +979,16 @@ impl Runner {
             Launch::Start(start) => &mut start.environment,
             Launch::Resume(resume) => &mut resume.environment,
         };
-        // The harness talks to the runner's relay, which a re-attaching Station repoints.
-        if let Some(upstream) = Upstream::from_environment(environment) {
-            match cable::CableProxy::start(Some(upstream), &self.inner.limits).await {
+        // The harness talks to the runner's relay, which reaches whichever Station is attached.
+        // A Cable endpoint a Station named itself is not one the harness can reach from here.
+        environment.remove(cable::URL_KEY);
+        environment.remove(cable::TOKEN_KEY);
+        if cables {
+            let route = Arc::new(BoundStation {
+                runner: Arc::downgrade(&self.inner),
+                key: key.to_owned(),
+            });
+            match cable::CableProxy::start(key, route, &self.inner.limits).await {
                 Ok(proxy) => {
                     proxy.add_environment(environment);
                     *lock_of(&hosted.cable) = Some(proxy);
@@ -1144,6 +1171,7 @@ mod tests {
                 &HandlerSpec::new(handler, serde_json::Value::Null),
                 None,
                 Launch::Start(start_request(key)),
+                false,
             )
             .await
     }

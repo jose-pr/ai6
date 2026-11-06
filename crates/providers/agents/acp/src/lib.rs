@@ -403,6 +403,7 @@ impl AcpHandler {
             }),
             text_flush_bytes: settings.text_flush_bytes,
             max_tool_kinds: settings.max_tool_kinds,
+            extensions: None,
         };
         let ended = process.clone();
         let stopper = io.clone();

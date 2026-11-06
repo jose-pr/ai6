@@ -991,6 +991,7 @@ pub(crate) mod testing {
         runner_dir: Option<PathBuf>,
         down: Arc<std::sync::atomic::AtomicBool>,
         forwards: Arc<std::sync::atomic::AtomicUsize>,
+        forward: bool,
     }
 
     #[cfg(unix)]
@@ -1001,7 +1002,14 @@ pub(crate) mod testing {
                 runner_dir: runner_dir.map(Path::to_path_buf),
                 down: Arc::default(),
                 forwards: Arc::default(),
+                forward: true,
             }
+        }
+
+        /// A host this transport cannot forward a port to, as a container's.
+        pub(crate) fn without_forward(mut self) -> Self {
+            self.forward = false;
+            self
         }
 
         /// While set, every operation fails as a dropped link does.
@@ -1107,7 +1115,7 @@ pub(crate) mod testing {
                 terminal: true,
                 run: true,
                 files: true,
-                forward: true,
+                forward: self.forward,
                 os: Some(std::env::consts::OS.to_owned()),
                 ..Capabilities::default()
             }
@@ -1225,6 +1233,9 @@ pub(crate) mod testing {
             spec: &Value,
         ) -> Result<guatiao::library::Object<dyn TransportForward>, ProviderError> {
             self.check()?;
+            if !self.forward {
+                return Err(crate::directorates::q::transport::unsupported("forward"));
+            }
             let spec = ForwardSpec::from_value(spec).map_err(internal)?;
             let listener =
                 std::net::TcpListener::bind(("127.0.0.1", spec.remote_port)).map_err(|e| io(&e))?;
