@@ -4843,7 +4843,11 @@ async fn start_mission(
             (mission.operation_id.as_deref(), mission_id.as_str()),
             run,
             earlier.as_ref(),
-            (&handler_provider, mission.resume_refused.is_some()),
+            (
+                &handler_provider,
+                mission.resume_refused.is_some(),
+                mission.after_failure,
+            ),
         )
     });
     let start_request = AgentStart {

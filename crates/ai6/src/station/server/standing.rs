@@ -53,22 +53,24 @@ pub(super) fn of(state: &DaemonState, mission_id: &str) -> Option<WindowRun> {
 /// The provider Session a run that resumes takes up: the last attempt's, when that attempt ran on
 /// `handler`, did not fail, and its provider gave it an ID, unless the provider `refused` it this
 /// attempt. A failed attempt's Session may be why it failed, and resuming it could fail every
-/// window alike. Which it does goes on the timeline.
+/// window alike. That it failed is read from its Session record, or `after_failure` from this
+/// Station's book, which can say so first. Which it does goes on the timeline.
 pub(super) fn resume_from(
     state: &DaemonState,
     (operation, mission_id): (Option<&str>, &str),
     run: &WindowRun,
     earlier: Option<&SessionRecord>,
-    (handler, refused): (&str, bool),
+    (handler, refused, after_failure): (&str, bool, bool),
 ) -> Option<SessionId> {
     if !run.resume {
         return None;
     }
-    let failed = earlier
-        .and_then(|record| record.result.as_ref())
-        .is_some_and(|result| {
-            result.state == "failed" || result.reason.as_deref() == Some(SUPERSEDED)
-        });
+    let failed = after_failure
+        || earlier
+            .and_then(|record| record.result.as_ref())
+            .is_some_and(|result| {
+                result.state == "failed" || result.reason.as_deref() == Some(SUPERSEDED)
+            });
     let found = earlier
         .filter(|_| !refused && !failed)
         .filter(|record| {
@@ -876,6 +878,40 @@ mod tests {
             ["started", "resumed", "started"]
         );
         assert!(said[2].1.contains("could not be resumed"), "{said:?}");
+        stop(&state);
+    }
+
+    /// The book says an attempt failed before its Session record does: the record's result is
+    /// written after the Mission's state, so a start in between still reads the attempt as done.
+    #[tokio::test]
+    async fn a_failure_the_book_holds_keeps_the_next_window_off_its_session() {
+        let root = tempfile::tempdir().unwrap();
+        let state = order_state(root.path(), "Tidy the tree.", true);
+        let mut warned = BTreeSet::new();
+        let mission = run_window(&state, FIRST, &mut warned).await;
+        // Its result may not be written yet; its provider Session is, from when it opened.
+        let done = runs(&state, &mission).remove(0);
+        let run = WindowRun {
+            window: window_label(FIRST + DAY),
+            resume: true,
+        };
+        let handler = "mock-standing";
+        let at = (Some("G"), mission.as_str());
+        assert_eq!(
+            resume_from(&state, at, &run, Some(&done), (handler, false, false)),
+            done.provider_session_id
+                .clone()
+                .map(|id| SessionId::try_new(id).unwrap())
+        );
+        assert_eq!(
+            resume_from(&state, at, &run, Some(&done), (handler, false, true)),
+            None
+        );
+        let said = told(&state, "started");
+        assert!(
+            said.last().unwrap().detail["detail"].contains("the last attempt failed"),
+            "{said:?}"
+        );
         stop(&state);
     }
 

@@ -4990,6 +4990,8 @@ sets `Mission.runs_past_brief` until it starts: such a Mission starts whatever i
 while `forget_queued(id)` takes any other out of the book when its brief settled before it started.
 `fail_reported(id, said)` fails it as its harness reported, keeping `Mission.reported_failure` for the
 outcome; `refuse_resume(id, why)` sets `Mission.resume_refused`, so the next start begins a new Session.
+`reopen` sets `Mission.after_failure` when the Mission ended `Failed` or `Blown`, and a standing
+Sleeper's resume then starts a new Session too, whatever the last Session record says yet.
 `reopen(id, agent_id, prompt, digest)` queues a `Done`, `Failed`,
 `Blown` or `Abandoned` Mission as its next attempt for a later claim of its brief (a reopened
 item, a standing Sleeper's window): the new prompt, the Agent, `Mission.brief_digest`, and the launch

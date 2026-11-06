@@ -117,6 +117,11 @@ pub struct Mission {
     /// not resume the last one. Cleared by the next attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_refused: Option<String>,
+    /// Whether the attempt before this one ended failed or blown, as this Station's book had it
+    /// when the Mission was queued again: this attempt does not take up that attempt's Session.
+    /// The book says so before the Session record does.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub after_failure: bool,
     /// Queued again on this Station's word after its brief was filed, by an operator's retry or a
     /// review: it runs, though the Registry's record of that brief has ended. Cleared when it
     /// starts.
@@ -287,6 +292,7 @@ impl MissionStore {
             failure: None,
             reported_failure: None,
             resume_refused: None,
+            after_failure: false,
             runs_past_brief: false,
             review_naming: None,
             plan: None,
@@ -855,6 +861,7 @@ impl MissionStore {
                 to: MissionState::Queued,
             });
         }
+        mission.after_failure = matches!(mission.state, MissionState::Failed | MissionState::Blown);
         mission.state = MissionState::Queued;
         mission.prompt = prompt;
         mission.agent_id = Some(agent_id);

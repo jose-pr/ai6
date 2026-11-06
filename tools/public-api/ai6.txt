@@ -1526,6 +1526,7 @@ pub ai6::directorates::m::mission::MissionState::Working
 impl ai6::directorates::m::mission::MissionState
 pub fn ai6::directorates::m::mission::MissionState::as_str(self) -> &'static str
 pub struct ai6::directorates::m::mission::Mission
+pub ai6::directorates::m::mission::Mission::after_failure: bool
 pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::blocked_reason: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::brief_digest: core::option::Option<alloc::string::String>
