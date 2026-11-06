@@ -1246,7 +1246,8 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 | `replay_batch` | 256 | **Spooled events taken at once.** Spooled events a runner connection takes from the spool at once. |
 | `keep_ended` | 604,800 (7 days) | **Keep an ended Session for.** Seconds an ended Session is kept by its runner. |
 | `cable_request_bytes` | 4 MiB | **Largest request through the Cable relay.** Bytes of one request through a runner's Cable relay. |
-| `cable_connect_timeout` | 10 | **The Cable relay reaches the Station within.** Seconds a runner's Cable relay may take to reach the Station. |
+| `cable_connect_timeout` | 10 | **The Station reaches its Cable endpoint within.** Seconds the Station may take to reach its own Cable endpoint for a request a runner relays. |
+| `cable_streams` | 64 | **Cable relay requests open at once.** Requests through a runner's Cable relay the Station answers at once for one Session; past it a request is refused until one ends. |
 | `read_wait` | 1 | **One read of a Session waits.** Seconds one read by the Station of a runner's Session waits for an event. |
 | `connect_timeout` | 5 | **`ai6 runner connect` reaches the runner within.** Seconds `ai6 runner connect` may take to reach the runner's loopback port. |
 | `answer_wait` | 10 | **A runner answers its authentication within.** Seconds a runner that accepted `ai6 runner connect` has to answer its authentication. |

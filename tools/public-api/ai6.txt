@@ -2241,6 +2241,11 @@ pub ai6::directorates::m::theaters::AgentMode::Local
 pub ai6::directorates::m::theaters::AgentMode::RemoteHands
 impl ai6::directorates::m::theaters::AgentMode
 pub fn ai6::directorates::m::theaters::AgentMode::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::directorates::m::theaters::CableReach
+pub ai6::directorates::m::theaters::CableReach::Optional
+pub ai6::directorates::m::theaters::CableReach::Required
+impl ai6::directorates::m::theaters::CableReach
+pub fn ai6::directorates::m::theaters::CableReach::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::Egress
 pub ai6::directorates::m::theaters::Egress::Direct
 pub ai6::directorates::m::theaters::Egress::Isolated
@@ -2314,6 +2319,7 @@ pub fn ai6::directorates::m::theaters::SshAccess::with_user(self, impl core::con
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::Theater
 pub ai6::directorates::m::theaters::Theater::access: ai6::directorates::m::theaters::TheaterAccess
 pub ai6::directorates::m::theaters::Theater::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::directorates::m::theaters::Theater::cables: ai6::directorates::m::theaters::CableReach
 pub ai6::directorates::m::theaters::Theater::egress: ai6::directorates::m::theaters::Egress
 pub ai6::directorates::m::theaters::Theater::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::theaters::Theater::id: alloc::string::String
@@ -2327,6 +2333,7 @@ pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<all
 pub fn ai6::directorates::m::theaters::Theater::summary(&self) -> ai6::directorates::m::theaters::TheaterSummary
 pub fn ai6::directorates::m::theaters::Theater::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::theaters::Theater::with_agents(self, ai6::directorates::m::theaters::AgentMode) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_cables(self, ai6::directorates::m::theaters::CableReach) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_egress(self, ai6::directorates::m::theaters::Egress) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_harness(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
@@ -2341,6 +2348,7 @@ pub fn ai6::directorates::m::theaters::TheaterError::fmt(&self, &mut core::fmt::
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::TheaterSummary
 pub ai6::directorates::m::theaters::TheaterSummary::access: ai6::directorates::m::theaters::TheaterKind
 pub ai6::directorates::m::theaters::TheaterSummary::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::directorates::m::theaters::TheaterSummary::cables: ai6::directorates::m::theaters::CableReach
 pub ai6::directorates::m::theaters::TheaterSummary::capabilities: core::option::Option<ai6::directorates::q::transport::Capabilities>
 pub ai6::directorates::m::theaters::TheaterSummary::egress: ai6::directorates::m::theaters::EgressKind
 pub ai6::directorates::m::theaters::TheaterSummary::harnesses: alloc::vec::Vec<alloc::string::String>
@@ -7828,6 +7836,7 @@ pub ai6::directorates::section_00::acp::AcpOptions::decider: alloc::sync::Arc<dy
 pub ai6::directorates::section_00::acp::AcpOptions::disconnect_detail: core::option::Option<ai6::directorates::section_00::acp::DisconnectDetail>
 pub ai6::directorates::section_00::acp::AcpOptions::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::AcpOptions::effort_option: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::AcpOptions::extensions: core::option::Option<alloc::sync::Arc<dyn ai6::directorates::section_00::acp::ExtensionHandler>>
 pub ai6::directorates::section_00::acp::AcpOptions::fail_on_disconnect: bool
 pub ai6::directorates::section_00::acp::AcpOptions::initialize_timeout_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::limit_phrases: alloc::vec::Vec<alloc::string::String>
@@ -7877,6 +7886,7 @@ pub fn ai6::directorates::section_00::acp::HandlerSpec::new(impl core::convert::
 pub ai6::directorates::section_00::acp::LaunchMeta::agent_id: alloc::string::String
 pub ai6::directorates::section_00::acp::LaunchMeta::answer_only: bool
 pub ai6::directorates::section_00::acp::LaunchMeta::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::directorates::section_00::acp::LaunchMeta::cables: bool
 pub ai6::directorates::section_00::acp::LaunchMeta::clearance: alloc::string::String
 pub ai6::directorates::section_00::acp::LaunchMeta::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::LaunchMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -7894,14 +7904,20 @@ impl ai6::directorates::section_00::acp::LaunchMeta
 pub fn ai6::directorates::section_00::acp::LaunchMeta::from_start(&ai6::directorates::section_00::agent::AgentStart) -> Self
 pub fn ai6::directorates::section_00::acp::LaunchMeta::into_start(self, alloc::string::String, alloc::string::String) -> ai6::directorates::section_00::agent::AgentStart
 pub fn ai6::directorates::section_00::acp::LaunchMeta::to_value(&self) -> serde_json::value::Value
+pub fn ai6::directorates::section_00::acp::LaunchMeta::with_cables(self, bool) -> Self
 pub fn ai6::directorates::section_00::acp::LaunchMeta::with_handler(self, ai6::directorates::section_00::acp::HandlerSpec) -> Self
 pub fn ai6::directorates::section_00::acp::LaunchMeta::with_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::section_00::acp::LaunchMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
 impl core::fmt::Debug for ai6::directorates::section_00::acp::LaunchMeta
 pub fn ai6::directorates::section_00::acp::LaunchMeta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::section_00::acp::Notifier(_)
+impl ai6::directorates::section_00::acp::Notifier
+pub fn ai6::directorates::section_00::acp::Notifier::new(impl core::ops::function::Fn(&str, serde_json::value::Value) -> bool + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn ai6::directorates::section_00::acp::Notifier::notify(&self, &str, serde_json::value::Value) -> bool
 #[non_exhaustive] pub struct ai6::directorates::section_00::acp::ResumeMeta
 pub ai6::directorates::section_00::acp::ResumeMeta::answer_only: bool
 pub ai6::directorates::section_00::acp::ResumeMeta::assistant: core::option::Option<ai6::directorates::section_00::agent::AssistantMode>
+pub ai6::directorates::section_00::acp::ResumeMeta::cables: bool
 pub ai6::directorates::section_00::acp::ResumeMeta::clearance: alloc::string::String
 pub ai6::directorates::section_00::acp::ResumeMeta::effort: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::environment: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -7921,6 +7937,7 @@ impl ai6::directorates::section_00::acp::ResumeMeta
 pub fn ai6::directorates::section_00::acp::ResumeMeta::from_resume(&ai6::directorates::section_00::agent::AgentResume) -> Self
 pub fn ai6::directorates::section_00::acp::ResumeMeta::into_resume(self, alloc::string::String) -> ai6::directorates::section_00::agent::AgentResume
 pub fn ai6::directorates::section_00::acp::ResumeMeta::to_value(&self) -> serde_json::value::Value
+pub fn ai6::directorates::section_00::acp::ResumeMeta::with_cables(self, bool) -> Self
 pub fn ai6::directorates::section_00::acp::ResumeMeta::with_handler(self, ai6::directorates::section_00::acp::HandlerSpec) -> Self
 pub fn ai6::directorates::section_00::acp::ResumeMeta::with_key(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::section_00::acp::ResumeMeta::with_terminal(self, core::option::Option<alloc::string::String>) -> Self
@@ -7943,6 +7960,8 @@ pub const ai6::directorates::section_00::acp::LAUNCH_META_KEY: &str
 pub const ai6::directorates::section_00::acp::RUNNER_TOKEN_METHOD: &str
 pub const ai6::directorates::section_00::acp::UNBOUNDED_LINE_BYTES: u64
 pub const ai6::directorates::section_00::acp::UNBOUNDED_MS: u64
+pub trait ai6::directorates::section_00::acp::ExtensionHandler: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::section_00::acp::ExtensionHandler::handle(&self, &str, &serde_json::value::Value, ai6::directorates::section_00::acp::Notifier)
 pub fn ai6::directorates::section_00::acp::duplex() -> (agent_client_protocol::jsonrpc::Channel, agent_client_protocol::jsonrpc::Channel)
 pub type ai6::directorates::section_00::acp::Credential = (dyn core::ops::function::Fn(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> bool + core::marker::Send + core::marker::Sync)
 pub type ai6::directorates::section_00::acp::DisconnectDetail = alloc::boxed::Box<(dyn core::ops::function::FnOnce() -> core::option::Option<alloc::string::String> + core::marker::Send)>
@@ -8494,6 +8513,7 @@ pub fn ai6::station::limits::ReviewLimits::default() -> Self
 pub ai6::station::limits::RunnerLimits::answer_wait: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::cable_connect_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::cable_request_bytes: ai6::bounds::Limit
+pub ai6::station::limits::RunnerLimits::cable_streams: ai6::bounds::Limit
 pub ai6::station::limits::RunnerLimits::connect_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::feed_poll: ai6::bounds::Seconds
 pub ai6::station::limits::RunnerLimits::keep_ended: ai6::bounds::Seconds
@@ -8902,6 +8922,11 @@ pub ai6::CableAction::Send
 pub ai6::CableInboundMode::Deliver
 pub ai6::CableInboundMode::Hold
 pub ai6::CableInboundMode::Refuse
+#[non_exhaustive] pub enum ai6::CableReach
+pub ai6::CableReach::Optional
+pub ai6::CableReach::Required
+impl ai6::directorates::m::theaters::CableReach
+pub fn ai6::directorates::m::theaters::CableReach::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::CableRelayError
 pub ai6::CableRelayError::InvalidRequest
 pub ai6::CableRelayError::RegistryUnavailable
@@ -13012,6 +13037,7 @@ pub fn ai6::directorates::m::unex_limits::TextLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::Theater
 pub ai6::Theater::access: ai6::directorates::m::theaters::TheaterAccess
 pub ai6::Theater::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::Theater::cables: ai6::directorates::m::theaters::CableReach
 pub ai6::Theater::egress: ai6::directorates::m::theaters::Egress
 pub ai6::Theater::harnesses: alloc::vec::Vec<alloc::string::String>
 pub ai6::Theater::id: alloc::string::String
@@ -13025,6 +13051,7 @@ pub fn ai6::directorates::m::theaters::Theater::new(impl core::convert::Into<all
 pub fn ai6::directorates::m::theaters::Theater::summary(&self) -> ai6::directorates::m::theaters::TheaterSummary
 pub fn ai6::directorates::m::theaters::Theater::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::theaters::Theater::with_agents(self, ai6::directorates::m::theaters::AgentMode) -> Self
+pub fn ai6::directorates::m::theaters::Theater::with_cables(self, ai6::directorates::m::theaters::CableReach) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_egress(self, ai6::directorates::m::theaters::Egress) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_harness(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::Theater::with_label(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
@@ -13052,6 +13079,7 @@ pub ai6::TheaterRequest::template: alloc::string::String
 #[non_exhaustive] pub struct ai6::TheaterSummary
 pub ai6::TheaterSummary::access: ai6::directorates::m::theaters::TheaterKind
 pub ai6::TheaterSummary::agents: ai6::directorates::m::theaters::AgentMode
+pub ai6::TheaterSummary::cables: ai6::directorates::m::theaters::CableReach
 pub ai6::TheaterSummary::capabilities: core::option::Option<ai6::directorates::q::transport::Capabilities>
 pub ai6::TheaterSummary::egress: ai6::directorates::m::theaters::EgressKind
 pub ai6::TheaterSummary::harnesses: alloc::vec::Vec<alloc::string::String>
