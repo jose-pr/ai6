@@ -106,7 +106,6 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
   themselves; the Headquarters lease does not yet drive placement.
 - Of a loadout, only its secrets and `env` are applied when a Session starts; its sandbox profile
   and MCP servers are parsed and validated but not yet applied.
-- External A2A interoperability (see below).
 
 ## Agent Cables
 
@@ -168,19 +167,26 @@ overrides. Both read bearer credentials from the launch environment, never from 
 persisted configuration. A harness under a field runner reaches it through the runner's
 relay, which carries each request over the runner's connection to the Station; the detached
 wrapper's harness through a reverse forward ([Agents](agents.md#cables)).
-MCP is the agent-to-tool interface. [A2A](https://a2a-protocol.org/latest/) remains a
-future cross-harness interoperability boundary, while AI6's relay remains authoritative
-for local identity and scope permissions. [Claude Code's cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)
+MCP is the agent-to-tool interface. [A2A](https://a2a-protocol.org/latest/) is the wire format of
+Cables at AI6's boundary, while AI6's relay remains authoritative for local identity and scope
+permissions. [Claude Code's cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)
 is a reference for delivered/held/refused outcomes and receiver-side controls, not an AI6
 transport dependency. See the [A2A coding-harness analysis](https://shashikantjagtap.net/a2a-for-coding-harnesses-the-protocol-most-teams-still-build-privately/)
 for the interoperability motivation.
 
-**Protocol decision:** AI6 will not expose A2A yet. Its current MCP Cable surface serves
-managed Agents through M's local relay, while no authenticated cross-harness directory or
-peer trust exchange exists. Revisit A2A when a deployment needs discovery and message/task
-exchange with agents outside its AI6 Registry; an adapter must preserve relay authorization
-and map no external identity into AI6 authority. An A2A `Task ID` remains an external
-protocol identifier: it is not AI6's **Mission ID** (a unit of work that can group multiple
+**Protocol decision: A2A is a Cable's wire format.** [Liaison](liaison.md), in Universal Exports,
+serves A2A 1.0 to agents outside AI6 and calls theirs. A peer proves its key on a
+[coqui-agentic-peer](https://github.com/Boriken-Dev/coqui-agentic-peer) link (the `a2a/1`
+binding of [coqui-a2a](https://github.com/Boriken-Dev/coqui-a2a)), or signs in on the gateway's
+HTTP JSON-RPC binding. Its message becomes a Cable to one AI6 Agent or an Operation's role,
+submitted to the relay as the peer's configured principal: the same records, grants,
+compartments, quotas, TTL, deduplication and audit as any Cable, with no store or route of its
+own. The addressee's reply is a Cable reply, read back as the A2A answer; a Cable to
+`a2a:<peer>` leaves as A2A. A message never becomes a Mission or a brief: Missions are work with
+objectives and deliverables, Cables are messages. No external identity gains AI6 authority: a
+peer may do only what its principal may (`cable.send`, `cable.read`), and the relay's grants
+name it as `a2a:<peer>`. An A2A Task is the peer's Cable (its ID is the Cable ID) and its context
+the Cable conversation; neither is a **Mission ID** (a unit of work that can group multiple
 Sessions) or a provider-issued **Session ID** (one resumable agent run). Inbox
 delivery currently uses polling through `read_cables` at agent-selected checkpoints; it
 does not wake an idle provider session.

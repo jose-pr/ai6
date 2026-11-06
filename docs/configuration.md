@@ -120,6 +120,17 @@ listen = "127.0.0.1:7083"             # the loopback listener of that origin
 certificate = "unex.pem"              # its chain, PEM; with key, listen may be any address
 key = "unex-key.pem"
 
+[unex.liaison]                        # A2A for agents outside AI6, as Cables (liaison.md)
+listen = "0.0.0.0:7084"               # the link listener: wss:// with [unex.tls]; omit for /v1/a2a only
+identity = "/var/lib/unex/liaison/identity"   # the gateway's link key, made the first time
+poll = 1                              # seconds between looks for replies and outgoing Cables
+
+[unex.liaison.peer.acme]              # one peer: a link key, a principal, what it may write to
+id = "sha256:…"                       # its peer id; omit for a peer that signs in over HTTP only
+principal = "person:acme-bot"         # what it acts as; its cable.send and cable.read decide
+addressees = ["agent:G/007", "role:G/coordinator"]
+url = "wss://agents.acme.example/link"   # where Liaison dials it for Cables sent to a2a:acme
+
 [station]                             # a Station and the ai6 command
 id = "hq-1"                           # default: made up once and kept in the state directory
 state_dir = "/var/lib/ai6"            # default: the platform's state directory

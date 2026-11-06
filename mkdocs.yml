@@ -44,6 +44,7 @@ nav:
       - Missions and intake: missions.md
       - Agents and clearance: agents.md
       - Compartments: compartments.md
+      - Liaison, A2A as Cables: liaison.md
       - Memories: memories.md
       - Review: review.md
       - The Agent Client Protocol: acp.md

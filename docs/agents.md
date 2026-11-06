@@ -451,9 +451,17 @@ shows as `moneypenny for <person>` and reaches only Agents of its Operation ([Mo
 Cables](assistant.md#cables)).
 
 Incoming message text is untrusted input. It cannot grant tools, clearance, secrets or
-authority. A2A remains an external interoperability boundary; it cannot bypass AI6's
-relay policy. See [Agent Cables](architecture.md#agent-cables) for the message and
+authority. See [Agent Cables](architecture.md#agent-cables) for the message and
 permission contract.
+
+Agents outside AI6 reach these Cables over A2A through [Liaison](liaison.md). A peer's message
+arrives as a Cable from `a2a:<peer>` (shown as `a2a:<peer> for <principal>`), and its reply goes
+back with `reply_to_cable` as to any Cable; a Cable to `a2a:<peer>`, or `a2a:<peer>/<addressee>`
+for one of that peer's own addressees, is sent to it as an A2A message, and the peer's answer
+comes back as a reply. Both need grants naming `a2a:<peer>`, as any Cable needs grants naming
+its Agents. A thread stays with the Session that took its first message: a follow-up in the same
+A2A context reaches that Session, or, once it has ended, the Agent's next Session, never another
+of its Sessions that was already open.
 
 Across Operations, a Cable needs a [compartment](compartments.md#cables) as well as these grants,
 and a Session holding one also has `compartments`, `missions_in`, `mission_brief` and

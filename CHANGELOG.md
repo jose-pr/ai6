@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Liaison: A2A 1.0 as the wire format of Cables, in Universal Exports. A configured peer
+  (`[unex.liaison.peer.<name>]`: its link key `id`, the `principal` it acts as, its `addressees`)
+  reaches AI6 on a proven coqui-agentic-peer link (`[unex.liaison] listen`, the `a2a/1` binding of
+  coqui-a2a) or on the gateway's A2A JSON-RPC binding (`POST /v1/a2a`, signed in as its principal).
+  Its message is a Cable from `a2a:<peer>` to one Agent or an Operation's role, through the relay
+  with its grants, quotas, lifetime and audit, under the principal's `cable.send`; the reply Cable
+  is the A2A answer. Nothing becomes a Mission or brief, and nothing is kept but Cables: a Task is
+  the peer's Cable and its context the conversation. A context stays with the Session that took its
+  first message, then the Agent's next Session (`CableSendRequest::with_affinity`,
+  `CableRecipient::taken_by`). A Cable to `a2a:<peer>` or `a2a:<peer>/<addressee>` is sent to the
+  peer over A2A, on its link or by dialing its `url`, and its answer comes back as a reply.
+  `CableRelay::withdraw` and `CableState::Withdrawn` back `CancelTask`;
+  `CableStore::cables_from` lists one sender's Cables, and `update_cable_delivery` takes the
+  Session that took a delivery. Every call is audited (`liaison.*`).
 - Harness logins kept sealed in the Registry. A `harness-login` account with `files` has its login
   sealed separately to each Station named, opened only by those Stations' own sealing keys
   (`sealing.key` beside `identity.pem`, its public half published and signed by the identity), and
