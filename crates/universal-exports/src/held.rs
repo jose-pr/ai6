@@ -347,7 +347,7 @@ pub(crate) async fn withdraw(
         Withdrawal::Decided => {
             return Err(ApiError::refused(
                 axum::http::StatusCode::CONFLICT,
-                "a Station took the Mission, or it ended: cancel it instead".to_owned(),
+                "a Station took the Mission, or it ended: use `mission cancel`".to_owned(),
             ));
         }
     };
@@ -644,7 +644,90 @@ mod tests {
         )
         .await;
         assert_eq!(taken.status(), 409);
-        assert!(taken.text().await.unwrap().contains("cancel it instead"));
+        assert!(taken.text().await.unwrap().contains("`mission cancel`"));
+    }
+
+    /// A Mission whose brief is filed and which has no Session record: what the withdraw's refusal
+    /// sends an operator to must work, here through Headquarters.
+    #[tokio::test]
+    async fn a_cancel_of_a_mission_whose_brief_ended_reaches_a_station() {
+        let served = served_with(CONTROL_ROLES).await;
+        let key = ended(&served, "e-1");
+        let refused = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/missions/{key}/withdraw"),
+            Some(serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(refused.status(), 409);
+        let asked = crate::controls::tests::ask(
+            &served,
+            &served.operator,
+            "G",
+            &key,
+            serde_json::json!({"action": "cancel", "idempotency_key": "e-1"}),
+        )
+        .await;
+        assert_eq!(asked.status(), 202);
+        let status: serde_json::Value = asked.json().await.unwrap();
+        assert_eq!(status["status"], "queued");
+        assert_eq!(status["station_id"], "hq");
+        let control = crate::controls::tests::take(&served, "hq").await.unwrap();
+        assert_eq!(control.action(), ai6_diptel::ControlAction::Cancel);
+
+        // Another Operation's cancel learns nothing of it.
+        let elsewhere = crate::controls::tests::ask(
+            &served,
+            &served.operator,
+            "L",
+            &key,
+            serde_json::json!({"action": "cancel", "idempotency_key": "e-2"}),
+        )
+        .await;
+        assert_ne!(elsewhere.status(), 202);
+    }
+
+    /// With no Station to ask, a Mission that already ended is settled by the gateway.
+    #[tokio::test]
+    async fn a_cancel_of_an_ended_mission_with_no_station_to_ask_is_settled_here() {
+        let served = served_with(CONTROL_ROLES).await;
+        let key = ended(&served, "e-3");
+        served
+            .registry
+            .elect("hq", std::time::Duration::from_nanos(1))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let asked = crate::controls::tests::ask(
+            &served,
+            &served.operator,
+            "G",
+            &key,
+            serde_json::json!({"action": "cancel", "idempotency_key": "e-3"}),
+        )
+        .await;
+        assert_eq!(asked.status(), 202);
+        let status: serde_json::Value = asked.json().await.unwrap();
+        assert_eq!(status["status"], "applied");
+        assert_eq!(status["state"], "failed");
+    }
+
+    /// Files `id`'s brief as failed, with no Session record and no lease left.
+    fn ended(served: &Served, id: &str) -> String {
+        let key = queue(served, id);
+        let claimed = served.registry.claim_new(Some(&key)).unwrap().unwrap();
+        served
+            .registry
+            .finish(
+                &claimed,
+                &serde_json::json!({"state": "failed", "reason": "no"}),
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        key
     }
 
     #[tokio::test]

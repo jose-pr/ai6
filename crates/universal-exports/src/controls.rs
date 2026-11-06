@@ -302,12 +302,14 @@ enum Routing {
     Unknown,
     /// The Mission is known, but no Station that could act on it is checking in.
     NoStation,
+    /// As `NoStation`, and its brief is filed in this state: it has already ended.
+    Ended(String),
 }
 
 /// The Station that should act on a Mission: the one holding its latest Session record, else
 /// the one holding its brief's lease, else the Headquarters Station. A Station that has gone
 /// dark is passed over. The Mission is known only when something names `operation` as its
-/// Operation (a Session record, its lease, its queued brief, or the board: `on_board`) and
+/// Operation (a Session record, its lease, its brief in any state, or the board: `on_board`) and
 /// nothing names another; otherwise it is unknown, so nothing about a Mission of another
 /// Operation is routed to, counted or told.
 fn control_target(
@@ -340,18 +342,17 @@ fn control_target(
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
     });
-    // A queued brief's key is its Mission ID.
-    let briefed_for: Vec<Option<String>> = registry
-        .list_new()?
-        .into_iter()
-        .filter(|brief| brief.key() == mission_id)
-        .map(|brief| brief.operation)
-        .collect();
+    // A brief's key is its Mission ID; one a Mission ID cannot name has none.
+    let filed = registry.filed_brief(mission_id).ok().flatten();
     let named: Vec<&str> = records
         .iter()
         .filter_map(|record| record.operation.as_deref())
         .chain(leased_for.as_deref())
-        .chain(briefed_for.iter().flatten().map(String::as_str))
+        .chain(
+            filed
+                .as_ref()
+                .and_then(|filed| filed.brief.operation.as_deref()),
+        )
         .collect();
     if !(on_board || named.contains(&operation)) || named.iter().any(|named| *named != operation) {
         return Ok(Routing::Unknown);
@@ -383,10 +384,16 @@ fn control_target(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    let nobody = match filed {
+        Some(filed) if matches!(filed.state.as_str(), "done" | "failed") => {
+            Routing::Ended(filed.state)
+        }
+        _ => Routing::NoStation,
+    };
     Ok(registry
         .headquarters()?
         .filter(|lease| lease.expires() > now && live.iter().any(|s| s == lease.station()))
-        .map_or(Routing::NoStation, |lease| {
+        .map_or(nobody, |lease| {
             Routing::To(Target {
                 station: lease.station().to_owned(),
                 session,
@@ -536,7 +543,56 @@ pub(crate) async fn request_control(
     let target = match routing {
         Routing::To(target) => target,
         Routing::Unknown => return Err(ApiError::not_found()),
-        Routing::NoStation => return Err(no_station()),
+        // Nothing runs it and nothing can: the cancel is what the Registry already says.
+        Routing::Ended(ended) if action == ControlAction::Cancel => {
+            let at = unix_timestamp()?;
+            let control_id =
+                ControlId::new(Uuid::new_v4().to_string()).map_err(|_| ApiError::internal())?;
+            let audit = AuditRecord {
+                id: Uuid::new_v4().to_string(),
+                actor: person.id.clone(),
+                action: audit_action(action).to_owned(),
+                operation: operation.to_string(),
+                resource: None,
+                target: mission.to_string(),
+                at,
+            };
+            tokio::task::spawn_blocking(move || registry.record_audit(&audit))
+                .await
+                .map_err(|_| ApiError::internal())?
+                .map_err(|_| ApiError::internal())?;
+            let status = ControlStatus {
+                control_id: control_id.to_string(),
+                operation_id: operation.to_string(),
+                mission_id: mission.to_string(),
+                session_id: None,
+                action: action.as_str().to_owned(),
+                agent: None,
+                station_id: String::new(),
+                status: "applied".to_owned(),
+                state: Some(ended),
+                reason: Some("the Mission had already ended".to_owned()),
+                requested_by: person.id.clone(),
+                requested_at: at,
+                finished_at: Some(at),
+            };
+            let entry = Entry {
+                status: status.clone(),
+                control: MissionControl::new(
+                    control_id,
+                    operation.clone(),
+                    mission.clone(),
+                    action,
+                ),
+                asked,
+                key,
+                created: Instant::now(),
+            };
+            gateway.with_controls(|book| book.settled(entry))?;
+            crate::timeline::record_control(&gateway, &status).await;
+            return Ok((StatusCode::ACCEPTED, Json(status)));
+        }
+        Routing::NoStation | Routing::Ended(_) => return Err(no_station()),
     };
     let session = match (expected_session, &target.session) {
         (Some(expected), Some(current)) if expected.as_str() != current => {

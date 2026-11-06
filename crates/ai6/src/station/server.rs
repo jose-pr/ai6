@@ -3656,6 +3656,7 @@ async fn schedule_queued_once(state: &DaemonState) {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let queued = without_settled(state, queued).await;
     let queued_ids = queued
         .iter()
         .map(|mission| mission.mission_id.to_string())
@@ -3738,6 +3739,58 @@ async fn schedule_queued_once(state: &DaemonState) {
             }
         }
     }
+}
+
+/// `queued` without the Missions whose brief the Registry has filed while they waited to start, as
+/// when a lease lapsed and intake failed the brief: nothing would ever settle them, and they would
+/// be tried for good. Each is dropped from the book, where it would come back after a restart.
+async fn without_settled(state: &DaemonState, queued: Vec<Mission>) -> Vec<Mission> {
+    let tied: Vec<String> = queued
+        .iter()
+        .filter(|mission| mission.brief_digest.is_some() && !mission.runs_past_brief)
+        .map(|mission| mission.mission_id.to_string())
+        .collect();
+    if tied.is_empty() {
+        return queued;
+    }
+    let reading = state.clone();
+    let settled: BTreeMap<String, String> = tokio::task::spawn_blocking(move || {
+        tied.into_iter()
+            .filter_map(|id| {
+                let filed = reading.intake.filed_brief(&id).ok().flatten()?;
+                matches!(filed.state.as_str(), "done" | "failed").then_some((id, filed.state))
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default();
+    let mut kept = Vec::with_capacity(queued.len());
+    for mission in queued {
+        let id = mission.mission_id.as_str();
+        let Some(filed) = settled.get(id) else {
+            kept.push(mission);
+            continue;
+        };
+        let dropped = state
+            .missions
+            .lock()
+            .is_ok_and(|mut missions| missions.forget_queued(id).unwrap_or(false));
+        if !dropped {
+            continue;
+        }
+        eprintln!("ai6: Mission {id:?} is dropped: its brief is filed {filed}, nothing to start");
+        if let Some(operation) = &mission.operation_id {
+            let event =
+                TimelineEvent::new("mission", "dropped", operation, state.clock.now() as f64)
+                    .station(state.station_id.clone())
+                    .mission(id)
+                    .detail("reason", format!("its brief is filed {filed}"));
+            if let Err(error) = state.intake.record_event(&event) {
+                eprintln!("ai6: timeline event of Mission {id:?} was not written: {error}");
+            }
+        }
+    }
+    kept
 }
 
 /// Fails a queued Mission whose harness cannot be started, with the reason; its brief is filed
@@ -4278,8 +4331,16 @@ async fn start_mission(
         .agent_id
         .as_deref()
         .ok_or_else(|| configuration_error("Mission has no assigned Agent"))?;
-    let agent = agents::effective(&state, mission.operation_id.as_deref(), agent_id)
-        .map_err(configuration_error)?;
+    // An Agent the Operation does not have, as one not posted to it: no start would find one.
+    let agent =
+        agents::effective(&state, mission.operation_id.as_deref(), agent_id).map_err(|error| {
+            ApiErrorResponse(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ApiError {
+                    error: error.to_string(),
+                }),
+            )
+        })?;
     if medical::is_quarantined(&state, &agent.id, mission.operation_id.as_deref()) {
         return Err(conflict(&format!("Agent {:?} is quarantined", agent.id)));
     }

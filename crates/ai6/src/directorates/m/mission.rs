@@ -117,6 +117,11 @@ pub struct Mission {
     /// not resume the last one. Cleared by the next attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_refused: Option<String>,
+    /// Queued again on this Station's word after its brief was filed, by an operator's retry or a
+    /// review: it runs, though the Registry's record of that brief has ended. Cleared when it
+    /// starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runs_past_brief: bool,
     /// Untrusted input the Mission itself came from (`brief:source`, or the exposure of the
     /// Session that proposed it); every Session of the Mission starts exposed by it.
     #[serde(default)]
@@ -282,6 +287,7 @@ impl MissionStore {
             failure: None,
             reported_failure: None,
             resume_refused: None,
+            runs_past_brief: false,
             review_naming: None,
             plan: None,
             denied_tools: Vec::new(),
@@ -389,6 +395,7 @@ impl MissionStore {
         mission.waiting = None;
         if state == MissionState::Working {
             mission.denied_tools.clear();
+            mission.runs_past_brief = false;
         }
         mission.revision += 1;
         let updated = mission.clone();
@@ -613,11 +620,30 @@ impl MissionStore {
         mission.parked_until = None;
         mission.blocked_reason = Some(reason.to_owned());
         mission.failure = None;
+        mission.reported_failure = None;
         mission.waiting = None;
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
         Ok(updated)
+    }
+
+    /// Takes a queued Mission out of the book: its brief was filed while it waited to start, so
+    /// nothing is left for it to do. `false` for a Mission in any other state, or none.
+    pub fn forget_queued(&mut self, mission_id: &str) -> Result<bool, MissionError> {
+        if self
+            .missions
+            .get(mission_id)
+            .is_none_or(|mission| mission.state != MissionState::Queued)
+        {
+            return Ok(false);
+        }
+        let mut next = self.missions.clone();
+        next.remove(mission_id);
+        let mut operations = self.operations.clone();
+        operations.remove(mission_id);
+        self.commit_with(next, operations)?;
+        Ok(true)
     }
 
     /// Quarantines an active Mission: its work stops and only an operator moves it on.
@@ -766,6 +792,23 @@ impl MissionStore {
         Ok(updated)
     }
 
+    /// [`retry`](Self::retry) on this Station's word rather than from a brief: it starts whatever
+    /// the Registry has filed that brief as.
+    pub fn retry_past_brief(
+        &mut self,
+        mission_id: &str,
+        agent_id: Option<String>,
+    ) -> Result<Mission, MissionError> {
+        self.retry(mission_id, agent_id)?;
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        mission.runs_past_brief = true;
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
     /// Records the content digest of the Registry brief this Station runs the Mission from.
     pub fn record_brief_digest(
         &mut self,
@@ -821,6 +864,7 @@ impl MissionStore {
         mission.failure = None;
         mission.reported_failure = None;
         mission.resume_refused = None;
+        mission.runs_past_brief = false;
         mission.waiting = None;
         mission.denied_tools.clear();
         mission.revision += 1;

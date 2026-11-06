@@ -1681,7 +1681,7 @@ async fn a_queued_mission_is_withdrawn_with_a_note_and_a_placed_one_is_told_to_c
     assert_eq!(refused.status.code(), Some(1));
     let said = String::from_utf8(refused.stderr).unwrap();
     assert!(
-        said.contains("409") && said.contains("cancel it instead"),
+        said.contains("409") && said.contains("`mission cancel`"),
         "{said}"
     );
     let _ = shutdown.send(());

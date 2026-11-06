@@ -306,6 +306,240 @@ fn named_brief(id: &str, agent: &str) -> Brief {
     brief
 }
 
+/// A Station whose Mission book is a file, as a real Station's is, with Agent 007 posted to `G`
+/// through `G`'s roster, and the brief `id` placed on it: a Mission queued and not yet started.
+fn placed_on_a_durable_book(root: &Path, id: &str) -> (DaemonState, String) {
+    let mut state = test_state(
+        root,
+        "roster = [\"007\"]\n",
+        "[agent.007]\nhandler = \"mock-agent\"\n[agent.008]\nhandler = \"mock-agent\"\n",
+    );
+    state.missions = Arc::new(Mutex::new(
+        MissionStore::open(root.join("missions.json")).unwrap(),
+    ));
+    publish_station_check_in(&state);
+    let brief = named_brief(id, "007");
+    let key = brief.key();
+    state.intake.submit_brief(&brief).unwrap();
+    assert!(schedule_intake_once(&state));
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Queued
+    );
+    (state, key)
+}
+
+/// The roster as it is once Agent 007 is no longer posted to `G`.
+fn unpost_the_agent(state: &mut DaemonState, root: &Path) {
+    fs::write(
+        root.join("operations.toml"),
+        format!(
+            "[operation.G]\npath = {:?}\nroster = [\"008\"]\n",
+            root.join("checkout").to_string_lossy()
+        ),
+    )
+    .unwrap();
+    state.roster = Arc::new(Roster::load(root).unwrap());
+}
+
+/// The Agent is taken off the Operation, a restart lets the brief's lease lapse, and intake files
+/// the brief failed because it names that Agent, with the Mission still queued in the Station's
+/// book. Nothing else would ever settle that Mission.
+#[tokio::test]
+async fn a_settled_brief_stops_retrying_and_its_mission_is_dropped_across_a_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut state, key) = placed_on_a_durable_book(root.path(), "pinned-settled");
+    unpost_the_agent(&mut state, root.path());
+    assert!(
+        state
+            .intake
+            .renew(&key, "test", Duration::from_nanos(1))
+            .unwrap()
+    );
+    let lapsed = loop {
+        if let Some(lease) = state.intake.expired().unwrap().into_iter().next() {
+            break lease;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    state.intake.recover(&lapsed, 5, "test").unwrap().unwrap();
+    assert!(schedule_intake_once(&state));
+    let filed = state.intake.filed_brief(&key).unwrap().unwrap();
+    assert_eq!(filed.state, "failed");
+    assert!(
+        filed.outcome.unwrap()["reason"]
+            .as_str()
+            .unwrap()
+            .contains("not posted"),
+    );
+
+    schedule_queued_once(&state).await;
+    assert!(
+        !state.retry_after.lock().unwrap().contains_key(&key),
+        "a settled brief is not tried again"
+    );
+    assert!(
+        state.missions.lock().unwrap().get(&key).is_none(),
+        "its stale Mission is dropped"
+    );
+    let dropped = state
+        .intake
+        .timeline_events("G")
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "mission" && event.action == "dropped")
+        .count();
+    assert_eq!(dropped, 1);
+
+    // After a restart the book has nothing to start.
+    let book = MissionStore::open(root.path().join("missions.json")).unwrap();
+    assert!(book.get(&key).is_none());
+}
+
+#[tokio::test]
+async fn an_agent_not_posted_to_the_operation_fails_the_brief_once_naming_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut state, key) = placed_on_a_durable_book(root.path(), "pinned-unposted");
+    unpost_the_agent(&mut state, root.path());
+
+    schedule_queued_once(&state).await;
+    let mission = super::tests::mission_state(&state, &key);
+    assert_eq!(mission.state, MissionState::Failed);
+    let reason = mission.failure.unwrap();
+    assert!(
+        reason.contains("\"007\"") && reason.contains("not posted"),
+        "{reason}"
+    );
+    assert!(state.retry_after.lock().unwrap().is_empty());
+    assert!(schedule_intake_once(&state));
+    let filed = state.intake.filed_brief(&key).unwrap().unwrap();
+    assert_eq!(filed.state, "failed");
+    assert_eq!(filed.outcome.unwrap()["reason"], reason.as_str());
+
+    // Nothing is left to try.
+    schedule_queued_once(&state).await;
+    assert!(state.retry_after.lock().unwrap().is_empty());
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Failed
+    );
+}
+
+/// A Mission whose start keeps failing, with its brief still claimed, is ended by a cancel.
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_cancel_ends_a_mission_looping_in_its_start() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut state, key) = placed_on_a_durable_book(root.path(), "pinned-looping");
+    // A handler is a thing a roster can lose and get back, so this start is tried again.
+    fs::write(root.path().join("agents.toml"), "[agent.007]\n").unwrap();
+    state.roster = Arc::new(Roster::load(root.path()).unwrap());
+    schedule_queued_once(&state).await;
+    assert!(state.retry_after.lock().unwrap().contains_key(&key));
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Queued
+    );
+
+    let control = ai6_diptel::MissionControl::new(
+        ai6_diptel::ControlId::new("c-1").unwrap(),
+        ai6_diptel::OperationId::new("G").unwrap(),
+        ai6_diptel::MissionId::new(key.clone()).unwrap(),
+        ai6_diptel::ControlAction::Cancel,
+    );
+    assert_eq!(
+        controls::apply(&state, &control).await,
+        crate::station::publisher::ControlOutcome::applied("abandoned")
+    );
+    assert!(schedule_intake_once(&state));
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "failed"
+    );
+    state.retry_after.lock().unwrap().clear();
+    schedule_queued_once(&state).await;
+    assert!(
+        state.retry_after.lock().unwrap().is_empty(),
+        "nothing is tried again"
+    );
+}
+
+/// A Mission AI6 failed itself stays failed, though its last Session on record was lost: its
+/// reason would fail the next try alike, and each try would queue the one after.
+#[tokio::test]
+async fn a_mission_ai6_failed_is_not_taken_for_a_lost_attempt_to_try_again() {
+    use crate::directorates::registry::sessions::{NewSession, SessionError};
+
+    let root = tempfile::tempdir().unwrap();
+    let (state, key) = placed_on_a_durable_book(root.path(), "pinned-lost");
+    state
+        .intake
+        .open_session(
+            NewSession::new("lost-run", key.as_str(), "elsewhere").with_operation("G"),
+            Duration::from_nanos(1),
+        )
+        .unwrap();
+    loop {
+        match state
+            .intake
+            .lose_session("lost-run", "its Station went dark")
+        {
+            Ok(_) => break,
+            Err(SessionError::HeldBy(_)) => std::thread::sleep(Duration::from_millis(5)),
+            Err(error) => panic!("{error}"),
+        }
+    }
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .fail_for(&key, "it cannot be started")
+        .unwrap();
+    assert!(schedule_intake_once(&state));
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Failed
+    );
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "failed"
+    );
+}
+
+/// A brief filed before an operator asks again stays filed, and the retry is what runs.
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_retry_an_operator_asked_for_runs_though_its_brief_is_settled() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, key) = placed_on_a_durable_book(root.path(), "pinned-retried");
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .fail_for(&key, "it did not work")
+        .unwrap();
+    assert!(schedule_intake_once(&state));
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "failed"
+    );
+    let control = ai6_diptel::MissionControl::new(
+        ai6_diptel::ControlId::new("c-1").unwrap(),
+        ai6_diptel::OperationId::new("G").unwrap(),
+        ai6_diptel::MissionId::new(key.clone()).unwrap(),
+        ai6_diptel::ControlAction::Retry,
+    );
+    assert_eq!(controls::apply(&state, &control).await.outcome, "applied");
+
+    schedule_queued_once(&state).await;
+    assert_ne!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Queued,
+        "it started"
+    );
+    state.stopping.store(true, Ordering::Release);
+}
+
 #[tokio::test]
 async fn an_agent_with_no_path_fails_its_brief_after_one_attempt_and_says_why() {
     let root = tempfile::tempdir().unwrap();

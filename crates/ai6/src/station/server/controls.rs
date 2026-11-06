@@ -64,7 +64,10 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
     let Some(mission) = mission
         .filter(|mission| mission.operation_id.as_deref() == Some(control.operation_id().as_str()))
     else {
-        return ControlOutcome::rejected(None, "this Station has no such Mission");
+        return match ended_brief(state, control) {
+            Some(ended) => ControlOutcome::applied(ended),
+            None => ControlOutcome::rejected(None, "this Station has no such Mission"),
+        };
     };
     let current = Some(mission.state.as_str());
     if let Err(reason) = check_lease(state, mission_id) {
@@ -104,6 +107,26 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
     }
 }
 
+/// How the Registry filed the brief of a Mission no book here holds, when a cancel asks for one that
+/// ended: there is nothing left to stop.
+fn ended_brief(state: &DaemonState, control: &MissionControl) -> Option<&'static str> {
+    if control.action() != ControlAction::Cancel {
+        return None;
+    }
+    let filed = state
+        .intake
+        .filed_brief(control.mission_id().as_str())
+        .ok()??;
+    if filed.brief.operation.as_deref() != Some(control.operation_id().as_str()) {
+        return None;
+    }
+    match filed.state.as_str() {
+        "done" => Some("done"),
+        "failed" => Some("failed"),
+        _ => None,
+    }
+}
+
 /// The Mission's state after a control, and whether a lifecycle event already reported it.
 struct Applied {
     state: MissionState,
@@ -130,17 +153,11 @@ fn check_lease(state: &DaemonState, mission_id: &str) -> Result<(), String> {
 }
 
 async fn cancel(state: &DaemonState, mission: &Mission) -> Result<Applied, String> {
-    if mission.state == MissionState::Abandoned {
+    if is_terminal_state(mission.state) {
         return Ok(Applied {
-            state: MissionState::Abandoned,
+            state: mission.state,
             announced: true,
         });
-    }
-    if is_terminal_state(mission.state) {
-        return Err(format!(
-            "the Mission already ended ({})",
-            mission.state.as_str()
-        ));
     }
     let live = has_live_session(state, mission);
     let cancelled = transition_mission(
@@ -196,7 +213,7 @@ async fn retry(
         .missions
         .lock()
         .map_err(|_| "the Mission book is unavailable".to_owned())?
-        .retry(mission_id, agent)
+        .retry_past_brief(mission_id, agent)
         .map_err(|error| format!("the Mission could not be queued again: {error:?}"))?;
     if let Ok(mut retries) = state.retry_after.lock() {
         retries.remove(mission_id);
@@ -625,6 +642,64 @@ mod tests {
         let queued = apply(&state, &control("mission-2", ControlAction::Cancel)).await;
         assert_eq!(queued, ControlOutcome::applied("abandoned"));
         assert!(mission_state(&state, "mission-2").session_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_of_a_mission_that_ended_is_applied_and_changes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let state = state_in(root.path(), TWO_AGENTS);
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .fail_for("mission-1", "it did not work")
+            .unwrap();
+        let outcome = apply(&state, &control("mission-1", ControlAction::Cancel)).await;
+        assert_eq!(outcome, ControlOutcome::applied("failed"));
+        assert_eq!(
+            mission_state(&state, "mission-1").state,
+            MissionState::Failed
+        );
+    }
+
+    /// A brief settled while no Station holds its Mission: Headquarters is asked, has no Mission
+    /// to stop, and the cancel is what the Registry already says.
+    #[tokio::test]
+    async fn a_cancel_of_a_brief_that_ended_with_no_mission_here_is_applied() {
+        let root = tempfile::tempdir().unwrap();
+        let state = state_in(root.path(), TWO_AGENTS);
+        let brief: crate::directorates::registry::store::Brief =
+            serde_json::from_value(serde_json::json!({
+                "title": "gone",
+                "id": "gone",
+                "source": "manual",
+                "operation": "G",
+            }))
+            .unwrap();
+        state.intake.submit_brief(&brief).unwrap();
+        let claimed = state.intake.claim_new(Some(&brief.key())).unwrap().unwrap();
+        state
+            .intake
+            .finish(
+                &claimed,
+                &serde_json::json!({"state": "failed", "reason": "no"}),
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        let outcome = apply(&state, &control(&brief.key(), ControlAction::Cancel)).await;
+        assert_eq!(outcome, ControlOutcome::applied("failed"));
+
+        let elsewhere = MissionControl::new(
+            ai6_diptel::ControlId::new("c-2").unwrap(),
+            ai6_diptel::OperationId::new("L").unwrap(),
+            ai6_diptel::MissionId::new(brief.key()).unwrap(),
+            ControlAction::Cancel,
+        );
+        assert_eq!(apply(&state, &elsewhere).await.outcome, "rejected");
+        let unknown = apply(&state, &control("mission-nobody", ControlAction::Cancel)).await;
+        assert_eq!(unknown.outcome, "rejected");
     }
 
     #[tokio::test]

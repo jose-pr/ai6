@@ -730,7 +730,7 @@ enum MissionCommand {
         operation: Option<String>,
     },
     /// Stop the Mission's live Session, if any, and abandon the Mission. One no Station has taken
-    /// yet is withdrawn instead.
+    /// yet is withdrawn instead, and one that already ended stays as it is and answers applied.
     Cancel {
         /// AI6 Mission ID.
         mission_id: String,
@@ -2702,7 +2702,9 @@ async fn withdraw_mission(request: reqwest::RequestBuilder) -> Result<WithdrawnM
         let detail = match status {
             StatusCode::FORBIDDEN => " (mission.control on the Operation is required)",
             StatusCode::NOT_FOUND => " (the Operation has no such Mission queued or held)",
-            StatusCode::CONFLICT => " (a Station took the Mission, or it ended: cancel it instead)",
+            StatusCode::CONFLICT => {
+                " (a Station took the Mission, or it ended: use `mission cancel`)"
+            }
             StatusCode::BAD_REQUEST => " (the note is too long or holds control characters)",
             _ => "",
         };
