@@ -1,4 +1,68 @@
 pub mod universal_exports
+pub mod universal_exports::liaison
+pub use universal_exports::liaison::LIAISON_PREFIX
+pub use universal_exports::liaison::LIAISON_STATION
+pub enum universal_exports::liaison::Addressee
+pub universal_exports::liaison::Addressee::Agent
+pub universal_exports::liaison::Addressee::Agent::agent: alloc::string::String
+pub universal_exports::liaison::Addressee::Agent::operation: alloc::string::String
+pub universal_exports::liaison::Addressee::Role
+pub universal_exports::liaison::Addressee::Role::operation: alloc::string::String
+pub universal_exports::liaison::Addressee::Role::role: alloc::string::String
+impl universal_exports::liaison::Addressee
+pub fn universal_exports::liaison::Addressee::operation(&self) -> &str
+impl core::fmt::Display for universal_exports::liaison::Addressee
+pub fn universal_exports::liaison::Addressee::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for universal_exports::liaison::Addressee
+pub type universal_exports::liaison::Addressee::Err = universal_exports::liaison::LiaisonError
+pub fn universal_exports::liaison::Addressee::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub struct universal_exports::liaison::Liaison
+impl universal_exports::liaison::Liaison
+pub fn universal_exports::liaison::Liaison::new(universal_exports::Gateway, universal_exports::liaison::LiaisonConfig) -> Self
+impl coqui_a2a::agent::Agent for universal_exports::liaison::Liaison
+pub fn universal_exports::liaison::Liaison::agent_card(&self, &coqui_a2a::agent::Caller<'_>) -> coqui_a2a::model::AgentCard
+pub fn universal_exports::liaison::Liaison::cancel_task(&self, &coqui_a2a::agent::Caller<'_>, coqui_a2a::model::CancelTaskRequest) -> core::result::Result<coqui_a2a::model::Task, coqui_a2a::error::A2aError>
+pub fn universal_exports::liaison::Liaison::get_task(&self, &coqui_a2a::agent::Caller<'_>, coqui_a2a::model::GetTaskRequest) -> core::result::Result<coqui_a2a::model::Task, coqui_a2a::error::A2aError>
+pub fn universal_exports::liaison::Liaison::list_tasks(&self, &coqui_a2a::agent::Caller<'_>, coqui_a2a::model::ListTasksRequest) -> core::result::Result<coqui_a2a::model::ListTasksResponse, coqui_a2a::error::A2aError>
+pub fn universal_exports::liaison::Liaison::send_message(&self, &coqui_a2a::agent::Caller<'_>, coqui_a2a::model::SendMessageRequest) -> core::result::Result<coqui_a2a::model::SendMessageResponse, coqui_a2a::error::A2aError>
+pub fn universal_exports::liaison::Liaison::send_streaming_message(&self, &coqui_a2a::agent::Caller<'_>, coqui_a2a::model::SendMessageRequest) -> core::result::Result<coqui_a2a::agent::Events, coqui_a2a::error::A2aError>
+pub fn universal_exports::liaison::Liaison::subscribe_to_task(&self, &coqui_a2a::agent::Caller<'_>, coqui_a2a::model::SubscribeToTaskRequest) -> core::result::Result<coqui_a2a::agent::Events, coqui_a2a::error::A2aError>
+impl core::fmt::Debug for universal_exports::liaison::Liaison
+pub fn universal_exports::liaison::Liaison::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::liaison::LiaisonConfig
+pub universal_exports::liaison::LiaisonConfig::max_links: ai6::bounds::Limit
+pub universal_exports::liaison::LiaisonConfig::peers: alloc::collections::btree::map::BTreeMap<alloc::string::String, universal_exports::liaison::LiaisonPeer>
+pub universal_exports::liaison::LiaisonConfig::plain_beyond_loopback: bool
+pub universal_exports::liaison::LiaisonConfig::poll: core::time::Duration
+pub universal_exports::liaison::LiaisonConfig::recheck: core::time::Duration
+impl universal_exports::liaison::LiaisonConfig
+pub fn universal_exports::liaison::LiaisonConfig::from_settings(&ai6::bootstrap::LiaisonSettings) -> core::result::Result<Self, universal_exports::liaison::LiaisonError>
+pub fn universal_exports::liaison::LiaisonConfig::with_peer(self, universal_exports::liaison::LiaisonPeer) -> Self
+impl core::default::Default for universal_exports::liaison::LiaisonConfig
+pub fn universal_exports::liaison::LiaisonConfig::default() -> Self
+pub struct universal_exports::liaison::LiaisonError(_)
+impl core::error::Error for universal_exports::liaison::LiaisonError
+impl core::fmt::Display for universal_exports::liaison::LiaisonError
+pub fn universal_exports::liaison::LiaisonError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct universal_exports::liaison::LiaisonPeer
+pub universal_exports::liaison::LiaisonPeer::a2a: bool
+pub universal_exports::liaison::LiaisonPeer::addressees: alloc::vec::Vec<universal_exports::liaison::Addressee>
+pub universal_exports::liaison::LiaisonPeer::id: core::option::Option<alloc::string::String>
+pub universal_exports::liaison::LiaisonPeer::name: alloc::string::String
+pub universal_exports::liaison::LiaisonPeer::principal: alloc::string::String
+pub universal_exports::liaison::LiaisonPeer::url: core::option::Option<url::Url>
+impl universal_exports::liaison::LiaisonPeer
+pub fn universal_exports::liaison::LiaisonPeer::sender(&self) -> alloc::string::String
+pub struct universal_exports::liaison::LinkListener
+impl universal_exports::liaison::LinkListener
+pub fn universal_exports::liaison::LinkListener::local_addr(&self) -> core::net::socket_addr::SocketAddr
+pub fn universal_exports::liaison::LinkListener::peer_id(&self) -> &str
+pub fn universal_exports::liaison::LinkListener::start(&universal_exports::liaison::Liaison, core::net::socket_addr::SocketAddr, core::option::Option<alloc::sync::Arc<rustls::server::server_conn::ServerConfig>>, &std::path::Path) -> core::result::Result<Self, universal_exports::liaison::LiaisonError>
+impl core::fmt::Debug for universal_exports::liaison::LinkListener
+pub fn universal_exports::liaison::LinkListener::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for universal_exports::liaison::LinkListener
+pub fn universal_exports::liaison::LinkListener::drop(&mut self)
+pub const universal_exports::liaison::ADDRESSEE_MEMBER: &str
 #[non_exhaustive] pub enum universal_exports::AttachMode
 pub universal_exports::AttachMode::Read
 pub universal_exports::AttachMode::Write
@@ -201,6 +265,7 @@ pub async fn universal_exports::Gateway::disconnect_connection(&self, &ai6_dipte
 pub async fn universal_exports::Gateway::exchange_attach_token(&self, &str) -> core::result::Result<alloc::string::String, universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::ingest(&self, &str, &ai6_diptel::SessionId, u64, alloc::vec::Vec<u8>) -> core::result::Result<(), universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::issue_attach_token(&self, &str, universal_exports::AttachGrant) -> core::result::Result<alloc::string::String, universal_exports::GatewayError>
+pub fn universal_exports::Gateway::liaison(&self) -> core::option::Option<universal_exports::liaison::Liaison>
 pub fn universal_exports::Gateway::new(universal_exports::GatewayConfig) -> Self
 pub async fn universal_exports::Gateway::next_sequence(&self, &str, &ai6_diptel::SessionId) -> core::result::Result<u64, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::pages_router(&self) -> core::option::Option<axum::routing::Router>
@@ -220,6 +285,7 @@ pub fn universal_exports::Gateway::with_access_admin(self, alloc::sync::Arc<univ
 pub fn universal_exports::Gateway::with_accounts(self, alloc::sync::Arc<dyn coqui_access::kind::Accounts>) -> Self
 pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
 pub fn universal_exports::Gateway::with_job_poll_max_wait(self, core::time::Duration) -> Self
+pub fn universal_exports::Gateway::with_liaison(self, universal_exports::liaison::LiaisonConfig) -> Self
 pub fn universal_exports::Gateway::with_pages(self, universal_exports::PagesConfig) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self

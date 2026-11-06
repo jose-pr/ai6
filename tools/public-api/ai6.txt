@@ -183,6 +183,19 @@ impl core::fmt::Display for ai6::bootstrap::BootstrapError
 pub fn ai6::bootstrap::BootstrapError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::bootstrap::IdentitySettings
 pub ai6::bootstrap::IdentitySettings::dir: core::option::Option<std::path::PathBuf>
+#[non_exhaustive] pub struct ai6::bootstrap::LiaisonPeerSettings
+pub ai6::bootstrap::LiaisonPeerSettings::a2a: core::option::Option<bool>
+pub ai6::bootstrap::LiaisonPeerSettings::addressees: alloc::vec::Vec<alloc::string::String>
+pub ai6::bootstrap::LiaisonPeerSettings::id: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::LiaisonPeerSettings::principal: core::option::Option<alloc::string::String>
+pub ai6::bootstrap::LiaisonPeerSettings::url: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::bootstrap::LiaisonSettings
+pub ai6::bootstrap::LiaisonSettings::identity: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::LiaisonSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
+pub ai6::bootstrap::LiaisonSettings::max_links: core::option::Option<u64>
+pub ai6::bootstrap::LiaisonSettings::peer: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::bootstrap::LiaisonPeerSettings>
+pub ai6::bootstrap::LiaisonSettings::plain_beyond_loopback: core::option::Option<bool>
+pub ai6::bootstrap::LiaisonSettings::poll: core::option::Option<f64>
 pub struct ai6::bootstrap::Located<T>
 pub ai6::bootstrap::Located::path: core::option::Option<std::path::PathBuf>
 pub ai6::bootstrap::Located::value: T
@@ -196,6 +209,7 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::secrets_dir(&self) ->
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::liaison_identity(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_listen(&self) -> core::net::socket_addr::SocketAddr
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::proxy_secret_min_bytes(&self) -> u64
@@ -256,6 +270,7 @@ pub ai6::bootstrap::StationSettings::state_dir: core::option::Option<std::path::
 #[non_exhaustive] pub struct ai6::bootstrap::UnexSettings
 pub ai6::bootstrap::UnexSettings::access: ai6::bootstrap::AccessSettings
 pub ai6::bootstrap::UnexSettings::ca_file: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::UnexSettings::liaison: ai6::bootstrap::LiaisonSettings
 pub ai6::bootstrap::UnexSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
 pub ai6::bootstrap::UnexSettings::pages: ai6::bootstrap::PagesSettings
 pub ai6::bootstrap::UnexSettings::plugins: ai6::bootstrap::PluginSettings
@@ -4884,28 +4899,31 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::CableStore
 pub fn ai6::directorates::registry::backend::CableStore::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::backend::CableStore::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::backend::CableStore::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::backend::CableStore::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::backend::CableStore::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::backend::CableStore::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::backend::CableStore::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::backend::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::backend::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub trait ai6::directorates::registry::backend::ClearanceStore
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -5434,11 +5452,13 @@ pub ai6::directorates::registry::cables::CableState::Failed
 pub ai6::directorates::registry::cables::CableState::Held
 pub ai6::directorates::registry::cables::CableState::Queued
 pub ai6::directorates::registry::cables::CableState::Refused
+pub ai6::directorates::registry::cables::CableState::Withdrawn
 #[non_exhaustive] pub enum ai6::directorates::registry::cables::CrossOperation
 pub ai6::directorates::registry::cables::CrossOperation::Compartments
 pub ai6::directorates::registry::cables::CrossOperation::StationGrants
 pub struct ai6::directorates::registry::cables::Cable
 impl ai6::directorates::registry::cables::Cable
+pub fn ai6::directorates::registry::cables::Cable::affinity(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::body(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::conversation_id(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::created_at(&self) -> f64
@@ -5447,6 +5467,7 @@ pub fn ai6::directorates::registry::cables::Cable::id(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::idempotency_key(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::mission_id(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::on_behalf_of(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::cables::Cable::peer(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::recipients(&self) -> &[ai6::directorates::registry::cables::CableRecipient]
 pub fn ai6::directorates::registry::cables::Cable::reply_to(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::same_request(&self, &Self) -> bool
@@ -5458,6 +5479,7 @@ pub fn ai6::directorates::registry::cables::Cable::session_id(&self) -> core::op
 pub fn ai6::directorates::registry::cables::Cable::target(&self) -> &ai6::directorates::registry::cables::CableTarget
 pub fn ai6::directorates::registry::cables::Cable::try_new(ai6::directorates::registry::cables::CableDraft, &ai6::directorates::registry::limits::CableLimits) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::directorates::registry::cables::Cable::with_recipient_state(&self, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState) -> core::result::Result<core::option::Option<Self>, ai6::directorates::registry::cables::CableError>
+pub fn ai6::directorates::registry::cables::Cable::with_recipient_taken(&self, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>) -> core::result::Result<core::option::Option<Self>, ai6::directorates::registry::cables::CableError>
 impl core::fmt::Debug for ai6::directorates::registry::cables::Cable
 pub fn ai6::directorates::registry::cables::Cable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableAuditRecord
@@ -5470,6 +5492,7 @@ pub ai6::directorates::registry::cables::CableAuditRecord::event: &'static str
 pub ai6::directorates::registry::cables::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableAuditRecord::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableAuditRecord::operation: alloc::string::String
+pub ai6::directorates::registry::cables::CableAuditRecord::peer: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableAuditRecord::session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableAuditRecord::station: alloc::string::String
 pub ai6::directorates::registry::cables::CableAuditRecord::target_name: core::option::Option<alloc::string::String>
@@ -5502,6 +5525,7 @@ pub ai6::directorates::registry::cables::CableDelivery::from_station: alloc::str
 pub ai6::directorates::registry::cables::CableDelivery::from_theater: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::mission_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::on_behalf_of: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableDelivery::peer: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::reply_to: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::sent_as: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDelivery::session_id: core::option::Option<alloc::string::String>
@@ -5510,6 +5534,7 @@ pub ai6::directorates::registry::cables::CableDelivery::target: ai6::directorate
 impl core::fmt::Debug for ai6::CableDelivery
 pub fn ai6::CableDelivery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableDraft
+pub ai6::directorates::registry::cables::CableDraft::affinity: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::body: alloc::string::String
 pub ai6::directorates::registry::cables::CableDraft::conversation_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::created_at: f64
@@ -5518,6 +5543,7 @@ pub ai6::directorates::registry::cables::CableDraft::id: alloc::string::String
 pub ai6::directorates::registry::cables::CableDraft::idempotency_key: alloc::string::String
 pub ai6::directorates::registry::cables::CableDraft::mission_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::on_behalf_of: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::cables::CableDraft::peer: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::recipients: alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>
 pub ai6::directorates::registry::cables::CableDraft::reply_to: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::cables::CableDraft::sender_agent: alloc::string::String
@@ -5528,9 +5554,11 @@ pub ai6::directorates::registry::cables::CableDraft::session_id: core::option::O
 pub ai6::directorates::registry::cables::CableDraft::target: ai6::directorates::registry::cables::CableTarget
 impl ai6::directorates::registry::cables::CableDraft
 pub fn ai6::directorates::registry::cables::CableDraft::new(alloc::string::String, alloc::string::String, alloc::string::String, ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>, alloc::string::String, alloc::string::String, f64, f64) -> Self
+pub fn ai6::directorates::registry::cables::CableDraft::with_affinity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_on_behalf_of(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::cables::CableDraft::with_peer(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_sender_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_session(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -5577,16 +5605,19 @@ pub fn ai6::CablePrincipal::agent(&self) -> &str
 pub fn ai6::CablePrincipal::mission_id(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::on_behalf_of(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::operation(&self) -> &str
+pub fn ai6::CablePrincipal::peer(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::station(&self) -> &str
 pub fn ai6::CablePrincipal::theater(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CablePrincipal::with_on_behalf_of(self, alloc::string::String) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CablePrincipal::with_peer(self, alloc::string::String) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub struct ai6::directorates::registry::cables::CableRecipient
 impl ai6::directorates::registry::cables::CableRecipient
 pub fn ai6::directorates::registry::cables::CableRecipient::agent(&self) -> &str
 pub fn ai6::directorates::registry::cables::CableRecipient::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableRecipient::state(&self) -> ai6::directorates::registry::cables::CableState
+pub fn ai6::directorates::registry::cables::CableRecipient::taken_by(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableRecipient::try_new(alloc::string::String, core::option::Option<alloc::string::String>, ai6::directorates::registry::cables::CableState) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub struct ai6::directorates::registry::cables::CableRelay
 impl ai6::CableRelay
@@ -5614,12 +5645,14 @@ pub fn ai6::CableRelay::with_durable_audit(self, impl core::ops::function::Fn(&a
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_message_limits(self, (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::withdraw(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableRelease
 pub ai6::directorates::registry::cables::CableRelease::delivered: usize
 pub ai6::directorates::registry::cables::CableRelease::refused: usize
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableSendRequest
 impl ai6::CableSendRequest
 pub fn ai6::CableSendRequest::new(ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::string::String) -> Self
+pub fn ai6::CableSendRequest::with_affinity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -5631,10 +5664,13 @@ impl ai6::directorates::registry::cables::CableTarget
 pub fn ai6::directorates::registry::cables::CableTarget::name(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableTarget::scope(&self) -> ai6::directorates::registry::cables::CableScope
 pub fn ai6::directorates::registry::cables::CableTarget::try_new(ai6::directorates::registry::cables::CableScope, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub const ai6::directorates::registry::cables::LIAISON_PREFIX: &str
+pub const ai6::directorates::registry::cables::LIAISON_STATION: &str
 pub const ai6::directorates::registry::cables::MAX_CABLE_FANOUT: usize
 pub trait ai6::directorates::registry::cables::CableCompartments: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::registry::cables::CableCompartments::clearance(&self, &str, &str) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::registry::cables::CableCompartments::current(&self) -> core::result::Result<ai6::directorates::m::compartments::CompiledCompartments, alloc::string::String>
+pub fn ai6::directorates::registry::cables::liaison_peer(&str) -> core::option::Option<(&str, core::option::Option<&str>)>
 pub mod ai6::directorates::registry::clearance
 #[non_exhaustive] pub struct ai6::directorates::registry::clearance::ClearanceGrant
 pub ai6::directorates::registry::clearance::ClearanceGrant::agent: alloc::string::String
@@ -7074,12 +7110,13 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -7342,12 +7379,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -7551,28 +7589,31 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::store::CableStore
 pub fn ai6::directorates::registry::store::CableStore::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::CableStore::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::CableStore::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::CableStore::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::CableStore::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::CableStore::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::CableStore::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::store::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub trait ai6::directorates::registry::store::StationStore
 pub fn ai6::directorates::registry::store::StationStore::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::StationStore::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -8950,6 +8991,7 @@ pub ai6::CableState::Failed
 pub ai6::CableState::Held
 pub ai6::CableState::Queued
 pub ai6::CableState::Refused
+pub ai6::CableState::Withdrawn
 #[non_exhaustive] pub enum ai6::CompartmentAction
 pub ai6::CompartmentAction::CableRead
 pub ai6::CompartmentAction::CableSend
@@ -10333,6 +10375,7 @@ impl ai6::directorates::medical::usage::BudgetDefinition
 pub fn ai6::directorates::medical::usage::BudgetDefinition::resolve(&self) -> core::result::Result<ai6::directorates::medical::usage::Budget, alloc::string::String>
 pub struct ai6::Cable
 impl ai6::directorates::registry::cables::Cable
+pub fn ai6::directorates::registry::cables::Cable::affinity(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::body(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::conversation_id(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::created_at(&self) -> f64
@@ -10341,6 +10384,7 @@ pub fn ai6::directorates::registry::cables::Cable::id(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::idempotency_key(&self) -> &str
 pub fn ai6::directorates::registry::cables::Cable::mission_id(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::on_behalf_of(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::cables::Cable::peer(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::recipients(&self) -> &[ai6::directorates::registry::cables::CableRecipient]
 pub fn ai6::directorates::registry::cables::Cable::reply_to(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::Cable::same_request(&self, &Self) -> bool
@@ -10352,6 +10396,7 @@ pub fn ai6::directorates::registry::cables::Cable::session_id(&self) -> core::op
 pub fn ai6::directorates::registry::cables::Cable::target(&self) -> &ai6::directorates::registry::cables::CableTarget
 pub fn ai6::directorates::registry::cables::Cable::try_new(ai6::directorates::registry::cables::CableDraft, &ai6::directorates::registry::limits::CableLimits) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::directorates::registry::cables::Cable::with_recipient_state(&self, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState) -> core::result::Result<core::option::Option<Self>, ai6::directorates::registry::cables::CableError>
+pub fn ai6::directorates::registry::cables::Cable::with_recipient_taken(&self, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>) -> core::result::Result<core::option::Option<Self>, ai6::directorates::registry::cables::CableError>
 impl core::fmt::Debug for ai6::directorates::registry::cables::Cable
 pub fn ai6::directorates::registry::cables::Cable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::CableAuditRecord
@@ -10364,6 +10409,7 @@ pub ai6::CableAuditRecord::event: &'static str
 pub ai6::CableAuditRecord::mission_id: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::on_behalf_of: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::operation: alloc::string::String
+pub ai6::CableAuditRecord::peer: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::session_id: core::option::Option<alloc::string::String>
 pub ai6::CableAuditRecord::station: alloc::string::String
 pub ai6::CableAuditRecord::target_name: core::option::Option<alloc::string::String>
@@ -10393,6 +10439,7 @@ pub ai6::CableDelivery::from_station: alloc::string::String
 pub ai6::CableDelivery::from_theater: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::mission_id: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::on_behalf_of: core::option::Option<alloc::string::String>
+pub ai6::CableDelivery::peer: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::reply_to: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::sent_as: core::option::Option<alloc::string::String>
 pub ai6::CableDelivery::session_id: core::option::Option<alloc::string::String>
@@ -10401,6 +10448,7 @@ pub ai6::CableDelivery::target: ai6::directorates::registry::cables::CableTarget
 impl core::fmt::Debug for ai6::CableDelivery
 pub fn ai6::CableDelivery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::CableDraft
+pub ai6::CableDraft::affinity: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::body: alloc::string::String
 pub ai6::CableDraft::conversation_id: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::created_at: f64
@@ -10409,6 +10457,7 @@ pub ai6::CableDraft::id: alloc::string::String
 pub ai6::CableDraft::idempotency_key: alloc::string::String
 pub ai6::CableDraft::mission_id: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::on_behalf_of: core::option::Option<alloc::string::String>
+pub ai6::CableDraft::peer: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::recipients: alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>
 pub ai6::CableDraft::reply_to: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::sender_agent: alloc::string::String
@@ -10419,9 +10468,11 @@ pub ai6::CableDraft::session_id: core::option::Option<alloc::string::String>
 pub ai6::CableDraft::target: ai6::directorates::registry::cables::CableTarget
 impl ai6::directorates::registry::cables::CableDraft
 pub fn ai6::directorates::registry::cables::CableDraft::new(alloc::string::String, alloc::string::String, alloc::string::String, ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::vec::Vec<ai6::directorates::registry::cables::CableRecipient>, alloc::string::String, alloc::string::String, f64, f64) -> Self
+pub fn ai6::directorates::registry::cables::CableDraft::with_affinity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_on_behalf_of(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::cables::CableDraft::with_peer(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_sender_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::cables::CableDraft::with_session(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -10471,16 +10522,19 @@ pub fn ai6::CablePrincipal::agent(&self) -> &str
 pub fn ai6::CablePrincipal::mission_id(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::on_behalf_of(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::operation(&self) -> &str
+pub fn ai6::CablePrincipal::peer(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::station(&self) -> &str
 pub fn ai6::CablePrincipal::theater(&self) -> core::option::Option<&str>
 pub fn ai6::CablePrincipal::try_new(alloc::string::String, alloc::string::String, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CablePrincipal::with_on_behalf_of(self, alloc::string::String) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CablePrincipal::with_peer(self, alloc::string::String) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub struct ai6::CableRecipient
 impl ai6::directorates::registry::cables::CableRecipient
 pub fn ai6::directorates::registry::cables::CableRecipient::agent(&self) -> &str
 pub fn ai6::directorates::registry::cables::CableRecipient::session_id(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableRecipient::state(&self) -> ai6::directorates::registry::cables::CableState
+pub fn ai6::directorates::registry::cables::CableRecipient::taken_by(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::registry::cables::CableRecipient::try_new(alloc::string::String, core::option::Option<alloc::string::String>, ai6::directorates::registry::cables::CableState) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub struct ai6::CableRelay
 impl ai6::CableRelay
@@ -10508,12 +10562,14 @@ pub fn ai6::CableRelay::with_durable_audit(self, impl core::ops::function::Fn(&a
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_message_limits(self, (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::withdraw(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 #[non_exhaustive] pub struct ai6::CableRelease
 pub ai6::CableRelease::delivered: usize
 pub ai6::CableRelease::refused: usize
 #[non_exhaustive] pub struct ai6::CableSendRequest
 impl ai6::CableSendRequest
 pub fn ai6::CableSendRequest::new(ai6::directorates::registry::cables::CableTarget, alloc::string::String, alloc::string::String) -> Self
+pub fn ai6::CableSendRequest::with_affinity(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_conversation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::CableSendRequest::with_reply_to(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -11070,12 +11126,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -12825,12 +12882,13 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::submit_brief(&self, &ai6::
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::StationStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::check_in(&self, &str, alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::elect(&self, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -13831,28 +13889,31 @@ pub fn ai6::directorates::registry::store::FileRegistry::submit_brief(&self, &ai
 pub fn ai6::directorates::registry::store::FileRegistry::submit_mission_proposal(&self, &ai6::directorates::registry::store::MissionProposal) -> core::io::error::Result<()>
 pub trait ai6::CableStore
 pub fn ai6::CableStore::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::CableStore::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::CableStore::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::CableStore::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::CableStore::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::CableStore::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::CableStore::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::CableStore::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 impl ai6::directorates::registry::store::CableStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::cable_inbox(&self, &str, core::option::Option<&str>, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::cables_from(&self, &str, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::find_cable(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::get_cable(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::held_cables(&self, usize, core::option::Option<f64>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::cables::Cable>>
 pub fn ai6::directorates::registry::store::FileRegistry::submit_cable(&self, &ai6::directorates::registry::cables::Cable) -> core::io::error::Result<ai6::directorates::registry::cables::Cable>
 pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&str, f64, u32)], f64) -> core::io::error::Result<bool>
-pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
+pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub trait ai6::ClearanceStore
 pub fn ai6::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
