@@ -308,7 +308,10 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
         {
             match state.intake.recover(&lapsed, max_attempts, station) {
                 Ok(Some(LeaseRecovery::Requeued)) => return MissionState::Abandoned,
-                Ok(Some(_)) => return MissionState::Failed,
+                Ok(Some(_)) => {
+                    super::standing::recovered_failed(state, lapsed.key());
+                    return MissionState::Failed;
+                }
                 Ok(None) => {}
                 Err(error) => {
                     eprintln!("ai6: Mission {mission_id:?} brief not handed back yet: {error}")
@@ -325,9 +328,16 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
 }
 
 /// Whether a lost attempt at a Mission this Station had left behind is what a new brief lease
-/// asks it to run: the Mission ended here, holds no Session, and its latest Session is lost.
+/// asks it to run: the Mission ended here, holds no Session, and its latest Session is lost. One
+/// AI6 failed itself ended for a reason trying again will not change.
 pub(super) fn retries_lost_attempt(state: &DaemonState, mission_id: &str) -> bool {
-    session_hold(state, mission_id).is_none()
+    let failed_here = state.missions.lock().ok().is_some_and(|missions| {
+        missions
+            .get(mission_id)
+            .is_some_and(|mission| mission.failure.is_some())
+    });
+    !failed_here
+        && session_hold(state, mission_id).is_none()
         && state
             .intake
             .latest_session(mission_id)

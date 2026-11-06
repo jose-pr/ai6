@@ -93,7 +93,8 @@ use crate::directorates::registry::mission_ids::new_uid;
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease};
+use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease, LeaseRecovery};
+use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::READ_CLEARANCE;
 use crate::directorates::section_00::agent::{
@@ -1719,6 +1720,9 @@ async fn scheduler_loop(base: DaemonState) {
         if check_in {
             controls::stop_settled(&state).await;
         }
+        if check_in {
+            standing::supersede_stalled(&state).await;
+        }
         if is_headquarters && check_in {
             let promoting = state.clone();
             let _ = tokio::task::spawn_blocking(move || promotion::round(&promoting)).await;
@@ -1757,8 +1761,10 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
             if lease.station() != station
                 && let Some(max_attempts) = recovery::extract(state, &lease)
                     .max_attempts(state.station.limits().scheduler.intake_attempts)
+                && let Ok(Some(LeaseRecovery::Failed)) =
+                    state.intake.recover(&lease, max_attempts, station)
             {
-                let _ = state.intake.recover(&lease, max_attempts, station);
+                standing::recovered_failed(state, lease.key());
             }
         }
     }
@@ -3583,8 +3589,17 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
         "branch": mission.safe_house.as_ref().map(|safe_house| safe_house.branch.clone()),
         "denied_tools": mission.denied_tools,
     });
-    if let Some(reason) = &mission.failure {
-        outcome["reason"] = serde_json::json!(reason);
+    match (&mission.failure, &mission.reported_failure) {
+        (Some(reason), _) => outcome["reason"] = serde_json::json!(reason),
+        (None, Some(said)) => {
+            outcome["reason"] = serde_json::json!(said);
+            outcome[standing::HARNESS_SAID] = serde_json::json!(true);
+        }
+        (None, None) if mission.state == MissionState::Failed => {
+            outcome["reason"] =
+                serde_json::json!("its harness reported a failure and said no more");
+        }
+        (None, None) => {}
     }
     if let Some(hold) = session_hold(state, mission_id) {
         if let Ok(Some(report)) = state.intake.final_report(&hold.id) {
@@ -3608,11 +3623,14 @@ fn finish_intake_claim(
     ok: bool,
 ) -> Option<()> {
     let brief = state.intake.read_claimed(lease.key()).ok()??;
-    state
+    let finished = state
         .intake
         .finish(&brief, outcome, ok, None, Some(lease.station()))
-        .ok()?
-        .then_some(())
+        .ok()?;
+    if finished && !ok {
+        standing::attempt_failed(state, &brief, outcome);
+    }
+    finished.then_some(())
 }
 
 async fn schedule_queued_once(state: &DaemonState) {
@@ -4764,7 +4782,7 @@ async fn start_mission(
             (mission.operation_id.as_deref(), mission_id.as_str()),
             run,
             earlier.as_ref(),
-            &handler_provider,
+            (&handler_provider, mission.resume_refused.is_some()),
         )
     });
     let start_request = AgentStart {
@@ -4783,6 +4801,7 @@ async fn start_mission(
         answer_only: review,
         assistant: None,
     };
+    let resuming = resume_from.is_some();
     let launch = match resume_from {
         Some(session_id) => Launch::Resume(standing::resume_request(start_request, session_id)),
         None => Launch::Start(start_request),
@@ -4895,6 +4914,9 @@ async fn start_mission(
     let session = match started {
         Ok(session) => session,
         Err(error) => {
+            if resuming {
+                standing::resume_refused(&state, &mission_id, &error);
+            }
             return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
         }
     };
@@ -6904,11 +6926,23 @@ fn apply_event_state(
         {
             let _ = missions.transition(mission_id, MissionState::Working);
         }
-        if target == MissionState::Held {
-            let _ = missions.hold_for(mission_id, event.text.as_deref().unwrap_or_default());
+        let said = (target == MissionState::Failed)
+            .then_some(event.text.as_deref())
+            .flatten()
+            .map(|said| {
+                said.chars()
+                    .take(state.intake.limits().sessions.recent_event_chars.or_max())
+                    .collect::<String>()
+            })
+            .filter(|said| !said.trim().is_empty());
+        let _ = if target == MissionState::Held {
+            missions.hold_for(mission_id, event.text.as_deref().unwrap_or_default())
         } else {
-            let _ = missions.transition(mission_id, target);
-        }
+            match said {
+                Some(said) => missions.fail_reported(mission_id, &said),
+                None => missions.transition(mission_id, target),
+            }
+        };
     }
     let published_state = missions
         .get(mission_id)
@@ -6978,7 +7012,12 @@ fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: Missi
             .ok()
             .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
         if let Some(telemetry) = telemetry {
-            telemetry.publish_lifecycle_for(state_name, held_reason(state, mission_id));
+            let reason = held_reason(state, mission_id).or_else(|| {
+                (mission_state == MissionState::Failed)
+                    .then(|| order_reason(state, mission_id))
+                    .flatten()
+            });
+            telemetry.publish_lifecycle_for(state_name, reason);
         }
     }
     #[cfg(not(feature = "publisher"))]
@@ -6991,6 +7030,16 @@ fn denied_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> 
     let missions = state.missions.lock().ok()?;
     let denied = !missions.get(mission_id)?.denied_tools.is_empty();
     denied.then_some(DENIED_REASON)
+}
+
+/// The reason an ended attempt of a Sleeper's order is published with, so the board says it is an
+/// order that failed rather than one Mission.
+#[cfg(feature = "publisher")]
+fn order_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
+    let missions = state.missions.lock().ok()?;
+    let provenance = missions.get(mission_id)?.provenance.as_ref()?;
+    (provenance.origin == crate::directorates::registry::bona_fides::Origin::Sleeper)
+        .then_some(standing::ORDER_FAILED_REASON)
 }
 
 /// Why AI6 itself holds a blocked Mission, as the lifecycle reports it.
@@ -7396,7 +7445,10 @@ fn publish_finished_event(
     if let Some(telemetry) = finished.telemetry {
         let (name, reason) = match event.kind.as_str() {
             "completed" => (Some("done"), denied_reason(state, mission_id)),
-            "failed" | "blown" => (Some("failed"), denied_reason(state, mission_id)),
+            "failed" | "blown" => (
+                Some("failed"),
+                denied_reason(state, mission_id).or_else(|| order_reason(state, mission_id)),
+            ),
             verdicts::HELD_EVENT => (Some("held"), Some(verdicts::NO_APPROVAL_CODE)),
             _ => (None, None),
         };

@@ -104,10 +104,19 @@ pub struct Mission {
     /// state change.
     #[serde(default)]
     pub blocked_reason: Option<String>,
-    /// Why AI6 failed the Mission without its Agent: a harness that cannot be started. Cleared by
-    /// the next state change.
+    /// Why AI6 failed the Mission without its Agent: a harness that cannot be started, or an
+    /// attempt a standing order's next window superseded. Cleared by the next state change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
+    /// What its harness said when it reported the Mission failed, which may quote anything: it
+    /// goes in the attempt's outcome and on no metadata-only record. Cleared by the next state
+    /// change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_failure: Option<String>,
+    /// Why this attempt starts a new Session though its order says to resume: the provider could
+    /// not resume the last one. Cleared by the next attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_refused: Option<String>,
     /// Untrusted input the Mission itself came from (`brief:source`, or the exposure of the
     /// Session that proposed it); every Session of the Mission starts exposed by it.
     #[serde(default)]
@@ -271,6 +280,8 @@ impl MissionStore {
             parked_until: None,
             blocked_reason: None,
             failure: None,
+            reported_failure: None,
+            resume_refused: None,
             review_naming: None,
             plan: None,
             denied_tools: Vec::new(),
@@ -374,6 +385,7 @@ impl MissionStore {
         mission.parked_until = None;
         mission.blocked_reason = None;
         mission.failure = None;
+        mission.reported_failure = None;
         mission.waiting = None;
         if state == MissionState::Working {
             mission.denied_tools.clear();
@@ -546,6 +558,41 @@ impl MissionStore {
         mission.blocked_reason = None;
         mission.waiting = None;
         mission.failure = Some(reason.to_owned());
+        mission.reported_failure = None;
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
+    /// Fails the Mission as its harness reported, keeping what the harness said.
+    pub fn fail_reported(&mut self, mission_id: &str, said: &str) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if !valid_transition(mission.state, MissionState::Failed) {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Failed,
+            });
+        }
+        mission.state = MissionState::Failed;
+        mission.parked_until = None;
+        mission.blocked_reason = None;
+        mission.waiting = None;
+        mission.failure = None;
+        mission.reported_failure = Some(said.to_owned());
+        mission.revision += 1;
+        let updated = mission.clone();
+        self.commit(next)?;
+        Ok(updated)
+    }
+
+    /// Records that the provider could not resume the Session this attempt would have taken up,
+    /// so its next start begins a new one.
+    pub fn refuse_resume(&mut self, mission_id: &str, why: &str) -> Result<Mission, MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        mission.resume_refused = Some(why.to_owned());
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -709,6 +756,7 @@ impl MissionStore {
         mission.parked_until = None;
         mission.blocked_reason = None;
         mission.failure = None;
+        mission.reported_failure = None;
         if agent_id.is_some() {
             mission.agent_id = agent_id;
         }
@@ -771,6 +819,8 @@ impl MissionStore {
         mission.parked_until = None;
         mission.blocked_reason = None;
         mission.failure = None;
+        mission.reported_failure = None;
+        mission.resume_refused = None;
         mission.waiting = None;
         mission.denied_tools.clear();
         mission.revision += 1;

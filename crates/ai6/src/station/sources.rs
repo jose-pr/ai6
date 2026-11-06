@@ -20,10 +20,11 @@ use crate::directorates::registry::backend::*;
 use crate::directorates::registry::mission_issues::{
     IssueLink, IssueSnapshot, LinkRelation, LinkState,
 };
-use crate::directorates::registry::sleepers::{Fire, Sleeper, window_label};
+use crate::directorates::registry::sleepers::{Fire, Sleeper, SleeperMark, window_label};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
+use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::registry::tracker::Tracker;
 use crate::station::issues::{
     DrainState, TrackerBuilder, drain_outbox, poll_replies, queue_report,
@@ -497,7 +498,6 @@ pub(crate) fn reopen_item(
 ) -> bool {
     use crate::directorates::registry::sources::{reopened_brief, source_entry};
     use crate::directorates::registry::store::{AuditRecord, Reentry};
-    use crate::directorates::registry::timeline::TimelineEvent;
     let brief = reopened_brief(
         (operation, provider),
         item,
@@ -947,10 +947,87 @@ pub(crate) fn source_link(
     }
 }
 
-/// Queues the brief of every authorized sleeper whose latest window has not fired.
+/// Why a window passed unfired, as the timeline says it.
+const NOT_AUTHORIZED: &str = "not authorized";
+const SCHEDULER_DOWN: &str = "the scheduler was not running";
+const IN_FLIGHT: &str = "the last attempt was in flight";
+const PAST_THE_BOUND: &str = "older than its catch-up bound";
+const NO_STATION: &str = "no Station could take it";
+
+/// One standing order as the Headquarters Station reckons with it.
+struct Order<'a> {
+    registry: &'a dyn RegistryBackend,
+    operation: &'a str,
+    name: &'a str,
+    sleeper: &'a Sleeper,
+    now: i64,
+}
+
+impl Order<'_> {
+    fn tell(&self, action: &str, window: String, why: Option<&str>) {
+        let mut event = TimelineEvent::new("sleeper", action, self.operation, self.now as f64)
+            .detail("sleeper", self.name)
+            .detail("window", window);
+        if let Some(why) = why {
+            event = event.detail("why", why);
+        }
+        if let Err(error) = self.registry.record_event(&event) {
+            eprintln!(
+                "ai6: sleeper {} of Operation {}: timeline event not written: {error}",
+                self.name, self.operation
+            );
+        }
+    }
+
+    /// Moves `mark` on to `latest`, telling the timeline of each window left behind unfired: the
+    /// one it stood at, for the reason it has, and those no pass reckoned with, for `gap`.
+    /// Returns whether any was left behind.
+    fn pass_windows(&self, mark: &mut SleeperMark, latest: i64, gap: &str) -> bool {
+        let limits = &self.registry.limits().sleepers;
+        let mut named = Vec::new();
+        let mut older = false;
+        let mut window = latest;
+        while let Some(before) = self.sleeper.window_before(window, limits) {
+            if before <= mark.window || before <= mark.since {
+                break;
+            }
+            if !limits.skipped_events.allows(named.len() + 1) {
+                older = true;
+                break;
+            }
+            named.push(before);
+            window = before;
+        }
+        let left = !mark.settled;
+        if left {
+            self.tell(
+                "skipped",
+                window_label(mark.window),
+                Some(mark.why.as_deref().unwrap_or(SCHEDULER_DOWN)),
+            );
+        }
+        if older {
+            self.tell(
+                "skipped",
+                format!("{} to {}", window_label(mark.window), window_label(window)),
+                Some(gap),
+            );
+        }
+        for skipped in named.iter().rev() {
+            self.tell("skipped", window_label(*skipped), Some(gap));
+        }
+        let missed = left || older || !named.is_empty();
+        *mark = SleeperMark::new(mark.since, latest);
+        missed
+    }
+}
+
+/// Queues the brief of every authorized sleeper whose latest window has not fired, and puts each
+/// window that passed unfired on the timeline.
 ///
-/// Returns how many briefs were queued. A sleeper without an approval of its current
-/// definition is skipped and named once in `warned`.
+/// Returns how many briefs were queued. A sleeper with no approval of its current definition does
+/// not fire and is named once in `warned`; an approval that an edit left behind keeps its windows
+/// on the record, and the approval given again may fire the latest of them late.
 pub(crate) fn fire_due_sleepers(
     registry: &dyn RegistryBackend,
     roster: &Roster,
@@ -962,79 +1039,146 @@ pub(crate) fn fire_due_sleepers(
     for operation in roster.operations() {
         for (name, sleeper) in &operation.sleepers {
             let approval = match registry.sleeper_authorization(&operation.id, name) {
-                Ok(Some(approval)) if approval.fingerprint == sleeper.fingerprint() => approval,
-                Ok(_) => {
-                    if warned.insert(format!("{}/{name}", operation.id)) {
-                        eprintln!(
-                            "ai6: sleeper {name} of Operation {} waits for `ai6 sleeper authorize {} {name}`",
-                            operation.id, operation.id
-                        );
-                    }
-                    continue;
-                }
+                Ok(approval) => approval,
                 Err(error) => {
                     eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
                     continue;
                 }
             };
-            let Some(window) = sleeper.due_window(now, approval.at, &registry.limits().sleepers)
-            else {
+            let authorized = approval
+                .as_ref()
+                .is_some_and(|approval| approval.fingerprint == sleeper.fingerprint());
+            if !authorized && warned.insert(format!("{}/{name}", operation.id)) {
+                eprintln!(
+                    "ai6: sleeper {name} of Operation {} waits for `ai6 sleeper authorize {} {name}`",
+                    operation.id, operation.id
+                );
+            }
+            let Some(approval) = approval else {
                 continue;
             };
-            let rounds = if sleeper.each_station {
-                round_stations(registry, roster, &operation.id, sleeper, now)
-                    .into_iter()
-                    .map(Some)
-                    .collect()
-            } else {
-                vec![None]
+            let limits = &registry.limits().sleepers;
+            let Some(latest) = sleeper.latest_window(now, limits) else {
+                continue;
             };
-            for round in rounds {
-                match registry.fire_sleeper(
-                    &operation.id,
-                    name,
-                    sleeper,
-                    (window, round.as_deref()),
-                    station,
-                ) {
-                    Ok(Fire::Queued) => {
-                        queued += 1;
-                        match &round {
-                            Some(round) => eprintln!(
-                                "ai6: sleeper {name} of Operation {} queued the round of Station {round}",
-                                operation.id
-                            ),
-                            None => eprintln!(
-                                "ai6: sleeper {name} of Operation {} queued a brief",
-                                operation.id
-                            ),
+            let order = Order {
+                registry,
+                operation: &operation.id,
+                name,
+                sleeper,
+                now,
+            };
+            let mut mark = approval
+                .mark
+                .clone()
+                .unwrap_or_else(|| SleeperMark::new(approval.at, latest));
+            let gap = if authorized {
+                SCHEDULER_DOWN
+            } else {
+                NOT_AUTHORIZED
+            };
+            let missed = latest > mark.window && order.pass_windows(&mut mark, latest, gap);
+            if authorized {
+                match sleeper.due_window(now, mark.since, limits) {
+                    Some(window) => {
+                        let late = missed || mark.why.is_some();
+                        let fired =
+                            fire_rounds(&order, (window, station), roster, warned, &mut mark);
+                        if late && fired > 0 {
+                            order.tell("late", window_label(window), None);
                         }
+                        queued += fired;
                     }
-                    Ok(Fire::InFlight) => {
-                        // Named once per window; only the latest window is remembered.
-                        let prefix = format!(
-                            "skipped/{}/{name}/{}/",
-                            operation.id,
-                            round.as_deref().unwrap_or_default()
-                        );
-                        let skipped = format!("{prefix}{}", window_label(window));
-                        warned.retain(|seen| !seen.starts_with(&prefix) || *seen == skipped);
-                        if warned.insert(skipped) {
-                            eprintln!(
-                                "ai6: sleeper {name} of Operation {} skipped window {}: its \
-                                 standing Mission's last attempt is still in flight",
-                                operation.id,
-                                window_label(window)
-                            );
-                        }
+                    None if !mark.settled => {
+                        order.tell("skipped", window_label(latest), Some(PAST_THE_BOUND));
+                        mark.settled = true;
                     }
-                    Ok(_) => {}
-                    Err(error) => {
-                        eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
+                    None => {}
+                }
+            } else if !mark.settled {
+                mark.why = Some(NOT_AUTHORIZED.to_owned());
+            }
+            if approval.mark.as_ref() != Some(&mark)
+                && let Err(error) = registry.mark_sleeper(&operation.id, name, &mark)
+            {
+                eprintln!("ai6: sleeper {name} of Operation {}: {error}", operation.id);
+            }
+        }
+    }
+    queued
+}
+
+/// Offers `window` to the Registry for each of the order's rounds, and notes on `mark` how it went;
+/// how many briefs were queued.
+fn fire_rounds(
+    order: &Order<'_>,
+    (window, station): (i64, &str),
+    roster: &Roster,
+    warned: &mut BTreeSet<String>,
+    mark: &mut SleeperMark,
+) -> usize {
+    let (registry, operation, name, sleeper) =
+        (order.registry, order.operation, order.name, order.sleeper);
+    let rounds = if sleeper.each_station {
+        round_stations(registry, roster, operation, sleeper, order.now)
+            .into_iter()
+            .map(Some)
+            .collect()
+    } else {
+        vec![None]
+    };
+    let mut queued = 0;
+    let (mut in_flight, mut failed) = (false, false);
+    for round in &rounds {
+        match registry.fire_sleeper(
+            operation,
+            name,
+            sleeper,
+            (window, round.as_deref()),
+            station,
+        ) {
+            Ok(Fire::Queued) => {
+                queued += 1;
+                match round {
+                    Some(round) => eprintln!(
+                        "ai6: sleeper {name} of Operation {operation} queued the round of Station {round}",
+                    ),
+                    None => {
+                        eprintln!("ai6: sleeper {name} of Operation {operation} queued a brief")
                     }
                 }
             }
+            Ok(Fire::InFlight) => {
+                in_flight = true;
+                // Named once per window; only the latest window is remembered.
+                let prefix = format!(
+                    "skipped/{operation}/{name}/{}/",
+                    round.as_deref().unwrap_or_default()
+                );
+                let skipped = format!("{prefix}{}", window_label(window));
+                warned.retain(|seen| !seen.starts_with(&prefix) || *seen == skipped);
+                if warned.insert(skipped) {
+                    eprintln!(
+                        "ai6: sleeper {name} of Operation {operation} has not fired window {}: \
+                         its standing Mission's last attempt is still in flight",
+                        window_label(window)
+                    );
+                }
+            }
+            Ok(Fire::AlreadyFired) => {}
+            Err(error) => {
+                failed = true;
+                eprintln!("ai6: sleeper {name} of Operation {operation}: {error}");
+            }
         }
+    }
+    if in_flight {
+        mark.why = Some(IN_FLIGHT.to_owned());
+    } else if rounds.is_empty() {
+        mark.why = Some(NO_STATION.to_owned());
+    } else if !failed {
+        mark.settled = true;
+        mark.why = None;
     }
     queued
 }
@@ -1855,6 +1999,336 @@ mod tests {
             1
         );
         assert_eq!(takeover.list_new().unwrap().len(), 2);
+    }
+
+    /// 2026-10-25T03:00:00Z, a window of the nightly Sleeper below.
+    const MARK: i64 = 1_792_897_200;
+    const DAY: i64 = 86_400;
+
+    /// A registry and a roster whose Operation `G` has the Sleeper `deps` on `schedule`.
+    fn order(schedule: &str, extra: &str) -> (tempfile::TempDir, Roster, Sleeper) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("operations.toml"),
+            format!(
+                "[operation.G]\nclearance = \"field\"\n\
+                 [operation.G.sleepers.deps]\nschedule = \"{schedule}\"\ntitle = \"Update\"\n\
+                 prompt = \"Update the lockfile.\"\n{extra}"
+            ),
+        )
+        .unwrap();
+        let roster = Roster::load(dir.path()).unwrap();
+        let sleeper = roster.operation("G").unwrap().sleepers["deps"].clone();
+        (dir, roster, sleeper)
+    }
+
+    /// The skipped windows on the timeline, as (window, why).
+    fn skipped(registry: &FileRegistry) -> Vec<(String, String)> {
+        registry
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "sleeper" && event.action == "skipped")
+            .map(|event| (event.detail["window"].clone(), event.detail["why"].clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_missed_mark_fires_once_late_and_every_window_it_skipped_is_recorded() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        let fire = |now: i64, warned: &mut BTreeSet<String>| {
+            fire_due_sleepers(&registry, &roster, "station-a", now, warned)
+        };
+        assert_eq!(fire(MARK + 60, &mut warned), 1);
+        assert!(skipped(&registry).is_empty());
+
+        // The scheduler is down for three marks and comes back five hours after the last.
+        let back = MARK + 3 * DAY + 5 * 3600;
+        assert_eq!(fire(back, &mut warned), 1, "one late firing, of the latest");
+        assert_eq!(fire(back + 60, &mut warned), 0, "never more than one");
+        let late: Vec<String> = registry
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "sleeper" && event.action == "late")
+            .map(|event| event.detail["window"].clone())
+            .collect();
+        assert_eq!(late, [window_label(MARK + 3 * DAY)]);
+        assert_eq!(
+            skipped(&registry),
+            [MARK + DAY, MARK + 2 * DAY].map(|window| (
+                window_label(window),
+                "the scheduler was not running".to_owned()
+            ))
+        );
+        let queued = registry.list_new().unwrap();
+        assert_eq!(queued.len(), 2);
+        assert!(
+            queued
+                .iter()
+                .any(|brief| brief.created == window_label(MARK + 3 * DAY))
+        );
+    }
+
+    #[test]
+    fn a_weekly_mark_missed_by_days_still_fires_within_its_own_period() {
+        let (_dir, roster, sleeper) = order("0 3 * * 0", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", MARK + 3 * DAY, &mut warned),
+            1
+        );
+    }
+
+    #[test]
+    fn a_mark_past_the_bound_is_recorded_and_does_not_fire() {
+        // Weekdays at 09:00: Friday's window is a day after Thursday's, so on Sunday morning,
+        // two days old, it is past its own period.
+        let (_dir, roster, sleeper) = order("0 9 * * 1-5", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - 7 * DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        let thursday = MARK - 3 * DAY + 6 * 3600;
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", thursday, &mut warned),
+            1
+        );
+        let sunday = MARK + 7 * 3600;
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", sunday, &mut warned),
+            0
+        );
+        assert_eq!(
+            skipped(&registry),
+            [(
+                window_label(MARK - 2 * DAY + 6 * 3600),
+                "older than its catch-up bound".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn windows_an_order_was_unauthorized_for_are_recorded_and_the_latest_fires_once_authorized() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        let fire = |now: i64, warned: &mut BTreeSet<String>| {
+            fire_due_sleepers(&registry, &roster, "station-a", now, warned)
+        };
+        assert_eq!(fire(MARK + 60, &mut warned), 1);
+
+        // The definition is edited and its approval no longer covers it.
+        let edited = Sleeper {
+            prompt: "Something else.".to_owned(),
+            ..sleeper.clone()
+        };
+        registry
+            .authorize_sleeper("G", "deps", &edited, "operator", MARK + 60)
+            .unwrap();
+        assert_eq!(fire(MARK + DAY + 60, &mut warned), 0);
+        assert_eq!(fire(MARK + 2 * DAY + 60, &mut warned), 0);
+        assert_eq!(
+            skipped(&registry),
+            [(window_label(MARK + DAY), "not authorized".to_owned())]
+        );
+
+        // Approved again that morning: the window it missed fires once.
+        let approved = MARK + 2 * DAY + 3 * 3600;
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", approved)
+            .unwrap();
+        assert_eq!(fire(approved + 60, &mut warned), 1);
+        assert_eq!(fire(approved + 120, &mut warned), 0);
+    }
+
+    #[test]
+    fn past_the_setting_a_skipped_stretch_is_one_event() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "");
+        let state = tempfile::tempdir().unwrap();
+        let mut limits = crate::directorates::registry::limits::RegistryLimits::default();
+        limits.sleepers.skipped_events = crate::bounds::Limit::at(2);
+        let registry = FileRegistry::open(state.path()).with_limits(limits);
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", MARK + 60, &mut warned),
+            1
+        );
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", MARK + 6 * DAY, &mut warned),
+            1
+        );
+        let why = "the scheduler was not running".to_owned();
+        assert_eq!(
+            skipped(&registry),
+            [
+                (
+                    format!("{} to {}", window_label(MARK), window_label(MARK + 4 * DAY)),
+                    why.clone()
+                ),
+                (window_label(MARK + 4 * DAY), why.clone()),
+                (window_label(MARK + 5 * DAY), why),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_explicit_bound_keeps_a_late_mark_from_firing() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "");
+        let state = tempfile::tempdir().unwrap();
+        let mut limits = crate::directorates::registry::limits::RegistryLimits::default();
+        limits.sleepers.catch_up = Some(crate::bounds::TimeLimit::secs(3600));
+        let registry = FileRegistry::open(state.path()).with_limits(limits);
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", MARK + 60, &mut warned),
+            1
+        );
+        assert_eq!(
+            fire_due_sleepers(
+                &registry,
+                &roster,
+                "station-a",
+                MARK + DAY + 7200,
+                &mut warned
+            ),
+            0,
+            "none past the bound"
+        );
+        assert_eq!(
+            skipped(&registry),
+            [(
+                window_label(MARK + DAY),
+                "older than its catch-up bound".to_owned()
+            )]
+        );
+        assert_eq!(
+            fire_due_sleepers(
+                &registry,
+                &roster,
+                "station-a",
+                MARK + 2 * DAY + 1800,
+                &mut warned
+            ),
+            1,
+            "within the bound"
+        );
+        assert_eq!(skipped(&registry).len(), 1, "told once");
+    }
+
+    #[test]
+    fn a_first_approval_covers_only_the_windows_after_it() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let approved = MARK + 3600;
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", approved)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", approved + 60, &mut warned),
+            0
+        );
+        assert!(skipped(&registry).is_empty());
+        assert_eq!(
+            fire_due_sleepers(
+                &registry,
+                &roster,
+                "station-a",
+                MARK + DAY + 60,
+                &mut warned
+            ),
+            1
+        );
+        assert!(skipped(&registry).is_empty(), "nothing was missed");
+    }
+
+    #[test]
+    fn a_revoked_order_owes_no_window_when_it_is_approved_again() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", MARK + 60, &mut warned),
+            1
+        );
+        assert!(registry.revoke_sleeper("G", "deps").unwrap());
+        assert_eq!(
+            fire_due_sleepers(
+                &registry,
+                &roster,
+                "station-a",
+                MARK + DAY + 60,
+                &mut warned
+            ),
+            0
+        );
+        let approved = MARK + 2 * DAY + 3600;
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", approved)
+            .unwrap();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", approved + 60, &mut warned),
+            0,
+            "the operator stopped it; what passed since is not owed"
+        );
+        assert!(skipped(&registry).is_empty());
+    }
+
+    #[test]
+    fn a_window_that_passes_with_an_attempt_in_flight_is_recorded_when_the_next_one_comes() {
+        let (_dir, roster, sleeper) = order("0 3 * * *", "standing = true\n");
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", MARK - DAY)
+            .unwrap();
+        let mut warned = BTreeSet::new();
+        let fire = |now: i64, warned: &mut BTreeSet<String>| {
+            fire_due_sleepers(&registry, &roster, "station-a", now, warned)
+        };
+        assert_eq!(fire(MARK + 60, &mut warned), 1);
+        assert_eq!(fire(MARK + DAY + 60, &mut warned), 0);
+        assert!(
+            skipped(&registry).is_empty(),
+            "it still fires if the attempt settles before the next window"
+        );
+        assert_eq!(fire(MARK + 2 * DAY + 60, &mut warned), 0);
+        assert_eq!(
+            skipped(&registry),
+            [(
+                window_label(MARK + DAY),
+                "the last attempt was in flight".to_owned()
+            )]
+        );
     }
 
     #[test]

@@ -83,13 +83,15 @@ pub struct Sleeper {
     pub each_station: bool,
     /// One standing Mission for the Sleeper (one per Station with `each_station`), each window
     /// a new attempt of it, instead of a Mission per window. A window that comes while an
-    /// attempt is in flight is skipped.
+    /// attempt is in flight is skipped, unless that attempt has stalled: the window then supersedes
+    /// it. A failed attempt leaves the order standing.
     #[serde(default, skip_serializing_if = "is_false")]
     #[schema(title = "One standing Mission")]
     #[map(default)]
     pub standing: bool,
-    /// Each window's attempt resumes the last attempt's provider Session when its handler can,
-    /// else starts a new one. Needs `standing`.
+    /// Each window's attempt resumes the last attempt's provider Session when its handler can and
+    /// that attempt did not fail, else starts a new one, as it does when the resume is refused.
+    /// Needs `standing`.
     #[serde(default, skip_serializing_if = "is_false")]
     #[schema(title = "Resume the last attempt's Session")]
     #[map(default)]
@@ -137,15 +139,30 @@ impl Sleeper {
         ))
     }
 
-    /// The latest scheduled minute (Unix seconds) at or before `now` that may still fire:
-    /// after `authorized_at` and no older than `limits.window_age`; an older window is
-    /// skipped rather than fired late.
-    pub fn due_window(&self, now: i64, authorized_at: i64, limits: &SleeperLimits) -> Option<i64> {
-        let window = Cron::parse(&self.schedule)
+    /// The latest scheduled minute (Unix seconds) at or before `now` that may still fire: after
+    /// `since` and within `limits.catch_up`; an older window is skipped rather than fired late.
+    pub fn due_window(&self, now: i64, since: i64, limits: &SleeperLimits) -> Option<i64> {
+        let window = self.latest_window(now, limits)?;
+        let age = now - window;
+        let within = match limits.catch_up {
+            Some(bound) => bound.allows_secs(age as f64),
+            None => self
+                .window_before(window, limits)
+                .is_none_or(|before| age <= window - before),
+        };
+        (window > since && within).then_some(window)
+    }
+
+    /// The latest scheduled minute (Unix seconds) at or before `now`.
+    pub fn latest_window(&self, now: i64, limits: &SleeperLimits) -> Option<i64> {
+        Cron::parse(&self.schedule)
             .ok()?
-            .latest_at_or_before(now, limits.lookback_days)?;
-        (window > authorized_at && limits.window_age.allows_secs((now - window) as f64))
-            .then_some(window)
+            .latest_at_or_before(now, limits.lookback_days)
+    }
+
+    /// The scheduled minute before `window`.
+    pub fn window_before(&self, window: i64, limits: &SleeperLimits) -> Option<i64> {
+        self.latest_window(window - 60, limits)
     }
 
     /// Checks the prompt against `limits`.
@@ -165,8 +182,41 @@ pub struct SleeperAuthorization {
     pub fingerprint: String,
     /// Who approved it.
     pub authorized_by: String,
-    /// When, in Unix seconds; windows at or before this never fire.
+    /// When, in Unix seconds.
     pub at: i64,
+    /// What the Headquarters Station has reckoned of the order's windows; an approval given again
+    /// keeps it, and a revoke ends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark: Option<SleeperMark>,
+}
+
+/// What the Headquarters Station last reckoned of a Sleeper's windows, so one that passes unfired
+/// is on the timeline whichever Station is Headquarters and however long none was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SleeperMark {
+    /// Windows at or before this never fire: the first approval's time, in Unix seconds. An
+    /// approval given again for an edited order leaves it, so what the order missed in between
+    /// may still fire once.
+    pub since: i64,
+    /// The latest window reckoned with, in Unix seconds.
+    pub window: i64,
+    /// Whether that window fired or is already on the timeline as skipped.
+    pub settled: bool,
+    /// Why that window has not fired so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+impl SleeperMark {
+    /// The mark of an order first reckoned with at `window`, which may fire only after `since`.
+    pub fn new(since: i64, window: i64) -> Self {
+        Self {
+            since,
+            window,
+            settled: window <= since,
+            why: None,
+        }
+    }
 }
 
 /// What offering a window to the Registry did.
@@ -177,7 +227,7 @@ pub enum Fire {
     /// The window's brief already exists, queued, running or finished.
     AlreadyFired,
     /// A standing Sleeper's attempt of an earlier window is still queued, held or running, so
-    /// this window is skipped.
+    /// this window has not fired.
     InFlight,
 }
 
@@ -412,7 +462,8 @@ impl FileRegistry {
 
 /// Sleeper authorizations and the windows they have fired.
 pub trait SleeperStore {
-    /// Records an operator's approval of this exact definition.
+    /// Records an operator's approval of this exact definition, keeping the mark of the approval
+    /// it replaces.
     ///
     /// # Errors
     ///
@@ -437,12 +488,20 @@ pub trait SleeperStore {
         name: &str,
     ) -> io::Result<Option<SleeperAuthorization>>;
 
-    /// Withdraws an approval; returns whether one existed.
+    /// Withdraws an approval and its mark; returns whether one existed.
     ///
     /// # Errors
     ///
     /// Returns an error when the Registry cannot be written.
     fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool>;
+
+    /// Records what the Headquarters Station has reckoned of the order's windows, on its approval;
+    /// returns whether it has one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read or written.
+    fn mark_sleeper(&self, operation: &str, name: &str, mark: &SleeperMark) -> io::Result<bool>;
 
     /// Queues the brief for one `(window, station)` round: the window's brief, or with a
     /// `station` that Station's round in it (see [`sleeper_brief`]), unless it already
@@ -549,6 +608,9 @@ impl SleeperStore for FileRegistry {
             fingerprint: sleeper.fingerprint(),
             authorized_by: authorized_by.to_owned(),
             at,
+            mark: self
+                .sleeper_authorization(operation, name)?
+                .and_then(|approval| approval.mark),
         };
         let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
         self.write_atomic(&self.sleeper_path(operation, name), &bytes)?;
@@ -590,6 +652,17 @@ impl SleeperStore for FileRegistry {
         }
     }
 
+    fn mark_sleeper(&self, operation: &str, name: &str, mark: &SleeperMark) -> io::Result<bool> {
+        let _lock = self.lock()?;
+        let Some(mut approval) = self.sleeper_authorization(operation, name)? else {
+            return Ok(false);
+        };
+        approval.mark = Some(mark.clone());
+        let bytes = serde_json::to_vec_pretty(&approval).map_err(io::Error::other)?;
+        self.write_atomic(&self.sleeper_path(operation, name), &bytes)?;
+        Ok(true)
+    }
+
     fn fire_sleeper(
         &self,
         operation: &str,
@@ -613,10 +686,55 @@ pub(super) mod tests {
         each_station_s_round_is_its_own_brief_narrowed_to_it,
         a_standing_sleeper_s_windows_are_attempts_of_one_mission,
         a_standing_sleeper_past_the_attempt_limit_still_requeues_a_lapse,
+        a_mark_lives_on_its_approval,
     );
 
     /// 2026-10-25T10:00:00Z
     const NOW: i64 = 1_792_922_400;
+
+    fn a_mark_lives_on_its_approval(store: &dyn Store) {
+        let registry = store.handle();
+        let order = nightly();
+        let mark = SleeperMark {
+            why: Some("not authorized".to_owned()),
+            ..SleeperMark::new(100, 200)
+        };
+        assert!(!registry.mark_sleeper("G", "deps", &mark).unwrap());
+        registry
+            .authorize_sleeper("G", "deps", &order, "operator", 100)
+            .unwrap();
+        assert_eq!(
+            registry
+                .sleeper_authorization("G", "deps")
+                .unwrap()
+                .unwrap()
+                .mark,
+            None
+        );
+        assert!(registry.mark_sleeper("G", "deps", &mark).unwrap());
+        registry
+            .authorize_sleeper("G", "deps", &order, "operator", 300)
+            .unwrap();
+        let approval = store
+            .handle()
+            .sleeper_authorization("G", "deps")
+            .unwrap()
+            .unwrap();
+        assert_eq!((approval.at, approval.mark.as_ref()), (300, Some(&mark)));
+        registry.revoke_sleeper("G", "deps").unwrap();
+        registry
+            .authorize_sleeper("G", "deps", &order, "operator", 400)
+            .unwrap();
+        assert_eq!(
+            registry
+                .sleeper_authorization("G", "deps")
+                .unwrap()
+                .unwrap()
+                .mark,
+            None,
+            "a revoke ends what was owed"
+        );
+    }
 
     fn a_standing_sleeper_s_windows_are_attempts_of_one_mission(store: &dyn Store) {
         let headquarters = store.handle();
@@ -1041,7 +1159,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn only_windows_after_the_approval_and_within_a_day_may_fire() {
+    fn only_windows_after_the_approval_and_within_their_period_may_fire() {
         let sleeper = nightly();
         let three = at("2026-10-25") + 3 * 3600;
         assert_eq!(
@@ -1064,8 +1182,48 @@ pub(super) mod tests {
         };
         assert_eq!(
             weekly.due_window(NOW + 3 * 86_400, 0, &SleeperLimits::default()),
+            Some(three),
+            "a weekly window may be days late"
+        );
+        let weekdays = Sleeper {
+            schedule: "0 9 * * 1-5".to_owned(),
+            ..nightly()
+        };
+        assert_eq!(
+            weekdays.due_window(NOW, 0, &SleeperLimits::default()),
             None,
-            "a window over a day old is skipped"
+            "Friday's window is over a day after Thursday's, and a day is its period"
+        );
+    }
+
+    #[test]
+    fn catch_up_bounds_a_late_window_or_keeps_no_limit() {
+        let three = at("2026-10-25") + 3 * 3600;
+        let bounded = |bound| {
+            let mut limits = SleeperLimits::default();
+            limits.catch_up = Some(bound);
+            limits
+        };
+        let hour = bounded(crate::bounds::TimeLimit::secs(3600));
+        assert_eq!(
+            nightly().due_window(three + 3600, 0, &hour),
+            Some(three),
+            "at the bound"
+        );
+        assert_eq!(
+            nightly().due_window(three + 3601, 0, &hour),
+            None,
+            "past the bound"
+        );
+        let weekdays = Sleeper {
+            schedule: "0 9 * * 1-5".to_owned(),
+            ..nightly()
+        };
+        let none = bounded(crate::bounds::TimeLimit::UNBOUNDED);
+        assert_eq!(
+            weekdays.due_window(NOW, 0, &none),
+            Some(at("2026-10-23") + 9 * 3600),
+            "no limit takes the window its own period would not"
         );
     }
 

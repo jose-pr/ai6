@@ -130,7 +130,20 @@ impl RegistryLimits {
         ) else {
             return Vec::new();
         };
-        crate::bounds::looser("registry.limits", &current, &default, &[])
+        let mut lines = crate::bounds::looser("registry.limits", &current, &default, &[]);
+        // Its default depends on the window, so there is no number for the walk to compare.
+        if self
+            .sleepers
+            .catch_up
+            .is_some_and(|bound| bound.get().is_none())
+        {
+            lines.push(
+                "registry.limits.sleepers.catch_up none is looser than the default, a window's \
+                 own period"
+                    .to_owned(),
+            );
+        }
+        lines
     }
 }
 
@@ -915,10 +928,11 @@ impl Default for SessionLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct SleeperLimits {
-    /// Seconds a scheduled window may be late and still fire; an older one is skipped.
-    #[schema(title = "A late window still fires within")]
-    #[map(default = SleeperLimits::default().window_age)]
-    pub window_age: TimeLimit,
+    /// Seconds a missed window may be late and still fire, once; an older one is skipped and
+    /// recorded. `none` keeps no limit. Default: the window's own period, the time since the window
+    /// before it.
+    #[schema(title = "A missed window still fires within")]
+    pub catch_up: Option<TimeLimit>,
     /// Bytes of a Sleeper's prompt.
     #[schema(title = "Longest Sleeper prompt", format = "bytes")]
     #[map(default = SleeperLimits::default().prompt_bytes)]
@@ -927,14 +941,20 @@ pub struct SleeperLimits {
     #[schema(title = "Days searched back for a window")]
     #[map(default = SleeperLimits::default().lookback_days)]
     pub lookback_days: u32,
+    /// Skipped windows the timeline names one by one when a later window comes; any older ones
+    /// are one event.
+    #[schema(title = "Skipped windows named one by one")]
+    #[map(default = SleeperLimits::default().skipped_events)]
+    pub skipped_events: Limit,
 }
 
 impl Default for SleeperLimits {
     fn default() -> Self {
         Self {
-            window_age: TimeLimit::secs(24 * 60 * 60),
+            catch_up: None,
             prompt_bytes: Limit::at(16 * KIB),
             lookback_days: 366,
+            skipped_events: Limit::at(64),
         }
     }
 }
@@ -1150,6 +1170,28 @@ mod tests {
         open.briefs.record_bytes = Limit::UNBOUNDED;
         assert_eq!(open.logbook.record_bytes(), Limit::UNBOUNDED);
         assert_eq!(open.held_record_bytes(), Limit::UNBOUNDED);
+    }
+
+    #[test]
+    fn catch_up_reads_a_bound_or_none_and_none_is_named() {
+        let unset: RegistryLimits = crate::directorates::m::records::from_toml("").unwrap();
+        assert_eq!(unset.sleepers.catch_up, None);
+        assert!(unset.weakenings().is_empty());
+        let bound: RegistryLimits =
+            crate::directorates::m::records::from_toml("[sleepers]\ncatch_up = 3600\n").unwrap();
+        assert_eq!(bound.sleepers.catch_up, Some(TimeLimit::secs(3600)));
+        assert!(bound.weakenings().is_empty(), "{:?}", bound.weakenings());
+        let none: RegistryLimits =
+            crate::directorates::m::records::from_toml("[sleepers]\ncatch_up = \"none\"\n")
+                .unwrap();
+        assert_eq!(none.sleepers.catch_up, Some(TimeLimit::UNBOUNDED));
+        assert_eq!(
+            none.weakenings(),
+            [
+                "registry.limits.sleepers.catch_up none is looser than the default, a window's own \
+              period"
+            ]
+        );
     }
 
     #[test]

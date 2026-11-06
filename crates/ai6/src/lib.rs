@@ -219,7 +219,7 @@ pub use directorates::registry::sessions::{
     SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
 pub use directorates::registry::sleepers::{
-    Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization,
+    Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization, SleeperMark,
 };
 pub use directorates::registry::sources::{
     FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,

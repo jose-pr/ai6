@@ -1,12 +1,30 @@
 //! A standing Sleeper's runs: each window is a new attempt of the Sleeper's one Mission, and one
-//! that resumes takes up the provider Session the last attempt left.
+//! that resumes takes up the provider Session the last attempt left. A Sleeper's attempt that fails
+//! says so on the timeline and the board, and a window that finds its order's attempt stalled
+//! supersedes it.
 
-use super::DaemonState;
+use super::{DaemonState, is_terminal_state, session_hold};
+use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::vetting::sleeper_of;
-use crate::directorates::registry::sessions::SessionRecord;
-use crate::directorates::registry::sleepers::window_of;
+use crate::directorates::registry::bona_fides::Origin;
+use crate::directorates::registry::sessions::{
+    SessionRecord, SessionResult, SessionStatus, SessionUpdate,
+};
+use crate::directorates::registry::sleepers::{window_label, window_of};
+use crate::directorates::registry::store::{AuditRecord, Brief};
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::{AgentResume, AgentStart, SessionId};
+
+/// The key an attempt's outcome sets when its `reason` is what its harness said, which may quote
+/// anything and stays off the timeline.
+pub(super) const HARNESS_SAID: &str = "reason_from_harness";
+
+/// The reason the board gets with a Sleeper's failed attempt.
+#[cfg(feature = "publisher")]
+pub(super) const ORDER_FAILED_REASON: &str = "order-attempt-failed";
+
+/// The reason on the Session record of an attempt a later window superseded.
+const SUPERSEDED: &str = "superseded";
 
 /// The window a standing Sleeper's run answers, and whether it resumes the last attempt.
 pub(super) struct WindowRun {
@@ -32,19 +50,27 @@ pub(super) fn of(state: &DaemonState, mission_id: &str) -> Option<WindowRun> {
     })
 }
 
-/// The provider Session a run that resumes takes up: the last attempt's, when that attempt ran
-/// on `handler` and its provider gave it an ID. Which it does goes on the timeline.
+/// The provider Session a run that resumes takes up: the last attempt's, when that attempt ran on
+/// `handler`, did not fail, and its provider gave it an ID, unless the provider `refused` it this
+/// attempt. A failed attempt's Session may be why it failed, and resuming it could fail every
+/// window alike. Which it does goes on the timeline.
 pub(super) fn resume_from(
     state: &DaemonState,
     (operation, mission_id): (Option<&str>, &str),
     run: &WindowRun,
     earlier: Option<&SessionRecord>,
-    handler: &str,
+    (handler, refused): (&str, bool),
 ) -> Option<SessionId> {
     if !run.resume {
         return None;
     }
+    let failed = earlier
+        .and_then(|record| record.result.as_ref())
+        .is_some_and(|result| {
+            result.state == "failed" || result.reason.as_deref() == Some(SUPERSEDED)
+        });
     let found = earlier
+        .filter(|_| !refused && !failed)
         .filter(|record| {
             record
                 .launch
@@ -63,8 +89,14 @@ pub(super) fn resume_from(
         ),
         None => (
             "started",
-            "the window starts a new Session: the last attempt left none its handler can resume"
-                .to_owned(),
+            if refused {
+                "the window starts a new Session: the last attempt's could not be resumed"
+            } else if failed {
+                "the window starts a new Session: the last attempt failed, so its is not taken up"
+            } else {
+                "the window starts a new Session: the last attempt left none its handler can resume"
+            }
+            .to_owned(),
         ),
     };
     if let Some(operation) = operation {
@@ -97,8 +129,263 @@ pub(super) fn resume_request(start: AgentStart, session_id: SessionId) -> AgentR
     }
 }
 
+/// Notes that the provider could not resume the Session this attempt would have taken up: the
+/// scheduler's next try starts a new one, rather than asking again for what will not come back.
+pub(super) fn resume_refused(state: &DaemonState, mission_id: &str, why: &str) {
+    eprintln!("ai6: Mission {mission_id:?} could not resume its last Session: {why}");
+    if let Ok(mut missions) = state.missions.lock()
+        && let Err(error) = missions.refuse_resume(mission_id, why)
+    {
+        eprintln!("ai6: Mission {mission_id:?}: the refused resume is not recorded: {error:?}");
+    }
+}
+
+/// Puts a failed attempt of a Sleeper on the timeline, needing no one's approval: the order stands
+/// and its next window fires, so nothing else would tell of it. A cancel is an operator's own doing.
+pub(super) fn attempt_failed(state: &DaemonState, brief: &Brief, outcome: &serde_json::Value) {
+    if outcome["state"] == "abandoned" {
+        return;
+    }
+    let (Some((operation, name)), Some(window)) = (sleeper_of(brief), window_of(brief)) else {
+        return;
+    };
+    let reason = if outcome[HARNESS_SAID] == true {
+        "its harness reported a failure; its words are in the attempt's outcome"
+    } else {
+        outcome["reason"]
+            .as_str()
+            .unwrap_or("no reason was recorded")
+    };
+    let limit = state.intake.limits().timeline.text_bytes.or_max();
+    let mut kept = String::new();
+    for character in reason.chars().filter(|character| !character.is_control()) {
+        if kept.len() + character.len_utf8() > limit {
+            break;
+        }
+        kept.push(character);
+    }
+    let mut event = TimelineEvent::new(
+        "sleeper",
+        "attempt-failed",
+        operation,
+        state.clock.now() as f64,
+    )
+    .station(state.station_id.clone())
+    .mission(brief.key())
+    .detail("sleeper", name)
+    .detail("window", window.to_owned());
+    if !kept.trim().is_empty() {
+        event = event.detail("reason", kept);
+    }
+    if let Err(error) = state.intake.record_event(&event) {
+        eprintln!(
+            "ai6: timeline event of Mission {:?} was not written: {error}",
+            brief.key()
+        );
+    }
+}
+
+/// [`attempt_failed`] for a brief a recovered lease filed, when its Station was lost.
+pub(super) fn recovered_failed(state: &DaemonState, key: &str) {
+    if let Ok(Some(filed)) = state.intake.filed_brief(key)
+        && let Some(outcome) = &filed.outcome
+    {
+        attempt_failed(state, &filed.brief, outcome);
+    }
+}
+
+/// An attempt a later window takes the place of.
+struct Stalled {
+    mission_id: String,
+    operation: String,
+    /// The window the attempt answers.
+    window: String,
+    /// The window that supersedes it.
+    next: String,
+    why: String,
+    /// Whether a stall of its Agent's was already counted for this attempt.
+    counted: bool,
+}
+
+/// Why `mission`, an attempt held by this Station, cannot be expected to end by itself. The stall
+/// bound is its Agent's `stall_timeout`, which is what makes it `stalled`. A Mission waiting for a
+/// person, a provider's limit or an operator's release is not stalled, nor is one a re-attach may
+/// still bring back.
+fn why_stalled(state: &DaemonState, mission: &Mission) -> Option<String> {
+    let id = mission.mission_id.as_str();
+    let failed_retry = state
+        .retry_after
+        .lock()
+        .ok()
+        .is_some_and(|retries| retries.contains_key(id));
+    match mission.state {
+        MissionState::Stalled => Some("its Session stalled".to_owned()),
+        MissionState::Queued => failed_retry.then(|| "it did not start".to_owned()),
+        MissionState::Working | MissionState::Blocked => {
+            let live = state
+                .sessions
+                .lock()
+                .ok()
+                .is_none_or(|sessions| sessions.contains_key(id))
+                || state
+                    .starting
+                    .lock()
+                    .ok()
+                    .is_none_or(|starting| starting.contains(id));
+            let reattaching = state
+                .startup_recovery
+                .lock()
+                .ok()
+                .is_none_or(|pending| pending.contains(id))
+                && !failed_retry;
+            (!live && !reattaching && mission.blocked_reason.is_none())
+                .then(|| format!("no live Session on Station {}", state.station_id))
+        }
+        _ => None,
+    }
+}
+
+/// The attempts in this Station's book whose order's next window has come while they cannot end.
+fn stalled_attempts(state: &DaemonState) -> Vec<Stalled> {
+    let book: Vec<Mission> = state
+        .missions
+        .lock()
+        .map(|missions| {
+            missions
+                .list()
+                .into_iter()
+                .filter(|mission| {
+                    !is_terminal_state(mission.state)
+                        && mission
+                            .provenance
+                            .as_ref()
+                            .is_some_and(|provenance| provenance.origin == Origin::Sleeper)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let limits = &state.intake.limits().sleepers;
+    let now = state.clock.now();
+    book.iter()
+        .filter_map(|mission| {
+            let why = why_stalled(state, mission)?;
+            let id = mission.mission_id.as_str();
+            let brief = state.intake.read_claimed(id).ok()??;
+            let (operation, name) = sleeper_of(&brief)?;
+            let run = of(state, id)?;
+            let lease = state.intake.lease(id).ok()??;
+            if lease.station() != state.station_id {
+                return None;
+            }
+            let sleeper = state
+                .roster
+                .operation(&operation)
+                .ok()?
+                .sleepers
+                .get(&name)?;
+            let approval = state
+                .intake
+                .sleeper_authorization(&operation, &name)
+                .ok()??;
+            if approval.fingerprint != sleeper.fingerprint() {
+                return None;
+            }
+            let since = approval.mark.map_or(approval.at, |mark| mark.since);
+            let next = window_label(sleeper.due_window(now, since, limits)?);
+            (next > run.window).then(|| Stalled {
+                mission_id: id.to_owned(),
+                operation,
+                window: run.window,
+                next,
+                why,
+                counted: mission.state == MissionState::Stalled,
+            })
+        })
+        .collect()
+}
+
+/// Settles each attempt in this Station's book whose order's next window finds it stalled: it fails
+/// with that reason, audited, its harness stopped, and the next intake pass files its brief, which
+/// lets the window fire as the next attempt. Without this the order waits for a person.
+pub(super) async fn supersede_stalled(state: &DaemonState) {
+    let reading = state.clone();
+    let stalled = tokio::task::spawn_blocking(move || stalled_attempts(&reading))
+        .await
+        .unwrap_or_default();
+    for attempt in stalled {
+        supersede(state, attempt).await;
+    }
+}
+
+async fn supersede(state: &DaemonState, attempt: Stalled) {
+    let id = attempt.mission_id.as_str();
+    let reason = format!("superseded by window {}: {}", attempt.next, attempt.why);
+    let hold = session_hold(state, id);
+    let failed = state
+        .missions
+        .lock()
+        .is_ok_and(|mut missions| missions.fail_for(id, &reason).is_ok());
+    if !failed {
+        return;
+    }
+    eprintln!("ai6: Mission {id:?}: {reason}");
+    if let Ok(mut retries) = state.retry_after.lock() {
+        retries.remove(id);
+    }
+    if let Ok(mut pending) = state.startup_recovery.lock() {
+        pending.remove(id);
+    }
+    super::recovery::reattached(state, id);
+    if let Some(hold) = &hold {
+        // Not the Agent's failure: what stopped it is a stall already counted, or the Station.
+        let update = SessionUpdate::default()
+            .result(SessionResult::new("abandoned").with_reason(Some(SUPERSEDED.to_owned())))
+            .status(SessionStatus::Ended);
+        if let Err(error) =
+            state
+                .intake
+                .update_session(&hold.id, &state.station_id, hold.fence, update)
+        {
+            eprintln!("ai6: Session record {:?} not updated: {error}", hold.id);
+        }
+        if !attempt.counted {
+            super::agents::count_lost(state, id, hold.attempt);
+        }
+    }
+    super::publish_lifecycle(state, id, MissionState::Failed);
+    let at = state.clock.now() as f64;
+    let record = AuditRecord {
+        id: format!("sleeper-superseded-{}", uuid::Uuid::new_v4().simple()),
+        actor: "m".to_owned(),
+        action: "sleeper.superseded".to_owned(),
+        operation: attempt.operation.clone(),
+        resource: None,
+        target: format!("{id} {}", attempt.window),
+        at,
+    };
+    if let Err(error) = state.intake.record_audit(&record) {
+        eprintln!("ai6: the supersede of Mission {id:?} was not audited: {error}");
+    }
+    let event = TimelineEvent::new("sleeper", "superseded", &attempt.operation, at)
+        .station(state.station_id.clone())
+        .mission(id)
+        .detail("window", attempt.window.clone())
+        .detail("by", attempt.next.clone())
+        .detail("why", attempt.why.clone());
+    if let Err(error) = state.intake.record_event(&event) {
+        eprintln!("ai6: timeline event of Mission {id:?} was not written: {error}");
+    }
+    if super::finalize_mission_resources(state, id, true, false)
+        .await
+        .is_err()
+    {
+        eprintln!("ai6: Mission {id:?}: the superseded attempt's resources were not released");
+    }
+}
+
 #[cfg(test)]
 pub(super) mod testing {
+    use std::collections::BTreeSet;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -107,7 +394,7 @@ pub(super) mod testing {
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError};
     use crate::guatiao::{Provider, Status};
-    use coqui_acp_provider::AgentSession;
+    use coqui_acp_provider::{AgentEvent, AgentSession};
 
     use super::super::tests::MockSession;
 
@@ -115,9 +402,25 @@ pub(super) mod testing {
     pub(in crate::station::server) static RESUMED: Mutex<Vec<(String, String)>> =
         Mutex::new(Vec::new());
     static STARTS: AtomicUsize = AtomicUsize::new(0);
+    /// The Missions whose first attempt has gone the way its prompt asks.
+    static FIRST_DONE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+    fn event(kind: &str, text: &str) -> AgentEvent {
+        AgentEvent {
+            kind: kind.to_owned(),
+            text: Some(text.to_owned()),
+            data: None,
+            limit: None,
+            usage: None,
+            quota: Vec::new(),
+            tools: Vec::new(),
+        }
+    }
 
     /// A harness that resumes by provider Session ID, as Claude Code does: each start is a new
-    /// provider Session and each turn completes the Mission.
+    /// provider Session and each turn completes the Mission. A word in the prompt changes that:
+    /// `first-attempt-fails`, `first-attempt-stalls` and `first-attempt-blocks` for a Mission's
+    /// first start, `resume-refused` and `resume-dead` for every resume.
     #[derive(Default, Provider)]
     #[provider(
         AgentHandler,
@@ -130,7 +433,7 @@ pub(super) mod testing {
     impl AgentHandler for MockStandingHandler {
         fn start(
             &self,
-            _request: AgentStart,
+            request: AgentStart,
             _terminal: Object<dyn AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             let started = STARTS.fetch_add(1, Ordering::Relaxed);
@@ -138,7 +441,21 @@ pub(super) mod testing {
                 SessionId::try_new(format!("provider-standing-{started}")).map_err(|error| {
                     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
                 })?;
-            Ok(MockSession::new(session, "completed").into_object())
+            let first = FIRST_DONE
+                .lock()
+                .unwrap()
+                .insert(request.mission_id.as_str().to_owned());
+            let asked = |word: &str| first && request.prompt.contains(word);
+            let session = if asked("first-attempt-fails") {
+                MockSession::with_event(session, event("failed", "the model refused the turn"))
+            } else if asked("first-attempt-stalls") {
+                MockSession::new(session, "stalled")
+            } else if asked("first-attempt-blocks") {
+                MockSession::new(session, "blocked")
+            } else {
+                MockSession::new(session, "completed")
+            };
+            Ok(session.into_object())
         }
 
         fn resume(
@@ -150,7 +467,22 @@ pub(super) mod testing {
                 request.mission_id.as_str().to_owned(),
                 request.session_id.as_str().to_owned(),
             ));
-            Ok(MockSession::new(request.session_id, "completed").into_object())
+            let message = request.message.as_deref().unwrap_or_default();
+            if message.contains("resume-refused") {
+                return Err(ProviderError::new(
+                    Status::GUATIAO_ERR_INTERNAL,
+                    "no conversation found",
+                ));
+            }
+            let session = if message.contains("resume-dead") {
+                MockSession::with_event(
+                    request.session_id,
+                    event("failed", "no conversation found"),
+                )
+            } else {
+                MockSession::new(request.session_id, "completed")
+            };
+            Ok(session.into_object())
         }
     }
 }
@@ -164,7 +496,6 @@ mod tests {
     use super::*;
     use crate::directorates::m::mission::MissionState;
     use crate::directorates::registry::mission_ids::MissionEntry;
-    use crate::directorates::registry::sleepers::window_label;
     use crate::station::sources::fire_due_sleepers;
 
     /// 2026-10-25T03:00:00Z, a window of the `0 3 * * *` Sleeper below.
@@ -173,11 +504,16 @@ mod tests {
 
     /// A Station whose Operation `G` has the authorized standing Sleeper `nightly`.
     fn standing_state(root: &std::path::Path, resume: bool) -> DaemonState {
+        order_state(root, "Tidy the tree.", resume)
+    }
+
+    /// [`standing_state`], the Sleeper's prompt saying how [`testing::MockStandingHandler`] goes.
+    fn order_state(root: &std::path::Path, prompt: &str, resume: bool) -> DaemonState {
         let mut state = test_state(
             root,
             &format!(
                 "[operation.G.sleepers.nightly]\nschedule = \"0 3 * * *\"\ntitle = \"Tidy\"\n\
-                 prompt = \"Tidy the tree.\"\nagent = \"007\"\nstanding = true\nresume = {resume}\n"
+                 prompt = \"{prompt}\"\nagent = \"007\"\nstanding = true\nresume = {resume}\n"
             ),
             "[agent.007]\nhandler = \"mock-standing\"\n",
         );
@@ -390,5 +726,306 @@ mod tests {
         state
             .stopping
             .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Fires what is due at `now`.
+    fn fire_at(state: &DaemonState, now: i64, warned: &mut BTreeSet<String>) -> usize {
+        fire_due_sleepers(state.intake.as_ref(), &state.roster, "test", now, warned)
+    }
+
+    /// The Sleeper events named `action` on the timeline.
+    fn told(state: &DaemonState, action: &str) -> Vec<TimelineEvent> {
+        state
+            .intake
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "sleeper" && event.action == action)
+            .collect()
+    }
+
+    fn stop(state: &DaemonState) {
+        state
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// The Station's clock stands at `now`.
+    fn at(state: &mut DaemonState, now: i64) {
+        state.clock = super::super::Clock(std::sync::Arc::new(move || now));
+    }
+
+    #[tokio::test]
+    async fn a_failed_attempt_leaves_the_order_standing_and_says_why() {
+        let root = tempfile::tempdir().unwrap();
+        let state = order_state(root.path(), "first-attempt-fails the tree.", false);
+        let mut warned = BTreeSet::new();
+        assert_eq!(fire_at(&state, FIRST + 60, &mut warned), 1);
+        assert!(schedule_intake_once(&state));
+        let mission = standing_mission(&state);
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, &mission, MissionState::Failed).await;
+        schedule_intake_once(&state);
+
+        let filed = state.intake.filed_brief(&mission).unwrap().unwrap();
+        assert_eq!(filed.state, "failed");
+        let outcome = filed.outcome.unwrap();
+        assert_eq!(outcome["reason"], "the model refused the turn");
+
+        #[cfg(feature = "publisher")]
+        {
+            let reason = super::super::order_reason(&state, &mission);
+            assert_eq!(reason, Some(ORDER_FAILED_REASON));
+            assert!(ai6_diptel::valid_reason(ORDER_FAILED_REASON));
+            assert_eq!(
+                super::super::order_reason(&state, "mission-nobody"),
+                None,
+                "nothing else is told as an order"
+            );
+        }
+        let alerts = told(&state, "attempt-failed");
+        assert_eq!(alerts.len(), 1, "one alert for the attempt");
+        assert_eq!(alerts[0].mission.as_deref(), Some(mission.as_str()));
+        assert_eq!(alerts[0].detail["sleeper"], "nightly");
+        assert_eq!(alerts[0].detail["window"], window_label(FIRST));
+        assert!(
+            !alerts[0].detail["reason"].contains("the model refused"),
+            "the timeline keeps what a harness says out: {:?}",
+            alerts[0].detail
+        );
+        assert!(
+            state
+                .intake
+                .audit_records()
+                .unwrap()
+                .iter()
+                .all(|record| !record.action.starts_with("green_ink")),
+            "no green ink is asked for"
+        );
+
+        assert_eq!(
+            run_window(&state, FIRST + DAY, &mut warned).await,
+            mission,
+            "the next window fires as the next attempt"
+        );
+        let runs = runs(&state, &mission);
+        assert_eq!(
+            runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        stop(&state);
+    }
+
+    /// A cancelled attempt is an operator's own doing, and asks for no alert.
+    #[test]
+    fn a_cancelled_attempt_raises_no_alert() {
+        let root = tempfile::tempdir().unwrap();
+        let state = standing_state(root.path(), false);
+        let sleeper = state.roster.operation("G").unwrap().sleepers["nightly"].clone();
+        let brief = crate::directorates::registry::sleepers::sleeper_brief(
+            "G", "nightly", &sleeper, FIRST, None,
+        );
+        attempt_failed(
+            &state,
+            &brief,
+            &serde_json::json!({"state": "abandoned", "reason": "cancelled"}),
+        );
+        assert!(told(&state, "attempt-failed").is_empty());
+    }
+
+    /// A provider that refuses the resume leaves the attempt to start a new Session, and the
+    /// order does not sit in the start's retries.
+    #[tokio::test]
+    async fn a_resume_the_provider_refuses_falls_back_to_a_new_session_and_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let state = order_state(root.path(), "resume-refused the tree.", true);
+        let mut warned = BTreeSet::new();
+        let mission = run_window(&state, FIRST, &mut warned).await;
+
+        assert_eq!(fire_at(&state, FIRST + DAY + 60, &mut warned), 1);
+        assert!(schedule_intake_once(&state));
+        schedule_queued_once(&state).await;
+        state.retry_after.lock().unwrap().clear();
+        schedule_queued_once(&state).await;
+        assert_ne!(
+            super::super::tests::mission_state(&state, &mission).state,
+            MissionState::Queued,
+            "the attempt must not keep asking for a Session that cannot resume"
+        );
+        wait_for_state(&state, &mission, MissionState::Done).await;
+        schedule_intake_once(&state);
+
+        let runs = runs(&state, &mission);
+        assert_eq!(
+            runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_ne!(runs[0].provider_session_id, runs[1].provider_session_id);
+        let said: Vec<(String, String)> = state
+            .intake
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "sleeper" && event.mission.as_deref() == Some(&mission))
+            .map(|event| (event.action, event.detail["detail"].clone()))
+            .collect();
+        assert_eq!(
+            said.iter()
+                .map(|(action, _)| action.as_str())
+                .collect::<Vec<_>>(),
+            ["started", "resumed", "started"]
+        );
+        assert!(said[2].1.contains("could not be resumed"), "{said:?}");
+        stop(&state);
+    }
+
+    /// A harness can take the resume and then fail on it, each window alike; only a new Session
+    /// gets the order out of that.
+    #[tokio::test]
+    async fn a_session_whose_attempt_failed_is_not_resumed_by_the_next_window() {
+        let root = tempfile::tempdir().unwrap();
+        let state = order_state(root.path(), "resume-dead the tree.", true);
+        let mut warned = BTreeSet::new();
+        let mission = run_window(&state, FIRST, &mut warned).await;
+
+        assert_eq!(fire_at(&state, FIRST + DAY + 60, &mut warned), 1);
+        assert!(schedule_intake_once(&state));
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, &mission, MissionState::Failed).await;
+        schedule_intake_once(&state);
+        let filed = state.intake.filed_brief(&mission).unwrap().unwrap();
+        assert_eq!(
+            filed.outcome.unwrap()["reason"],
+            "no conversation found",
+            "the attempt's outcome carries the reason"
+        );
+
+        assert_eq!(
+            run_window(&state, FIRST + 2 * DAY, &mut warned).await,
+            mission,
+            "the third window runs on a new Session"
+        );
+        let runs = runs(&state, &mission);
+        assert_eq!(runs.len(), 3);
+        assert_ne!(runs[2].provider_session_id, runs[0].provider_session_id);
+        stop(&state);
+    }
+
+    #[tokio::test]
+    async fn a_window_supersedes_a_stalled_attempt_and_runs_as_the_next_attempt() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = order_state(root.path(), "first-attempt-stalls the tree.", false);
+        let mut warned = BTreeSet::new();
+        at(&mut state, FIRST + 60);
+        assert_eq!(fire_at(&state, FIRST + 60, &mut warned), 1);
+        assert!(schedule_intake_once(&state));
+        let mission = standing_mission(&state);
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, &mission, MissionState::Stalled).await;
+
+        // Its own window has not passed: it is left alone.
+        supersede_stalled(&state).await;
+        assert_eq!(
+            super::super::tests::mission_state(&state, &mission).state,
+            MissionState::Stalled
+        );
+
+        at(&mut state, FIRST + DAY + 60);
+        assert_eq!(fire_at(&state, FIRST + DAY + 60, &mut warned), 0);
+        supersede_stalled(&state).await;
+        let superseded = super::super::tests::mission_state(&state, &mission);
+        assert_eq!(superseded.state, MissionState::Failed);
+        let reason = superseded.failure.unwrap();
+        assert!(
+            reason.contains(&window_label(FIRST + DAY)) && reason.contains("stalled"),
+            "{reason}"
+        );
+        assert!(
+            !state.sessions.lock().unwrap().contains_key(&mission),
+            "its harness is stopped"
+        );
+        schedule_intake_once(&state);
+        let filed = state.intake.filed_brief(&mission).unwrap().unwrap();
+        assert_eq!(filed.state, "failed");
+        assert_eq!(filed.outcome.unwrap()["reason"], reason.as_str());
+        assert!(
+            state
+                .intake
+                .audit_records()
+                .unwrap()
+                .iter()
+                .any(|record| record.action == "sleeper.superseded"
+                    && record.target.starts_with(&mission)),
+            "the supersede is audited"
+        );
+        assert_eq!(told(&state, "superseded").len(), 1);
+
+        assert_eq!(fire_at(&state, FIRST + DAY + 80, &mut warned), 1);
+        run_attempt(&state).await;
+        let runs = runs(&state, &mission);
+        assert_eq!(
+            runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_eq!(
+            crate::directorates::m::scorecard::judge(&runs[0]),
+            crate::directorates::m::scorecard::Judgment::Withdrawn,
+            "a stall already counted is not counted again as the Agent's failure"
+        );
+        stop(&state);
+    }
+
+    /// A restart leaves the Mission blocked and waiting to re-attach. While a re-attach has not
+    /// failed it may still come back; a harness that cannot be re-attached wedges the order until
+    /// the next window.
+    #[tokio::test]
+    async fn a_window_supersedes_an_attempt_with_no_live_session_after_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = order_state(root.path(), "first-attempt-blocks the tree.", false);
+        let mut warned = BTreeSet::new();
+        at(&mut state, FIRST + 60);
+        assert_eq!(fire_at(&state, FIRST + 60, &mut warned), 1);
+        assert!(schedule_intake_once(&state));
+        let mission = standing_mission(&state);
+        schedule_queued_once(&state).await;
+        wait_for_state(&state, &mission, MissionState::Blocked).await;
+
+        // Blocked with its Session live is waiting, not stalled.
+        at(&mut state, FIRST + DAY + 60);
+        supersede_stalled(&state).await;
+        assert_eq!(
+            super::super::tests::mission_state(&state, &mission).state,
+            MissionState::Blocked
+        );
+
+        // The restart: nothing live here and a re-attach pending, which has not failed yet.
+        state.sessions.lock().unwrap().remove(&mission);
+        state
+            .startup_recovery
+            .lock()
+            .unwrap()
+            .insert(mission.clone());
+        supersede_stalled(&state).await;
+        assert_eq!(
+            super::super::tests::mission_state(&state, &mission).state,
+            MissionState::Blocked
+        );
+
+        state
+            .retry_after
+            .lock()
+            .unwrap()
+            .insert(mission.clone(), tokio::time::Instant::now());
+        supersede_stalled(&state).await;
+        let superseded = super::super::tests::mission_state(&state, &mission);
+        assert_eq!(superseded.state, MissionState::Failed);
+        assert!(
+            superseded.failure.unwrap().contains("no live Session"),
+            "the reason names what was found"
+        );
+        assert!(!state.startup_recovery.lock().unwrap().contains(&mission));
+        schedule_intake_once(&state);
+        assert_eq!(fire_at(&state, FIRST + DAY + 80, &mut warned), 1);
+        stop(&state);
     }
 }

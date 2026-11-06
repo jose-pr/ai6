@@ -17,7 +17,7 @@ use crate::directorates::registry::quarantine::{
     Quarantine, QuarantineStore, add_incident, quarantine_report, validate_quarantine,
 };
 use crate::directorates::registry::sleepers::{
-    Fire, Sleeper, SleeperAuthorization, SleeperStore, fire_round,
+    Fire, Sleeper, SleeperAuthorization, SleeperMark, SleeperStore, fire_round,
 };
 use crate::directorates::registry::store::{
     AccessTokenStore, AgentRoleStore, AuditRecord, AuditStore, CableStore, cable_error,
@@ -790,15 +790,24 @@ impl SleeperStore for SqlRegistry {
         sleeper
             .check_size(&self.limits.sleepers)
             .map_err(invalid_data)?;
-        let record = SleeperAuthorization {
-            fingerprint: sleeper.fingerprint(),
-            authorized_by: authorized_by.to_owned(),
-            at,
-        };
         let event = TimelineEvent::new("sleeper", "authorized", operation, at as f64)
             .actor(authorized_by)
             .detail("sleeper", name);
         self.write(|tx, revision| {
+            let replaced: Option<SleeperAuthorization> = tx
+                .query_opt(
+                    "SELECT record FROM ai6_sleeper_authorizations \
+                     WHERE operation = $1 AND name = $2",
+                    &[operation.into(), name.into()],
+                )?
+                .map(|row| from_json(&row.text(0)?, "Sleeper authorization"))
+                .transpose()?;
+            let record = SleeperAuthorization {
+                fingerprint: sleeper.fingerprint(),
+                authorized_by: authorized_by.to_owned(),
+                at,
+                mark: replaced.and_then(|approval| approval.mark),
+            };
             tx.execute(
                 "INSERT INTO ai6_sleeper_authorizations (operation, name, record, revision) \
                  VALUES ($1, $2, $3, $4) ON CONFLICT (operation, name) \
@@ -847,6 +856,34 @@ impl SleeperStore for SqlRegistry {
                 }
             }
             Ok(removed)
+        })
+    }
+
+    fn mark_sleeper(&self, operation: &str, name: &str, mark: &SleeperMark) -> io::Result<bool> {
+        self.write(|tx, revision| {
+            let approval: Option<SleeperAuthorization> = tx
+                .query_opt(
+                    "SELECT record FROM ai6_sleeper_authorizations \
+                     WHERE operation = $1 AND name = $2",
+                    &[operation.into(), name.into()],
+                )?
+                .map(|row| from_json(&row.text(0)?, "Sleeper authorization"))
+                .transpose()?;
+            let Some(mut approval) = approval else {
+                return Ok(false);
+            };
+            approval.mark = Some(mark.clone());
+            tx.execute(
+                "UPDATE ai6_sleeper_authorizations SET record = $3, revision = $4 \
+                 WHERE operation = $1 AND name = $2",
+                &[
+                    operation.into(),
+                    name.into(),
+                    to_json(&approval)?.into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(true)
         })
     }
 
