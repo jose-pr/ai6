@@ -83,6 +83,11 @@ use crate::station::limits::OverlayLimits;
 /// The manifest's file name at an overlay's root.
 pub const MANIFEST: &str = "overlay.cfg";
 
+/// The file a later AOS edition reads as the manifest when there is no `overlay.cfg`: its front
+/// matter the manifest, its body the context. This reader does not read it, so an overlay that has
+/// it and no `overlay.cfg` is refused rather than read as having no manifest.
+pub const LATER_MANIFEST: &str = "OVERLAY.md";
+
 /// Where an overlay comes from.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,9 +191,16 @@ impl ReadOverlay {
 ///
 /// # Errors
 ///
-/// Why the tree has no digest, or why its manifest cannot be read.
+/// Why the tree has no digest, why its manifest cannot be read, or that its manifest is an
+/// [`LATER_MANIFEST`] this reader does not read.
 pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, String> {
     let digest = tree_digest(root, &limits.tree()).map_err(|error| error.to_string())?;
+    if digest.files.contains_key(LATER_MANIFEST) && !digest.files.contains_key(MANIFEST) {
+        return Err(format!(
+            "{LATER_MANIFEST}: this AI6 does not read {LATER_MANIFEST} yet, and the overlay has no \
+             {MANIFEST}; it is refused rather than read as having no manifest"
+        ));
+    }
     let manifest = if digest.files.contains_key(MANIFEST) {
         let bytes =
             std::fs::read(root.join(MANIFEST)).map_err(|error| format!("{MANIFEST}: {error}"))?;

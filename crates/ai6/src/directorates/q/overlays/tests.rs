@@ -391,3 +391,25 @@ fn an_operation_names_overlays_by_identity_once_each() {
         );
     }
 }
+
+#[test]
+fn an_overlay_md_with_no_overlay_cfg_is_refused_and_never_read_as_no_manifest() {
+    let root = tempfile::tempdir().unwrap();
+    let write = |path: &str, text: &str| {
+        let file = root.path().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, text).unwrap();
+    };
+    write("OVERLAY.md", "---\nrequires = [\"base\"]\n---\nContext.\n");
+    write("bin/helper", "#!/bin/sh\n");
+    let refusal = read_overlay(root.path(), &OverlayLimits::default()).unwrap_err();
+    assert!(refusal.contains("OVERLAY.md"), "{refusal}");
+    assert!(
+        refusal.contains("does not read OVERLAY.md yet"),
+        "{refusal}"
+    );
+    // With an overlay.cfg beside it, the manifest is that file, as this edition reads it.
+    write("overlay.cfg", "name = \"tools\"\n");
+    let read = read_overlay(root.path(), &OverlayLimits::default()).unwrap();
+    assert_eq!(read.manifest["name"], "tools");
+}

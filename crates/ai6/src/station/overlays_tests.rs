@@ -1086,3 +1086,35 @@ fn a_requirements_file_holds_requirements_and_comments_only() {
         assert!(refusal.contains(why), "{text:?}: {refusal}");
     }
 }
+
+#[test]
+fn an_overlay_md_with_no_overlay_cfg_refuses_the_session_naming_the_file() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[
+            ("OVERLAY.md", "---\nname = \"tools\"\n---\nContext.\n"),
+            ("bin/helper", "x\n"),
+        ],
+    );
+    // A pin as the tree's digest would be: the refusal is the manifest's, not the pin's.
+    let pin = crate::directorates::q::overlays::tree_digest(&dir, &OverlayLimits::default().tree())
+        .unwrap()
+        .digest;
+    let list = records([OverlayRecord::new("tools", OverlayFrom::Path(dir)).pinned(pin)]);
+    let refusal = case.prepare(&["tools"], &[], &list).err().unwrap();
+    assert!(
+        refusal.contains("does not read OVERLAY.md yet"),
+        "{refusal}"
+    );
+    assert!(
+        !case
+            .state
+            .path()
+            .join("overlays/trees")
+            .join(hex_of(&pin))
+            .exists()
+    );
+}

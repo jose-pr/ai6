@@ -423,6 +423,7 @@ mod theater {
             }),
         )
         .await
+        .map(drop)
         .map_err(|error| error.1.0.error.clone())?;
         let mut lines = Vec::new();
         tokio::time::timeout(Duration::from_secs(60), async {
@@ -488,7 +489,7 @@ mod theater {
             &state,
             &mission,
             "ship-helper; echo \"root $TOOLS_OVERLAY_ROOT\"; echo \"where $(command -v ship-helper)\"; \
-             echo planted > \"$TOOLS_OVERLAY_ROOT/planted\" 2>/dev/null && echo wrote; sleep 0.2",
+             { echo planted > \"$TOOLS_OVERLAY_ROOT/planted\"; } 2>/dev/null && echo wrote; sleep 0.2",
         )
         .await
         .unwrap();
@@ -709,7 +710,7 @@ mod theater {
         );
         let state = on_theater(root.path(), &first, &host_path(), "");
         let read = "cat \"$TOOLS_OVERLAY_STATE/phases\"; \
-                    echo x >> \"$TOOLS_OVERLAY_STATE/phases\" 2>/dev/null && echo wrote; sleep 0.1";
+                    { echo x >> \"$TOOLS_OVERLAY_STATE/phases\"; } 2>/dev/null && echo wrote; sleep 0.1";
         let a = format!("overlay-setup-a-{}", std::process::id());
         let lines = run(&state, &a, read).await.unwrap();
         assert_eq!(lines, ["install install tools"]);

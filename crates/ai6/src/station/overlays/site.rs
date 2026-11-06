@@ -70,6 +70,7 @@ else
   mv "$1" "$2"
   chmod 555 "$2"
 fi
+rmdir "${1%/*}" 2>/dev/null || true
 "#;
 
 /// Removes a tree a `PLACE_TREE` or a `CLOSE` made read-only.
