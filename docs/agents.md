@@ -421,9 +421,24 @@ value; `@` mentions are put in backticks so nobody is pinged. The Station, never
 appends the footer the Operation's cover policy allows.
 
 Each managed Session receives a separate loopback MCP endpoint when AI6 is built with
-`cables-mcp`. The endpoint returns no tools until AI6 binds the provider-issued Session
-ID. Claude and Codex receive bearer credentials through their launch environment, never
-in process arguments or persisted configuration. Remote SSH tunneling is not implemented.
+`cables-mcp`; its tools answer only once AI6 binds the provider-issued Session ID. Every
+handler connects it: Claude Code and Codex take the bearer from their launch environment,
+never from process arguments or persisted configuration; an ACP agent finds it in its
+Session's `mcpServers`; the Antigravity CLI in the launch's private MCP config
+([above](#what-an-antigravity-cli-mission-may-call)). It works wherever the harness runs:
+
+| Where the harness runs | How it reaches its endpoint |
+| --- | --- |
+| On the Station's own host, or in remote-hands mode | The endpoint itself, on the Station's loopback |
+| Under a [runner](theaters.md#the-field-runner), on this host or another | The runner's relay on the Theater's loopback, with a token of its own. The runner carries each request over the connection the Station reaches it by, and the Station answers from the Session's endpoint with that endpoint's bearer, which never leaves the Station. No forward is needed |
+| Under the [detached wrapper](theaters.md#the-detached-wrapper) | A reverse forward from a loopback port on the Theater (the transport's `forward`) |
+
+A Theater where the wrapped harness would have no way to its endpoint (no runner, and a
+transport without `forward`) is ruled out for field mode at placement, with that reason;
+`agents = "auto"` then runs the harness on the Station in remote-hands mode. A Theater with
+`cables = "optional"` starts such a Session without Cables instead, and so without the other
+tools on that endpoint (`request_approval`, the issue and memory tools); its check-in lists
+that as `weakened`, and the Station logs it for each such Mission.
 
 An `operation` recipient (`operation:P`) reaches the live Agents of that Operation and of
 every Operation under it. It needs an explicit send grant for the sender, and each receiver

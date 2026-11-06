@@ -161,11 +161,13 @@ held-Cable approvals, acknowledgements and replies. `list_held_cables` returns s
 target, recipient and expiry metadata but never a held message body. `release_cable` requires
 the same explicit scope grant, rechecks recipient receive grants and moves authorized
 recipients into their inboxes. Rust AI6's optional `cables-mcp` feature creates a separate
-loopback listener per managed Agent Session, returns no tools until the provider-issued
+loopback listener per managed Agent Session, answers its tools only once the provider-issued
 Session ID is bound, and closes the listener when the Session ends. Claude receives an
 environment-substituted `--mcp-config`; Codex app-server receives per-process config
 overrides. Both read bearer credentials from the launch environment, never from argv or
-persisted configuration. Remote SSH tunneling is not implemented.
+persisted configuration. A harness under a field runner reaches it through the runner's
+relay, which carries each request over the runner's connection to the Station; the detached
+wrapper's harness through a reverse forward ([Agents](agents.md#cables)).
 MCP is the agent-to-tool interface. [A2A](https://a2a-protocol.org/latest/) remains a
 future cross-harness interoperability boundary, while AI6's relay remains authoritative
 for local identity and scope permissions. [Claude Code's cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)

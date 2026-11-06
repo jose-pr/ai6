@@ -37,6 +37,7 @@ workdir = "/srv/work"
 | `runner` | The [field runner](#the-field-runner) that supervises harnesses on the Theater: `{}` for every default, or `command`, `state_dir`, `plugin_paths` and `terminal`. |
 | `requires` | What the Theater must have before Sessions run there: `os`, `harnesses`, `tools`, `disk_mb`. See [Fitting a Theater out](#fitting-a-theater-out). |
 | `provision` | How `ai6 theater provision` installs what it lacks: `runner`, `plugins`, `install`, `install_timeout_secs`. |
+| `cables` | Whether a Session here must reach its [Cable endpoint](agents.md#cables): `"required"` (default) rules out field mode where the harness would have no way to it; `"optional"` starts such a Session without Cables, reported as `weakened`. |
 
 A Station's own host is always reachable as the Theater `local` without any configuration;
 declaring `[theater.local]` only adds labels, facts or a runner to it.
@@ -195,7 +196,8 @@ placement rules it out.
   when it is `"station"`). A Theater with a [runner](#the-field-runner) qualifies (another
   host also needs `run`, which is how the Station reaches the runner). Without one, the
   Station's own host needs `terminal` and `files`, and another host needs `run`, `files`, a
-  POSIX `os` and a declared harness for the [detached wrapper](#the-detached-wrapper). The
+  POSIX `os`, a declared harness and `forward` (which takes the harness to its Cable endpoint,
+  unless `cables = "optional"`) for the [detached wrapper](#the-detached-wrapper). The
   Mission works in the Operation's path on the Theater when the Operation is bound to it,
   else in the Theater's `workdir`, which must be absolute.
 - **Remote-hands mode**: the harness runs on the *Station* and acts on the Theater through the
@@ -264,8 +266,8 @@ install = { git = "dnf install -y git" }
 - Placement chooses the template like any Theater (its requirements count as met, since they
   are fitted when a Theater is made) and never chooses a Theater made for another Mission;
   check-ins publish those with `made_for`.
-- A container has no terminal and no `forward`, and a harness on another host reaches the
-  Station's Cable endpoint through a forward, so a container Theater works in remote-hands
+- A container has no terminal and no `forward`: no runner can be reached there, and a wrapped
+  harness would have no way to its Cable endpoint, so a container Theater works in remote-hands
   mode: set `agents = "remote-hands"`.
 
 ## The field runner
@@ -328,10 +330,14 @@ runs by as `settings.json` in its state directory, where `ai6 runner connect` re
 A runner out of reach for longer than the Operation's `lost_after_secs` is probed once more
 and, if it is gone, its Session is lost and the Mission tried again
 ([Runner loss](missions.md#runner-loss-the-station-lives)).
-The harness's Cable tools go through a relay the runner gives each Session, with its own URL
-and token, which the Station points at its own Cable endpoint (on another host, through a
-reverse forward over the transport) and repoints when it re-attaches or the link returns;
-while no Station is attached the relay answers that none is.
+The harness's Cable tools go through a relay the runner gives each Session on the Theater's
+loopback, with its own URL and token. The runner carries each request over the connection of
+the Station attached to the Session, and that Station answers from its own Cable endpoint for
+the Session: the endpoint's bearer never leaves the Station, and the Theater needs no
+`forward`. A Station that re-attaches, or adopts the Session, answers from then on; while none
+is attached the relay answers `503`, saying so. The `[runner]` keys `cable_request_bytes`,
+`cable_connect_timeout` and `cable_streams` bound it
+([Station runtime limits](configuration.md#station-runtime-limits)).
 
 Run one by hand with `ai6 runner serve [--state-dir PATH] [--plugin-path PATH]...` (or
 `--detach` to start it in the background); `ai6 runner connect` relays standard input
@@ -364,7 +370,9 @@ where there is none), so the link that started it can drop without ending it:
   `exit` recorded, loses the Session
   ([Runner loss](missions.md#runner-loss-the-station-lives)).
 - The harness reaches the Station's Cable endpoint through a reverse forward on a loopback
-  port of the Theater, which the transport re-opens on the same port after a reconnect.
+  port of the Theater, which the transport re-opens on the same port after a reconnect. A
+  transport without `forward` leaves it no way there, so placement rules the wrapper out
+  unless the Theater says `cables = "optional"`.
 - The harness gets the host's login environment plus the Session's, and no terminal: it is
   for harnesses that speak a protocol on standard input and output, as the `claude` and
   `codex` handlers do.

@@ -303,6 +303,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A cancel accepts a Mission that ended: it stays as it is and the control is `applied` with its
   state. A control's route knows a Mission by its brief in any state, and `mission withdraw`'s `409`
   names `mission cancel`.
+- Every Session has its Cables wherever its harness runs. A runner's relay no longer reaches the
+  Station through a reverse forward: it carries each of the harness's MCP requests over the ACP
+  connection the Station reaches the runner by (`_ai6/cable_request`, `_ai6/cable_answer`,
+  `_ai6/cable_cancel`), and the Station answers from the Session's own Cable endpoint with that
+  endpoint's bearer, which is no longer in the launch environment a runner is handed. A runner
+  needs no `forward`, and `_ai6/cable` is gone. The detached wrapper keeps its reverse forward;
+  a Theater where the wrapped harness would have no way to its endpoint (no runner, a transport
+  without `forward`) is ruled out for field mode at placement, with the reason, unless it says
+  `cables = "optional"` (new Theater key, `ai6::CableReach`), which starts such a Session
+  without Cables and is reported as `weakened`. `[runner] cable_streams` (64) bounds the relayed
+  requests a Station answers at once for one Session, and `cable_connect_timeout` is now how long
+  the Station may take to reach its own endpoint for one. `AcpOptions::extensions`
+  (`ExtensionHandler`, `Notifier`) hands a Session's extension notifications to the caller. The
+  `acp` handler's fake agent takes `FAKE_CABLES`, a script of Cable tool calls.
 - `mission retry` without an Agent chooses one again from the roster as it is now: the best Agent
   qualified for the Mission's role and its brief's tags, not quarantined, held or retired, whose
   handler the Station can run; the Agent it had keeps it while it ranks as high. A named Agent is
