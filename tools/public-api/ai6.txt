@@ -3169,6 +3169,7 @@ pub fn ai6::directorates::q::overlays::digest_entries<'a, I>(I) -> core::result:
 pub fn ai6::directorates::q::overlays::effective(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::Facts) -> core::result::Result<ai6::directorates::q::overlays::Effective, ai6::directorates::q::overlays::Refusal>
 pub fn ai6::directorates::q::overlays::env_files_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<serde_json::value::Value>
 pub fn ai6::directorates::q::overlays::environments(&alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::OverlayTree>, &str, &[alloc::string::String]) -> core::result::Result<ai6::directorates::q::overlays::Environments, alloc::string::String>
+pub fn ai6::directorates::q::overlays::hooks_asked(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::q::overlays::is_reserved_variable(&str) -> bool
 pub fn ai6::directorates::q::overlays::is_sensitive_variable(&str) -> bool
 pub fn ai6::directorates::q::overlays::is_variable_name(&str) -> bool
