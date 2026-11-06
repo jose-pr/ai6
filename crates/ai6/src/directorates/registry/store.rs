@@ -2679,15 +2679,25 @@ pub trait CableStore {
     /// Returns unexpired Cables with at least one held recipient.
     fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>>;
 
-    /// Atomically changes one recipient's state and returns the updated Cable.
+    /// Atomically changes one recipient's state and returns the updated Cable; `taken_by` records
+    /// the Session that took a delivery addressed to the Agent as a whole.
     fn update_cable_delivery(
         &self,
         cable_id: &str,
         agent: &str,
         session_id: Option<&str>,
         state: CableState,
+        taken_by: Option<&str>,
         now: Option<f64>,
     ) -> io::Result<Option<Cable>>;
+
+    /// The unexpired Cables `sender_agent` sent, oldest first, at most `limit`.
+    fn cables_from(
+        &self,
+        sender_agent: &str,
+        limit: usize,
+        now: Option<f64>,
+    ) -> io::Result<Vec<Cable>>;
 
     /// Atomically consumes one token from every shared Cable quota bucket.
     ///
@@ -2790,6 +2800,33 @@ impl CableStore for FileRegistry {
         Ok(cables)
     }
 
+    fn cables_from(
+        &self,
+        sender_agent: &str,
+        limit: usize,
+        now: Option<f64>,
+    ) -> io::Result<Vec<Cable>> {
+        if sender_agent.trim().is_empty() || limit == 0 || !self.limits.cables.page.allows(limit) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sender must be non-empty and limit within [registry.limits.cables] page",
+            ));
+        }
+        let now = now.map_or_else(unix_time, Ok)?;
+        let mut cables = self
+            .scan_cables()?
+            .into_iter()
+            .filter(|cable| cable.expires_at() > now && cable.sender_agent() == sender_agent)
+            .collect::<Vec<_>>();
+        cables.sort_by(|left, right| {
+            left.created_at()
+                .total_cmp(&right.created_at())
+                .then_with(|| left.id().cmp(right.id()))
+        });
+        cables.truncate(limit);
+        Ok(cables)
+    }
+
     fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>> {
         if limit == 0 || !self.limits.cables.page.allows(limit) {
             return Err(io::Error::new(
@@ -2827,6 +2864,7 @@ impl CableStore for FileRegistry {
         agent: &str,
         session_id: Option<&str>,
         state: CableState,
+        taken_by: Option<&str>,
         now: Option<f64>,
     ) -> io::Result<Option<Cable>> {
         validate_cable_id(cable_id)?;
@@ -2844,7 +2882,7 @@ impl CableStore for FileRegistry {
             state
         };
         let Some(updated) = cable
-            .with_recipient_state(agent, session_id, next_state)
+            .with_recipient_taken(agent, session_id, next_state, taken_by)
             .map_err(cable_error)?
         else {
             return Ok(None);
@@ -4766,6 +4804,7 @@ mod tests {
                 "008",
                 Some("session-8"),
                 CableState::Held,
+                None,
                 Some(1_700_000_100.0),
             )
             .unwrap()
@@ -4789,6 +4828,7 @@ mod tests {
                 "008",
                 Some("session-8"),
                 CableState::Delivered,
+                None,
                 Some(1_700_000_100.0),
             )
             .unwrap()
@@ -4806,6 +4846,7 @@ mod tests {
                 "008",
                 Some("session-8"),
                 CableState::Acked,
+                None,
                 Some(1_700_001_000.0),
             )
             .unwrap()
@@ -4819,7 +4860,7 @@ mod tests {
         );
         assert_eq!(
             registry
-                .update_cable_delivery("cable-9", "008", None, CableState::Acked, None)
+                .update_cable_delivery("cable-9", "008", None, CableState::Acked, None, None)
                 .unwrap(),
             None
         );

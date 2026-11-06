@@ -27,6 +27,31 @@ const DEFAULT_SENDER_BURST: u32 = 20;
 const DEFAULT_SCOPE_RATE: f64 = 10.0;
 const DEFAULT_SCOPE_BURST: u32 = 50;
 
+/// The prefix of an Agent name that is a Liaison peer: `a2a:<peer>`, or `a2a:<peer>/<addressee>`
+/// for one of that peer's own addressees. Universal Exports' Liaison carries what is sent to one
+/// over A2A, and a peer's Cables carry `a2a:<peer>` as their sender.
+pub const LIAISON_PREFIX: &str = "a2a:";
+
+/// The Station a Liaison peer's Cables are stamped with: it runs in none.
+pub const LIAISON_STATION: &str = "liaison";
+
+/// The peer an Agent name reaches through Liaison (`a2a:<peer>` or `a2a:<peer>/<addressee>`), and
+/// the addressee when it names one; `None` for any other name.
+pub fn liaison_peer(name: &str) -> Option<(&str, Option<&str>)> {
+    let rest = name.strip_prefix(LIAISON_PREFIX)?;
+    let (peer, addressee) = match rest.split_once('/') {
+        Some((peer, addressee)) if !addressee.is_empty() => (peer, Some(addressee)),
+        Some(_) => return None,
+        None => (rest, None),
+    };
+    (!peer.is_empty()
+        && peer.len() <= 64
+        && peer
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    .then_some((peer, addressee))
+}
+
 fn default_max_fanout() -> usize {
     MAX_CABLE_FANOUT
 }
@@ -163,6 +188,7 @@ pub struct CablePrincipal {
     session_id: Option<String>,
     mission_id: Option<String>,
     on_behalf_of: Option<String>,
+    peer: Option<String>,
 }
 
 impl CablePrincipal {
@@ -195,6 +221,7 @@ impl CablePrincipal {
             session_id,
             mission_id,
             on_behalf_of: None,
+            peer: None,
         })
     }
 
@@ -215,6 +242,23 @@ impl CablePrincipal {
     /// Returns the person this principal acts for, when it is an assistant's.
     pub fn on_behalf_of(&self) -> Option<&str> {
         self.on_behalf_of.as_deref()
+    }
+
+    /// Binds the proven key of the Liaison peer this principal sends for: its Cables carry it,
+    /// and a reply to one goes back to the sending Session as it was stamped, wherever it runs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `peer` is empty, over 256 characters or has control characters.
+    pub fn with_peer(mut self, peer: String) -> Result<Self, CableError> {
+        super::validate_text("Cable principal peer", Some(&peer), 256, true)?;
+        self.peer = Some(peer);
+        Ok(self)
+    }
+
+    /// Returns the Liaison peer this principal sends for, when it is one.
+    pub fn peer(&self) -> Option<&str> {
+        self.peer.as_deref()
     }
 
     /// Returns the bound Agent identity.
@@ -588,6 +632,8 @@ pub struct CableAuditRecord {
     pub cable_id: Option<String>,
     /// The person the sender acted for, when it is an assistant acting for one.
     pub on_behalf_of: Option<String>,
+    /// The Liaison peer the sender stands for, when it is one.
+    pub peer: Option<String>,
     /// The Operation boundary this Cable crosses, when it crosses one.
     pub crossing: Option<CableCrossing>,
 }
@@ -653,6 +699,8 @@ pub struct CableSendRequest {
     to_session: Option<String>,
     /// Narrows a compartment Cable to one Operation it covers.
     operation: Option<String>,
+    /// The provider Session the thread is bound to.
+    affinity: Option<String>,
 }
 
 impl fmt::Debug for CableSendRequest {
@@ -699,6 +747,9 @@ pub struct CableDelivery {
     /// The person an assistant sent this Cable for, when it acted for one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_behalf_of: Option<String>,
+    /// The proven key of the Liaison peer that sent it, when an agent outside AI6 did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer: Option<String>,
     /// How the sender is shown: `<from_agent> for <on_behalf_of>`, when sent for a person.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_as: Option<String>,
@@ -726,6 +777,7 @@ impl fmt::Debug for CableDelivery {
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
             .field("on_behalf_of", &self.on_behalf_of)
+            .field("peer", &self.peer)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
             .field("state", &self.state)
@@ -745,7 +797,16 @@ impl CableSendRequest {
             reply_to: None,
             to_session: None,
             operation: None,
+            affinity: None,
         }
+    }
+
+    /// Binds the Cable to the provider Session its thread is with: only that Session reads it,
+    /// or, once that Session has ended, the next Session of the Agent opened after it ended.
+    #[must_use]
+    pub fn with_affinity(mut self, session: impl Into<String>) -> Self {
+        self.affinity = Some(session.into());
+        self
     }
 
     /// Narrows a compartment Cable to one Operation it covers.
@@ -909,7 +970,22 @@ impl CableRelay {
             (CableScope::Operation, Some(operation)) => (self.lineage)(operation),
             _ => Vec::new(),
         };
-        policy.allows(agent, action, target, &ancestors)
+        if policy.allows(agent, action, target, &ancestors) {
+            return true;
+        }
+        // A grant naming a Liaison peer covers the addressees it serves.
+        target.scope() == CableScope::Agent
+            && target
+                .name()
+                .and_then(liaison_peer)
+                .is_some_and(|(peer, addressee)| {
+                    addressee.is_some()
+                        && CableTarget::try_new(
+                            CableScope::Agent,
+                            Some(format!("{LIAISON_PREFIX}{peer}")),
+                        )
+                        .is_ok_and(|peer| policy.allows(agent, action, &peer, &[]))
+                })
     }
 
     /// Sets the UTF-8 bytes a Cable's body may have, the longest lifetime a sender may ask
@@ -1295,6 +1371,9 @@ impl CableRelay {
             let Some(recipient) = recipient_for(&cable, principal) else {
                 continue;
             };
+            if !self.bound_to(&cable, principal) {
+                continue;
+            }
             let in_compartment = cable.target().scope() == CableScope::Compartment;
             // What was granted when the Cable went is asked again now. Unreadable, it stays
             // where it is; a grant that is gone refuses it.
@@ -1335,7 +1414,23 @@ impl CableRelay {
                 {
                     continue;
                 }
-                let Some(updated) = self.set_delivery_state(&cable, recipient, state, now)? else {
+                // A peer's Cable to the Agent as a whole belongs, once taken, to the Session that
+                // took it: its thread follows that Session.
+                let taken_by = (cable.peer().is_some() && recipient.session_id().is_none())
+                    .then_some(principal.session_id.as_deref())
+                    .flatten();
+                let Some(updated) = self
+                    .registry
+                    .update_cable_delivery(
+                        cable.id(),
+                        recipient.agent(),
+                        recipient.session_id(),
+                        state,
+                        taken_by,
+                        Some(now),
+                    )
+                    .map_err(|_| CableRelayError::Unavailable)?
+                else {
                     continue;
                 };
                 if state != CableState::Delivered {
@@ -1490,6 +1585,7 @@ impl CableRelay {
                 session_id: endpoint.session_id.clone(),
                 mission_id: endpoint.mission_id.clone(),
                 on_behalf_of: None,
+                peer: None,
             });
             let crossing = held_by
                 .as_ref()
@@ -1575,6 +1671,58 @@ impl CableRelay {
         Ok(())
     }
 
+    /// Takes back a Cable `principal` sent while none of its recipients has had it: every
+    /// recipient still queued or held becomes withdrawn.
+    ///
+    /// # Errors
+    ///
+    /// [`CableRelayError::Unavailable`] when it is not this sender's Cable, or a recipient has
+    /// already had it.
+    pub fn withdraw(
+        &self,
+        principal: &CablePrincipal,
+        cable_id: &str,
+    ) -> Result<Cable, CableRelayError> {
+        let cable = self
+            .registry
+            .get_cable(cable_id)
+            .map_err(|_| CableRelayError::RegistryUnavailable)?
+            .ok_or(CableRelayError::Unavailable)?;
+        if cable.sender_agent() != principal.agent
+            || cable.session_id() != principal.session_id.as_deref()
+        {
+            return Err(CableRelayError::Unavailable);
+        }
+        if cable
+            .recipients()
+            .iter()
+            .any(|recipient| matches!(recipient.state(), CableState::Delivered | CableState::Acked))
+        {
+            return Err(CableRelayError::Unavailable);
+        }
+        let now = (self.now)();
+        if !now.is_finite() || now <= 0.0 {
+            return Err(CableRelayError::RegistryUnavailable);
+        }
+        let mut current = cable.clone();
+        for recipient in cable.recipients() {
+            if matches!(recipient.state(), CableState::Queued | CableState::Held)
+                && let Some(updated) =
+                    self.set_delivery_state(&current, recipient, CableState::Withdrawn, now)?
+            {
+                current = updated;
+            }
+        }
+        self.record_event(
+            "cable_withdraw",
+            principal,
+            cable.target(),
+            "accepted",
+            Some(&current),
+        );
+        Ok(current)
+    }
+
     /// Replies to a delivered Cable; sender and reply threading come from the stored record.
     pub fn reply(
         &self,
@@ -1610,8 +1758,9 @@ impl CableRelay {
                 .unwrap_or_else(|| original.id().to_owned()),
         );
         // A Cable sent for a person came from one conversation of a shared assistant Agent;
-        // its reply goes back to that conversation alone, not to the Agent's others.
-        if original.on_behalf_of().is_some() {
+        // its reply goes back to that conversation alone, not to the Agent's others. So does a
+        // reply to a Liaison peer's Cable, to the thread that sent it.
+        if original.on_behalf_of().is_some() || original.peer().is_some() {
             request.to_session = Some(
                 original
                     .session_id()
@@ -1637,9 +1786,38 @@ impl CableRelay {
                 recipient.agent(),
                 recipient.session_id(),
                 state,
+                None,
                 Some(now),
             )
             .map_err(|_| CableRelayError::Unavailable)
+    }
+
+    /// Whether `principal`'s Session may read `cable` as its thread binds it: the bound Session
+    /// itself, or, once that one has ended, a Session of the Agent opened after it ended. A bound
+    /// Session the Registry does not know as ended keeps it.
+    fn bound_to(&self, cable: &Cable, principal: &CablePrincipal) -> bool {
+        let Some(bound) = cable.affinity() else {
+            return true;
+        };
+        let Some(session) = principal.session_id.as_deref() else {
+            return false;
+        };
+        if session == bound {
+            return true;
+        }
+        let Ok(records) = self.registry.sessions() else {
+            return false;
+        };
+        let of = |provider: &str| {
+            records
+                .iter()
+                .find(|record| record.provider_session_id.as_deref() == Some(provider))
+        };
+        let ended = of(bound)
+            .filter(|record| record.status.is_closed())
+            .and_then(|record| record.closed_at);
+        let opened = of(session).and_then(|record| record.opened_at);
+        matches!((ended, opened), (Some(ended), Some(opened)) if opened > ended)
     }
 
     /// The lifetime `request` asks for, else the relay's default, in seconds.
@@ -1714,6 +1892,41 @@ impl CableRelay {
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut candidates = self.candidates(&request.target)?;
+        // A Liaison peer named as an Agent is reached through the Registry, where Universal
+        // Exports' Liaison reads what waits for it. A peer cannot address another peer.
+        if request.target.scope() == CableScope::Agent
+            && candidates.is_empty()
+            && principal.peer.is_none()
+            && let Some((peer, _)) = request.target.name().and_then(liaison_peer)
+        {
+            candidates.push(CableEndpoint {
+                agent: format!("{LIAISON_PREFIX}{peer}"),
+                operation: principal.operation.clone(),
+                theater: None,
+                station: LIAISON_STATION.to_owned(),
+                session_id: None,
+                mission_id: None,
+                conversation_only: false,
+            });
+        }
+        // A Liaison peer runs in no Station, so a reply to its Cable goes to the sender as the
+        // Cable stamped it; the grants below still decide whether it may.
+        if let Some(original) = self.peer_original(&request)
+            && !candidates.iter().any(|endpoint| {
+                endpoint.agent == original.sender_agent()
+                    && endpoint.session_id.as_deref() == original.session_id()
+            })
+        {
+            candidates.push(CableEndpoint {
+                agent: original.sender_agent().to_owned(),
+                operation: original.sender_operation().to_owned(),
+                theater: None,
+                station: original.sender_station().to_owned(),
+                session_id: original.session_id().map(str::to_owned),
+                mission_id: None,
+                conversation_only: true,
+            });
+        }
         if request.target.scope() == CableScope::Compartment {
             let replying_to = self.compartment_reply_of(principal, &request);
             candidates = match replying_to {
@@ -1886,6 +2099,12 @@ impl CableRelay {
         if let Some(person) = principal.on_behalf_of.as_deref() {
             draft = draft.with_on_behalf_of(person);
         }
+        if let Some(peer) = principal.peer.as_deref() {
+            draft = draft.with_peer(peer);
+        }
+        if let Some(session) = request.affinity.as_deref() {
+            draft = draft.with_affinity(session);
+        }
         Ok(draft)
     }
 
@@ -1946,6 +2165,19 @@ impl CableRelay {
                 .cloned(),
         );
         Ok(endpoints)
+    }
+
+    /// The Liaison peer's Cable `request` replies to, when it replies to one by its sender.
+    fn peer_original(&self, request: &CableSendRequest) -> Option<Cable> {
+        if request.target.scope() != CableScope::Agent {
+            return None;
+        }
+        let original = self
+            .registry
+            .get_cable(request.reply_to.as_deref()?)
+            .ok()??;
+        (original.peer().is_some() && request.target.name() == Some(original.sender_agent()))
+            .then_some(original)
     }
 
     /// The original a compartment reply answers: a Cable of that compartment sent to `principal`.
@@ -2169,6 +2401,7 @@ impl CableRelay {
             at: (self.now)(),
             cable_id: cable.map(|item| item.id().to_owned()),
             on_behalf_of: principal.on_behalf_of.clone(),
+            peer: principal.peer.clone(),
             crossing: None,
         }
     }
@@ -2179,6 +2412,9 @@ fn recipient_for<'a>(cable: &'a Cable, principal: &CablePrincipal) -> Option<&'a
         recipient.agent() == principal.agent
             && recipient
                 .session_id()
+                .is_none_or(|session| Some(session) == principal.session_id.as_deref())
+            && recipient
+                .taken_by()
                 .is_none_or(|session| Some(session) == principal.session_id.as_deref())
     })
 }
@@ -2229,6 +2465,7 @@ fn delivery_view(cable: &Cable, recipient: &CableRecipient) -> CableDelivery {
         conversation_id: cable.conversation_id().map(str::to_owned),
         reply_to: cable.reply_to().map(str::to_owned),
         on_behalf_of: cable.on_behalf_of().map(str::to_owned),
+        peer: cable.peer().map(str::to_owned),
         sent_as: cable
             .on_behalf_of()
             .map(|person| format!("{} for {person}", cable.sender_agent())),

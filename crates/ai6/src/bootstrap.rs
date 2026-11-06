@@ -604,6 +604,77 @@ pub struct UnexSettings {
     #[schema(title = "The gateway's own TLS")]
     #[map(default)]
     pub tls: UnexTlsSettings,
+    /// `[unex.liaison]`: A2A for agents outside AI6.
+    #[schema(title = "Liaison")]
+    #[map(default)]
+    pub liaison: LiaisonSettings,
+}
+
+/// `[unex.liaison]`: Liaison serves A2A 1.0 to agents outside AI6, over proven coqui-agentic-peer
+/// links and on the gateway's `/v1/a2a`. A2A is a Cable's wire format there: a peer's message is a
+/// Cable to one AI6 Agent or an Operation's role, through the Cable relay with its grants, quotas
+/// and audit, and never a Mission or a brief; a Cable to `a2a:<peer>` leaves as A2A.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct LiaisonSettings {
+    /// The address its link listener binds: `wss://` with `[unex.tls]`, else `ws://`. Default:
+    /// none, and Liaison is off.
+    #[schema(title = "Link listener")]
+    pub listen: Option<SocketAddr>,
+    /// The key file the gateway proves itself with to peers, made the first time (Noise).
+    /// Default: `liaison/identity` in the gateway's state directory.
+    #[schema(title = "The gateway's link key")]
+    pub identity: Option<PathBuf>,
+    /// Seconds between looks at the Registry: while an operation waits for a reply, and for
+    /// Cables to a peer. Default: 1.
+    #[schema(title = "Look for replies every", format = "seconds")]
+    pub poll: Option<f64>,
+    /// Links served at once, proven or still proving; one more is closed at once. Default: 64.
+    #[schema(title = "Links at once")]
+    pub max_links: Option<u64>,
+    /// Lets a `ws://` listener bind, and a peer's `ws://` url be dialed, beyond loopback, with no
+    /// TLS: a weakening, since nothing then hides the link from the network, though its own proof
+    /// still seals it. Default: false.
+    #[schema(title = "Plain listener beyond loopback")]
+    pub plain_beyond_loopback: Option<bool>,
+    /// `[unex.liaison.peer.<name>]`: each peer paired with this gateway, by a name of letters,
+    /// digits, `-` and `_`. Default: none, and nobody is admitted.
+    #[schema(title = "Peers")]
+    #[map(default)]
+    pub peer: std::collections::BTreeMap<String, LiaisonPeerSettings>,
+}
+
+/// `[unex.liaison.peer.<name>]`: one agent outside AI6 that may reach it: on a link by proving
+/// `id`, or on `/v1/a2a` signed in as `principal`. It acts as `principal`, never as itself: what
+/// that principal may not do, it may not ask.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct LiaisonPeerSettings {
+    /// Its peer id, `sha256:<hex>` of its key, as its own identity prints it. Default: none; the
+    /// peer then reaches Liaison only over HTTP, signed in.
+    #[schema(title = "Peer id")]
+    pub id: Option<String>,
+    /// The AI6 principal it acts as: `person:<id>`, `account:<name>` or `group:<name>`, read
+    /// through the Directory. Its `cable.send` decides each message, and its `cable.read` each
+    /// read, on the addressee's Operation. Default: none; a peer without one is refused at start.
+    #[schema(title = "Acts as")]
+    pub principal: Option<String>,
+    /// What it may write to: `agent:<operation>/<agent>` and `role:<operation>/<role>`.
+    /// Default: none.
+    #[schema(title = "Addressees")]
+    #[map(default)]
+    pub addressees: Vec<String>,
+    /// Whether it may open A2A on its link; false keeps it paired and refuses its A2A streams.
+    /// Default: true.
+    #[schema(title = "May use A2A")]
+    pub a2a: Option<bool>,
+    /// Where Liaison dials it (`ws://` or `wss://`) to carry Cables sent to `a2a:<name>`, when it
+    /// holds no link open to the gateway; needs `id`. Default: none, and such Cables wait for its
+    /// link.
+    #[schema(title = "Dial at", format = "uri")]
+    pub url: Option<String>,
 }
 
 /// `ai6.cfg`: what every program on a host or for a user needs before it reaches the
@@ -653,6 +724,19 @@ impl Located<Bootstrap> {
     /// The pages' own listener: `[unex.pages] listen`, else [`DEFAULT_PAGES_LISTEN`].
     pub fn pages_listen(&self) -> SocketAddr {
         self.value.unex.pages.listen.unwrap_or(DEFAULT_PAGES_LISTEN)
+    }
+
+    /// Liaison's link key: `[unex.liaison] identity`, else `liaison/identity` in the gateway's
+    /// state directory.
+    ///
+    /// # Errors
+    ///
+    /// As [`unex_state_dir`](Self::unex_state_dir).
+    pub fn liaison_identity(&self) -> Result<PathBuf, BootstrapError> {
+        match &self.value.unex.liaison.identity {
+            Some(path) => Ok(path.clone()),
+            None => Ok(self.unex_state_dir()?.join("liaison").join("identity")),
+        }
     }
 
     /// The gateway's state directory: `[unex] state_dir`, else [`platform_state_dir`].
@@ -719,6 +803,13 @@ impl Located<Bootstrap> {
             ));
         }
         weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
+        if self.value.unex.liaison.plain_beyond_loopback == Some(true) {
+            weakened.push(
+                "[unex.liaison] plain_beyond_loopback: the link listener may serve ws:// with no \
+                 TLS beyond loopback"
+                    .to_owned(),
+            );
+        }
         weakened
     }
 }

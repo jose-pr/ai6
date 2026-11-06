@@ -1119,10 +1119,14 @@ pub struct StationSettings { id: Option<String>, state_dir: Option<PathBuf>, lis
 pub struct AccessSettings { chief: Vec<String> }   // [unex.access] chief: always-chief subjects
 pub struct PagesSettings { dir: Option<PathBuf>, origin: Option<String>, listen: Option<SocketAddr> }
 pub struct UnexTlsSettings { certificate: Option<PathBuf>, key: Option<PathBuf> }   // [unex.tls]: PEM files; both or neither
+pub struct LiaisonSettings { listen: Option<SocketAddr>, identity: Option<PathBuf>, poll: Option<f64>,
+    max_links: Option<u64>, plain_beyond_loopback: Option<bool>, peer: BTreeMap<String, LiaisonPeerSettings> }  // [unex.liaison]; defaults off, 1 s, 64, false; plain_beyond_loopback is a weakening
+pub struct LiaisonPeerSettings { id: Option<String>, principal: Option<String>, addressees: Vec<String>,
+    a2a: Option<bool>, url: Option<String> }   // [unex.liaison.peer.<name>]; universal_exports::liaison::LiaisonConfig::from_settings checks them
 pub struct UnexSettings { url: Option<String>, ca_file: Option<PathBuf>, station_token: Option<SecretRef>,
     listen: Option<SocketAddr>, public_origin: Option<String>, proxy_secret: Option<SecretRef>,
     proxy_secret_min_bytes: Option<u64>, state_dir: Option<PathBuf>, plugins: PluginSettings,
-    access: AccessSettings, pages: PagesSettings, tls: UnexTlsSettings }  // a Station publishes with url and station_token; paths resolved beside the file
+    access: AccessSettings, pages: PagesSettings, tls: UnexTlsSettings, liaison: LiaisonSettings }  // a Station publishes with url and station_token; paths resolved beside the file
 pub struct Bootstrap { provider: ProviderSettings, registry: RegistrySettings, unex: UnexSettings,
     station: StationSettings, oo: serde_json::Map<String, serde_json::Value> }  // oo: unread here
 pub const DEFAULT_PAGES_LISTEN: SocketAddr;                              // 127.0.0.1:7083
@@ -1154,6 +1158,7 @@ impl Located<Bootstrap> {
     pub fn proxy_secret_min_bytes(&self) -> u64;                         // [unex] proxy_secret_min_bytes, else 32
     pub fn pages_dir(&self) -> Result<PathBuf, BootstrapError>;          // [unex.pages] dir, else pages/ in unex_state_dir()
     pub fn pages_listen(&self) -> SocketAddr;                            // [unex.pages] listen
+    pub fn liaison_identity(&self) -> Result<PathBuf, BootstrapError>;   // [unex.liaison] identity, else liaison/identity in unex_state_dir()
     pub fn unex_weakenings(&self) -> Vec<String>;
 }
 pub struct SearchPath { pub explicit: Option<PathBuf>, pub variable: Option<(String, PathBuf)>, pub candidates: Vec<PathBuf> }
@@ -4520,6 +4525,27 @@ reaches it. `inbox_from(principal, operation, limit)` reads the inbox as `inbox`
 Cables sent in `operation` only: the others are neither delivered nor counted against
 `limit`.
 
+Liaison (Universal Exports' A2A) sends for a peer outside AI6 with
+`CablePrincipal::with_peer(proof) -> Result<Self, CableError>` (1-256 characters; `peer()`
+reads it), its sender `a2a:<peer>` (`LIAISON_PREFIX`) and its Station `LIAISON_STATION`
+(`"liaison"`). The Cable carries it (`CableDraft::with_peer`, `Cable::peer()`, serde field
+`peer`, omitted when `None`; `CableDelivery::peer`, `CableAuditRecord::peer`). A reply to a peer's
+Cable reaches the sending Session as the Cable stamped it, wherever it runs, its `session_id`
+required as for one sent for a person; the grants still decide. A send whose Agent target names a
+peer (`a2a:<peer>` or `a2a:<peer>/<addressee>`, `liaison_peer(name) -> Option<(&str,
+Option<&str>)>` splits it) and matches no endpoint is addressed to `a2a:<peer>` with no Session,
+waiting in the Registry for Liaison; a principal with a peer cannot send to one. A grant whose
+Agent target is `a2a:<peer>` also covers `a2a:<peer>/<addressee>`.
+`CableSendRequest::with_affinity(session)` binds a Cable to the provider Session its thread is
+with (`Cable::affinity()`, serde field `affinity`): `inbox` gives it to that Session only, or,
+once the Registry has that Session `Ended` or `Lost`, to a Session of the Agent whose record
+`opened_at` is later than its `closed_at`; a Session the Registry cannot tell about keeps it. A
+peer's Cable addressed to the Agent as a whole records the Session that took it
+(`CableRecipient::taken_by()`, serde field `taken_by`), and only that Session sees, acknowledges or
+answers it after. `withdraw(principal, cable_id) -> Result<Cable, CableRelayError>` lets the
+sending principal (Agent and Session) take back a Cable no recipient has had: queued and held
+recipients become `CableState::Withdrawn`, which is final; `Unavailable` once any recipient has it.
+
 The daemon reads strict `cables.toml` from its config directory. Missing configuration
 denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and optional
 `name`; `[inbound]` selects `deliver`, `hold`, or `refuse` by Agent; `[channels]` maps
@@ -4535,8 +4561,11 @@ matches; conflicting content returns `AlreadyExists`. `find_cable(sender, key)` 
 `get_cable(id)` read accepted records. `cable_inbox(agent, session_id, limit, now)` lists
 unexpired queued/delivered records for an Agent Session, sorted by creation time and ID;
 `limit` is 1–1,000 and `now` is optional Unix time for deterministic callers.
-`update_cable_delivery(id, agent, session_id, state, now)` serializes recipient state
-changes under the Registry lock and automatically expires overdue deliveries.
+`update_cable_delivery(id, agent, session_id, state, taken_by, now)` serializes recipient state
+changes under the Registry lock and automatically expires overdue deliveries; `taken_by` records
+the Session that took a delivery addressed to the Agent as a whole
+(`Cable::with_recipient_taken`). `cables_from(sender_agent, limit, now)` lists the unexpired
+Cables one sender sent, oldest first.
 `held_cables(limit, now)` lists unexpired envelopes containing at least one held recipient
 for the scoped relay to authorize.
 `take_quotas(buckets, now)` atomically consumes sender and scope token buckets from

@@ -514,6 +514,33 @@ impl CableStore for SqlRegistry {
         Ok(cables)
     }
 
+    fn cables_from(
+        &self,
+        sender_agent: &str,
+        limit: usize,
+        now: Option<f64>,
+    ) -> io::Result<Vec<Cable>> {
+        if sender_agent.trim().is_empty() || limit == 0 || !self.limits.cables.page.allows(limit) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sender must be non-empty and limit within [registry.limits.cables] page",
+            ));
+        }
+        let now = check_now(now, "Cables from a sender")?;
+        let mut cables = self
+            .read(|tx| live_cables(tx, now, &self.limits.cables))?
+            .into_iter()
+            .filter(|cable| cable.sender_agent() == sender_agent)
+            .collect::<Vec<_>>();
+        cables.sort_by(|left, right| {
+            left.created_at()
+                .total_cmp(&right.created_at())
+                .then_with(|| left.id().cmp(right.id()))
+        });
+        cables.truncate(limit);
+        Ok(cables)
+    }
+
     fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>> {
         if limit == 0 || !self.limits.cables.page.allows(limit) {
             return Err(io::Error::new(
@@ -542,6 +569,7 @@ impl CableStore for SqlRegistry {
         agent: &str,
         session_id: Option<&str>,
         state: CableState,
+        taken_by: Option<&str>,
         now: Option<f64>,
     ) -> io::Result<Option<Cable>> {
         validate_cable_id(cable_id)?;
@@ -556,7 +584,7 @@ impl CableStore for SqlRegistry {
                 state
             };
             let Some(updated) = cable
-                .with_recipient_state(agent, session_id, next_state)
+                .with_recipient_taken(agent, session_id, next_state, taken_by)
                 .map_err(cable_error)?
             else {
                 return Ok(None);

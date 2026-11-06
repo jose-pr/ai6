@@ -6,7 +6,7 @@ pub use relay::{
     CableAction, CableAuditRecord, CableCompartments, CableConfig, CableCrossing, CableDelivery,
     CableEndpoint, CableGrant, CableHeldDelivery, CableHeldRecipient, CableInboundMode, CablePeer,
     CablePolicy, CablePrincipal, CableRelay, CableRelayError, CableRelease, CableSendRequest,
-    CrossOperation, MAX_CABLE_FANOUT,
+    CrossOperation, LIAISON_PREFIX, LIAISON_STATION, MAX_CABLE_FANOUT, liaison_peer,
 };
 
 use std::error::Error;
@@ -124,6 +124,8 @@ pub enum CableState {
     Expired,
     /// Failed during delivery.
     Failed,
+    /// Taken back by its sender before anyone had it.
+    Withdrawn,
 }
 
 /// One relay-resolved Agent Session and its delivery state.
@@ -133,6 +135,8 @@ pub struct CableRecipient {
     agent: String,
     session_id: Option<String>,
     state: CableState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    taken_by: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -142,13 +146,20 @@ struct CableRecipientWire {
     #[serde(deserialize_with = "deserialize_required_option")]
     session_id: Option<String>,
     state: CableState,
+    #[serde(default)]
+    taken_by: Option<String>,
 }
 
 impl TryFrom<CableRecipientWire> for CableRecipient {
     type Error = CableError;
 
     fn try_from(wire: CableRecipientWire) -> Result<Self, Self::Error> {
-        Self::try_new(wire.agent, wire.session_id, wire.state)
+        let mut recipient = Self::try_new(wire.agent, wire.session_id, wire.state)?;
+        if let Some(session) = wire.taken_by {
+            validate_text("Cable recipient taken_by", Some(&session), 512, true)?;
+            recipient.taken_by = Some(session);
+        }
+        Ok(recipient)
     }
 }
 
@@ -167,6 +178,7 @@ impl CableRecipient {
             agent,
             session_id,
             state,
+            taken_by: None,
         })
     }
 
@@ -183,6 +195,12 @@ impl CableRecipient {
     /// Returns the current delivery state.
     pub fn state(&self) -> CableState {
         self.state
+    }
+
+    /// Returns the provider Session that took this recipient's delivery, when it was addressed
+    /// to the Agent as a whole and a Liaison peer sent it: only that Session sees it after.
+    pub fn taken_by(&self) -> Option<&str> {
+        self.taken_by.as_deref()
     }
 }
 
@@ -204,6 +222,10 @@ pub struct Cable {
     reply_to: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     on_behalf_of: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    peer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    affinity: Option<String>,
     id: String,
     created_at: f64,
     expires_at: f64,
@@ -239,6 +261,12 @@ pub struct CableDraft {
     pub reply_to: Option<String>,
     /// The person an assistant sent this Cable for, when it was sent on a person's behalf.
     pub on_behalf_of: Option<String>,
+    /// The Liaison peer that sent this Cable, when an agent outside AI6 did: its proven key on a
+    /// link, or its principal over HTTP.
+    pub peer: Option<String>,
+    /// The provider Session its thread is bound to: only that Session receives it, or, once that
+    /// one has ended, the Agent's next Session.
+    pub affinity: Option<String>,
     /// Unique Cable identifier supplied by the relay.
     pub id: String,
     /// Creation time as Unix seconds.
@@ -276,6 +304,8 @@ impl CableDraft {
             conversation_id: None,
             reply_to: None,
             on_behalf_of: None,
+            peer: None,
+            affinity: None,
             id,
             created_at,
             expires_at,
@@ -317,6 +347,18 @@ impl CableDraft {
         self.on_behalf_of = Some(person.into());
         self
     }
+
+    /// Names the Liaison peer that sent this Cable.
+    pub fn with_peer(mut self, peer: impl Into<String>) -> Self {
+        self.peer = Some(peer.into());
+        self
+    }
+
+    /// Binds this Cable to the provider Session its thread is with.
+    pub fn with_affinity(mut self, session: impl Into<String>) -> Self {
+        self.affinity = Some(session.into());
+        self
+    }
 }
 
 impl fmt::Debug for CableDraft {
@@ -336,6 +378,8 @@ impl fmt::Debug for CableDraft {
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
             .field("on_behalf_of", &self.on_behalf_of)
+            .field("peer", &self.peer)
+            .field("affinity", &self.affinity)
             .field("id", &self.id)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
@@ -360,6 +404,8 @@ impl fmt::Debug for Cable {
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
             .field("on_behalf_of", &self.on_behalf_of)
+            .field("peer", &self.peer)
+            .field("affinity", &self.affinity)
             .field("id", &self.id)
             .field("created_at", &self.created_at)
             .field("expires_at", &self.expires_at)
@@ -389,6 +435,10 @@ struct CableWire {
     reply_to: Option<String>,
     #[serde(default)]
     on_behalf_of: Option<String>,
+    #[serde(default)]
+    peer: Option<String>,
+    #[serde(default)]
+    affinity: Option<String>,
     id: String,
     created_at: f64,
     expires_at: f64,
@@ -413,6 +463,8 @@ impl TryFrom<CableWire> for Cable {
                 conversation_id: wire.conversation_id,
                 reply_to: wire.reply_to,
                 on_behalf_of: wire.on_behalf_of,
+                peer: wire.peer,
+                affinity: wire.affinity,
                 id: wire.id,
                 created_at: wire.created_at,
                 expires_at: wire.expires_at,
@@ -496,6 +548,8 @@ impl Cable {
             ("conversation_id", draft.conversation_id.as_deref(), 64),
             ("reply_to", draft.reply_to.as_deref(), 64),
             ("on_behalf_of", draft.on_behalf_of.as_deref(), 256),
+            ("peer", draft.peer.as_deref(), 256),
+            ("affinity", draft.affinity.as_deref(), 512),
         ] {
             if let Some(value) = value {
                 validate_text(&format!("Cable {label}"), Some(value), limit, true)?;
@@ -533,6 +587,8 @@ impl Cable {
             conversation_id: draft.conversation_id,
             reply_to: draft.reply_to,
             on_behalf_of: draft.on_behalf_of,
+            peer: draft.peer,
+            affinity: draft.affinity,
             id: draft.id,
             created_at: draft.created_at,
             expires_at: draft.expires_at,
@@ -605,6 +661,17 @@ impl Cable {
         self.on_behalf_of.as_deref()
     }
 
+    /// Returns the proven key of the Liaison peer that sent this Cable, when an agent outside
+    /// AI6 did; its text is untrusted like any body.
+    pub fn peer(&self) -> Option<&str> {
+        self.peer.as_deref()
+    }
+
+    /// Returns the provider Session this Cable's thread is bound to, when it is bound.
+    pub fn affinity(&self) -> Option<&str> {
+        self.affinity.as_deref()
+    }
+
     /// Returns this Cable's relay-generated identity.
     pub fn id(&self) -> &str {
         &self.id
@@ -642,6 +709,33 @@ impl Cable {
             && self.conversation_id == other.conversation_id
             && self.reply_to == other.reply_to
             && self.on_behalf_of == other.on_behalf_of
+            && self.peer == other.peer
+            && self.affinity == other.affinity
+    }
+
+    /// As [`with_recipient_state`](Self::with_recipient_state), recording `taken_by` as the
+    /// Session that took a delivery addressed to the Agent as a whole.
+    pub fn with_recipient_taken(
+        &self,
+        agent: &str,
+        session_id: Option<&str>,
+        state: CableState,
+        taken_by: Option<&str>,
+    ) -> Result<Option<Self>, CableError> {
+        let Some(mut updated) = self.with_recipient_state(agent, session_id, state)? else {
+            return Ok(None);
+        };
+        if let Some(session) = taken_by {
+            validate_text("Cable recipient taken_by", Some(session), 512, true)?;
+            if let Some(recipient) = updated.recipients.iter_mut().find(|recipient| {
+                recipient.agent == agent
+                    && recipient.session_id.as_deref() == session_id
+                    && recipient.taken_by.is_none()
+            }) {
+                recipient.taken_by = Some(session.to_owned());
+            }
+        }
+        Ok(Some(updated))
     }
 
     /// Returns a copy with one recipient's permitted delivery transition applied.
@@ -665,6 +759,7 @@ impl Cable {
                     | CableState::Refused
                     | CableState::Expired
                     | CableState::Failed
+                    | CableState::Withdrawn
             ),
             CableState::Held => matches!(
                 state,
@@ -673,6 +768,7 @@ impl Cable {
                     | CableState::Refused
                     | CableState::Expired
                     | CableState::Failed
+                    | CableState::Withdrawn
             ),
             CableState::Delivered => {
                 matches!(
@@ -680,9 +776,11 @@ impl Cable {
                     CableState::Acked | CableState::Expired | CableState::Failed
                 )
             }
-            CableState::Refused | CableState::Acked | CableState::Expired | CableState::Failed => {
-                false
-            }
+            CableState::Refused
+            | CableState::Acked
+            | CableState::Expired
+            | CableState::Failed
+            | CableState::Withdrawn => false,
         };
         if !permitted {
             return Err(CableError::new(format!(
