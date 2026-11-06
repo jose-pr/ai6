@@ -3018,6 +3018,9 @@ pub fn ai6::directorates::q::overlays::Facts::fmt(&self, &mut core::fmt::Formatt
 pub struct ai6::directorates::q::overlays::Issue
 pub ai6::directorates::q::overlays::Issue::at: alloc::string::String
 pub ai6::directorates::q::overlays::Issue::code: &'static str
+pub struct ai6::directorates::q::overlays::IssuedDigest
+pub ai6::directorates::q::overlays::IssuedDigest::digest: alloc::string::String
+pub ai6::directorates::q::overlays::IssuedDigest::overlay: alloc::string::String
 pub struct ai6::directorates::q::overlays::IssuedOverlay
 pub ai6::directorates::q::overlays::IssuedOverlay::identity: alloc::string::String
 pub ai6::directorates::q::overlays::IssuedOverlay::manifest: ai6::directorates::q::overlays::Document
@@ -3051,6 +3054,7 @@ pub fn ai6::directorates::q::overlays::OverlayTree::from_paths<I: core::iter::tr
 pub fn ai6::directorates::q::overlays::OverlayTree::from_texts<I: core::iter::traits::collect::IntoIterator<Item = (S, T)>, S: core::convert::Into<alloc::string::String>, T: core::convert::Into<alloc::string::String>>(I) -> Self
 pub fn ai6::directorates::q::overlays::OverlayTree::paths(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn ai6::directorates::q::overlays::OverlayTree::text(&self, &str) -> core::option::Option<&str>
+pub fn ai6::directorates::q::overlays::OverlayTree::with_text(self, &str, impl core::convert::Into<alloc::string::String>) -> Self
 pub struct ai6::directorates::q::overlays::PackageConflict
 pub ai6::directorates::q::overlays::PackageConflict::environment: alloc::string::String
 pub ai6::directorates::q::overlays::PackageConflict::overlays: alloc::vec::Vec<alloc::string::String>
@@ -3147,9 +3151,11 @@ pub ai6::directorates::q::overlays::Weakening::subject: alloc::string::String
 pub const ai6::directorates::q::overlays::DEFAULT_KEYS: [&str; 9]
 pub const ai6::directorates::q::overlays::EXCLUDED_COMPONENTS: [&str; 10]
 pub const ai6::directorates::q::overlays::INTERPRETERS: [&str; 5]
+pub const ai6::directorates::q::overlays::LATER_MANIFEST: &str
 pub const ai6::directorates::q::overlays::MANIFEST: &str
 pub const ai6::directorates::q::overlays::SKILL_INERT_KEYS: [&str; 12]
 pub fn ai6::directorates::q::overlays::applies(&[ai6::directorates::q::overlays::Issue]) -> bool
+pub fn ai6::directorates::q::overlays::check_requirements(&str, bool) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::overlays::check_skill(&std::path::Path, &str, bool, &str, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::overlays::compose(&alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::OverlayTree>) -> core::result::Result<ai6::directorates::q::overlays::Composition, ai6::directorates::q::overlays::Cycle>
 pub fn ai6::directorates::q::overlays::composed_environment(&[(&ai6::directorates::q::overlays::Document, ai6::directorates::q::overlays::Facts)], ai6::directorates::q::overlays::Environment, &mut alloc::vec::Vec<ai6::directorates::q::overlays::Weakening>) -> core::result::Result<ai6::directorates::q::overlays::Environment, ai6::directorates::q::overlays::Refusal>
@@ -3181,6 +3187,7 @@ pub fn ai6::directorates::q::overlays::resolve(&alloc::collections::btree::map::
 pub fn ai6::directorates::q::overlays::root_variable(&str) -> alloc::string::String
 pub fn ai6::directorates::q::overlays::rules_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::q::overlays::setup_phase(ai6::directorates::q::overlays::Change, core::option::Option<&str>, core::option::Option<&str>) -> core::option::Option<ai6::directorates::q::overlays::Phase>
+pub fn ai6::directorates::q::overlays::skill_description(&std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::q::overlays::skills_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::q::overlays::state_variable(&str) -> alloc::string::String
 pub fn ai6::directorates::q::overlays::substitute(&str, &ai6::directorates::q::overlays::Lookup<'_>) -> core::result::Result<alloc::string::String, ai6::directorates::q::overlays::SubstitutionError>
@@ -6628,6 +6635,7 @@ pub ai6::directorates::registry::sessions::SessionLaunch::effort: core::option::
 pub ai6::directorates::registry::sessions::SessionLaunch::handler: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
 pub ai6::directorates::registry::sessions::SessionLaunch::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionLaunch::overlays: alloc::vec::Vec<ai6::directorates::q::overlays::IssuedDigest>
 pub ai6::directorates::registry::sessions::SessionLaunch::pool: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::runner: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionLaunch::terminal: alloc::string::String
@@ -6638,6 +6646,7 @@ pub fn ai6::directorates::registry::sessions::SessionLaunch::with_agent(self, co
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_overlays(self, alloc::vec::Vec<ai6::directorates::q::overlays::IssuedDigest>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_pool(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::SessionRecord
@@ -7876,6 +7885,7 @@ pub ai6::directorates::section_00::acp::LaunchMeta::key: core::option::Option<al
 pub ai6::directorates::section_00::acp::LaunchMeta::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::acp::LaunchMeta::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::acp::LaunchMeta::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::LaunchMeta::overlays: ai6::directorates::section_00::agent::SessionOverlays
 pub ai6::directorates::section_00::acp::LaunchMeta::project_mcp: bool
 pub ai6::directorates::section_00::acp::LaunchMeta::project_settings: bool
 pub ai6::directorates::section_00::acp::LaunchMeta::terminal: core::option::Option<alloc::string::String>
@@ -7901,6 +7911,7 @@ pub ai6::directorates::section_00::acp::ResumeMeta::max_cost_micro_usd: core::op
 pub ai6::directorates::section_00::acp::ResumeMeta::message: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::acp::ResumeMeta::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::acp::ResumeMeta::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::acp::ResumeMeta::overlays: ai6::directorates::section_00::agent::SessionOverlays
 pub ai6::directorates::section_00::acp::ResumeMeta::project_mcp: bool
 pub ai6::directorates::section_00::acp::ResumeMeta::project_settings: bool
 pub ai6::directorates::section_00::acp::ResumeMeta::session_id: ai6::directorates::m::identity::SessionId
@@ -7947,6 +7958,7 @@ pub ai6::directorates::section_00::agent::AgentResume::max_cost_micro_usd: core:
 pub ai6::directorates::section_00::agent::AgentResume::message: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::agent::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::agent::AgentResume::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentResume::overlays: ai6::directorates::section_00::agent::SessionOverlays
 pub ai6::directorates::section_00::agent::AgentResume::project_mcp: bool
 pub ai6::directorates::section_00::agent::AgentResume::project_settings: bool
 pub ai6::directorates::section_00::agent::AgentResume::session_id: ai6::directorates::m::identity::SessionId
@@ -7962,6 +7974,7 @@ pub ai6::directorates::section_00::agent::AgentStart::initial_context: alloc::ve
 pub ai6::directorates::section_00::agent::AgentStart::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::agent::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::section_00::agent::AgentStart::model: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::AgentStart::overlays: ai6::directorates::section_00::agent::SessionOverlays
 pub ai6::directorates::section_00::agent::AgentStart::project_mcp: bool
 pub ai6::directorates::section_00::agent::AgentStart::project_settings: bool
 pub ai6::directorates::section_00::agent::AgentStart::prompt: alloc::string::String
@@ -8007,6 +8020,19 @@ pub ai6::directorates::section_00::agent::ModelListing::unknown_because: core::o
 impl ai6::directorates::section_00::agent::ModelListing
 pub fn ai6::directorates::section_00::agent::ModelListing::of(alloc::vec::Vec<ai6::directorates::section_00::agent::ModelInfo>) -> Self
 pub fn ai6::directorates::section_00::agent::ModelListing::unknown(impl core::convert::Into<alloc::string::String>) -> Self
+pub struct ai6::directorates::section_00::agent::OverlaySkill
+pub ai6::directorates::section_00::agent::OverlaySkill::description: alloc::string::String
+pub ai6::directorates::section_00::agent::OverlaySkill::name: alloc::string::String
+pub ai6::directorates::section_00::agent::OverlaySkill::native: bool
+pub ai6::directorates::section_00::agent::OverlaySkill::overlay: alloc::string::String
+pub ai6::directorates::section_00::agent::OverlaySkill::path: alloc::string::String
+pub struct ai6::directorates::section_00::agent::SessionOverlays
+pub ai6::directorates::section_00::agent::SessionOverlays::plugin_dir: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::agent::SessionOverlays::roots: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::section_00::agent::SessionOverlays::skills: alloc::vec::Vec<ai6::directorates::section_00::agent::OverlaySkill>
+impl ai6::directorates::section_00::agent::SessionOverlays
+pub fn ai6::directorates::section_00::agent::SessionOverlays::routing(&self, bool) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::section_00::agent::SessionOverlays::with_routing(&self, &[alloc::string::String], bool) -> alloc::vec::Vec<alloc::string::String>
 pub struct ai6::directorates::section_00::agent::SessionRecordFile
 pub ai6::directorates::section_00::agent::SessionRecordFile::format: alloc::string::String
 pub ai6::directorates::section_00::agent::SessionRecordFile::path: alloc::string::String
@@ -8278,6 +8304,7 @@ impl core::ops::drop::Drop for ai6::directorates::section_00::listing::Harness
 pub fn ai6::directorates::section_00::listing::Harness::drop(&mut self)
 pub fn ai6::directorates::section_00::listing::ask<T>(&str, &[&str], &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>, core::time::Duration, impl core::ops::function::FnOnce(&mut ai6::directorates::section_00::listing::Harness) -> core::result::Result<T, alloc::string::String>) -> core::result::Result<T, alloc::string::String>
 pub mod ai6::directorates::section_00::programs
+pub const ai6::directorates::section_00::programs::NO_PATH_SEARCH: &str
 pub const ai6::directorates::section_00::programs::STATION_CONFIG_ROOTS: [&str; 3]
 pub fn ai6::directorates::section_00::programs::canonical(&std::path::Path) -> std::path::PathBuf
 pub fn ai6::directorates::section_00::programs::denied_station_paths(&std::path::Path, &[std::path::PathBuf], &[std::path::PathBuf], core::option::Option<std::path::PathBuf>) -> alloc::vec::Vec<std::path::PathBuf>
@@ -8403,10 +8430,16 @@ impl core::default::Default for ai6::station::limits::HeadOfStationLimits
 pub fn ai6::station::limits::HeadOfStationLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::OverlayLimits
 pub ai6::station::limits::OverlayLimits::bytes: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::context_bytes: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::deps_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::OverlayLimits::dotagents_pin: core::option::Option<alloc::string::String>
+pub ai6::station::limits::OverlayLimits::dotagents_pyz: core::option::Option<alloc::string::String>
+pub ai6::station::limits::OverlayLimits::fetch_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::OverlayLimits::file_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::files: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::manifest_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::manifest_depth: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::output_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::unpinned: bool
 impl ai6::station::limits::OverlayLimits
 pub fn ai6::station::limits::OverlayLimits::manifest(&self) -> ai6::directorates::q::overlays::ReadLimits
@@ -9679,6 +9712,7 @@ pub ai6::AgentResume::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::AgentResume::message: core::option::Option<alloc::string::String>
 pub ai6::AgentResume::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::AgentResume::model: core::option::Option<alloc::string::String>
+pub ai6::AgentResume::overlays: ai6::directorates::section_00::agent::SessionOverlays
 pub ai6::AgentResume::project_mcp: bool
 pub ai6::AgentResume::project_settings: bool
 pub ai6::AgentResume::session_id: ai6::directorates::m::identity::SessionId
@@ -9722,6 +9756,7 @@ pub ai6::AgentStart::initial_context: alloc::vec::Vec<alloc::string::String>
 pub ai6::AgentStart::max_cost_micro_usd: core::option::Option<u64>
 pub ai6::AgentStart::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::AgentStart::model: core::option::Option<alloc::string::String>
+pub ai6::AgentStart::overlays: ai6::directorates::section_00::agent::SessionOverlays
 pub ai6::AgentStart::project_mcp: bool
 pub ai6::AgentStart::project_settings: bool
 pub ai6::AgentStart::prompt: alloc::string::String
@@ -11551,6 +11586,12 @@ pub ai6::Output::stderr: guatiao::value::convert::Bytes
 pub ai6::Output::stdout: guatiao::value::convert::Bytes
 pub ai6::Output::timed_out: bool
 pub ai6::Output::truncated: bool
+pub struct ai6::OverlaySkill
+pub ai6::OverlaySkill::description: alloc::string::String
+pub ai6::OverlaySkill::name: alloc::string::String
+pub ai6::OverlaySkill::native: bool
+pub ai6::OverlaySkill::overlay: alloc::string::String
+pub ai6::OverlaySkill::path: alloc::string::String
 #[non_exhaustive] pub struct ai6::PanelCandidate
 pub ai6::PanelCandidate::id: alloc::string::String
 pub ai6::PanelCandidate::models: alloc::collections::btree::set::BTreeSet<alloc::string::String>
@@ -12318,6 +12359,7 @@ pub ai6::SessionLaunch::effort: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::handler: alloc::string::String
 pub ai6::SessionLaunch::mode: ai6::directorates::m::placement::ExecutionMode
 pub ai6::SessionLaunch::model: core::option::Option<alloc::string::String>
+pub ai6::SessionLaunch::overlays: alloc::vec::Vec<ai6::directorates::q::overlays::IssuedDigest>
 pub ai6::SessionLaunch::pool: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::runner: core::option::Option<alloc::string::String>
 pub ai6::SessionLaunch::terminal: alloc::string::String
@@ -12328,6 +12370,7 @@ pub fn ai6::directorates::registry::sessions::SessionLaunch::with_agent(self, co
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_clearance(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_mode(self, ai6::directorates::m::placement::ExecutionMode) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_model(self, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionLaunch::with_overlays(self, alloc::vec::Vec<ai6::directorates::q::overlays::IssuedDigest>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_pool(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::SessionLimits
@@ -12343,6 +12386,13 @@ pub ai6::SessionLimits::records: ai6::bounds::Limit
 pub ai6::SessionLimits::verdict_note_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::SessionLimits
 pub fn ai6::directorates::registry::limits::SessionLimits::default() -> Self
+pub struct ai6::SessionOverlays
+pub ai6::SessionOverlays::plugin_dir: core::option::Option<alloc::string::String>
+pub ai6::SessionOverlays::roots: alloc::vec::Vec<alloc::string::String>
+pub ai6::SessionOverlays::skills: alloc::vec::Vec<ai6::directorates::section_00::agent::OverlaySkill>
+impl ai6::directorates::section_00::agent::SessionOverlays
+pub fn ai6::directorates::section_00::agent::SessionOverlays::routing(&self, bool) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::section_00::agent::SessionOverlays::with_routing(&self, &[alloc::string::String], bool) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::SessionRecord
 pub ai6::SessionRecord::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
 pub ai6::SessionRecord::attempt: u32
