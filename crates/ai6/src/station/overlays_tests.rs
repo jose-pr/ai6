@@ -65,15 +65,49 @@ impl Case {
     ) -> Result<Delivered, String> {
         let work = self.state.path().join("work");
         fs::create_dir_all(&work).unwrap();
-        prepared.deliver_here(SessionFacts {
-            environment: environment
-                .iter()
-                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
-                .collect(),
+        self.deliver_in(
+            prepared,
+            environment,
             commands,
             handler,
-            working_directory: &work.to_string_lossy(),
-        })
+            &work.to_string_lossy(),
+        )
+    }
+}
+
+impl Case {
+    fn deliver_in(
+        &self,
+        prepared: &Prepared,
+        environment: &[(&str, &str)],
+        commands: bool,
+        handler: &str,
+        working_directory: &str,
+    ) -> Result<Delivered, String> {
+        let environment: BTreeMap<String, String> = environment
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        let keeper = Keeper::default();
+        let fit = prepared.fit(
+            Site::Here {
+                dir: self.state.path().join("overlays"),
+            },
+            &environment,
+            commands,
+            true,
+            (&keeper, Duration::from_secs(60)),
+        )?;
+        prepared.deliver(
+            &fit,
+            SessionFacts {
+                environment,
+                handler,
+                working_directory,
+                key: "mission-1",
+            },
+            &keeper,
+        )
     }
 }
 
@@ -556,13 +590,14 @@ fn a_store_inside_the_working_directory_is_refused() {
     let dir = overlay_dir(source.path(), "tools", &[("kb/a.md", "a\n")]);
     let list = records([record("tools", &dir)]);
     let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
-    let refusal = prepared
-        .deliver_here(SessionFacts {
-            environment: BTreeMap::new(),
-            commands: true,
-            handler: "codex",
-            working_directory: &case.state.path().to_string_lossy(),
-        })
+    let refusal = case
+        .deliver_in(
+            &prepared,
+            &[],
+            true,
+            "codex",
+            &case.state.path().to_string_lossy(),
+        )
         .err()
         .unwrap();
     assert!(
@@ -714,4 +749,340 @@ fn front_matter_is_only_a_closed_block_at_the_start() {
         without_front_matter("body\n---\nx\n---\n"),
         "body\n---\nx\n---\n"
     );
+}
+
+/// A `PATH` holding the host's Python, or `None` where it has none that runs.
+fn path_with_python() -> Option<String> {
+    let path = std::env::var("PATH").ok()?;
+    let found = Site::Here {
+        dir: PathBuf::from("."),
+    }
+    .find_tools(&["python3", "python"], &path)
+    .ok()?;
+    found
+        .values()
+        .any(|tool| tool.version.contains("Python 3"))
+        .then_some(path)
+}
+
+/// What a Session's own process would print, run with exactly its environment.
+fn session_prints(environment: &BTreeMap<String, String>, program: &str, args: &[&str]) -> String {
+    let mut command = Command::new(program);
+    command.args(args).env_clear().envs(environment);
+    #[cfg(windows)]
+    command.env(
+        "SYSTEMROOT",
+        std::env::var_os("SYSTEMROOT").unwrap_or_default(),
+    );
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{program}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+#[test]
+fn on_this_host_python_imports_the_overlays_lib_and_setup_runs_once_per_digest() {
+    let Some(path) = path_with_python() else {
+        eprintln!("skipped: this host has no Python 3 on its PATH");
+        return;
+    };
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[
+            ("lib/python/shiphelp.py", "VALUE = 'from the lib'\n"),
+            (
+                "setup.py",
+                "import os, sys\n\
+                 with open(os.path.join(os.environ['AOS_OVERLAY_STATE'], 'phases'), 'a') as out:\n\
+                 \x20   out.write(sys.argv[1] + ' ' + os.environ['AOS_SETUP_PHASE'] + '\\n')\n",
+            ),
+            (
+                "overlay.cfg",
+                "[[setup]]\ninterpreter = \"python\"\npath = \"setup.py\"\n",
+            ),
+        ],
+    );
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    // Windows' Python launcher reads these, as an Agent's env would give them.
+    let profile: Vec<(&str, String)> = ["LOCALAPPDATA", "APPDATA", "USERPROFILE"]
+        .into_iter()
+        .filter_map(|name| Some((name, std::env::var(name).ok()?)))
+        .collect();
+    let mut environment = vec![("PATH", path.as_str())];
+    environment.extend(profile.iter().map(|(name, value)| (*name, value.as_str())));
+    let environment = environment.as_slice();
+    let delivered = case.deliver(&prepared, environment, true, "codex").unwrap();
+    let python = delivered.environment["AGENTS_PYTHON"].clone();
+    assert_eq!(
+        session_prints(
+            &delivered.environment,
+            &python,
+            &["-c", "import shiphelp; print(shiphelp.VALUE)"]
+        ),
+        "from the lib"
+    );
+    let state = delivered.environment["TOOLS_OVERLAY_STATE"].clone();
+    let phases = || fs::read_to_string(Path::new(&state).join("phases")).unwrap();
+    assert_eq!(phases().trim(), "install install");
+    assert!(
+        fs::write(Path::new(&state).join("planted"), "x").is_err(),
+        "the state directory is read-only to the Session"
+    );
+    let again = case.deliver(&prepared, environment, true, "codex").unwrap();
+    assert_eq!(phases().trim(), "install install", "{:?}", again.digests);
+}
+
+#[test]
+fn on_this_host_code_with_no_python_on_the_path_refuses_naming_what_is_missing() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(source.path(), "tools", &[("lib/python/m.py", "x = 1\n")]);
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let nowhere = source.path().join("nothing-here");
+    fs::create_dir_all(&nowhere).unwrap();
+    let nowhere = nowhere.to_string_lossy().into_owned();
+    let refusal = case
+        .deliver(&prepared, &[("PATH", nowhere.as_str())], true, "codex")
+        .err()
+        .unwrap();
+    assert!(refusal.contains("python3 or python"), "{refusal}");
+    assert!(refusal.contains("tools"), "{refusal}");
+    // Text goes anywhere, and a desk Session asks nothing of the host.
+    let desk = case.deliver(&prepared, &[("PATH", nowhere.as_str())], false, "codex");
+    assert!(desk.is_ok(), "{:?}", desk.err());
+}
+
+#[test]
+fn commands_are_refused_without_the_setting_and_a_wrong_pin_refuses_with_it() {
+    let Some(path) = path_with_python() else {
+        eprintln!("skipped: this host has no Python 3 on its PATH");
+        return;
+    };
+    let mut case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(source.path(), "tools", &[("cmds/hello.py", "print(1)\n")]);
+    let list = records([record("tools", &dir)]);
+    let environment = [("PATH", path.as_str())];
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let refusal = case
+        .deliver(&prepared, &environment, true, "codex")
+        .err()
+        .unwrap();
+    assert!(
+        refusal.contains("station.overlays.dotagents_pyz"),
+        "{refusal}"
+    );
+
+    let pyz = source.path().join("dotagents.pyz");
+    fs::write(&pyz, "print('stand-in')\n").unwrap();
+    case.limits.dotagents_pyz = Some(pyz.to_string_lossy().into_owned());
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let refusal = case
+        .deliver(&prepared, &environment, true, "codex")
+        .err()
+        .unwrap();
+    assert!(
+        refusal.contains("station.overlays.dotagents_pin"),
+        "{refusal}"
+    );
+
+    case.limits.dotagents_pin = Some(Digest::of(b"other").to_string());
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let refusal = case
+        .deliver(&prepared, &environment, true, "codex")
+        .err()
+        .unwrap();
+    assert!(
+        refusal.contains("not station.overlays.dotagents_pin"),
+        "{refusal}"
+    );
+
+    case.limits.dotagents_pin = Some(Digest::of(b"print('stand-in')\n").to_string());
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let delivered = case
+        .deliver(&prepared, &environment, true, "codex")
+        .unwrap();
+    assert!(delivered.environment["AGENTS_CMDS_PATH"].contains("cmds"));
+    let home = &delivered.environment["AGENTS_HOME"];
+    assert_eq!(
+        fs::read_dir(home).unwrap().count(),
+        0,
+        "its agents directory is empty"
+    );
+    assert!(
+        delivered
+            .environment
+            .keys()
+            .all(|name| !name.starts_with("DOTAGENTS_")),
+        "{:?}",
+        delivered.environment.keys()
+    );
+    let site = Site::Here {
+        dir: case.state.path().join("overlays"),
+    };
+    forget_session(&site, "mission-1").unwrap();
+    assert!(!Path::new(home).exists(), "removed with its Mission");
+}
+
+/// A container reached through the real provider, when the environment names one: Podman up, a
+/// running container, and where the provider's library is built.
+#[test]
+fn in_a_container_a_helper_reaches_its_commands_and_code_with_no_python_waits() {
+    let (Ok(container), Ok(plugins)) = (
+        std::env::var("AI6_TEST_OVERLAY_CONTAINER"),
+        std::env::var("AI6_TEST_OVERLAY_PLUGINS"),
+    ) else {
+        eprintln!("skipped: AI6_TEST_OVERLAY_CONTAINER and AI6_TEST_OVERLAY_PLUGINS are not set");
+        return;
+    };
+    use crate::directorates::m::theaters::TheaterAccess;
+    let access = TheaterAccess::Transport(
+        crate::TransportAccess::new("container")
+            .with_setting("container", container.as_str())
+            .with_setting(
+                "engine",
+                std::env::var("AI6_TEST_ENGINE").unwrap_or_else(|_| "podman".to_owned()),
+            ),
+    );
+    let loaded = crate::station::plugins::Plugins::scan(&[PathBuf::from(plugins)]);
+    let client = Arc::new(loaded.theater_transport(&access).unwrap());
+
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[
+            ("bin/ship-helper", "#!/bin/sh\necho HELPER-IN-CONTAINER\n"),
+            ("rules/a.md", "A rule.\n"),
+        ],
+    );
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let keeper = Keeper::default();
+    let environment = BTreeMap::new();
+    let fit = prepared
+        .fit(
+            Site::theater("box", client.clone()).unwrap(),
+            &environment,
+            true,
+            true,
+            (&keeper, Duration::from_secs(60)),
+        )
+        .unwrap();
+    let delivered = prepared
+        .deliver(
+            &fit,
+            SessionFacts {
+                environment: environment.clone(),
+                handler: "codex",
+                working_directory: "/work",
+                key: "mission-1",
+            },
+            &keeper,
+        )
+        .unwrap();
+    let run = |script: &str| {
+        client
+            .run(&crate::directorates::q::transport::RunSpec {
+                argv: vec!["sh".to_owned(), "-c".to_owned(), script.to_owned()],
+                env: Some(delivered.environment.clone()),
+                timeout_ms: 60_000,
+                ..Default::default()
+            })
+            .unwrap()
+    };
+    let output = run("ship-helper");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout.0).trim(),
+        "HELPER-IN-CONTAINER"
+    );
+    // A second start finds the copy and checks it; a changed one refuses.
+    let again = prepared.fit(
+        Site::theater("box", client.clone()).unwrap(),
+        &environment,
+        true,
+        true,
+        (&keeper, Duration::from_secs(60)),
+    );
+    assert!(again.is_ok());
+    let root = delivered.environment["TOOLS_OVERLAY_ROOT"].clone();
+    run(&format!(
+        "chmod -R u+w {root} && echo planted >> {root}/rules/a.md"
+    ));
+    let refusal = prepared
+        .deliver(
+            &fit,
+            SessionFacts {
+                environment: environment.clone(),
+                handler: "codex",
+                working_directory: "/work",
+                key: "mission-1",
+            },
+            &keeper,
+        )
+        .err()
+        .unwrap();
+    assert!(
+        refusal.contains("has other bytes in rules/a.md"),
+        "{refusal}"
+    );
+
+    // An image with no Python: code waits, naming what is missing.
+    let with_code = overlay_dir(source.path(), "coded", &[("lib/python/m.py", "x = 1\n")]);
+    let list = records([record("coded", &with_code)]);
+    let coded = case.prepare(&["coded"], &[], &list).unwrap().unwrap();
+    let refused = coded.fit(
+        Site::theater("box", client.clone()).unwrap(),
+        &environment,
+        true,
+        true,
+        (&Keeper::default(), Duration::from_secs(60)),
+    );
+    if run("command -v python3 || command -v python").code != Some(0) {
+        let refusal = refused.err().unwrap();
+        assert!(refusal.contains("python3 or python"), "{refusal}");
+    }
+    run("rm -rf .ai6/overlays 2>/dev/null; chmod -R u+w .ai6 2>/dev/null; rm -rf .ai6");
+}
+
+#[test]
+fn a_requirements_file_holds_requirements_and_comments_only() {
+    use crate::directorates::q::overlays::check_requirements;
+    assert_eq!(check_requirements("# only a comment\n\n", false), Ok(()));
+    assert_eq!(
+        check_requirements("six==1.16 ; python_version > '3'\nrich\n", false),
+        Ok(())
+    );
+    assert_eq!(
+        check_requirements(
+            "six==1.16 \\\n  --hash=sha256:aa \\\n  --hash=sha256:bb\n",
+            true
+        ),
+        Ok(())
+    );
+    for (text, locked, why) in [
+        ("-r other.txt\n", false, "option"),
+        ("--index-url https://example.org\n", false, "option"),
+        ("-e .\n", false, "option"),
+        (
+            "thing @ https://example.org/thing.zip\n",
+            false,
+            "direct URL",
+        ),
+        ("https://example.org/thing.zip\n", false, "direct URL"),
+        ("six==1.16 --no-binary six\n", false, "--hash"),
+        ("six>=1 --hash=sha256:aa\n", true, "pinned"),
+    ] {
+        let refusal = check_requirements(text, locked).err().unwrap();
+        assert!(refusal.contains(why), "{text:?}: {refusal}");
+    }
 }

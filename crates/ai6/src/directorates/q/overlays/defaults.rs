@@ -398,6 +398,43 @@ pub(crate) fn requirements_locked(text: &str, path: &str) -> Result<bool, Partia
     Ok(false)
 }
 
+/// Why a requirements file is refused before pip reads it: it holds only requirement lines and
+/// comments (`spec/v0/runtime.md#runtime`), since pip would otherwise follow `-r` and `-c`, change
+/// the index or install a direct URL, and in a `locked` file every requirement is pinned with `==`.
+///
+/// # Errors
+///
+/// The line that is refused, and why.
+pub fn check_requirements(text: &str, locked: bool) -> Result<(), String> {
+    let joined = text.replace("\\\r\n", " ").replace("\\\n", " ");
+    for line in joined.lines() {
+        let line = line.split(" #").next().unwrap_or_default().trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (requirement, options) = line.split_once(" --").unwrap_or((line, ""));
+        if requirement.starts_with('-') {
+            return Err(format!(
+                "{line:?} is an option, and only requirements are read"
+            ));
+        }
+        if requirement.contains("://") || requirement.contains(" @ ") {
+            return Err(format!("{requirement:?} is a direct URL"));
+        }
+        if !options.is_empty()
+            && options
+                .split(" --")
+                .any(|option| !option.trim_start_matches('-').starts_with("hash"))
+        {
+            return Err(format!("{line:?} holds an option other than --hash"));
+        }
+        if locked && !requirement.contains("==") {
+            return Err(format!("{requirement:?} is not pinned with =="));
+        }
+    }
+    Ok(())
+}
+
 /// The dependency files a consumer installs on `os`, one per runtime. A selected variant that
 /// names a file replaces the default one; one that names none still chooses its environment.
 ///

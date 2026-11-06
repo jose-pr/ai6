@@ -753,6 +753,22 @@ pub struct OverlayLimits {
     #[schema(title = "Longest overlay fetch")]
     #[map(default = OverlayLimits::default().fetch_timeout)]
     pub fetch_timeout: Seconds,
+    /// Seconds installing one overlay's dependency file may take.
+    #[schema(title = "Longest dependency install")]
+    #[map(default = OverlayLimits::default().deps_timeout)]
+    pub deps_timeout: Seconds,
+    /// Bytes of each output stream kept from an overlay's setup, env script or package manager.
+    #[schema(title = "Largest output of an overlay's step", format = "bytes")]
+    #[map(default = OverlayLimits::default().output_bytes)]
+    pub output_bytes: Limit,
+    /// The `dotagents.pyz` on the Station that runs the `cmds/` of an overlay holding them. An
+    /// overlay with `cmds/` is refused without it. Default: none.
+    #[schema(title = "dotagents for overlay commands")]
+    pub dotagents_pyz: Option<String>,
+    /// The SHA-256 `dotagents_pyz` must have, `sha256:<hex>`; a mismatch refuses. Without one it is
+    /// refused unless `unpinned` allows it. Default: none.
+    #[schema(title = "Pin of dotagents")]
+    pub dotagents_pin: Option<String>,
 }
 
 impl Default for OverlayLimits {
@@ -767,6 +783,10 @@ impl Default for OverlayLimits {
             // A harness on Windows takes its context on a command line of at most 32 KiB.
             context_bytes: Limit::at(24 * 1024),
             fetch_timeout: Seconds::new(300),
+            deps_timeout: Seconds::new(600),
+            output_bytes: Limit::at(MIB),
+            dotagents_pyz: None,
+            dotagents_pin: None,
         }
     }
 }
@@ -800,6 +820,7 @@ impl OverlayLimits {
                 "bytes": self.bytes.get(),
                 "file_bytes": self.file_bytes.get(),
                 "context_bytes": self.context_bytes.get(),
+                "output_bytes": self.output_bytes.get(),
             }),
             &serde_json::json!({
                 "manifest_bytes": Self::default().manifest_bytes.get(),
@@ -808,6 +829,7 @@ impl OverlayLimits {
                 "bytes": Self::default().bytes.get(),
                 "file_bytes": Self::default().file_bytes.get(),
                 "context_bytes": Self::default().context_bytes.get(),
+                "output_bytes": Self::default().output_bytes.get(),
             }),
             &[],
         );

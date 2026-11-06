@@ -56,8 +56,9 @@ pub use compose::{
     Resolution, compose, composition_order, environments, resolve,
 };
 pub use defaults::{
-    DEFAULT_KEYS, Dependency, INTERPRETERS, OverlayTree, PartialLock, context_of, default_on,
-    default_paths, dependencies_of, env_files_of, paths_of, rules_of, skills_of,
+    DEFAULT_KEYS, Dependency, INTERPRETERS, OverlayTree, PartialLock, check_requirements,
+    context_of, default_on, default_paths, dependencies_of, env_files_of, paths_of, rules_of,
+    skills_of,
 };
 pub use digest::{
     Digest, DigestError, DigestErrorKind, TreeDigest, TreeEntry, TreeLimits, digest_entries,

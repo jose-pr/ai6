@@ -45,14 +45,28 @@ pub(super) struct Endpoint {
 }
 
 impl Endpoint {
-    /// Starts the listener. `root` is the Mission's working directory on the Theater; the
-    /// tools run within `limits` and read commands `nesting` levels deep for green ink.
+    /// Starts the listener with no environment for its commands.
+    #[cfg(test)]
     pub(super) async fn start(
         client: Arc<TransportClient>,
         capabilities: Capabilities,
         root: Option<String>,
         check: StepCheck,
+        limits: (TheaterToolLimits, usize),
+    ) -> std::io::Result<Self> {
+        Self::start_with(client, capabilities, root, check, limits, None).await
+    }
+
+    /// Starts the listener. `root` is the Mission's working directory on the Theater; the
+    /// tools run within `limits` and read commands `nesting` levels deep for green ink;
+    /// `environment` is added to what `theater_run`'s commands get.
+    pub(super) async fn start_with(
+        client: Arc<TransportClient>,
+        capabilities: Capabilities,
+        root: Option<String>,
+        check: StepCheck,
         (limits, nesting): (TheaterToolLimits, usize),
+        environment: Option<std::collections::BTreeMap<String, String>>,
     ) -> std::io::Result<Self> {
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -65,6 +79,7 @@ impl Endpoint {
                     root.clone(),
                     check.clone(),
                     (limits.clone(), nesting),
+                    environment.clone(),
                 ))
             },
             Arc::new(LocalSessionManager::default()),
@@ -125,6 +140,7 @@ struct TheaterTools {
     check: StepCheck,
     limits: TheaterToolLimits,
     nesting: usize,
+    environment: Option<std::collections::BTreeMap<String, String>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -135,6 +151,7 @@ impl TheaterTools {
         root: Option<String>,
         check: StepCheck,
         (limits, nesting): (TheaterToolLimits, usize),
+        environment: Option<std::collections::BTreeMap<String, String>>,
     ) -> Self {
         Self {
             client,
@@ -143,6 +160,7 @@ impl TheaterTools {
             check,
             limits,
             nesting,
+            environment,
             tool_router: Self::tool_router(),
         }
     }
@@ -302,6 +320,7 @@ impl TheaterTools {
                     .min(self.limits.max_timeout.get().unwrap_or(Duration::MAX)),
             ),
             max_output: self.limits.output_bytes.get().unwrap_or(u64::MAX),
+            env: self.environment.clone(),
             ..RunSpec::default()
         };
         let check = self.check.clone();

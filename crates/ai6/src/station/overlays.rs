@@ -10,21 +10,30 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use guatiao::Bytes;
 use serde_json::Value as Data;
 
 use crate::directorates::q::overlays::{
-    Digest, Document, Environment, Facts, IssuedDigest, IssuedOverlay, MANIFEST, OverlayFrom,
-    OverlayRecord, ReadOverlay, Source, SourceKind, TreeEntry, Weakening, composed_environment,
-    context_of, default_on, digest_entries, effective, env_files_of, issue_overlays,
-    normalize_name, read_overlay, root_variable, rules_of, skill_description, skills_of,
+    Change, Dependency, Digest, Document, Environment, Facts, IssuedDigest, IssuedOverlay,
+    MANIFEST, OverlayFrom, OverlayRecord, Phase, ReadOverlay, ScriptRun, SetupRecord, SetupRun,
+    Source, SourceKind, TreeEntry, Weakening, check_requirements, composed_environment, context_of,
+    default_on, digest_entries, effective, env_files_of, is_reserved_variable,
+    is_sensitive_variable, issue_overlays, normalize_name, preparation, read_env_script_output,
+    read_overlay, root_variable, rules_of, skill_description, skills_of, state_variable,
     tree_digest,
 };
+use crate::directorates::q::provision::RequiredProgram;
 use crate::directorates::q::transport::kit::{ProcessInput, run_process};
 use crate::directorates::section_00::agent::{OverlaySkill, SessionOverlays};
 use crate::station::limits::OverlayLimits;
+
+mod site;
+
+pub(crate) use site::Site;
+use site::{Found, Step, store_tree_files};
 
 /// A weakening a delivery reports, naming its overlay.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,6 +44,7 @@ pub(crate) struct Reported {
 
 /// What a Session is issued, checked and stored, before anything is placed where it runs.
 pub(crate) struct Prepared {
+    install_order: Vec<String>,
     overlays: Vec<Ready>,
     limits: OverlayLimits,
     store: Store,
@@ -50,6 +60,8 @@ struct Ready {
 pub(crate) struct Delivered {
     /// The Session's environment with the overlays' applied.
     pub(crate) environment: BTreeMap<String, String>,
+    /// What its commands get when its harness is elsewhere than they run (remote hands).
+    pub(crate) theater_environment: Option<BTreeMap<String, String>>,
     /// The rules, routing and context, as one piece of the initial context.
     pub(crate) context: Option<String>,
     /// What the harness is handed.
@@ -95,6 +107,10 @@ impl Store {
 
     fn trees(&self) -> PathBuf {
         self.dir.join("trees")
+    }
+
+    fn records(&self) -> PathBuf {
+        self.dir.join("records")
     }
 
     fn tree_path(&self, digest: &Digest) -> PathBuf {
@@ -275,7 +291,7 @@ impl Store {
 
     /// A read-only directory laying out `skills` as a harness plugin, kept by the digest of what it
     /// holds, so Sessions given the same skills share one.
-    fn plugin(&self, skills: &[(String, PathBuf)]) -> Result<PathBuf, String> {
+    fn plugin(&self, skills: &[(String, PathBuf)]) -> Result<(Digest, PathBuf), String> {
         let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
         files.insert(
             ".claude-plugin/plugin.json".to_owned(),
@@ -316,7 +332,7 @@ impl Store {
                     target.display()
                 ));
             }
-            return Ok(target);
+            return Ok((digest.digest, target));
         }
         let scratch = self.scratch().map_err(|why| why.to_string())?;
         let staged = scratch.path().join("tree");
@@ -328,7 +344,7 @@ impl Store {
             fs::write(&file, bytes).map_err(|why| why.to_string())?;
         }
         self.place(&staged, &target)?;
-        Ok(target)
+        Ok((digest.digest, target))
     }
 }
 
@@ -829,6 +845,7 @@ pub(crate) fn prepare(
         request.limits.unpinned,
     )
     .map_err(|refusal| refusal.to_string())?;
+    let install_order = issued.install_order;
     let mut overlays = Vec::new();
     for issued in issued.overlays {
         let found = stored
@@ -841,6 +858,7 @@ pub(crate) fn prepare(
         });
     }
     Ok(Some(Prepared {
+        install_order,
         overlays,
         limits: request.limits.clone(),
         store,
@@ -879,12 +897,59 @@ fn harness_id(handler: &str) -> &str {
 pub(crate) struct SessionFacts<'a> {
     /// The Session's environment before its overlays'.
     pub(crate) environment: BTreeMap<String, String>,
-    /// Whether its clearance runs commands: a `desk` Session gets the text and no `bin/`.
-    pub(crate) commands: bool,
     /// The handler provider.
     pub(crate) handler: &'a str,
     /// The directory it works in, which holds nothing of an overlay.
     pub(crate) working_directory: &'a str,
+    /// What names the Session where it keeps things of its own.
+    pub(crate) key: &'a str,
+}
+
+/// A Mission's ID as a directory name.
+fn session_key(mission: &str) -> String {
+    mission
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_start_matches('.')
+        .to_owned()
+}
+
+/// Removes what a Mission kept where it ran. A Mission that had none leaves nothing to remove.
+pub(crate) fn forget_session(site: &Site, mission: &str) -> Result<(), String> {
+    site.remove(&site.path(&format!("sessions/{}", session_key(mission))))
+}
+
+/// Sets `name` in `environment` back to what `session` holds, or takes it out.
+fn restore(
+    environment: &mut BTreeMap<String, String>,
+    session: &BTreeMap<String, String>,
+    name: &str,
+) {
+    let found = environment
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(name))
+        .cloned();
+    let Some(key) = found else {
+        return;
+    };
+    match session
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+    {
+        Some((_, value)) => {
+            environment.insert(key, value.clone());
+        }
+        None => {
+            environment.remove(&key);
+        }
+    }
 }
 
 impl Prepared {
@@ -899,45 +964,119 @@ impl Prepared {
             .collect()
     }
 
-    /// What a Session on this Station's own host gets: its overlays' read-only copies in the
-    /// store, their environment applied, and their text.
-    pub(crate) fn deliver_here(&self, session: SessionFacts<'_>) -> Result<Delivered, String> {
-        let roots: BTreeMap<String, String> = self
-            .overlays
-            .iter()
-            .map(|ready| {
-                (
-                    ready.issued.identity.clone(),
-                    ready.stored.root.to_string_lossy().into_owned(),
+    /// What a Session on `fit`'s site gets: its overlays' read-only copies there, what they need
+    /// prepared outside its sandbox, their environment applied, and their text.
+    pub(crate) fn deliver(
+        &self,
+        fit: &Fit,
+        session: SessionFacts<'_>,
+        keeper: &Keeper,
+    ) -> Result<Delivered, String> {
+        let site = &fit.site;
+        let os = site.os().to_owned();
+        let mut roots: BTreeMap<String, String> = BTreeMap::new();
+        for ready in &self.overlays {
+            let root = site
+                .tree(
+                    "trees",
+                    &ready.stored.digest,
+                    &ready.stored.root,
+                    &ready.stored.read.digest.files,
+                    &self.limits.tree(),
                 )
-            })
-            .collect();
-        for root in roots.values() {
-            check_outside(root, session.working_directory)?;
+                .map_err(|why| format!("overlay {:?}: {why}", ready.issued.identity))?;
+            check_outside(&root, session.working_directory)?;
+            roots.insert(ready.issued.identity.clone(), root);
         }
-        let os = crate::directorates::q::overlays::current_os();
         let mut weakenings = Vec::new();
-        let environment = self.environment(&session, os, &roots, &mut weakenings)?;
-        let context = self.context(&roots)?;
+        if !site.protection_holds() {
+            weakenings.extend(self.overlays.iter().map(|ready| Reported {
+                overlay: ready.issued.identity.clone(),
+                weakening: Weakening {
+                    id: "read-only-not-enforced".to_owned(),
+                    subject: site.name(),
+                },
+            }));
+        }
+        let empty = BTreeMap::new();
+        let base = process_base(
+            if fit.harness_here {
+                &session.environment
+            } else {
+                &empty
+            },
+            &fit.path,
+        );
+        let mut packages: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        if fit.commands {
+            for identity in &self.install_order {
+                let Some(ready) = self
+                    .overlays
+                    .iter()
+                    .find(|ready| ready.issued.identity == *identity)
+                else {
+                    continue;
+                };
+                let session = if fit.harness_here {
+                    &session.environment
+                } else {
+                    &empty
+                };
+                packages.insert(
+                    identity.clone(),
+                    self.prepare_one(ready, fit, &roots[identity], (session, &base), keeper)?,
+                );
+            }
+        }
+        let (harness_environment, theater_environment) = self.environment(
+            fit,
+            &session,
+            &os,
+            &roots,
+            &packages,
+            &base,
+            &mut weakenings,
+        )?;
+        let context = self.context(&roots, session.handler, fit)?;
         let mut delivered = Delivered {
-            environment,
+            environment: harness_environment,
+            theater_environment,
             context,
             overlays: SessionOverlays {
-                roots: roots.values().cloned().collect(),
+                roots: if fit.harness_here {
+                    roots.values().cloned().collect()
+                } else {
+                    Vec::new()
+                },
                 ..SessionOverlays::default()
             },
             digests: self.digests(),
             weakenings,
         };
-        let skills = self.skills(session.handler, &roots, true, &mut delivered.weakenings);
-        let native: Vec<(String, PathBuf)> = skills
+        let skills = self.skills(
+            session.handler,
+            &roots,
+            (&os, fit.harness_here),
+            &mut delivered.weakenings,
+        );
+        let native: Vec<(String, PathBuf)> = self
+            .overlays
             .iter()
-            .filter(|skill| skill.native)
-            .map(|skill| (skill.name.clone(), PathBuf::from(&skill.path)))
+            .flat_map(|ready| {
+                let dir = ready.stored.root.join("skills");
+                let wanted: Vec<(String, PathBuf)> = skills
+                    .iter()
+                    .filter(|skill| skill.native && skill.overlay == ready.issued.identity)
+                    .map(|skill| (skill.name.clone(), dir.join(&skill.name)))
+                    .collect();
+                wanted
+            })
             .collect();
         if !native.is_empty() {
-            let plugin = self.store.plugin(&native)?;
-            let plugin = plugin.to_string_lossy().into_owned();
+            let (digest, here) = self.store.plugin(&native)?;
+            let files =
+                store_tree_files(&here, &self.limits.tree()).map_err(|why| format!("{why}"))?;
+            let plugin = site.tree("plugins", &digest, &here, &files, &self.limits.tree())?;
             check_outside(&plugin, session.working_directory)?;
             delivered.overlays.plugin_dir = Some(plugin);
         }
@@ -945,100 +1084,248 @@ impl Prepared {
         Ok(delivered)
     }
 
+    /// The Session's environment with every overlay's applied in the order of application, and,
+    /// when its harness is elsewhere than its commands, what its commands get instead.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one delivery's context, used once"
+    )]
     fn environment(
         &self,
+        fit: &Fit,
         session: &SessionFacts<'_>,
         os: &str,
         roots: &BTreeMap<String, String>,
+        packages: &BTreeMap<String, BTreeMap<String, String>>,
+        base: &BTreeMap<String, String>,
         weakenings: &mut Vec<Reported>,
-    ) -> Result<BTreeMap<String, String>, String> {
+    ) -> Result<(BTreeMap<String, String>, Option<BTreeMap<String, String>>), String> {
+        let site = &fit.site;
         let windows = os == "windows";
-        let mut base = session.environment.clone();
-        // A harness has only the environment it is given: with no PATH there, an addition must
-        // keep where such a process looks.
-        if !base.keys().any(|name| name.eq_ignore_ascii_case("PATH")) {
-            base.insert(
-                "PATH".to_owned(),
-                crate::directorates::section_00::programs::NO_PATH_SEARCH.to_owned(),
-            );
+        // What the overlays' environment starts from: a Theater's PATH when the Agent names none,
+        // since a value here replaces the one there.
+        let mut start = if fit.harness_here {
+            session.environment.clone()
+        } else {
+            BTreeMap::new()
+        };
+        if path_of(&start).is_none() && !fit.path.is_empty() {
+            start.insert("PATH".to_owned(), fit.path.clone());
         }
-        let mut facts: Vec<(&Document, Facts)> = Vec::new();
+        let mut env = Environment::new(start.clone(), windows);
+        let found: Vec<String> = INTERPRETER_COMMANDS
+            .iter()
+            .filter(|(name, _)| fit.commands && interpreter(name, &fit.tools).is_some())
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
+        let mut all_roots = BTreeMap::new();
         for ready in &self.overlays {
             let identity = &ready.issued.identity;
-            let tree = self.tree_of(ready)?;
-            let one = Facts {
+            let state = site.path(&format!("state/{identity}"));
+            if !site.exists(&state)? {
+                site.open_dir(&state)?;
+                site.close_dir(&state)?;
+            }
+            env.set(&root_variable(identity), roots[identity].clone(), false);
+            env.set(&state_variable(identity), state.clone(), false);
+            all_roots.insert(root_variable(identity), roots[identity].clone());
+            all_roots.insert(state_variable(identity), state);
+        }
+        for ready in &self.overlays {
+            let identity = &ready.issued.identity;
+            let state = site.path(&format!("state/{identity}"));
+            let facts = Facts {
                 os: os.to_owned(),
                 root: roots[identity].clone(),
                 identity: identity.clone(),
+                state: Some(state.clone()),
                 pinned: ready.issued.record.pin().is_some(),
-                base_env: base.clone(),
+                base_env: start.clone(),
                 enforces_network: Some(false),
-                env_scripts_enabled: Some(false),
-                interpreters: Some(Vec::new()),
-                tree,
+                env_scripts_enabled: Some(fit.commands),
+                interpreters: Some(found.clone()),
+                packages: packages.get(identity).cloned().unwrap_or_default(),
+                tree: self.tree_of(ready)?,
                 read_limits: self.limits.manifest(),
                 ..Facts::default()
             };
             let manifest = &ready.issued.manifest;
-            let applied = effective(manifest, &one)
+            let applied = effective(manifest, &facts)
                 .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
-            if !applied.supported {
-                return Err(format!(
-                    "overlay {identity:?} does not support {os} (its runtime.os)"
-                ));
+            weakenings.extend(
+                applied
+                    .weakenings
+                    .iter()
+                    .filter(|weakening| {
+                        fit.commands || !RUN_WEAKENINGS.contains(&weakening.id.as_str())
+                    })
+                    .map(|weakening| Reported {
+                        overlay: identity.clone(),
+                        weakening: weakening.clone(),
+                    }),
+            );
+            let mut ignored = Vec::new();
+            env = composed_environment(&[(manifest, facts.clone())], env, &mut ignored)
+                .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
+            if fit.commands {
+                for script in &applied.env_scripts {
+                    // The overlay's own process: the base, every root, its own declarations.
+                    let mut environment = process_environment(
+                        &applied,
+                        &start,
+                        base,
+                        (&roots[identity], &state, identity),
+                    );
+                    environment.extend(all_roots.clone());
+                    self.run_env_script(
+                        fit,
+                        identity,
+                        &roots[identity],
+                        script,
+                        &environment,
+                        &mut env,
+                        weakenings,
+                    )?;
+                }
             }
-            weakenings.extend(applied.weakenings.into_iter().map(|weakening| Reported {
-                overlay: identity.clone(),
-                weakening,
-            }));
-            facts.push((manifest, one));
         }
-        let mut composed = Vec::new();
-        let env = composed_environment(
-            &facts,
-            Environment::new(base.clone(), windows),
-            &mut composed,
-        )
-        .map_err(|refusal| format!("the overlays' environment: {refusal}"))?;
-        let mut environment: BTreeMap<String, String> = env.values().iter().cloned().collect();
+        if fit.commands {
+            self.add_tools(fit, session, roots, &mut env)?;
+        }
+        let environment: BTreeMap<String, String> = env.values().iter().cloned().collect();
         for (name, value) in &environment {
-            let same = base.get(name) == Some(value);
-            if !same && name.to_ascii_uppercase().starts_with("AI6_") {
+            if start.get(name) != Some(value) && name.to_ascii_uppercase().starts_with("AI6_") {
                 return Err(format!(
                     "an overlay sets {name}, which is the Station's to set"
                 ));
             }
         }
-        if !session.commands {
-            // A Session that may not run commands gets nothing to run.
-            let path = environment
-                .keys()
-                .find(|name| name.eq_ignore_ascii_case("PATH"))
-                .cloned();
-            if let Some(path) = path {
-                let before = session
-                    .environment
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case("PATH"));
-                match before {
-                    Some((_, value)) => {
-                        environment.insert(path, value.clone());
-                    }
-                    None => {
-                        environment.remove(&path);
-                    }
-                }
-            }
-        } else if !session
-            .environment
-            .keys()
-            .any(|name| name.eq_ignore_ascii_case("PATH"))
-            && environment.get("PATH").map(String::as_str)
-                == Some(crate::directorates::section_00::programs::NO_PATH_SEARCH)
-        {
-            environment.remove("PATH");
+        if !fit.harness_here {
+            // The harness runs on this Station and acts through the Theater's tools: the overlays'
+            // environment is what those commands get, and it knows the roots by the same names.
+            let mut harness = session.environment.clone();
+            harness.extend(all_roots);
+            let commands = fit.commands.then_some(environment);
+            return Ok((harness, commands));
         }
-        Ok(environment)
+        let mut environment = environment;
+        if !fit.commands {
+            // A Session that may not run commands gets nothing to run.
+            for variable in ["PATH", "PYTHONPATH", "NODE_PATH"] {
+                restore(&mut environment, &session.environment, variable);
+            }
+        } else if path_of(&session.environment).is_none()
+            && path_of(&environment) == Some(fit.path.as_str())
+        {
+            restore(&mut environment, &session.environment, "PATH");
+        }
+        Ok((environment, None))
+    }
+
+    /// What code in an overlay runs with: `AGENTS_PYTHON`, and for `cmds/` the pinned `dotagents`
+    /// with a home of its own, empty, so nothing of the Station's reaches it.
+    fn add_tools(
+        &self,
+        fit: &Fit,
+        session: &SessionFacts<'_>,
+        roots: &BTreeMap<String, String>,
+        env: &mut Environment,
+    ) -> Result<(), String> {
+        let site = &fit.site;
+        let os = site.os();
+        let separator = if os == "windows" { ";" } else { ":" };
+        let uses_python = self.overlays.iter().any(|ready| {
+            holds_python_code(ready).is_some()
+                || ready
+                    .stored
+                    .read
+                    .tree()
+                    .contains("lib/python/requirements.txt")
+        });
+        if uses_python && let Some(python) = interpreter("python", &fit.tools) {
+            env.set("AGENTS_PYTHON", python.path.clone(), false);
+        }
+        let with_commands: Vec<String> = self
+            .overlays
+            .iter()
+            .filter(|ready| {
+                ready
+                    .stored
+                    .read
+                    .tree()
+                    .paths()
+                    .any(|path| path.starts_with("cmds/"))
+            })
+            .map(|ready| under(&roots[&ready.issued.identity], "cmds", os))
+            .collect();
+        if with_commands.is_empty() {
+            return Ok(());
+        }
+        let tool_bin = self.place_dotagents(fit)?;
+        let home = site.path(&format!("sessions/{}/agents", session_key(session.key)));
+        site.empty_dir(&home)?;
+        env.set("AGENTS_HOME", home, false);
+        env.set("AGENTS_CMDS_PATH", with_commands.join(separator), false);
+        let path = env.get("PATH").unwrap_or_default().to_owned();
+        let joined = if path.is_empty() {
+            tool_bin
+        } else {
+            format!("{tool_bin}{separator}{path}")
+        };
+        env.set("PATH", joined, false);
+        Ok(())
+    }
+
+    /// The pinned `dotagents.pyz` on the site and a program that runs it under `AGENTS_PYTHON`, by
+    /// the file's digest, answering the directory that program is in.
+    fn place_dotagents(&self, fit: &Fit) -> Result<String, String> {
+        let site = &fit.site;
+        let source = self
+            .limits
+            .dotagents_pyz
+            .as_deref()
+            .ok_or("station.overlays.dotagents_pyz names no dotagents.pyz")?;
+        let bytes = fs::read(source)
+            .map_err(|why| format!("station.overlays.dotagents_pyz {source}: {why}"))?;
+        let digest = Digest::of(&bytes);
+        match self.limits.dotagents_pin.as_deref() {
+            Some(pin) if pin.eq_ignore_ascii_case(&digest.to_string()) => {}
+            Some(pin) => {
+                return Err(format!(
+                    "station.overlays.dotagents_pyz {source} has the digest {digest}, not \
+                     station.overlays.dotagents_pin {pin}"
+                ));
+            }
+            None if self.limits.unpinned => {}
+            None => {
+                return Err(format!(
+                    "station.overlays.dotagents_pyz {source} has no \
+                     station.overlays.dotagents_pin; it would be {digest}"
+                ));
+            }
+        }
+        let windows = site.os() == "windows";
+        let directory = site.path(&format!("tools/{}", hex_of(&digest)));
+        let bin = under(&directory, "bin", site.os());
+        let pyz = under(&directory, "dotagents.pyz", site.os());
+        if !site.exists(&pyz)? {
+            site.write_file(&pyz, &bytes)?;
+        }
+        let (program, shim) = if windows {
+            (
+                under(&bin, "dotagents.cmd", site.os()),
+                format!("@\"%AGENTS_PYTHON%\" \"{pyz}\" %*\r\n"),
+            )
+        } else {
+            (
+                under(&bin, "dotagents", site.os()),
+                format!("#!/bin/sh\nexec \"$AGENTS_PYTHON\" '{pyz}' \"$@\"\n"),
+            )
+        };
+        if !site.exists(&program)? {
+            site.write_program(&program, shim.as_bytes())?;
+        }
+        Ok(bin)
     }
 
     /// The overlay's files, with the text of what the environment reads.
@@ -1071,11 +1358,22 @@ impl Prepared {
 
     /// The rules, routing and context of every overlay in composition order, each file marked, or
     /// the refusal naming `[overlays] context_bytes` when they do not fit.
-    fn context(&self, roots: &BTreeMap<String, String>) -> Result<Option<String>, String> {
+    fn context(
+        &self,
+        roots: &BTreeMap<String, String>,
+        handler: &str,
+        fit: &Fit,
+    ) -> Result<Option<String>, String> {
         let mut text = String::from(
             "An operator issued these overlays to this Session, so what they say is instruction. \
              Their files are read-only and outside your working directory, and stay out of it:\n",
         );
+        if !fit.harness_here {
+            text.push_str(
+                "(They are on the Theater: read them with theater_read; theater_run has their \
+                 environment.)\n",
+            );
+        }
         for ready in &self.overlays {
             let identity = &ready.issued.identity;
             let _ = writeln!(
@@ -1094,9 +1392,23 @@ impl Prepared {
                 .and_then(Data::as_array)
                 .map(|lines| lines.iter().filter_map(Data::as_str).collect())
                 .unwrap_or_default();
+            let hinted: Vec<String> = manifest
+                .get("harness")
+                .and_then(|harness| harness.get(harness_id(handler)))
+                .and_then(|hints| hints.get("context"))
+                .and_then(Data::as_array)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter_map(Data::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
             let files: Vec<String> = rules_of(manifest, &tree)
                 .into_iter()
                 .chain(context_of(manifest, &tree))
+                .chain(hinted)
                 .collect();
             if routing.is_empty() && files.is_empty() {
                 continue;
@@ -1131,7 +1443,7 @@ impl Prepared {
         &self,
         handler: &str,
         roots: &BTreeMap<String, String>,
-        loads_natively: bool,
+        (os, loads_natively): (&str, bool),
         weakenings: &mut Vec<Reported>,
     ) -> Vec<OverlaySkill> {
         let mut chosen: BTreeMap<String, OverlaySkill> = BTreeMap::new();
@@ -1152,10 +1464,7 @@ impl Prepared {
                 let key = name.to_ascii_lowercase();
                 let skill = OverlaySkill {
                     description: skill_description(&dir).unwrap_or_default(),
-                    path: format!(
-                        "{}/skills/{name}",
-                        roots[identity].trim_end_matches(['/', '\\'])
-                    ),
+                    path: under(&roots[identity], &format!("skills/{name}"), os),
                     overlay: identity.clone(),
                     name,
                     native,
@@ -1180,6 +1489,784 @@ impl Prepared {
     }
 }
 
+/// The interpreters AOS names, each with the commands that may be it, tried in order.
+const INTERPRETER_COMMANDS: [(&str, &[&str]); 5] = [
+    ("python", &["python3", "python"]),
+    ("node", &["node"]),
+    ("powershell", &["pwsh"]),
+    ("bash", &["bash"]),
+    ("sh", &["sh"]),
+];
+
+/// What a Station keeps between Sessions: what each Theater was found to have, for one check-in
+/// interval, and one lock per overlay and Theater, so two starts do not prepare it at once.
+#[derive(Default)]
+pub(crate) struct Keeper {
+    tools: Mutex<BTreeMap<(String, String), (Instant, BTreeMap<String, Found>)>>,
+    locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
+}
+
+// What it holds is a cache: two Keepers are the same as far as a configuration can say.
+impl PartialEq for Keeper {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Keeper {}
+
+impl std::fmt::Debug for Keeper {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Keeper")
+    }
+}
+
+impl Keeper {
+    fn tools(
+        &self,
+        site: &Site,
+        path: &str,
+        wanted: &[&str],
+        every: Duration,
+    ) -> Result<BTreeMap<String, Found>, String> {
+        let key = (site.key(), path.to_owned());
+        if let Ok(known) = self.tools.lock()
+            && let Some((when, found)) = known.get(&key)
+            && when.elapsed() < every
+        {
+            return Ok(found.clone());
+        }
+        let found = site.find_tools(wanted, path)?;
+        if let Ok(mut known) = self.tools.lock() {
+            known.insert(key, (Instant::now(), found.clone()));
+        }
+        Ok(found)
+    }
+
+    fn lock(&self, key: String) -> Arc<Mutex<()>> {
+        self.locks
+            .lock()
+            .map(|mut locks| locks.entry(key).or_default().clone())
+            .unwrap_or_default()
+    }
+}
+
+/// The Python found where a Session runs, or what takes its place: an interpreter's command is
+/// whichever is first on the `PATH` and answers.
+fn interpreter<'a>(name: &str, tools: &'a BTreeMap<String, Found>) -> Option<&'a Found> {
+    INTERPRETER_COMMANDS
+        .iter()
+        .find(|(known, _)| *known == name)
+        .and_then(|(_, commands)| commands.iter().find_map(|command| tools.get(*command)))
+        .filter(|found| name != "python" || found.version.contains("Python 3"))
+}
+
+/// A site's checked fit for a Session: where its overlays go and what is there to prepare them.
+pub(crate) struct Fit {
+    site: Site,
+    tools: BTreeMap<String, Found>,
+    path: String,
+    commands: bool,
+    harness_here: bool,
+}
+
+/// What an overlay holds that needs Python where it runs, beyond what AOS's own reading finds: an
+/// importable library, or commands. A program in `bin/` says what it needs itself.
+fn holds_python_code(ready: &Ready) -> Option<&'static str> {
+    let tree = ready.stored.read.tree();
+    let under = |prefix: &str| tree.paths().any(|path| path.starts_with(prefix));
+    if under("cmds/") {
+        Some("its cmds/")
+    } else if default_on(&ready.issued.manifest, "lib") && under("lib/python/") {
+        Some("its lib/python/")
+    } else {
+        None
+    }
+}
+
+impl Prepared {
+    /// Whether `site` has what this Session's overlays need. A Session that may not run commands
+    /// gets only their text and needs nothing there. Looks at the site once per `every`.
+    ///
+    /// # Errors
+    ///
+    /// The refusal a Mission waits with, naming what is missing and which overlay needs it.
+    pub(crate) fn fit(
+        &self,
+        site: Site,
+        environment: &BTreeMap<String, String>,
+        commands: bool,
+        harness_here: bool,
+        (keeper, every): (&Keeper, Duration),
+    ) -> Result<Fit, String> {
+        // The harness's own PATH says nothing of a Theater it acts on through tools.
+        let path = match path_of(environment).filter(|_| harness_here) {
+            Some(path) => path.to_owned(),
+            None => site.login_path()?,
+        };
+        let mut fit = Fit {
+            site,
+            tools: BTreeMap::new(),
+            path,
+            commands,
+            harness_here,
+        };
+        let os = fit.site.os().to_owned();
+        let empty = BTreeMap::new();
+        let session = if harness_here { environment } else { &empty };
+        for ready in &self.overlays {
+            let facts = self.plain_facts(ready, &os, session)?;
+            let applied = effective(&ready.issued.manifest, &facts)
+                .map_err(|refusal| format!("overlay {:?}: {refusal}", ready.issued.identity))?;
+            if !applied.supported {
+                return Err(format!(
+                    "overlay {:?} does not support {os} (its runtime.os), which {} runs",
+                    ready.issued.identity,
+                    fit.site.name()
+                ));
+            }
+        }
+        if !commands {
+            return Ok(fit);
+        }
+        let mut wanted: BTreeSet<String> = INTERPRETER_COMMANDS
+            .iter()
+            .flat_map(|(_, commands)| commands.iter().map(|command| (*command).to_owned()))
+            .collect();
+        wanted.insert("npm".to_owned());
+        for ready in &self.overlays {
+            let facts = self.plain_facts(ready, &os, session)?;
+            let applied = effective(&ready.issued.manifest, &facts)
+                .map_err(|refusal| format!("overlay {:?}: {refusal}", ready.issued.identity))?;
+            wanted.extend(applied.needs.commands);
+        }
+        let names: Vec<&str> = wanted.iter().map(String::as_str).collect();
+        fit.tools = keeper.tools(&fit.site, &fit.path, &names, every)?;
+        for ready in &self.overlays {
+            self.check_needs(ready, &fit, &os, session)?;
+        }
+        if self.overlays.iter().any(|ready| {
+            ready
+                .stored
+                .read
+                .tree()
+                .paths()
+                .any(|path| path.starts_with("cmds/"))
+        }) && self.limits.dotagents_pyz.is_none()
+        {
+            return Err(
+                "an issued overlay holds cmds/, which run under dotagents, and \
+                 station.overlays.dotagents_pyz names none"
+                    .to_owned(),
+            );
+        }
+        Ok(fit)
+    }
+
+    /// Why the site lacks what `ready` needs on it.
+    fn check_needs(
+        &self,
+        ready: &Ready,
+        fit: &Fit,
+        os: &str,
+        session: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let identity = &ready.issued.identity;
+        let site = fit.site.name();
+        let mut facts = self.plain_facts(ready, os, session)?;
+        facts.interpreters = Some(
+            INTERPRETER_COMMANDS
+                .iter()
+                .filter(|(name, _)| interpreter(name, &fit.tools).is_some())
+                .map(|(name, _)| (*name).to_owned())
+                .collect(),
+        );
+        let applied = effective(&ready.issued.manifest, &facts)
+            .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
+        let mut needed: Vec<(String, String)> = applied
+            .needs
+            .interpreters
+            .iter()
+            .map(|name| (name.clone(), "what it declares".to_owned()))
+            .collect();
+        if let Some(why) = holds_python_code(ready) {
+            needed.push(("python".to_owned(), why.to_owned()));
+        }
+        for (name, why) in needed {
+            if interpreter(&name, &fit.tools).is_none() {
+                let commands = INTERPRETER_COMMANDS
+                    .iter()
+                    .find(|(known, _)| *known == name)
+                    .map_or_else(|| name.clone(), |(_, commands)| commands.join(" or "));
+                return Err(format!(
+                    "{site} has no {commands}, which overlay {identity:?} needs for {why}"
+                ));
+            }
+        }
+        for command in &applied.needs.commands {
+            if !fit.tools.contains_key(command) {
+                return Err(format!(
+                    "{site} has no {command}, which overlay {identity:?} needs (its \
+                     runtime.commands or dependency file)"
+                ));
+            }
+        }
+        for (name, variant) in [("python", &applied.python), ("node", &applied.node)] {
+            let Some(minimum) = variant
+                .as_ref()
+                .and_then(|variant| variant.get("version"))
+                .and_then(Data::as_str)
+            else {
+                continue;
+            };
+            let Some(found) = interpreter(name, &fit.tools) else {
+                continue;
+            };
+            let refusal = RequiredProgram::new(name)
+                .and_then(|program| program.at_least(minimum))
+                .ok()
+                .and_then(|program| program.refuses(&found.version));
+            if let Some(why) = refusal {
+                return Err(format!(
+                    "{site}: {name} {why}, and overlay {identity:?} needs {minimum}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// What is known of an overlay before anything is placed for it.
+    fn plain_facts(
+        &self,
+        ready: &Ready,
+        os: &str,
+        session: &BTreeMap<String, String>,
+    ) -> Result<Facts, String> {
+        Ok(Facts {
+            os: os.to_owned(),
+            root: "/".to_owned(),
+            identity: ready.issued.identity.clone(),
+            state: Some("/".to_owned()),
+            pinned: ready.issued.record.pin().is_some(),
+            base_env: session.clone(),
+            enforces_network: Some(false),
+            tree: self.tree_of(ready)?,
+            read_limits: self.limits.manifest(),
+            ..Facts::default()
+        })
+    }
+
+    /// Installs an overlay's dependencies and runs its setup where it is due, per AOS's phases, and
+    /// answers its packages directories. A preparation stops at the first step that fails, and a
+    /// digest that has not been prepared is not issued.
+    fn prepare_one(
+        &self,
+        ready: &Ready,
+        fit: &Fit,
+        root: &str,
+        (session, base): (&BTreeMap<String, String>, &BTreeMap<String, String>),
+        keeper: &Keeper,
+    ) -> Result<BTreeMap<String, String>, String> {
+        let identity = &ready.issued.identity;
+        let digest = ready.stored.digest.to_string();
+        let site = &fit.site;
+        let mut session = session.clone();
+        if path_of(&session).is_none() && !fit.path.is_empty() {
+            session.insert("PATH".to_owned(), fit.path.clone());
+        }
+        let session = &session;
+        let lock = keeper.lock(format!("{}/{identity}", site.key()));
+        let _held = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = site.path(&format!("state/{identity}"));
+        let hex = hex_of(&ready.stored.digest);
+        let mut facts = self.plain_facts(ready, site.os(), session)?;
+        facts.root = root.to_owned();
+        facts.state = Some(state.clone());
+        facts.interpreters = Some(
+            INTERPRETER_COMMANDS
+                .iter()
+                .filter(|(name, _)| interpreter(name, &fit.tools).is_some())
+                .map(|(name, _)| (*name).to_owned())
+                .collect(),
+        );
+        let applied = effective(&ready.issued.manifest, &facts)
+            .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
+        let record_path = self
+            .store
+            .records()
+            .join(site.key())
+            .join(format!("{identity}.json"));
+        let mut record: Option<SetupRecord> = fs::read(&record_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+        // A Theater rebuilt since keeps no environment or state: its record says nothing of it.
+        let envs = |runtime: &str| site.path(&format!("envs/{hex}/{runtime}"));
+        let mut gone = !site.exists(&state)?;
+        for dependency in &applied.dependencies {
+            if record.as_ref().is_some_and(|r| r.digest == digest) {
+                gone |= !site.exists(&envs(&dependency.runtime))?;
+            }
+        }
+        if gone {
+            record = None;
+        }
+        let plan = preparation(
+            Change::Activate,
+            record.as_ref(),
+            Some(&digest),
+            applied.setup.as_ref(),
+            &applied.dependencies,
+            None,
+        );
+        if !site.exists(&state)? {
+            site.open_dir(&state)?;
+            site.close_dir(&state)?;
+        }
+        let environment = process_environment(&applied, session, base, (root, &state, identity));
+        let mut packages = BTreeMap::new();
+        for step in &plan.steps {
+            let done = match step.split(':').collect::<Vec<_>>().as_slice() {
+                ["empty-state"] => site.empty_dir(&state),
+                ["deps", "python"] => {
+                    let dependency = applied
+                        .dependencies
+                        .iter()
+                        .find(|dependency| dependency.runtime == "python");
+                    self.install_python(ready, fit, root, &envs("python"), dependency, &environment)
+                }
+                ["deps", "node"] => {
+                    let dependency = applied
+                        .dependencies
+                        .iter()
+                        .find(|dependency| dependency.runtime == "node");
+                    self.install_node(ready, fit, root, &envs("node"), dependency, &environment)
+                }
+                ["setup"] => applied.setup.as_ref().map_or(Ok(()), |setup| {
+                    let phase = plan.phase.map_or("sync", Phase::name);
+                    self.run_setup(ready, fit, root, &state, setup, phase, &environment)
+                }),
+                ["record"] => {
+                    let write = || -> io::Result<()> {
+                        if let Some(parent) = record_path.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        fs::write(
+                            &record_path,
+                            serde_json::to_vec_pretty(&plan.record).map_err(io::Error::other)?,
+                        )
+                    };
+                    write().map_err(|why| format!("its setup record: {why}"))
+                }
+                _ => Ok(()),
+            };
+            if let Err(why) = done {
+                let failed = step.split(':').next().unwrap_or_default();
+                let after = preparation(
+                    Change::Activate,
+                    record.as_ref(),
+                    Some(&digest),
+                    applied.setup.as_ref(),
+                    &applied.dependencies,
+                    Some(failed),
+                );
+                if !after.activates {
+                    return Err(format!(
+                        "overlay {identity:?} was not prepared on {}: {step}: {why}",
+                        site.name()
+                    ));
+                }
+            }
+        }
+        site.close_dir(&state)?;
+        for dependency in &applied.dependencies {
+            let directory = envs(&dependency.runtime);
+            packages.insert(
+                dependency.runtime.clone(),
+                match dependency.runtime.as_str() {
+                    "python" => self.python_packages(fit, &directory, base)?,
+                    _ => format!(
+                        "{}{}node_modules",
+                        directory,
+                        if site.os() == "windows" { "\\" } else { "/" }
+                    ),
+                },
+            );
+        }
+        Ok(packages)
+    }
+
+    /// `python -m venv` and pip, in hash-checking mode for a lock, from an environment of this
+    /// overlay's digest alone (`docs/agents.md`).
+    fn install_python(
+        &self,
+        ready: &Ready,
+        fit: &Fit,
+        root: &str,
+        directory: &str,
+        dependency: Option<&Dependency>,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let Some(dependency) = dependency else {
+            return Ok(());
+        };
+        let site = &fit.site;
+        let text = fs::read_to_string(ready.stored.root.join(&dependency.file))
+            .map_err(|why| format!("{}: {why}", dependency.file))?;
+        check_requirements(&text, dependency.lock.is_some())
+            .map_err(|why| format!("{}: {why}", dependency.file))?;
+        let python = interpreter("python", &fit.tools).ok_or("no Python")?;
+        site.empty_dir(directory)?;
+        let limit = Some(self.limits.deps_timeout.0);
+        let run = |argv: Vec<String>| -> Result<(), String> {
+            let finished = site.run(&Step {
+                argv,
+                cwd: Some(root),
+                env: environment,
+                limit,
+                max_output: self.limits.output_bytes.or_max() as u64,
+            })?;
+            if finished.succeeded() {
+                Ok(())
+            } else {
+                Err(finished.failure())
+            }
+        };
+        run(vec![
+            python.path.clone(),
+            "-m".to_owned(),
+            "venv".to_owned(),
+            directory.to_owned(),
+        ])?;
+        let mut pip = vec![
+            venv_python(directory, site.os()),
+            "-m".to_owned(),
+            "pip".to_owned(),
+            "install".to_owned(),
+            "--no-input".to_owned(),
+            "--disable-pip-version-check".to_owned(),
+        ];
+        if dependency.lock.is_some() {
+            pip.extend(["--require-hashes", "--no-deps", "--only-binary=:all:"].map(str::to_owned));
+        }
+        pip.push("-r".to_owned());
+        pip.push(under(root, &dependency.file, site.os()));
+        run(pip)?;
+        site.close_dir(directory)
+    }
+
+    /// `npm ci` with a lock and `npm install` without, from copies of the two files alone, so no
+    /// `.npmrc` of the overlay configures npm, and with no package's install script.
+    fn install_node(
+        &self,
+        ready: &Ready,
+        fit: &Fit,
+        root: &str,
+        directory: &str,
+        dependency: Option<&Dependency>,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let Some(dependency) = dependency else {
+            return Ok(());
+        };
+        let _ = ready;
+        let site = &fit.site;
+        let npm = fit.tools.get("npm").ok_or("no npm")?;
+        site.empty_dir(directory)?;
+        let separator = if site.os() == "windows" { "\\" } else { "/" };
+        site.copy_file(
+            &under(root, &dependency.file, site.os()),
+            &format!("{directory}{separator}package.json"),
+        )?;
+        if let Some(lock) = &dependency.lock {
+            site.copy_file(
+                &under(root, lock, site.os()),
+                &format!("{directory}{separator}package-lock.json"),
+            )?;
+        }
+        let verb = if dependency.lock.is_some() {
+            "ci"
+        } else {
+            "install"
+        };
+        let finished = site.run(&Step {
+            argv: vec![
+                npm.path.clone(),
+                verb.to_owned(),
+                "--ignore-scripts".to_owned(),
+                "--no-audit".to_owned(),
+                "--no-fund".to_owned(),
+            ],
+            cwd: Some(directory),
+            env: environment,
+            limit: Some(self.limits.deps_timeout.0),
+            max_output: self.limits.output_bytes.or_max() as u64,
+        })?;
+        if !finished.succeeded() {
+            return Err(finished.failure());
+        }
+        site.close_dir(directory)
+    }
+
+    fn python_packages(
+        &self,
+        fit: &Fit,
+        directory: &str,
+        base: &BTreeMap<String, String>,
+    ) -> Result<String, String> {
+        let finished = fit.site.run(&Step {
+            argv: vec![
+                venv_python(directory, fit.site.os()),
+                "-c".to_owned(),
+                "import site; print(site.getsitepackages()[-1])".to_owned(),
+            ],
+            cwd: None,
+            env: base,
+            limit: Some(Duration::from_secs(60)),
+            max_output: 64 * 1024,
+        })?;
+        if !finished.succeeded() {
+            return Err(format!("its packages directory: {}", finished.failure()));
+        }
+        Ok(String::from_utf8_lossy(&finished.stdout).trim().to_owned())
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a step's whole context, used once"
+    )]
+    fn run_setup(
+        &self,
+        ready: &Ready,
+        fit: &Fit,
+        root: &str,
+        state: &str,
+        setup: &SetupRun,
+        phase: &str,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let _ = ready;
+        let site = &fit.site;
+        let script = under(root, &setup.path, site.os());
+        let mut arguments = vec![phase.to_owned()];
+        arguments.extend(setup.args.iter().cloned());
+        let argv = interpreter_argv(&setup.interpreter, &script, &arguments, &fit.tools)?;
+        let mut env = environment.clone();
+        env.insert("AOS_SETUP_PHASE".to_owned(), phase.to_owned());
+        site.open_dir(state)?;
+        let finished = site.run(&Step {
+            argv,
+            cwd: Some(root),
+            env: &env,
+            limit: (setup.timeout > 0).then(|| Duration::from_secs(setup.timeout)),
+            max_output: self.limits.output_bytes.or_max() as u64,
+        });
+        let closed = site.close_dir(state);
+        let finished = finished?;
+        closed?;
+        if finished.succeeded() {
+            Ok(())
+        } else {
+            Err(finished.failure())
+        }
+    }
+
+    /// Runs an env script as a step does, and sets what it printed: an environment value, never a
+    /// variable that is the consumer's or the Station's.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a step's whole context, used once"
+    )]
+    fn run_env_script(
+        &self,
+        fit: &Fit,
+        identity: &str,
+        root: &str,
+        script: &ScriptRun,
+        environment: &BTreeMap<String, String>,
+        env: &mut Environment,
+        weakenings: &mut Vec<Reported>,
+    ) -> Result<(), String> {
+        let refuse = |why: String| {
+            format!(
+                "overlay {identity:?}: its env script {}: {why}",
+                script.path
+            )
+        };
+        let path = under(root, &script.path, fit.site.os());
+        let argv = interpreter_argv(&script.interpreter, &path, &script.args, &fit.tools)
+            .map_err(refuse)?;
+        let finished = fit
+            .site
+            .run(&Step {
+                argv,
+                cwd: Some(root),
+                env: environment,
+                limit: (script.timeout > 0).then(|| Duration::from_secs(script.timeout)),
+                max_output: self.limits.output_bytes.or_max() as u64,
+            })
+            .map_err(refuse)?;
+        if !finished.succeeded() {
+            return Err(refuse(finished.failure()));
+        }
+        let values =
+            read_env_script_output(&finished.stdout).map_err(|why| refuse(why.to_string()))?;
+        for (name, value) in values {
+            if is_reserved_variable(&name) {
+                return Err(refuse(format!("it sets {name}, which is reserved")));
+            }
+            let Some(value) = value else {
+                env.unset(&name);
+                continue;
+            };
+            if is_sensitive_variable(&name) {
+                weakenings.push(Reported {
+                    overlay: identity.to_owned(),
+                    weakening: Weakening {
+                        id: "env-sensitive".to_owned(),
+                        subject: name.clone(),
+                    },
+                });
+            }
+            env.set(&name, value, false);
+        }
+        Ok(())
+    }
+}
+
+/// `relative`, `/`-separated in an overlay, under `root` on `os`.
+fn under(root: &str, relative: &str, os: &str) -> String {
+    let separator = if os == "windows" { "\\" } else { "/" };
+    format!(
+        "{}{separator}{}",
+        root.trim_end_matches(['/', '\\']),
+        relative.replace('/', separator)
+    )
+}
+
+fn venv_python(directory: &str, os: &str) -> String {
+    if os == "windows" {
+        format!("{directory}\\Scripts\\python.exe")
+    } else {
+        format!("{directory}/bin/python")
+    }
+}
+
+/// How AOS runs a script under `interpreter`; arguments are a list, never read by a shell.
+fn interpreter_argv(
+    interpreter_name: &str,
+    script: &str,
+    arguments: &[String],
+    tools: &BTreeMap<String, Found>,
+) -> Result<Vec<String>, String> {
+    let found = interpreter(interpreter_name, tools)
+        .ok_or_else(|| format!("no {interpreter_name} to run it"))?;
+    let mut argv = vec![found.path.clone()];
+    if interpreter_name == "powershell" {
+        argv.extend(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"].map(str::to_owned));
+    }
+    argv.push(script.to_owned());
+    argv.extend(arguments.iter().cloned());
+    Ok(argv)
+}
+
+/// The variables of a Session's environment an overlay's own process keeps: what a host needs to
+/// start one and where a package manager finds its index. No credential a Session is issued is here.
+const PROCESS_VARIABLES: [&str; 23] = [
+    "PATH",
+    "PATHEXT",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TERM",
+    "SSL_CERT_FILE",
+    "PIP_INDEX_URL",
+    "PIP_CERT",
+    "NPM_CONFIG_REGISTRY",
+    "NODE_EXTRA_CA_CERTS",
+];
+
+/// The base environment of an overlay's own processes, from a Session's.
+fn process_base(session: &BTreeMap<String, String>, path: &str) -> BTreeMap<String, String> {
+    let mut base: BTreeMap<String, String> = session
+        .iter()
+        .filter(|(name, _)| {
+            PROCESS_VARIABLES
+                .iter()
+                .any(|kept| name.eq_ignore_ascii_case(kept))
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    if !base.keys().any(|name| name.eq_ignore_ascii_case("PATH")) && !path.is_empty() {
+        base.insert("PATH".to_owned(), path.to_owned());
+    }
+    #[cfg(windows)]
+    for name in ["SYSTEMROOT", "TEMP", "TMP", "PATHEXT", "COMSPEC"] {
+        if !base.keys().any(|known| known.eq_ignore_ascii_case(name))
+            && let Some(value) = std::env::var_os(name)
+        {
+            base.insert(name.to_owned(), value.to_string_lossy().into_owned());
+        }
+    }
+    base
+}
+
+/// What one overlay's process gets (`spec/v0/runtime.md#what-a-step-receives`): the base, this
+/// overlay's own declarations and the `AOS_` variables.
+fn process_environment(
+    applied: &crate::directorates::q::overlays::Effective,
+    session: &BTreeMap<String, String>,
+    base: &BTreeMap<String, String>,
+    (root, state, identity): (&str, &str, &str),
+) -> BTreeMap<String, String> {
+    let mut environment: BTreeMap<String, String> = base.clone();
+    // Substituted against the Session's, but only what this overlay itself declared is passed on.
+    environment.extend(
+        applied
+            .env
+            .values()
+            .iter()
+            .filter(|(name, value)| session.get(name) != Some(value))
+            .cloned(),
+    );
+    environment.insert("AOS_OVERLAY_ROOT".to_owned(), root.to_owned());
+    environment.insert("AOS_OVERLAY_NAME".to_owned(), normalize_name(identity));
+    environment.insert("AOS_OVERLAY_STATE".to_owned(), state.to_owned());
+    environment
+}
+
+/// Weakenings that say something ran, which do not hold for a Session given only text.
+const RUN_WEAKENINGS: [&str; 7] = [
+    "deps-network",
+    "unlocked-dependencies",
+    "setup-network",
+    "network-not-enforced",
+    "env-script",
+    "no-timeout",
+    "script-not-run",
+];
+
+/// The value of `PATH` in `environment`, under any case.
+fn path_of(environment: &BTreeMap<String, String>) -> Option<&str> {
+    environment
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| value.as_str())
+}
+
 /// The text after a leading front matter block: an optional byte-order mark, a first line that is
 /// `---`, up to the next that is `---` or `...`. Without that closing line there is none.
 fn without_front_matter(text: &str) -> &str {
@@ -1202,6 +2289,17 @@ fn without_front_matter(text: &str) -> &str {
 
 /// Refuses a copy of an overlay inside the working directory, where a commit could hold it.
 fn check_outside(root: &str, working_directory: &str) -> Result<(), String> {
+    let within = |path: &str, directory: &str| {
+        let directory = directory.trim_end_matches(['/', '\\']);
+        path.strip_prefix(directory)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '\\']))
+    };
+    if within(root, working_directory) {
+        return Err(format!(
+            "an overlay's copy at {root} is inside the working directory {working_directory}, \
+             where a commit could hold it"
+        ));
+    }
     let canonical = |path: &str| fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
     if canonical(root).starts_with(canonical(working_directory)) {
         return Err(format!(
