@@ -2283,7 +2283,8 @@ non-positive time (`[registry.limits.timeline]`: 64, 256, 8); it stores the even
 files. `submit_cable` records a `cable`/`sent` event for a new Cable under the sender's
 Operation (sender Station and Agent, Mission and Session, details `cable`, `scope`,
 `recipients`; never the body or the target name), and `authorize_sleeper` /
-`revoke_sleeper` record `sleeper`/`authorized` and `revoked` (detail `sleeper`). Universal
+`revoke_sleeper` record `sleeper`/`authorized` and `revoked` (detail `sleeper`); see Sleepers for the
+rest of that kind. Universal
 Exports records lifecycle transitions and control outcomes. A failed timeline write never
 fails the Cable or authorization it describes. Events never hold prompts, messages, Cable
 bodies, terminal bytes or secrets.
@@ -3506,9 +3507,13 @@ pub struct Sleeper {
 impl Sleeper {
     pub fn validate(&self) -> Result<(), String>;   // also refuses a `stations` entry that is no Station ID
     pub fn fingerprint(&self) -> String;   // SHA-256 over every field; any edit changes it
-    pub fn due_window(&self, now: i64, authorized_at: i64, limits: &SleeperLimits) -> Option<i64>;   // no older than window_age
+    pub fn due_window(&self, now: i64, since: i64, limits: &SleeperLimits) -> Option<i64>;   // after since, within catch_up
+    pub fn latest_window(&self, now: i64, limits: &SleeperLimits) -> Option<i64>;
+    pub fn window_before(&self, window: i64, limits: &SleeperLimits) -> Option<i64>;
 }
-pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64 }
+pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64, pub mark: Option<SleeperMark> }
+pub struct SleeperMark { pub since: i64, pub window: i64, pub settled: bool, pub why: Option<String> }
+impl SleeperMark { pub fn new(since: i64, window: i64) -> Self; }   // settled when window <= since
 pub enum Fire { Queued, AlreadyFired, InFlight /* a standing Sleeper's earlier attempt is still in flight */ }
 pub fn window_of(brief: &Brief) -> Option<&str>;   // the window a Sleeper's brief was queued for
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
@@ -3524,7 +3529,8 @@ pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64
 
 SleeperStore::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
 SleeperStore::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
-SleeperStore::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>
+SleeperStore::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>   // and its mark
+SleeperStore::mark_sleeper(operation: &str, name: &str, mark: &SleeperMark) -> io::Result<bool>   // false with no approval
 SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, round: (i64, Option<&str>), received_by: &str) -> io::Result<Fire>  // (window, station)
 ```
 
@@ -3550,9 +3556,19 @@ for the Operation and the sleeper's Agent or role, within the sleeper's `station
 resources and quarantines are ignored there (they only delay a brief), and a Station dark
 past `[registry.limits.stations] gone_dark_after` gets no round until it checks in again.
 `authorize_sleeper` refuses a prompt over `[registry.limits.sleepers] prompt_bytes`.
-Authorizations are stored under `sleepers/`. The
-Headquarters holder fires only sleepers whose stored fingerprint equals the current
-definition, using windows after the approval time and no older than `window_age` (a day).
+Authorizations are stored under `sleepers/` (SQL: the record column of
+`ai6_sleeper_authorizations`), each with what the Headquarters holder has reckoned of its windows
+(`mark`), which an approval given again keeps and a revoke ends. The Headquarters holder fires only
+sleepers whose stored fingerprint equals the current definition, using the latest window after
+`mark.since` (the first approval's time) and within `[registry.limits.sleepers] catch_up` (`None`,
+the window's own period; `TimeLimit::UNBOUNDED`, no limit). Each window that passes unfired is
+recorded as `sleeper`/`skipped` (details `sleeper`, `window`, `why`) once a later window comes, or at
+once when past the bound; `skipped_events` (64) are named one by one and any older ones are one
+event. A late firing is `sleeper`/`late`. A Sleeper brief filed as failed records
+`sleeper`/`attempt-failed` (details `sleeper`, `window`, `reason`; never a harness's words, which
+are in the outcome with `reason_from_harness`). A Station holding a standing attempt that is stalled,
+has no live Session or re-attach pending, or failed to start, when the next window is due, fails it,
+audits `sleeper.superseded` (target `<mission> <window>`) and records `sleeper`/`superseded`.
 
 ## Station logbooks (`ai6::directorates::registry::logbook`)
 
@@ -4969,7 +4985,12 @@ it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
 `Abandoned` Mission again as a new attempt, for `agent_id` when given and otherwise its
 Agent; it keeps `session_ids` and the safe house report, and refuses every other state
-with `InvalidTransition`. `reopen(id, agent_id, prompt, digest)` queues a `Done`, `Failed`,
+with `InvalidTransition`. `retry_past_brief(id, agent_id)` is that on the Station's own word, and
+sets `Mission.runs_past_brief` until it starts: such a Mission starts whatever its brief was filed as,
+while `forget_queued(id)` takes any other out of the book when its brief settled before it started.
+`fail_reported(id, said)` fails it as its harness reported, keeping `Mission.reported_failure` for the
+outcome; `refuse_resume(id, why)` sets `Mission.resume_refused`, so the next start begins a new Session.
+`reopen(id, agent_id, prompt, digest)` queues a `Done`, `Failed`,
 `Blown` or `Abandoned` Mission as its next attempt for a later claim of its brief (a reopened
 item, a standing Sleeper's window): the new prompt, the Agent, `Mission.brief_digest`, and the launch
 manifest's Session hold and runner let go, so the next start records a run after the last

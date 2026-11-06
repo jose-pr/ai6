@@ -391,6 +391,10 @@ standing = true   # optional: one Mission, each window an attempt of it
 resume = true     # optional, needs standing: resume the last attempt's Session
 ```
 
+A failed attempt leaves a standing order standing; a stalled one is superseded by the next window;
+one late firing follows a missed window, within `[registry.limits.sleepers] catch_up`; and every
+window that passes unfired is on the timeline, with why. See [Sleepers](missions.md#sleepers).
+
 ## Subordinate Operations
 
 An Operation can sit under another: `parent` names the parent Operation's ID, and an

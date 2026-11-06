@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   go on to the next route. The `registry` secret provider serves any sealed value. The pool board
   shows a login's Stations, end, last renewal, lease holder and state. `[registry.limits.accounts]
   sealed_bytes` (4 MiB). The commands to add a login come later.
+- A standing order keeps behaving: a failed attempt's reason is in its outcome
+  (`reason_from_harness` when the words are its harness's) and on the timeline (`sleeper`,
+  `attempt-failed`) and board (`order-attempt-failed`), and the next window fires as the next attempt;
+  `resume = true` starts a new Session when the provider refuses the resume or the last attempt
+  failed; a window that finds its attempt stalled, with no live Session, or not starting supersedes it
+  (audited `sleeper.superseded`, timeline `sleeper`, `superseded`). Every window that passes unfired
+  is on the timeline (`sleeper`, `skipped`, naming why), `[registry.limits.sleepers] skipped_events`
+  (64) of them one by one, and the approval keeps what is reckoned (`SleeperMark`,
+  `SleeperStore::mark_sleeper`).
 - A settled Source item reopens as its Mission's next attempt (same UID and handle): an
   instance's `reopen` is `label` (the default: a label added since AI6 last read the item, its own
   status and Agent labels aside), `comment` (also a comment, not AI6's, by someone the tracker lets
@@ -268,6 +277,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `[registry.limits.sleepers] catch_up` replaces `window_age`: a missed window fires once, late, within
+  its own period by default, not within a day, or within the seconds set, and `none` keeps no limit. An
+  approval given again for an edited order may fire the window it missed.
+- A cancel accepts a Mission that ended: it stays as it is and the control is `applied` with its
+  state. A control's route knows a Mission by its brief in any state, and `mission withdraw`'s `409`
+  names `mission cancel`.
 - `mission retry` without an Agent chooses one again from the roster as it is now: the best Agent
   qualified for the Mission's role and its brief's tags, not quarantined, held or retired, whose
   handler the Station can run; the Agent it had keeps it while it ranks as high. A named Agent is
@@ -537,6 +552,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Mission waiting to start whose brief was filed meanwhile looped in "did not start and will be
+  tried again" for good, across restarts, with nothing able to stop it: it now reads the brief first
+  and is dropped (`mission`, `dropped`); an operator's retry still runs. An Agent not posted to the
+  Operation fails the Mission and its brief at once, naming it.
 - A Sleeper's windows are no longer held as duplicates of each other for sharing its title; a
   person's brief with the same title is still a duplicate of an open window.
 - `ai6 config rm secret NAME` counts only real references to a secret: a `secrets` list entry, a

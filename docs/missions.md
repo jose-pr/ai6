@@ -156,7 +156,7 @@ its Station:
 
 | Action | Accepted when the Mission is | Effect |
 | --- | --- | --- |
-| `cancel` | queued, working, blocked, stalled, parked, quarantined or held | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below). |
+| `cancel` | any state | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below), and one that already ended stays as it is and answers `applied` with its state. |
 | `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
 | `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
 | `interrupt` | working | The Session's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
@@ -172,7 +172,7 @@ curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/mission-007/actions" \
 ```
 
 A Mission Universal Exports does not know under the Operation in the path (no Session record,
-brief lease, queued brief or board entry of that Operation), or that any of them puts in
+brief lease, brief in any state or board entry of that Operation), or that any of them puts in
 another Operation, is refused `404`, before anything is audited. Otherwise
 Universal Exports audits the request (`mission.cancel`, `mission.retry`, `mission.resume`,
 `session.interrupt`) and queues the control for the Station holding the Mission's latest
@@ -181,7 +181,9 @@ Headquarters Station. A Station that has gone dark is passed over. That Station 
 authority: it checks that the Mission is in its book under that Operation, that it still
 holds the Session's lease with its fencing token and, when the request named a
 `session_id`, that the Session is still the Mission's current one, then applies the
-control and reports `applied` or `rejected` with the Mission's state and a reason. Follow
+control and reports `applied` or `rejected` with the Mission's state and a reason. A cancel of a
+Mission no book holds, whose brief has ended, is `applied` with the brief's state; with no Station to
+ask, Universal Exports answers that itself. Follow
 the control with `GET .../actions/{control_id}`; one no Station acts on within two minutes
 is `expired`. Repeating a request with the same `idempotency_key` returns the first one.
 
@@ -208,8 +210,9 @@ curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/G-12/withdraw" \
 
 The brief is filed as failed with the outcome `withdrawn` and the reason "withdrawn by PERSON:
 NOTE"; a Source still gets its report. The withdrawal is audited (`mission.withdraw`) and put on the
-Operation's timeline (`intake`, `withdrawn`). A Mission a Station has taken answers `409`, and one
-the Operation has no such brief for `404`. `ai6ctl mission withdraw ID [--note TEXT]` does the same,
+Operation's timeline (`intake`, `withdrawn`). A Mission a Station has taken, or that ended, answers
+`409` naming `mission cancel`, and one the Operation has no such brief for `404`. `ai6ctl mission
+withdraw ID [--note TEXT]` does the same,
 and a `cancel` of such a Mission withdraws it with no note and answers `applied`, state `failed`.
 
 ### A cancel the Station never confirms
@@ -221,6 +224,16 @@ Headquarters Station files the brief as failed, "cancelled; the Station did not 
 Station and the Mission's Session at the time, and releases its lease. The Station holding the
 Mission, finding at its next check-in that its brief was settled so while it is still on that
 Session, stops the Mission; one retried since runs on.
+
+### A brief that settles before its Mission starts
+
+A Mission waiting to start reads its brief first. A brief the Registry has filed as done or failed
+while it waited, as when a restart lapsed its lease and intake could no longer place it, is not
+started or tried again: the Mission is dropped from the Station's book, and the timeline says so
+(`mission`, `dropped`). A retry an operator or a review asks for after the brief was filed still
+runs. A start that cannot succeed whatever is tried, because the Mission's Agent is not posted to the
+Operation, fails the Mission at once with that reason, and its brief with it; other start failures
+are tried again after `[scheduler] retry_delay`.
 
 ## Checking an outcome
 
@@ -460,7 +473,7 @@ from `GET /v1/user/operations/{operation_id}/timeline` or Outer Office's Timelin
 | `lifecycle` | Universal Exports | A Mission's state changed, on which Session and Station. |
 | `control` | Universal Exports | A cancel, retry, resume or interrupt was applied, rejected or expired, and the state after. |
 | `cable` | the sending Station | An Agent sent a Cable: sender, scope and recipient count. |
-| `sleeper` | the Registry | A Sleeper was authorized or revoked, and by whom. |
+| `sleeper` | the Registry, the Stations | A Sleeper was authorized or revoked, and by whom; a window was `skipped` and why, or fired `late`; an attempt `started` or `resumed` its Session, `attempt-failed` or was `superseded`. |
 | `green_ink` | the Station | An Agent asked for green ink (`requested`), or was told the decision (`approved`, `rejected`, `expired`): the step, its target and the request, and who signed. |
 | `audit` | Universal Exports | Mission requests and controls, proposal decisions, Agent role, quarantine and Station settings changes. |
 
@@ -1005,12 +1018,35 @@ ai6 sleeper revoke G nightly-deps
   `each_station`), `<operation>-<sleeper>-<n>`, and each window is a new attempt of it: the run
   `<handle>.<attempt>` records the window it answers (`window` on its Session record), and the
   board and scorecards show one Mission with a run history. A window that comes while an attempt
-  is queued, held or running is skipped and named once in the Headquarters Station's log; it
-  fires when the attempt settles only if it is still the latest window and less than a day old.
+  is queued, held or running does not fire; it fires when the attempt settles if it is still the
+  latest window and within `catch_up`, and is on the timeline as skipped otherwise.
   With `resume = true` as well, an attempt resumes the last attempt's provider Session when that
-  attempt ran on the same handler and its provider gave it an ID, and starts a new Session
-  otherwise; the timeline says which (`sleeper`, `resumed` or `started`, with the window).
-  `resume` without `standing` is refused when the roster loads.
+  attempt ran on the same handler, did not fail, and its provider gave it an ID, and starts a new
+  Session otherwise, as it does when the provider refuses the resume; the timeline says which
+  (`sleeper`, `resumed` or `started`, with the window). `resume` without `standing` is refused when
+  the roster loads.
+- **A failed attempt.** A failed attempt leaves the order standing: the next window fires as the
+  next attempt, and the reason is in the attempt's outcome. The attempt of any Sleeper that fails
+  is on the timeline (`sleeper`, `attempt-failed`, with the window and the reason, or a line saying
+  the harness's words are in the outcome) and, with a provider Session, on the board (reason
+  `order-attempt-failed`). It asks for no approval. Cancelling an attempt is not a failure, and leaves
+  the order standing too; `ai6 sleeper revoke` stops it.
+- **A stalled attempt.** The Station holding a standing Mission's attempt looks at each check-in:
+  when the order's next window has come and the attempt is `stalled` (past its Agent's
+  `stall_timeout`), has no live Session on the Station and no re-attach that may still bring one
+  back, or did not start, the window supersedes it. The attempt fails with that reason, its harness
+  stopped, audited (`sleeper.superseded`) and on the timeline (`sleeper`, `superseded`), and the
+  window fires as the next attempt. It is not charged to the Agent. An attempt waiting for a person
+  (`blocked` with a reason), a provider's limit (`parked`) or an operator's release (`quarantined`)
+  is left alone, and its windows are recorded as skipped.
+- **A missed window.** The latest window that has not fired fires once, late, while it is within
+  `[registry.limits.sleepers] catch_up`: by default its own period, the time since the window before
+  it; `none` keeps no limit. It is never more than one. Every other window that passes unfired is on
+  the timeline when a later one comes (`sleeper`, `skipped`, with the window and why: not authorized,
+  the scheduler was not running, the last attempt was in flight, no Station could take it, or older
+  than its catch-up bound), up to `skipped_events` of them, the older ones as one event. A window
+  before an order's first approval never fires and is not recorded. An edit withdraws the approval,
+  and the approval given again may fire what the order missed once; a revoke ends what was owed.
 - **Duplicates.** A Sleeper's windows share its title, and are never held as duplicates of each
   other; a person's brief with the same title is still a duplicate of an open window.
 - **Fingerprint.** Every field the sleeper sets is part of what `authorize` approves, so

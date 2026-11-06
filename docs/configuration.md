@@ -450,9 +450,10 @@ global one.
 <!-- schema:registry.limits.sleepers:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `window_age` | 86,400 (a day) | **A late window still fires within.** Seconds a scheduled window may be late and still fire; an older one is skipped. |
+| `catch_up` | see meaning | **A missed window still fires within.** Seconds a missed window may be late and still fire, once; an older one is skipped and recorded. `none` keeps no limit. Default: the window's own period, the time since the window before it. |
 | `prompt_bytes` | 16 KiB | **Longest Sleeper prompt.** Bytes of a Sleeper's prompt. |
 | `lookback_days` | 366 | **Days searched back for a window.** Days a schedule is searched back for its latest window. |
+| `skipped_events` | 64 | **Skipped windows named one by one.** Skipped windows the timeline names one by one when a later window comes; any older ones are one event. |
 <!-- schema:registry.limits.sleepers:end -->
 
 `[registry.limits.issues]`
