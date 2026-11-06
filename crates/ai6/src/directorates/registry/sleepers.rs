@@ -1199,10 +1199,9 @@ pub(super) mod tests {
     #[test]
     fn catch_up_bounds_a_late_window_or_keeps_no_limit() {
         let three = at("2026-10-25") + 3 * 3600;
-        let bounded = |bound| {
-            let mut limits = SleeperLimits::default();
-            limits.catch_up = Some(bound);
-            limits
+        let bounded = |bound| SleeperLimits {
+            catch_up: Some(bound),
+            ..SleeperLimits::default()
         };
         let hour = bounded(crate::bounds::TimeLimit::secs(3600));
         assert_eq!(
