@@ -4689,10 +4689,6 @@ async fn start_mission(
     // Before what is the Station's to set, which an overlay's environment does not override.
     let mut issued_overlays = crate::directorates::section_00::agent::SessionOverlays::default();
     let mut issued_digests = Vec::new();
-    #[cfg_attr(
-        not(feature = "cables-mcp"),
-        allow(unused_mut, unused_variables, reason = "only the Theater tools use it")
-    )]
     let mut theater_environment = None;
     if let Some((issued, fit)) = issued {
         let (worker_environment, worker_handler, worker_directory, worker_mission) = (
@@ -4736,8 +4732,8 @@ async fn start_mission(
         issued_overlays = delivered.overlays;
         issued_digests = delivered.digests;
     }
-    if !review {
-        if let Some(briefing) = configure_station_cover(
+    if !review
+        && let Some(briefing) = configure_station_cover(
             &state.roster,
             mission.operation_id.as_deref(),
             &agent.id,
@@ -4745,9 +4741,8 @@ async fn start_mission(
             &mut environment,
         )
         .map_err(configuration_error)?
-        {
-            initial_context.push(briefing);
-        }
+    {
+        initial_context.push(briefing);
     }
     if let Some(refusal) = program.as_deref().and_then(|program| {
         crate::directorates::section_00::programs::missing_program(&agent.id, program, &environment)
@@ -4852,6 +4847,9 @@ async fn start_mission(
             "this build has no Theater tools, which remote-hands mode needs",
         ));
     }
+    // Only the Theater tools hand the overlays' environment to commands.
+    #[cfg(not(feature = "cables-mcp"))]
+    drop(theater_environment);
     let working_directory = area.path.clone();
     // Leased last, so every failure after it goes through `start_failure`, which revokes.
     let site = accounts::Site {
@@ -5606,10 +5604,6 @@ async fn resume_mission(
     let mut resumed_overlays = crate::directorates::section_00::agent::SessionOverlays::default();
     let mut resumed_digests = None;
     let mut resumed_context = None;
-    #[cfg_attr(
-        not(feature = "cables-mcp"),
-        allow(unused_mut, unused_variables, reason = "only the Theater tools use it")
-    )]
     let mut resumed_theater_environment = None;
     if !review && reattach.is_none() {
         let (worker, worker_agent, worker_operation) = (
@@ -5841,6 +5835,8 @@ async fn resume_mission(
             "this build has no Theater tools, which remote-hands mode needs",
         ));
     }
+    #[cfg(not(feature = "cables-mcp"))]
+    drop(resumed_theater_environment);
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
     let cable = if runner.is_some() || resume_wrapped {

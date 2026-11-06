@@ -35,6 +35,12 @@ mod site;
 pub(crate) use site::Site;
 use site::{Found, Step, store_tree_files};
 
+/// Environment variables by name.
+type Variables = BTreeMap<String, String>;
+
+/// The programs a site was found to have, by command.
+type Tools = BTreeMap<String, Found>;
+
 /// A weakening a delivery reports, naming its overlay.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Reported {
@@ -128,7 +134,7 @@ impl Store {
                 root.display()
             )
         };
-        let read = read_overlay(&root, &self.limits).map_err(|why| tampered(why))?;
+        let read = read_overlay(&root, &self.limits).map_err(&tampered)?;
         if read.digest.digest != *digest {
             return Err(tampered(format!(
                 "has the digest {}, not {digest}",
@@ -1074,8 +1080,7 @@ impl Prepared {
             .collect();
         if !native.is_empty() {
             let (digest, here) = self.store.plugin(&native)?;
-            let files =
-                store_tree_files(&here, &self.limits.tree()).map_err(|why| format!("{why}"))?;
+            let files = store_tree_files(&here, &self.limits.tree())?;
             let plugin = site.tree("plugins", &digest, &here, &files, &self.limits.tree())?;
             check_outside(&plugin, session.working_directory)?;
             delivered.overlays.plugin_dir = Some(plugin);
@@ -1099,7 +1104,7 @@ impl Prepared {
         packages: &BTreeMap<String, BTreeMap<String, String>>,
         base: &BTreeMap<String, String>,
         weakenings: &mut Vec<Reported>,
-    ) -> Result<(BTreeMap<String, String>, Option<BTreeMap<String, String>>), String> {
+    ) -> Result<(Variables, Option<Variables>), String> {
         let site = &fit.site;
         let windows = os == "windows";
         // What the overlays' environment starts from: a Theater's PATH when the Agent names none,
@@ -1502,7 +1507,7 @@ const INTERPRETER_COMMANDS: [(&str, &[&str]); 5] = [
 /// interval, and one lock per overlay and Theater, so two starts do not prepare it at once.
 #[derive(Default)]
 pub(crate) struct Keeper {
-    tools: Mutex<BTreeMap<(String, String), (Instant, BTreeMap<String, Found>)>>,
+    tools: Mutex<BTreeMap<(String, String), (Instant, Tools)>>,
     locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
 }
 
