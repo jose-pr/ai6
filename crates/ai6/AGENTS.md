@@ -4260,6 +4260,7 @@ Store class (catalogs, icons) is not implemented.
 ```rust
 pub const MANIFEST: &str = "overlay.cfg";
 pub const LATER_MANIFEST: &str = "OVERLAY.md";   // read_overlay refuses a tree with it and no overlay.cfg
+pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String>;   // [hooks], or a root hook.<ext>: read_overlay refuses it
 #[non_exhaustive] pub enum OverlayFrom { Source(Source), Path(PathBuf) }
 pub struct OverlayRecord;   // [overlay.<name>]
 impl OverlayRecord {

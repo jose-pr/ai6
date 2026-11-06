@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   pinned `dotagents` with an empty `AGENTS_HOME`. Weakenings are on the timeline (`overlay`, `weakened`).
   `[overlays]` gains `context_bytes`, `fetch_timeout`, `deps_timeout`, `output_bytes`, `dotagents_pyz` and
   `dotagents_pin`.
+- An overlay that a later edition of the format would read differently is refused, naming why: one with
+  `OVERLAY.md` and no `overlay.cfg`, and one asking for hooks (`[hooks]`, or a root `hook.<ext>`), which
+  this AI6 does not run.
 - A settled Source item reopens as its Mission's next attempt (same UID and handle): an
   instance's `reopen` is `label` (the default: a label added since AI6 last read the item, its own
   status and Agent labels aside), `comment` (also a comment, not AI6's, by someone the tracker lets

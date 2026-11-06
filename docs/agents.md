@@ -1103,6 +1103,10 @@ overlays = ["rust"]
   `overlay.cfg`. This AI6 reads edition `0.1.0-draft` at `061b8f5`: an overlay with `OVERLAY.md` and
   no `overlay.cfg` is refused, naming the file, by `ai6 overlay pin` and at every Session start; it is
   never read as having no manifest.
+- **Hooks.** A later AOS edition runs an overlay's hooks (a `[hooks]` table, or a `hook.<ext>`
+  script at the root), and a `pre-tool` hook can deny a call. This AI6 runs none, so an overlay that
+  asks for one is refused, naming the table or the file, rather than run with weaker guards than its
+  author wrote.
 - **`ai6 overlay pin DIR`** reads an overlay as a Station does, running nothing: it prints each
   file with its SHA-256 and the `pin`. It exits non-zero, printing no pin, when `overlay.cfg`
   does not read or validate against the files, or a skill fails the `SKILL.md` checks. Problems
