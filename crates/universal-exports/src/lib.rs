@@ -13,6 +13,7 @@ mod follow_up_tests;
 mod green_ink;
 mod held;
 mod issues;
+pub mod liaison;
 mod login_limit;
 mod memories;
 mod models;
@@ -550,6 +551,8 @@ pub struct Gateway {
     source_reads: Arc<source_reads::SourceReads>,
     /// The images people send Moneypenny, kept beside the pages.
     images: Option<Arc<moneypenny::images::ImageStore>>,
+    /// The peers Liaison serves A2A to, on links and on `/v1/a2a`.
+    liaison: Option<Arc<liaison::LiaisonConfig>>,
 }
 
 /// A bearer the gateway makes for itself to read, in this process, as a person who proved who
@@ -657,6 +660,7 @@ impl Gateway {
             stand_ins: Arc::default(),
             source_reads: Arc::default(),
             images: None,
+            liaison: None,
         }
     }
 
@@ -691,6 +695,21 @@ impl Gateway {
         let mut gateway = Self::with_registry(config, registry);
         gateway.access = Some(access);
         gateway
+    }
+
+    /// Serves A2A to `config`'s peers: on the HTTP JSON-RPC binding at `/v1/a2a` to a person
+    /// signed in as a peer's principal, and on links through [`Gateway::liaison`] and a
+    /// [`liaison::LinkListener`]. Without it `/v1/a2a` answers 404.
+    #[must_use]
+    pub fn with_liaison(mut self, config: liaison::LiaisonConfig) -> Self {
+        self.liaison = Some(Arc::new(config));
+        self
+    }
+
+    /// Liaison's A2A agent over this gateway, when [`Gateway::with_liaison`] set one up.
+    pub fn liaison(&self) -> Option<liaison::Liaison> {
+        let config = self.liaison.clone()?;
+        Some(liaison::Liaison::shared(self.clone(), config))
     }
 
     /// Serves roster administration (`/v1/user/roster/...`) from `source`, the roster every
@@ -1878,6 +1897,7 @@ impl Gateway {
             )
             .route("/v1/attach", post(exchange_attach_token))
             .route("/v1/socket/{session_id}", get(websocket_attach))
+            .merge(liaison::routes())
             .layer(axum::extract::DefaultBodyLimit::max(max_frame_bytes))
             .merge(base)
             .with_state(self.clone());

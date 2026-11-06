@@ -310,6 +310,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             });
         }
     }
+    let liaison_settings = &settings.located.value.unex.liaison;
+    if liaison_settings.listen.is_some() || !liaison_settings.peer.is_empty() {
+        gateway = gateway.with_liaison(
+            universal_exports::liaison::LiaisonConfig::from_settings(liaison_settings)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    // Held until the gateway stops; dropping it closes the link listener.
+    let _liaison = match liaison_settings.listen {
+        Some(listen) => Some(start_liaison(&settings, &gateway, listen, tls.clone())?),
+        None => None,
+    };
     let poll = settings.located.value.provider.poll();
     if !poll.is_zero() {
         tokio::spawn(follow_policy(provider, live, snapshot.clone(), poll));
@@ -329,6 +341,31 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     .map_err(|error| format!("gateway listener failed: {error}"))
+}
+
+/// `[unex.liaison]`: serves A2A to the paired peers on links at `listen`, over TLS when the
+/// gateway has its own, and carries Cables sent to them.
+fn start_liaison(
+    settings: &Settings,
+    gateway: &universal_exports::Gateway,
+    listen: std::net::SocketAddr,
+    tls: Option<Arc<rustls::ServerConfig>>,
+) -> Result<universal_exports::liaison::LinkListener, String> {
+    let located = &settings.located;
+    let liaison = gateway.liaison().ok_or("[unex.liaison] is not set up")?;
+    let peers = located.value.unex.liaison.peer.len();
+    let identity = located
+        .liaison_identity()
+        .map_err(|error| format!("[unex.liaison] identity: {error}"))?;
+    let listener =
+        universal_exports::liaison::LinkListener::start(&liaison, listen, tls, &identity)
+            .map_err(|error| format!("[unex.liaison] {error}"))?;
+    eprintln!(
+        "universal-exports: Liaison serves A2A links on {} as {} to {peers} paired peer(s)",
+        listener.local_addr(),
+        listener.peer_id()
+    );
+    Ok(listener)
 }
 
 /// `[unex.tls]`: the TLS configuration of a gateway that serves TLS itself; `None` without one.

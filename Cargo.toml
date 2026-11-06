@@ -108,6 +108,11 @@ coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d3
 # The agent session kind a handler returns and its events, shared with every project hosting agent
 # providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
 coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d345437209eaea5b02091226a6bfa47e3" }
+# A2A 1.0 over a proven coqui-agentic-peer link, for Liaison. The three move together: coqui-a2a
+# names the link crate and its channel crate at these revisions.
+coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "f6f17a979deadd566fbb6e8847cf518316b23f2d" }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f6da790585e51345fa58f5e989cedd6500a0b962" }
+coqui-web-channel = { git = "https://github.com/Boriken-Dev/coqui-web-channel.git", rev = "0b5b05c9af3417f6b13edc0fc7d9c86c02a63eca", features = ["websocket"] }
 # Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

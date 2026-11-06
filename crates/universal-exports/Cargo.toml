@@ -53,8 +53,18 @@ tokio-rustls = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tower = { workspace = true }
 uuid = { workspace = true, features = ["std"] }
+# A2A times, ISO 8601 in UTC.
+time = { workspace = true, features = ["formatting"] }
+coqui-a2a = { workspace = true }
+coqui-agentic-peer = { workspace = true }
+coqui-web-channel = { workspace = true }
+# A peer's url, and the public roots a wss:// peer is dialed with.
+url = { workspace = true }
+webpki-root-certs = { workspace = true }
 
 [dev-dependencies]
+# The loopback HTTP endpoint unmodified A2A clients use, driven against Liaison in its tests.
+coqui-a2a = { workspace = true, features = ["loopback"] }
 rcgen = { workspace = true }
 reqwest = { workspace = true }
 tempfile = { workspace = true }

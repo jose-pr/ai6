@@ -56,6 +56,7 @@ pub(crate) const GUIDES: &[(&str, &str)] = &[
         include_str!("../../../../docs/compartments.md"),
     ),
     ("memories", include_str!("../../../../docs/memories.md")),
+    ("liaison", include_str!("../../../../docs/liaison.md")),
     ("terminals", include_str!("../../../../docs/terminals.md")),
     ("watchdog", include_str!("../../../../docs/watchdog.md")),
     ("medical", include_str!("../../../../docs/medical.md")),

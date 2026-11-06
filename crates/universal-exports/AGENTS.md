@@ -14,12 +14,14 @@ Development documentation lives with the source at
 | `cli` | The `universal-exports` service command and Guatiao provider loading. | No |
 
 MSRV: Rust 1.89. The default build depends on Axum, Tokio, guatiao,
-`ai6-diptel`, serde and UUID. The `cli` feature adds clap and Tokio signal support.
+`ai6-diptel`, serde and UUID, and, for Liaison, `coqui-a2a`, `coqui-agentic-peer` and
+`coqui-web-channel` (pinned by git revision), `url`, `time` and `webpki-root-certs`. The `cli`
+feature adds clap and Tokio signal support.
 
 ## Imports and modules
 
-Every public item is imported from the crate root. The crate has no public
-modules. There are no feature-gated items.
+Every public item is imported from the crate root, except Liaison's, in the public module
+`liaison`. There are no feature-gated items.
 
 ## Unsafe code
 
@@ -1125,6 +1127,52 @@ graceful shutdown, `1` when configuration or listener startup fails, and `2` for
 arguments. The operator command-line client is
 the separate `ai6ctl` crate.
 
+## Liaison (`universal_exports::liaison`)
+
+A2A 1.0 at AI6's boundary, as the wire format of Cables: a peer's message is a Cable through
+`ai6`'s `CableRelay` (sender `a2a:<peer>`, acting for its principal, `with_peer` stamped), the
+addressee's reply Cable is the answer, and a Cable to `a2a:<peer>` leaves as A2A. Nothing is kept
+but Cables, and nothing becomes a Mission or brief. A Task ID is the peer's Cable ID, a context ID
+the Cable conversation; a context's replies come back to the Session `liaison-<context>`.
+
+```rust
+pub const ADDRESSEE_MEMBER: &str = "addressee";            // message or request metadata naming the addressee
+pub use ai6::directorates::registry::cables::{LIAISON_PREFIX, LIAISON_STATION};  // "a2a:", "liaison"
+pub enum Addressee { Agent { operation, agent }, Role { operation, role } }  // FromStr/Display: agent:<op>/<agent>, role:<op>/<role>
+pub fn Addressee::operation(&self) -> &str
+pub struct LiaisonPeer { pub name, pub id: Option<String>, pub principal, pub addressees: Vec<Addressee>, pub a2a: bool, pub url: Option<url::Url> }
+pub fn LiaisonPeer::sender(&self) -> String                 // a2a:<name>
+pub struct LiaisonConfig { pub peers: BTreeMap<String, LiaisonPeer>, pub poll: Duration, pub max_links: ai6::Limit,
+    pub plain_beyond_loopback: bool, pub recheck: Duration }   // Default: no peers, 1 s, 64, false, 1 s
+pub fn LiaisonConfig::with_peer(self, peer: LiaisonPeer) -> Self
+pub fn LiaisonConfig::from_settings(&ai6::bootstrap::LiaisonSettings) -> Result<Self, LiaisonError>
+pub struct Liaison;                                          // Clone; impl coqui_a2a::Agent
+pub fn Liaison::new(gateway: Gateway, config: LiaisonConfig) -> Liaison
+pub fn Gateway::with_liaison(self, config: LiaisonConfig) -> Gateway   // also serves POST /v1/a2a
+pub fn Gateway::liaison(&self) -> Option<Liaison>
+pub struct LinkListener;                                     // Drop stops it and its outbound thread
+pub fn LinkListener::start(liaison: &Liaison, address: SocketAddr, tls: Option<Arc<rustls::ServerConfig>>,
+    identity: &Path) -> Result<LinkListener, LiaisonError>   // key made the first time (Noise)
+pub fn LinkListener::local_addr(&self) -> SocketAddr
+pub fn LinkListener::peer_id(&self) -> &str                 // sha256:<hex>, what a peer pins
+pub struct LiaisonError;                                     // Display, Error
+```
+
+- A link peer is admitted only by proving a configured `id`; `a2a = false` refuses its `a2a/1` streams. A `ws://`
+  listener binds beyond loopback only with `plain_beyond_loopback`.
+- `POST /v1/a2a` (and `/v1/a2a/`) is A2A's JSON-RPC binding, Server-Sent Events for the streaming methods;
+  `GET /v1/a2a/.well-known/agent-card.json` its card, interface `{public_origin}/v1/a2a`, `JSONRPC`, `1.0`. Both need
+  the bearer of a person who is a peer's principal: 401 without one, 403 for anyone else, 404 without Liaison.
+- Each message needs the principal's `cable.send` on the addressee's Operation, each read its `cable.read`; the
+  relay's grants name `a2a:<peer>`. Refusals are `PermissionDeniedError`, another peer's Task `TaskNotFoundError`.
+- A follow-up in a context carries `with_affinity` of the Session that took the context's first Cable.
+- `SendMessage` blocks until a reply (answered with the reply `Message`) or the Task ends, unless
+  `returnImmediately`; `CancelTask` withdraws a Cable nobody has had.
+- Outbound: Cables to `a2a:<peer>[/<addressee>]` are read from each Operation where the principal holds `cable.read`,
+  sent over the peer's own link or by dialing `url` (`wss://` with the public roots), and answered by a reply Cable.
+- Audit: `liaison.send_message`, `get_task`, `list_tasks`, `cancel_task`, `subscribe_to_task`, `outbound`, actor the
+  principal, metadata only; the relay's `cable.send` record for each Cable.
+
 ## Bootstrap file
 
 The command reads the one bootstrap file every program reads, `ai6.cfg`: `--config PATH`, else
@@ -1145,6 +1193,8 @@ name), and the last two are printed as a warning at start.
 | `[registry] location`, `password`, `headquarters_lease` | Shared Registry for issued access-token records; `--registry`. | The provider's database when SQL, else `registry` in `[unex] state_dir` |
 | `[unex.plugins] paths`, `profile`, `keep_verified` | Provider libraries, how they are checked, and which old verified copies stay; `--plugin-path` adds, `--plugin-profile` overrides. | None; strict with a pin set, report without; the newest 8 |
 | `[unex.pages] dir`, `origin`, `listen` | Where pages are kept, their own origin (a second listener with page routes only), and its loopback address. | `pages` beside the file; the API's origin; `127.0.0.1:7083` |
+| `[unex.liaison] listen`, `identity`, `poll`, `max_links`, `plain_beyond_loopback` | Liaison's link listener (TLS with `[unex.tls]`), its key, how often it looks for replies and outgoing Cables, links at once, and a plain listener beyond loopback (a weakening). | Off; `liaison/identity` in `[unex] state_dir`; 1 s; 64; false |
+| `[unex.liaison.peer.<name>] id`, `principal`, `addressees`, `a2a`, `url` | One peer: its link key, the subject it acts as, what it may write to, whether its link may open A2A, where to dial it. Any peer turns on `/v1/a2a`. | None; `a2a` true |
 
 ## Environment variables
 
