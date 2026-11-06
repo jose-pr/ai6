@@ -575,7 +575,7 @@ impl Site {
                     })
                     .map_err(|error| refuse(describe(&error)))?;
             } else {
-                Self::checked(client, COPY_IN, &[&file], Some(bytes)).map_err(&refuse)?;
+                Self::checked(client, COPY_IN, &[&file], Some(bytes)).map_err(refuse)?;
             }
         }
         Self::checked(

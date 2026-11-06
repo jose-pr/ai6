@@ -134,7 +134,7 @@ impl Store {
                 root.display()
             )
         };
-        let read = read_overlay(&root, &self.limits).map_err(&tampered)?;
+        let read = read_overlay(&root, &self.limits).map_err(tampered)?;
         if read.digest.digest != *digest {
             return Err(tampered(format!(
                 "has the digest {}, not {digest}",
