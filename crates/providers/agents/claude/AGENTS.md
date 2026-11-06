@@ -393,6 +393,18 @@ replaced by a notice and the skill loaded. A skill's other files were readable w
 (the plugin is inside the working directory) and Write to them was denied by the dot-path
 rule.
 
+A Mission whose `AgentStart::overlays` or `AgentResume::overlays` has a skill with `native` set and a
+`plugin_dir` gets, at every clearance, `Skill` last in `--tools`, `Skill(ai6:<name>)` per such skill in
+`--allowedTools`, `--plugin-dir <plugin_dir>`, and `"disableSkillShellExecution": true` in the one
+`--settings` value beside the green ink gate. A skill without `native` (its overlay's harness hint) is
+a routing line after the standing context (`SessionOverlays::with_routing`). Measured with 2.1.318 on
+Windows against a loopback stand-in for the API, with this argv at `field` and `desk`: the request's
+system prompt listed `ai6:<name>`, the skill launched as `ai6:<name>` and as the bare name, a name it
+does not hold answered `Unknown skill`, `Read` of the plugin's files ran and `Write` to them was
+denied; without `Skill` in `--tools` the call answered `No such tool available`. With `Skill` on,
+what Claude Code ships and the user's own directory holds is listed beside the plugin's (seen:
+`dataviz`), which is why injected commands stay off.
+
 `MultiEdit` and `LS`
 are not denied: Claude Code 2.1.310 warns that such a rule matches no known tool. `Task` is
 the former name of `Agent`, which Claude Code still accepts. Taken

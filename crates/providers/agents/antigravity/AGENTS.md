@@ -124,6 +124,15 @@ provider rotates the token, whether a running harness re-reads the file, what a 
 how long an unused login lasts. Keep `max_concurrent = 1` and set no `renew_command`, which leaves it to
 its next real use with a warning before it lapses.
 
+**Overlays.** A launch with a skill whose `native` is set (`AgentStart::overlays`,
+`AgentResume::overlays`) copies each one to `skills/<name>/` in the `.agents` directory of
+`<working directory>.ai6-agy-skills-<unique>`, and passes that directory as a second `--add-dir`; it is removed with the Session's. Each overlay root
+gets `read_file(<root>)` in `allow`. A skill without `native` is a routing line in the system prompt.
+Measured with agy 1.4.12 on x86-64 Linux, stand-in model: a `skills/<name>/SKILL.md` in a workspace's
+`.agents` is listed in the request under an `--agent` as without one, and its body is read with `read_file`, so
+the skills sit in a workspace of their own (the Session's directory is denied to the file tools). A
+`read_file` outside the workspaces under no rule ended the turn; with the rule it ran; a `write_file`
+there under no rule ended the turn and wrote nothing.
 
 ## What a Session may do
 

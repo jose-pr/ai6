@@ -421,8 +421,9 @@ impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero q
 ```
 
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
-`bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false) has `tree() -> TreeLimits`,
-`manifest() -> ReadLimits` and `weakenings()` (looser limits, and `unpinned = true`).
+`bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false, `context_bytes` 24 KiB, `fetch_timeout` 300 s,
+`deps_timeout` 600 s, `output_bytes` 1 MiB, `dotagents_pyz` and `dotagents_pin` none) has `tree() ->
+TreeLimits`, `manifest() -> ReadLimits` and `weakenings()` (looser limits, and `unpinned = true`).
 
 A Station hands `&StationLimits` (or one table) to whatever does the work; there is no
 global. Free functions that bounded with a constant take the table or the value:
@@ -2402,8 +2403,10 @@ impl SessionStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
     pub runner: Option<String>,              // the runner's Session key; only these are adopted
     pub clearance: Option<String>,           // what the harness was launched at, which fixed its tools
     pub agent: Option<String>,               // the Agent codename it ran as; a scorecard groups by it
+    pub overlays: Vec<IssuedDigest>,         // ai6::directorates::q::overlays: each overlay and its digest
 }
 impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
+    pub fn with_overlays(self, Vec<IssuedDigest>) -> Self;
     pub fn with_agent(self, Option<String>) -> Self;
     pub fn with_model(self, Option<String>, Option<String>) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self;
@@ -4249,11 +4252,14 @@ and applies only the secrets: see "Credentials" under the Station daemon.
 Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`, vectors at commit `061b8f5`
 in `tests/fixtures/aos-vectors/`): reading, validating, digesting, resolving and composing,
 and the environment, setup and dependencies an overlay asks for, as pure functions. Nothing
-here runs a script, installs a package, starts a server, reads the network or delivers an
-overlay to a Session. The Store class (catalogs, icons) is not implemented.
+here runs a script, installs a package, starts a server or reads the network: a Station's own
+`station::overlays` (not public) fetches overlays to its store under `<state_dir>/overlays`,
+places them on a Theater and prepares them, and hands the handler `AgentStart::overlays`. The
+Store class (catalogs, icons) is not implemented.
 
 ```rust
 pub const MANIFEST: &str = "overlay.cfg";
+pub const LATER_MANIFEST: &str = "OVERLAY.md";   // read_overlay refuses a tree with it and no overlay.cfg
 #[non_exhaustive] pub enum OverlayFrom { Source(Source), Path(PathBuf) }
 pub struct OverlayRecord;   // [overlay.<name>]
 impl OverlayRecord {
@@ -4314,6 +4320,10 @@ events) any tag, anchor, alias, merge key, directive, second document and U+0085
 typing plain scalars by the 1.2 core schema. The value is checked against the data model:
 no null, finite floats, signed 64-bit integers, `30.0` kept a float, within `depth`. Every
 error carries an AOS class (`parse-error`, `duplicate-key`, `yaml-tag`, `too-deep`, ...).
+
+`OverlayTree::with_text(path, text)` adds a file's text; `skill_description(dir)` reads a `SKILL.md`'s
+`description`; `check_requirements(text, locked)` refuses an option, a direct URL, or in a lock a
+requirement not pinned with `==`. `IssuedDigest { overlay, digest }` is what a launch records.
 
 `issue_overlays` refuses a name that is no overlay name or no record's (`InvalidName`,
 `Unknown`, naming the list), resolves `requires` over the records whose manifests are given
@@ -4592,6 +4602,17 @@ pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Op
                         pub limit: Option<UsageLimit>, pub usage: Option<TokenUsage>,
                         pub tools: Vec<String>,
                         pub quota: Vec<QuotaReport> /* serde default: empty */ }
+// AgentStart and AgentResume carry `overlays: SessionOverlays` (default empty), what a Session's
+// overlays hand its harness beside their environment and `initial_context`:
+pub struct SessionOverlays { pub roots: Vec<String>, pub skills: Vec<OverlaySkill>, pub plugin_dir: Option<String> }
+pub struct OverlaySkill { pub name: String, pub overlay: String, pub description: String,
+    pub path: String /* absolute, on the harness's host */, pub native: bool /* may load natively */ }
+impl SessionOverlays {
+    pub fn routing(&self, loads_skills: bool) -> Option<String>;       // lines naming each SKILL.md it does not load
+    pub fn with_routing(&self, context: &[String], loads_skills: bool) -> Vec<String>;
+}
+// `plugin_dir` lays the `native` skills out as `skills/<name>/` and `.claude-plugin/plugin.json` naming
+// the plugin `ai6`. A handler that does not load skills calls `with_routing(.., false)`.
 // AgentStart and AgentResume carry `max_cost_micro_usd: Option<u64>`: a spend ceiling a
 // harness may enforce itself (Claude Code gets `--max-budget-usd`); AI6 enforces budgets anyway.
 // They also carry `project_settings: bool` and `project_mcp: bool` (serde default false):

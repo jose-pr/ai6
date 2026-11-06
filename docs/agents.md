@@ -1055,8 +1055,8 @@ since which standards apply belongs to the project. The format is the
 [Agent Overlay Spec](https://boriken-dev.github.io/agent-overlay-spec/) (AOS), edition
 `0.1.0-draft`: a tree with an optional `overlay.cfg` manifest.
 
-Today a Station reads, validates, pins and resolves overlays; it does not yet deliver them into a
-Session. What follows is what those records mean and what is checked.
+A Station fetches each overlay to a store keyed by its digest, verifies it at every Session start,
+and gives the Session a read-only copy outside its working directory, so no commit can hold it.
 
 ```toml
 # loadouts.toml
@@ -1099,6 +1099,10 @@ overlays = ["rust"]
   overrides it: to accept other bytes, change the pin. An overlay with no pin is refused unless
   the `station` record's `[overlays] unpinned = true`, a weakening reported as `unpinned` for
   each such overlay every time it is issued.
+- **`OVERLAY.md`.** A later AOS edition reads `OVERLAY.md` as the manifest when there is no
+  `overlay.cfg`. This AI6 reads edition `0.1.0-draft` at `061b8f5`: an overlay with `OVERLAY.md` and
+  no `overlay.cfg` is refused, naming the file, by `ai6 overlay pin` and at every Session start; it is
+  never read as having no manifest.
 - **`ai6 overlay pin DIR`** reads an overlay as a Station does, running nothing: it prints each
   file with its SHA-256 and the `pin`. It exits non-zero, printing no pin, when `overlay.cfg`
   does not read or validate against the files, or a skill fails the `SKILL.md` checks. Problems
@@ -1134,15 +1138,83 @@ tools or injected command.
 - **Secrets** reach an overlay only by reference (`{ secret = "name" }` or
   `{ provider = "env", key = "VAR" }` in `env` or an `aos` env file, never in dotenv), and only
   when granted to that overlay; a placeholder never reads a secret.
-Nothing an overlay holds runs yet. When a Station installs and runs it, these are its rules:
 
+### What a Session gets
+
+- **The root.** `<NAME>_OVERLAY_ROOT` for each overlay, its identity in upper case with `-` as `_`,
+  and `<NAME>_OVERLAY_STATE`. A root is read-only: `0555` and `0444`, with `0555` on a file under
+  `bin/` or opening with `#!`, or on Windows an inherited deny on writing, adding and deleting. A
+  process running as the same user can take that off, so what stops it is the check at the next
+  start. A limited Windows token is stopped by that deny; an elevated one gets past it for a delete, a
+  new directory and whatever asks to back up (Git Bash wrote a new file through one), and root gets past
+  file modes. Each is reported as `read-only-not-enforced`.
+- **`bin/`** first on `PATH`, `lib/python/` on `PYTHONPATH` and `lib/node/` on `NODE_PATH`, with the
+  rest of the overlay's `env` and `env_files`, in the order of application. An Agent with no `PATH`
+  keeps where a process given none looks; on a Theater, the login `PATH`. An overlay may not set a
+  variable starting `AI6_`: that refuses the Session.
+- **The text.** Rules, routing and context in the initial context, each file marked, in composition
+  order, the whole no more than `[overlays] context_bytes`: past it the Session is refused, naming the
+  setting, rather than its text cut.
+- **Skills**, loaded natively where the harness loads them, and otherwise named by a routing line
+  (`Skill <name> (overlay <overlay>): ... Read <root>/skills/<name>/SKILL.md`). Two overlays offering a
+  skill of one name, without regard to case: the later in composition order is delivered and
+  `skill-collision` is reported. `[harness.<id>] skills = false` in the manifest makes the routing
+  line the delivery for that harness, `context` adds files for it alone, and no other key of the table
+  applies.
+- **A `desk` Session** gets the root and the text, and no `bin/`, `lib/` or anything run for it. The
+  same goes for a Session held to reading until its plan passes.
+
+| Handler | Harness id | Skills | Checked with |
+| --- | --- | --- | --- |
+| `claude` | `claude-code` | Native: `--plugin-dir` of a plugin the Station lays out, `Skill` offered | Claude Code 2.1.318 |
+| `codex` | `codex` | Routing line: Codex takes no root of skills but its home and the project. At `desk` it has no tool that reads a file, so there it cannot open what the line names | Codex 0.164.0 |
+| `acp` | `acp` | Routing line, in the first prompt | Grok 1.0.70 |
+| `antigravity` | `antigravity` | Native: a workspace of the Session's own holding the skills; each root may be read | agy 1.4.12 on Linux |
+
+**A resumed Session** is given its overlays again, checked again. If its digests differ from those it
+started with (a changed pin), it gets the new ones, and the timeline says so (`overlay`, `changed`).
+One taken up as it runs, on its runner, keeps what it has.
+
+**A tree that changed** refuses the start, naming the directory, on the Station as on a Theater, and
+the Mission waits with the reason. Nothing fetches over it: remove the directory and the next start
+fetches it again. Reading a plain URL as a source is not implemented; name a Git repository or a
+directory. A Git source's bytes are its blobs, with no checkout filter. `secrets` on an
+`[overlay.<name>]` names the secret a private HTTPS source is fetched with, in the environment of that
+one `git`.
+
+### Code in an overlay
+
+Code needs what runs it where the Session runs. Text does not: an overlay with only text goes anywhere.
+
+- **What is looked for.** On a Session that may run commands, a Station looks on the Agent's `PATH`
+  (the login `PATH` when it names none) at most once per `[scheduler] check_in`, for each interpreter
+  and command the overlay's manifest and files call for: Python (`python3`, or `python`, answering
+  `Python 3`) for `lib/python/`, `cmds/` or a requirements file, what a setup or env script names, and
+  `npm` for a `package.json`. A Theater lacking one is passed over: the Mission waits, and says what
+  is missing and which overlay needs it, until it is there.
 - **Dependencies** go into an environment of each overlay's own, keyed by its digest, whatever
   `environment` the overlay chooses, so a pin covers exactly the packages its Sessions get. AOS
-  allows a consumer this policy, and it is not a weakening, since it shares less. A
-  requirements file whose requirements are only partly hashed is refused.
+  allows a consumer this policy, and it is not a weakening, since it shares less. It is built before
+  the harness starts, outside its sandbox, and is read-only after. A file with an option in it, a
+  direct URL, or only some requirements hashed is refused. `deps-network` is reported for each
+  install, and `unlocked-dependencies` for a file not locked. npm runs no package's install scripts.
 - **Setup** runs in its phases: `install` for an overlay with no record on a Theater, `sync` for a
-  digest other than the recorded one, nothing for the recorded one. The record is kept per
-  Theater. A failed sync of the recorded digest keeps it active.
+  digest other than the recorded one, nothing for the recorded one. The record is kept per Theater, on
+  the Station, and a Theater that lost the environment or state it speaks of starts again from
+  `install`. A digest whose preparation failed is not issued, and the Mission fails with the step, its
+  exit status and its last line of standard error. A step runs in a process group of its own with its
+  timeout (on Windows, its process tree at the timeout), its environment the Agent's path and locale
+  variables and its own overlay's, never a credential. A Station cannot deny it the network, so
+  `network-not-enforced` is reported for a setup that declares none.
+- **The state directory** is per overlay identity and Theater, kept across digests, emptied before
+  `install`, and read-only to the Session.
+- **Env scripts** run at each start, outside the Session, and what they print joins the environment;
+  `env-script` is reported each time.
+- **`AGENTS_PYTHON`** names the interpreter found, for an overlay with Python code.
+- **`cmds/`** runs under `dotagents`: `[overlays] dotagents_pyz` names the `dotagents.pyz` on the
+  Station and `dotagents_pin` its SHA-256. A Session then has `dotagents` on `PATH`, `AGENTS_CMDS_PATH`
+  naming each overlay's `cmds/`, and an empty `AGENTS_HOME` of its own, removed with its Mission. An
+  overlay with `cmds/` and no such setting is refused, naming it.
 
 ## Commands
 

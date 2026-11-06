@@ -242,6 +242,14 @@ thread stays read-only with approval `never`, so `apply_patch` is refused withou
 mcp_servers.ai6-theater.disabled_tools=["theater_run","theater_write"]` takes those two out of `exec`
 (same measurement). `field` and `00` get a field Session as above, with no tool check.
 
+An overlay's skill (`AgentStart::overlays`) is a routing line naming its `SKILL.md`, after
+`initial_context` in the developer instructions: Codex 0.164.0 lists the skills of `CODEX_HOME/skills`,
+the project's own skill directories and what it ships, took no other root through
+`skills.config`, `skills.paths`, `skills.roots`, `skills.extra_roots` or `skills/list`'s
+`perCwdExtraUserRoots` (measured with `codex debug prompt-input` and the app server, no model), and
+`CODEX_HOME` is shared by every Session of the Agent. A `field` thread reads the file with its command
+tools; a `desk` thread has no tool that reads a file, so there the line names what it cannot open.
+
 A restricted thread that uses a tool anyway is killed, ends with a `failed` event naming
 it, and nothing read after that becomes an event: any server request but
 `account/chatgptAuthTokens/refresh` and `attestation/generate` (and, on a `desk` thread,

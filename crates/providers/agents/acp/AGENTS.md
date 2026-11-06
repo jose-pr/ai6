@@ -64,6 +64,8 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
   the `describe_*` settings, under `initialize_timeout_ms` and `request_timeout_ms`), and ends it.
   The values of the option of category `model` are the listing; an agent that advertises no such
   answer, or offers no model option, is unknown with the reason.
+- An overlay's skill (`AgentStart::overlays`) is a routing line naming its `SKILL.md` in the first
+  prompt, after `initial_context`: an ACP agent is any program, and the protocol has no skills.
 - `assistant_scripts` and `assistant_skills` keep the trait defaults (none).
 - A failed open appends the agent's last non-protocol output lines to the error; a connection
   lost later is `failed` with the agent's exit status and those lines.

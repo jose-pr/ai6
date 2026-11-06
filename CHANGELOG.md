@@ -37,6 +37,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   is on the timeline (`sleeper`, `skipped`, naming why), `[registry.limits.sleepers] skipped_events`
   (64) of them one by one, and the approval keeps what is reckoned (`SleeperMark`,
   `SleeperStore::mark_sleeper`).
+- Overlays reach a Session: a Station fetches each one a loadout or an Operation issues to a store keyed
+  by its digest (a directory or a Git source, the source's blobs with no checkout filter), verifies it at
+  every start and gives the Session a read-only copy outside its working directory, on its own host or,
+  through the transport, under `.ai6/overlays/` on a Theater. `<NAME>_OVERLAY_ROOT` and
+  `<NAME>_OVERLAY_STATE`, `bin/` on `PATH`, `lib/python/` and `lib/node/`, `env` and `env_files`, and rules,
+  routing and context in the initial context. `AgentStart` and `AgentResume` gain `overlays`; Claude Code
+  and the Antigravity CLI load skills natively, Codex and ACP agents get a routing line. A `desk` Session
+  gets the text and nothing to run. A changed copy refuses the start; a resumed Session with other digests
+  says so on the timeline (`overlay`, `changed`). A helper in an overlay's `bin/` reaches a Mission's `PATH`
+  with nothing staged on the host.
+- Overlays with code: where a Session may run commands, the interpreters and commands an overlay needs
+  are looked for once per check-in, and a Theater lacking one leaves the Mission waiting with the reason.
+  Dependencies go into an environment of the overlay's digest, setup runs in AOS's phases with a record per
+  Theater, env scripts run at each start, `AGENTS_PYTHON` names the interpreter, and `cmds/` runs under a
+  pinned `dotagents` with an empty `AGENTS_HOME`. Weakenings are on the timeline (`overlay`, `weakened`).
+  `[overlays]` gains `context_bytes`, `fetch_timeout`, `deps_timeout`, `output_bytes`, `dotagents_pyz` and
+  `dotagents_pin`.
 - A settled Source item reopens as its Mission's next attempt (same UID and handle): an
   instance's `reopen` is `label` (the default: a label added since AI6 last read the item, its own
   status and Agent labels aside), `comment` (also a comment, not AI6's, by someone the tracker lets

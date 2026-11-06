@@ -1168,8 +1168,8 @@ provider applied before it was a key; the provider's API header lists them with 
 <!-- schema:record.station.harness:end -->
 
 `[overlays]`: reading the [overlays](agents.md#overlays) loadouts and Operations issue, as `ai6
-overlay pin` reads them, and whether one without a pin is issued. `unpinned = true` is a weakening,
-named each time such an overlay is issued.
+overlay pin` reads them, whether one without a pin is issued, and delivering and preparing them for
+a Session. `unpinned = true` is a weakening, named each time such an overlay is issued.
 
 <!-- schema:record.station.overlays:begin -->
 | Key | Default | Meaning |
@@ -1180,6 +1180,12 @@ named each time such an overlay is issued.
 | `bytes` | 64 MiB | **Largest overlay.** Bytes of one overlay's files together. |
 | `file_bytes` | 16 MiB | **Largest overlay file.** Bytes of one file of an overlay. |
 | `unpinned` | `false` | **Issue overlays without a pin.** Issue an overlay whose `[overlay.<name>]` has no pin, reporting it as `unpinned` each time; without this such an overlay is refused. A weakening. |
+| `context_bytes` | 24 KiB | **Largest overlay context.** Bytes of the rules, routing and context a Session's overlays add to its initial context together. Past it the Session is refused, naming this setting, rather than its text cut. |
+| `fetch_timeout` | 300 | **Longest overlay fetch.** Seconds a fetch of one overlay's Git source may take. |
+| `deps_timeout` | 600 | **Longest dependency install.** Seconds installing one overlay's dependency file may take. |
+| `output_bytes` | 1 MiB | **Largest output of an overlay's step.** Bytes of each output stream kept from an overlay's setup, env script or package manager. |
+| `dotagents_pyz` | none | **dotagents for overlay commands.** The `dotagents.pyz` on the Station that runs the `cmds/` of an overlay holding them. An overlay with `cmds/` is refused without it. |
+| `dotagents_pin` | none | **Pin of dotagents.** The SHA-256 `dotagents_pyz` must have, `sha256:<hex>`; a mismatch refuses. Without one it is refused unless `unpinned` allows it. |
 <!-- schema:record.station.overlays:end -->
 
 `[provision]`: probing and provisioning Theaters.

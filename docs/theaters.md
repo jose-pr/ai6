@@ -373,6 +373,37 @@ The Station still supervises the harness: shutting the Station down stops it, an
 Station died is ended by the next start of the same Mission before another starts. Only a
 runner keeps the work going while no Station is attached.
 
+## Overlays on a Theater
+
+The [overlays](agents.md#overlays) a Session is issued go where it runs. A Station copies each one from
+its store to `.ai6/overlays/trees/<digest>/` under the transport's default directory, the login
+user's home over SSH, file by file through the transport, and it appears there only when whole. Every
+later start hashes that copy against what the store holds and reuses it, so nothing is staged on a
+Theater by hand and a helper in an overlay's `bin/` is on the Session's `PATH` there with no other
+step. A copy with other bytes, a missing or an added file, or a link in it refuses the start, naming
+the directory; remove it and the next start places it again.
+
+Beside the trees, under `.ai6/overlays/`: `state/<overlay>/`, `envs/<digest>/` for its dependencies,
+`tools/<digest>/` for a pinned `dotagents`, and `sessions/<Mission>/` for what one Mission keeps, removed
+when it ends. Each directory of an overlay's is read-only (`chmod a-w`) outside its preparation. An
+Agent's `PATH` is what its Session's commands look on; with none, the Station asks the Theater for its
+login `PATH`, so the overlay's `bin/` goes before it rather than in place of it.
+
+- **What a Theater must have.** A POSIX shell, `find`, and one of `sha256sum`, `shasum`, `sha256` or
+  `openssl`, for every overlay, text included. A Theater that runs Windows through a transport is
+  refused for overlays: copies, hashes and steps go through `sh`. A Station's own Windows host needs
+  none of it.
+- **Text.** An overlay with only text needs nothing else there. An overlay with code waits for what it
+  needs, as [Code in an overlay](agents.md#code-in-an-overlay) says.
+- **Remote hands.** The harness is on the Station and has no file or shell tool, so the overlays go to
+  the Theater, its context names them there, `theater_read` reads them, and `theater_run`'s commands
+  get their environment. Skills are routing lines. `desk` keeps both tools from running anything.
+- **Records.** Which digest was last prepared on a Theater is kept on the Station, per Theater, under its
+  state directory. An ephemeral Theater is a new one each time, so its overlays are placed and prepared
+  each time.
+- **A container runs as root** unless its image says otherwise, and `chmod a-w` does not stop root: there
+  the check at the next start is all that holds, and the container is gone by then anyway.
+
 ## Reaching a Theater
 
 A Station publishes the Theaters it reaches at each check-in: ID, access (`local`, `ssh` or
