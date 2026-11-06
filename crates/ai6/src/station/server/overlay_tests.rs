@@ -497,7 +497,7 @@ mod theater {
         let home = root.path().join("home");
         let tree = home
             .join(".ai6/overlays/trees")
-            .join(pin_of(&dir).to_string()["sha256:".len()..].to_owned());
+            .join(&pin_of(&dir).to_string()["sha256:".len()..]);
         assert_eq!(
             lines[1],
             format!("root {}", fs::canonicalize(&tree).unwrap().display()),
@@ -545,7 +545,7 @@ mod theater {
         let home = root.path().join("home");
         let tree = home
             .join(".ai6/overlays/trees")
-            .join(pin_of(&dir).to_string()["sha256:".len()..].to_owned());
+            .join(&pin_of(&dir).to_string()["sha256:".len()..]);
         open_tree(&tree);
         fs::write(tree.join("bin/ship-helper"), "#!/bin/sh\necho planted\n").unwrap();
         let second = format!("overlay-theater-tamper-b-{}", std::process::id());
