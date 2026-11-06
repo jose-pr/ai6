@@ -119,7 +119,7 @@ async fn a_mission_gets_its_overlays_outside_the_checkout_and_a_commit_holds_non
     let request = recorded_start(&mission);
 
     let overlay_root = request.environment["TOOLS_OVERLAY_ROOT"].clone();
-    assert_eq!(request.overlays.roots, [overlay_root.clone()]);
+    assert_eq!(request.overlays.roots, std::slice::from_ref(&overlay_root));
     let bin = Path::new(&overlay_root).join("bin");
     assert!(
         request.environment["PATH"].contains(&*bin.to_string_lossy()),

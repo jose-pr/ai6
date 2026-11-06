@@ -298,7 +298,7 @@ fn a_session_gets_the_root_bin_on_path_and_a_desk_one_no_bin() {
     assert_eq!(Path::new(&first), Path::new(&root).join("bin"));
     assert!(field.environment["PATH"].ends_with(&base));
     assert_eq!(field.environment["SHIP_MODE"], "fast");
-    assert_eq!(field.overlays.roots, [root.clone()]);
+    assert_eq!(field.overlays.roots, std::slice::from_ref(&root));
 
     let desk = case
         .deliver(&prepared, &[("PATH", base.as_str())], false, "codex")
@@ -700,8 +700,10 @@ fn a_link_in_a_git_tree_is_refused() {
         repo.to_string_lossy()
     ))
     .unwrap();
-    let mut limits = OverlayLimits::default();
-    limits.unpinned = true;
+    let limits = OverlayLimits {
+        unpinned: true,
+        ..OverlayLimits::default()
+    };
     let linked = OverlayRecord::new("tools", OverlayFrom::Source(source));
     let mut case = case;
     case.limits = limits;
