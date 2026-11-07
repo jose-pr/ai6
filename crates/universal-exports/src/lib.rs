@@ -35,7 +35,7 @@ mod verdicts;
 
 use core::future::Future;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -65,10 +65,12 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use coqui_peer::PeerId;
 use futures_util::{SinkExt, StreamExt};
 use guatiao::{Map, TryAsRef};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq as _;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tree::{OperationTree, operation_request, resource_request};
 use uuid::Uuid;
@@ -4713,11 +4715,7 @@ fn secret_digest(purpose: &[u8], secret: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(purpose);
     hasher.update(secret.as_bytes());
-    let mut digest = String::with_capacity(64);
-    for byte in hasher.finalize() {
-        let _ = write!(digest, "{byte:02x}");
-    }
-    digest
+    PeerId::from_bytes(hasher.finalize().into()).hex()
 }
 
 fn unix_timestamp() -> Result<f64, ApiError> {
@@ -5702,15 +5700,11 @@ fn client_slots_or_max(limits: GatewayLimits) -> usize {
         .saturating_mul(limits.max_clients_per_session)
 }
 
+/// Whether `left` and `right` are equal, in time that does not depend on where they differ.
+/// A different length is refused at once: the length of a stored secret or digest is fixed by
+/// its format and is not itself secret.
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    let mut difference = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
-        difference |= usize::from(
-            left.get(index).copied().unwrap_or_default()
-                ^ right.get(index).copied().unwrap_or_default(),
-        );
-    }
-    difference == 0
+    left.len() == right.len() && bool::from(left.ct_eq(right))
 }
 
 fn validate_input_frame(session_id: &SessionId, frame: &[u8]) -> Result<u64, GatewayError> {
@@ -5831,6 +5825,16 @@ fn read_sequence(map: &Map) -> Result<u64, GatewayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secrets_compare_equal_only_when_every_byte_and_the_length_match() {
+        assert!(constant_time_eq(b"", b""));
+        assert!(constant_time_eq(b"station-token", b"station-token"));
+        assert!(!constant_time_eq(b"station-token", b"station-tokeN"));
+        assert!(!constant_time_eq(b"station-token", b"station-toke"));
+        assert!(!constant_time_eq(b"station-toke", b"station-token"));
+        assert!(!constant_time_eq(b"", b"x"));
+    }
 
     const PROXY_TEST_SECRET: &str = "proxy-secret-that-is-long-enough-for-tests";
     use ai6::{FileRegistry, RoleAuthorizer};
