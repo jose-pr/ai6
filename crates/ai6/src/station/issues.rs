@@ -493,34 +493,12 @@ fn refresh_snapshot(registry: &dyn RegistryBackend, tracker: &dyn Tracker, link:
 /// A timestamp's Unix seconds, whichever offset it carries: `2026-11-01T15:56:39Z` or
 /// `2026-11-01T22:57:12.421+0700`. `None` for one that does not parse.
 pub(crate) fn unix_of(text: &str) -> Option<f64> {
-    let (date, rest) = text.split_once('T')?;
-    let mut date = date.splitn(3, '-');
-    let year: i64 = date.next()?.parse().ok()?;
-    let month: i64 = date.next()?.parse().ok()?;
-    let day: i64 = date.next()?.parse().ok()?;
-    let zone = rest.find(['+', '-', 'Z'])?;
-    let (clock, offset) = rest.split_at(zone);
-    let mut clock = clock.splitn(3, ':');
-    let hours: f64 = clock.next()?.parse().ok()?;
-    let minutes: f64 = clock.next()?.parse().ok()?;
-    let seconds: f64 = clock.next()?.parse().ok()?;
-    let offset_seconds = if offset.starts_with('Z') {
-        0.0
-    } else {
-        let digits = offset[1..].replace(':', "");
-        let whole: f64 = digits.get(..2)?.parse().ok()?;
-        let parts: f64 = digits.get(2..4)?.parse().ok()?;
-        let sign = if offset.starts_with('-') { -1.0 } else { 1.0 };
-        sign * (whole * 3600.0 + parts * 60.0)
-    };
-    // The arithmetic is `days_from_civil` of <https://howardhinnant.github.io/date_algorithms.html>.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year.rem_euclid(400);
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    Some(days as f64 * 86_400.0 + hours * 3_600.0 + minutes * 60.0 + seconds - offset_seconds)
+    let at = time::OffsetDateTime::parse(
+        text,
+        &time::format_description::well_known::Iso8601::DEFAULT,
+    )
+    .ok()?;
+    Some(at.unix_timestamp() as f64 + f64::from(at.nanosecond()) / 1e9)
 }
 
 fn setups_of(
@@ -1602,6 +1580,10 @@ mod tests {
             unix_of("2026-11-01T15:57:12.421Z")
         );
         assert_eq!(unix_of("not a time"), None);
+        assert_eq!(unix_of("2024-02-29T23:59:59-08:00"), Some(1_709_279_999.0));
+        assert_eq!(unix_of("2100-03-01T00:00:00Z"), Some(4_107_542_400.0));
+        assert_eq!(unix_of("1900-03-01T00:00:00+0000"), Some(-2_203_891_200.0));
+        assert_eq!(unix_of("2026-02-29T00:00:00Z"), None);
     }
 
     #[test]

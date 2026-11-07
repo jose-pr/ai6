@@ -420,25 +420,21 @@ fn fraction(key: &str, value: Option<f64>) -> Result<Option<u16>, String> {
         .transpose()
 }
 
-/// The UTC calendar day of a Unix time, as `YYYY-MM-DD`.
+/// The UTC calendar day of a Unix time, as `YYYY-MM-DD`; a time past the years `time` represents
+/// (+-9999) reads as the nearest one.
 pub fn utc_day(unix_seconds: i64) -> String {
-    let days = unix_seconds.div_euclid(86_400);
-    // Civil-from-days (H. Hinnant), valid for the whole proleptic Gregorian calendar.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02}")
+    let day =
+        time::OffsetDateTime::from_unix_timestamp(unix_seconds).unwrap_or(if unix_seconds < 0 {
+            time::OffsetDateTime::new_utc(time::Date::MIN, time::Time::MIDNIGHT)
+        } else {
+            time::OffsetDateTime::new_utc(time::Date::MAX, time::Time::MIDNIGHT)
+        });
+    format!(
+        "{:04}-{:02}-{:02}",
+        day.year(),
+        u8::from(day.month()),
+        day.day()
+    )
 }
 
 /// A Mission's usage as recorded in the Registry.
@@ -555,5 +551,18 @@ mod tests {
         assert_eq!(utc_day(951_782_400), "2000-02-29");
         assert_eq!(utc_day(1_790_000_000), "2026-09-21");
         assert_eq!(utc_day(-1), "1969-12-31");
+        assert_eq!(
+            utc_day(4_107_542_399),
+            "2100-02-28",
+            "2100 is not a leap year"
+        );
+        assert_eq!(utc_day(4_107_542_400), "2100-03-01");
+        assert_eq!(utc_day(-2_203_891_200), "1900-03-01");
+        assert_eq!(
+            utc_day(i64::MAX),
+            "9999-12-31",
+            "past the representable years"
+        );
+        assert_eq!(utc_day(i64::MIN), "-9999-01-01");
     }
 }

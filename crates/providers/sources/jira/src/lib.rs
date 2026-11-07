@@ -1133,40 +1133,12 @@ fn is_after(a: &str, b: &str) -> bool {
 
 /// `2026-11-01T22:57:12.421+0700` as milliseconds since the Unix epoch.
 fn instant(text: &str) -> Option<i64> {
-    let (date, rest) = text.split_once('T')?;
-    let mut parts = date.splitn(3, '-');
-    let year: i64 = parts.next()?.parse().ok()?;
-    let month: i64 = parts.next()?.parse().ok()?;
-    let day: i64 = parts.next()?.parse().ok()?;
-    let zone_at = rest.find(['+', '-', 'Z'])?;
-    let (clock, zone) = rest.split_at(zone_at);
-    let (clock, fraction) = clock.split_once('.').unwrap_or((clock, ""));
-    let mut clock = clock.splitn(3, ':');
-    let hours: i64 = clock.next()?.parse().ok()?;
-    let minutes: i64 = clock.next()?.parse().ok()?;
-    let seconds: i64 = clock.next()?.parse().ok()?;
-    let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
-    let offset_minutes = match zone.strip_prefix('Z') {
-        Some(_) => 0,
-        None => {
-            let digits = zone[1..].replace(':', "");
-            let sign = if zone.starts_with('-') { -1 } else { 1 };
-            sign * (digits.get(..2)?.parse::<i64>().ok()? * 60
-                + digits.get(2..4)?.parse::<i64>().ok()?)
-        }
-    };
-    // The arithmetic is `days_from_civil` of <https://howardhinnant.github.io/date_algorithms.html>.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year.rem_euclid(400);
-    let shifted_month = (month + 9) % 12;
-    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    Some(
-        ((days * 86_400 + hours * 3_600 + minutes * 60 + seconds) - offset_minutes * 60) * 1_000
-            + millis,
+    let at = time::OffsetDateTime::parse(
+        text,
+        &time::format_description::well_known::Iso8601::DEFAULT,
     )
+    .ok()?;
+    Some(at.unix_timestamp() * 1_000 + i64::from(at.millisecond()))
 }
 
 /// Jira labels cannot hold whitespace.
@@ -1352,6 +1324,17 @@ mod tests {
         let utc = "2026-11-01T15:57:12.421+0000";
         assert_eq!(instant(east), instant(utc));
         assert_eq!(instant("1970-01-01T00:00:01.5Z"), Some(1_500));
+        assert_eq!(
+            instant("2024-02-29T23:59:59.999-0800"),
+            Some(1_709_279_999_999),
+            "a leap day west of UTC"
+        );
+        assert_eq!(instant("2100-03-01T00:00:00Z"), Some(4_107_542_400_000));
+        assert_eq!(
+            instant("2026-02-29T00:00:00Z"),
+            None,
+            "2026 is not a leap year"
+        );
         assert!(
             is_after("2026-11-01T15:57:13.000+0000", east),
             "later, though its text sorts first"

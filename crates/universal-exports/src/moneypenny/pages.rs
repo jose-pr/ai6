@@ -287,22 +287,17 @@ pub(crate) fn escape(text: &str) -> String {
 
 /// `seconds` (Unix time) as `2026-11-01 12:30 UTC`.
 pub(crate) fn utc_text(seconds: f64) -> String {
-    let total = seconds.max(0.0) as i64;
-    let (days, rest) = (total.div_euclid(86_400), total.rem_euclid(86_400));
-    // Civil from days (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    // Past the years `time` represents (+-9999) the text shows the last one.
+    let at = time::OffsetDateTime::from_unix_timestamp(seconds.max(0.0) as i64).unwrap_or(
+        time::OffsetDateTime::new_utc(time::Date::MAX, time::Time::MIDNIGHT),
+    );
     format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
-        rest / 3_600,
-        rest % 3_600 / 60
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        at.year(),
+        u8::from(at.month()),
+        at.day(),
+        at.hour(),
+        at.minute()
     )
 }
 
