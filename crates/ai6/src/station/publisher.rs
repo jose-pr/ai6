@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use ureq::tls::{Certificate, TlsConfig};
+use ureq::tls::TlsConfig;
 use url::{Host, Url};
 
 use crate::MissionId;
@@ -78,7 +78,7 @@ impl Config {
     /// it. Without this call only the public roots are trusted.
     #[must_use]
     pub fn with_ca_certificates(mut self, certificates: &[Vec<u8>]) -> Self {
-        self.tls = trusting(certificates);
+        self.tls = crate::tls::trusting(certificates);
         self
     }
 
@@ -126,20 +126,6 @@ fn is_loopback(host: Host<&str>) -> bool {
         Host::Ipv6(address) => address.is_loopback(),
         Host::Domain(name) => name.eq_ignore_ascii_case("localhost"),
     }
-}
-
-/// The public roots and `certificates` (DER). ureq takes either its built-in roots or a list, so
-/// the list repeats the same roots as certificates.
-pub(crate) fn trusting(certificates: &[Vec<u8>]) -> TlsConfig {
-    let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
-        .iter()
-        .map(|root| Certificate::from_der(root.as_ref()))
-        .chain(
-            certificates
-                .iter()
-                .map(|der| Certificate::from_der(der).to_owned()),
-        );
-    TlsConfig::builder().root_certs(roots.into()).build()
 }
 
 /// An agent for one link to Universal Exports: no redirects, the Station's trust, and at most

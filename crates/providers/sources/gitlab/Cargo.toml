@@ -14,13 +14,12 @@ exclude = [".*", "*.local.*"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-ai6 = { path = "../../../ai6", default-features = false }
+ai6 = { path = "../../../ai6", default-features = false, features = ["tls-roots"] }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 ureq.workspace = true
 url.workspace = true
-webpki-root-certs.workspace = true
 
 [dev-dependencies]
 ai6 = { path = "../../../ai6", features = ["daemon"] }
