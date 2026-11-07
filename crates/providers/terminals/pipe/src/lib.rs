@@ -23,12 +23,6 @@ mod os;
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod os;
-#[cfg(unix)]
-#[path = "../../process_tree/unix.rs"]
-mod process_tree;
-#[cfg(windows)]
-#[path = "../../process_tree/windows.rs"]
-mod process_tree;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{PipeReader, PipeWriter, Read, Write};
@@ -41,8 +35,8 @@ use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, T
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue, Value};
 
+use ai6_process_tree::ProcessTree;
 use os::Process;
-use process_tree::ProcessTree;
 
 const EXIT_POLL: Duration = Duration::from_millis(10);
 /// How often a waiting `read` asks whether the child has exited.

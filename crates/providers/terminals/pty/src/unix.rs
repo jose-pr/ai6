@@ -13,7 +13,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use nix::sys::termios::{self, InputFlags, LocalFlags, SetArg, SpecialCharacterIndices};
 use portable_pty::MasterPty;
 
-pub(crate) use crate::process_tree::ProcessTree;
+pub(crate) use ai6_process_tree::ProcessTree;
 
 /// The child's process tree: `portable-pty` starts the child with `setsid`, so its process
 /// group and session ids are its pid.

@@ -208,6 +208,7 @@ name = "ai6-agent-codex"
 version = "0.1.0"
 dependencies = [
  "ai6",
+ "ai6-process-tree",
  "libc",
  "serde_json",
  "tempfile",
@@ -220,6 +221,14 @@ name = "ai6-diptel"
 version = "0.1.0"
 dependencies = [
  "guatiao",
+]
+
+[[package]]
+name = "ai6-process-tree"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -291,6 +300,7 @@ name = "ai6-terminal-pipe"
 version = "0.1.0"
 dependencies = [
  "ai6",
+ "ai6-process-tree",
  "libc",
  "windows-sys 0.61.2",
 ]
@@ -300,6 +310,7 @@ name = "ai6-terminal-pty"
 version = "0.1.0"
 dependencies = [
  "ai6",
+ "ai6-process-tree",
  "libc",
  "nix 0.28.0",
  "portable-pty",

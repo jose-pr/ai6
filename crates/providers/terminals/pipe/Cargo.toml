@@ -15,6 +15,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 ai6 = { path = "../../../ai6", default-features = false }
+ai6-process-tree = { path = "../../../process-tree" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

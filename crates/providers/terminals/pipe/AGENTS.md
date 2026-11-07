@@ -8,7 +8,7 @@ self-contained. Development documentation lives with the source at
 No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features); `libc` on Unix
 and `windows-sys` on Windows. The library is both an `rlib` and the Guatiao `cdylib` a
 Station loads. Provider ID: `pipe`. Unsafe code is limited to the platform calls that own the
-process tree (`../process_tree/`, shared with `pty`) and start the child, each with a safety
+process tree (`ai6-process-tree`, shared with `pty`) and start the child, each with a safety
 comment; the rest of the crate denies it.
 
 ## Exports

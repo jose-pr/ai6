@@ -23,7 +23,7 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_TERMINATE,
 };
 
-pub(crate) use crate::process_tree::ProcessTree;
+pub(crate) use ai6_process_tree::ProcessTree;
 
 /// Puts the child in a new kill-on-close Job Object, with every process it started before it
 /// joined, so killing the job kills every process the child started.
