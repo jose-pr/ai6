@@ -11,7 +11,7 @@ ai6::guatiao::providers!(Jira);
 
 mod adf;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -22,7 +22,6 @@ use ai6::{
     SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
     TrackerUpdate, settings_from_table, settled_cursor,
 };
-use ureq::tls::{Certificate, TlsConfig};
 use url::Url;
 
 /// The provider ID an Operation names under `sources`.
@@ -140,27 +139,6 @@ struct Discovered {
     subtask_type: Option<String>,
 }
 
-/// The public roots and the authorities in `ca_file`: ureq takes either its built-in roots or a
-/// whole list, so the list repeats the same roots as certificates.
-fn trusting(ca_file: &Path) -> Result<TlsConfig, String> {
-    if !ca_file.is_absolute() {
-        return Err(format!(
-            "ca_file must be an absolute path, since Stations share this record: {}",
-            ca_file.display()
-        ));
-    }
-    let added = ai6::bootstrap::read_ca_file(ca_file).map_err(|e| format!("ca_file: {e}"))?;
-    let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
-        .iter()
-        .map(|root| Certificate::from_der(root.as_ref()))
-        .chain(
-            added
-                .iter()
-                .map(|der| Certificate::from_der(der).to_owned()),
-        );
-    Ok(TlsConfig::builder().root_certs(roots.into()).build())
-}
-
 /// Jira issues as an AI6 Source and Tracker.
 #[derive(Debug, Provider)]
 #[provider(
@@ -229,7 +207,7 @@ impl Jira {
             .max_redirects(0)
             .http_status_as_error(false);
         if let Some(ca_file) = &settings.ca_file {
-            agent = agent.tls_config(trusting(ca_file)?);
+            agent = agent.tls_config(ai6::tls::trusting_file(ca_file)?);
         }
         let agent = agent.build().into();
         Ok(Self {

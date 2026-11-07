@@ -20,7 +20,9 @@ acp = ["dep:agent-client-protocol", "dep:coqui-acp", "dep:futures"]
 # The harness gate's client of a Station's Cable endpoint (`ai6::directorates::section_00::gate`).
 gate = ["dep:ureq", "dep:url"]
 # Adds bounded background event publication to the Universal Exports gateway.
-publisher = ["daemon", "dep:ai6-diptel", "dep:base64", "dep:url", "dep:webpki-root-certs"]
+publisher = ["daemon", "tls-roots", "dep:ai6-diptel", "dep:base64", "dep:url"]
+# `ai6::tls`: HTTPS trust for a ureq client, the public roots and a deployment's own authorities.
+tls-roots = ["dep:ureq", "dep:webpki-root-certs"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
 station-tls = ["dep:coqui-peer-tls", "dep:rustls", "dep:base64"]
 # A Registry and roster kept in a SQLite database file.

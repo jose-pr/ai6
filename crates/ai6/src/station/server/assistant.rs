@@ -5359,7 +5359,8 @@ event_bytes = 7
 
     #[test]
     fn the_desk_reaches_an_enterprise_gateway_only_with_its_ca() {
-        use crate::station::publisher::{tls_gateway, trusting};
+        use crate::station::publisher::tls_gateway;
+        use crate::tls::trusting;
 
         let gateway = tls_gateway::start("127.0.0.1");
         let link = |tls| Link {
