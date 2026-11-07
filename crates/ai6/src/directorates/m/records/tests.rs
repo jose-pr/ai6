@@ -189,7 +189,9 @@ fn full_example(record: ConfigRecord) -> Value {
             "budget": {"session_tokens": 10},
             "retire_on": "2030-01-01",
             "on_retire": "retired",
-            "retire_warning_days": 3
+            "retire_warning_days": 3,
+            "wake_on_cable": false,
+            "wakes_per_hour": 5
         }),
         ConfigRecord::Role => json!({
             "purpose": "Runs cases",

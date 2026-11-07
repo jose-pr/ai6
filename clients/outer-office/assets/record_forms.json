@@ -2158,6 +2158,30 @@
           "x-advanced": true,
           "default": {}
         },
+        "wake_on_cable": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Wake on a Cable",
+          "description": "Whether a Cable to a Session of it that is between turns starts a turn with the Cable as its input. When not, the Cable waits for the Agent's own read.",
+          "x-section": "cables",
+          "x-advanced": true,
+          "default": true
+        },
+        "wakes_per_hour": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Wakes per hour",
+          "description": "How many Cables may wake its Sessions in an hour; 0 wakes none.",
+          "x-section": "cables",
+          "x-advanced": true,
+          "default": 60
+        },
         "retire_on": {
           "type": [
             "string",
@@ -2226,6 +2250,10 @@
         {
           "id": "limits",
           "title": "Limits and spending"
+        },
+        {
+          "id": "cables",
+          "title": "Cables"
         },
         {
           "id": "retire",

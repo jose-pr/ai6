@@ -129,10 +129,18 @@ pub struct Agent {
     pub on_retire: OnRetire,
     /// Days before `retire_on` that the Station warns of it; `0` does not warn.
     pub retire_warning_days: u32,
+    /// Whether a Cable to a Session of it that is between turns starts a turn with the Cable as
+    /// its input; when not, the Cable waits for the Agent's own `read_cables`.
+    pub wake_on_cable: bool,
+    /// How many Cables may wake its Sessions in an hour, counted across Stations; `0` wakes none.
+    pub wakes_per_hour: u32,
 }
 
 /// Days before an Agent's `retire_on` date that the Station warns of it, by default.
 pub const DEFAULT_RETIRE_WARNING_DAYS: u32 = 14;
+
+/// The Cables that may wake an Agent's Sessions in an hour, by default.
+pub const DEFAULT_WAKES_PER_HOUR: u32 = 60;
 
 /// One way an Agent reaches its model: a handler, the name this source knows the model by, and an
 /// account source (`[[agent.<id>.route]]`). Identity stays the Agent's; routes of one Agent are
@@ -493,6 +501,8 @@ impl Agent {
             retire_on: None,
             on_retire: OnRetire::Desk,
             retire_warning_days: DEFAULT_RETIRE_WARNING_DAYS,
+            wake_on_cable: true,
+            wakes_per_hour: DEFAULT_WAKES_PER_HOUR,
         }
     }
 }
@@ -2317,6 +2327,7 @@ impl Operation {
     ),
     section(id = "duties", label = "Duties"),
     section(id = "limits", label = "Limits and spending"),
+    section(id = "cables", label = "Cables"),
     section(id = "retire", label = "Retirement")
 )]
 pub(crate) struct AgentDefinition {
@@ -2420,6 +2431,24 @@ pub(crate) struct AgentDefinition {
     #[map(default)]
     #[form(form)]
     budget: BudgetDefinition,
+
+    /// Whether a Cable to a Session of it that is between turns starts a turn with the Cable as
+    /// its input. When not, the Cable waits for the Agent's own read.
+    #[schema(
+        title = "Wake on a Cable",
+        section = "cables",
+        advanced,
+        default = Some(true)
+    )]
+    wake_on_cable: Option<bool>,
+    /// How many Cables may wake its Sessions in an hour; 0 wakes none.
+    #[schema(
+        title = "Wakes per hour",
+        section = "cables",
+        advanced,
+        default = Some(DEFAULT_WAKES_PER_HOUR)
+    )]
+    wakes_per_hour: Option<u32>,
 
     /// The day its model reaches end of life, as YYYY-MM-DD (UTC).
     #[schema(title = "Retire on", section = "retire", format = "date", advanced)]
@@ -2760,6 +2789,14 @@ fn resolve_agent(
             .retire_warning_days
             .or_else(|| base.as_ref().map(|agent| agent.retire_warning_days))
             .unwrap_or(DEFAULT_RETIRE_WARNING_DAYS),
+        wake_on_cable: definition
+            .wake_on_cable
+            .or_else(|| base.as_ref().map(|agent| agent.wake_on_cable))
+            .unwrap_or(true),
+        wakes_per_hour: definition
+            .wakes_per_hour
+            .or_else(|| base.as_ref().map(|agent| agent.wakes_per_hour))
+            .unwrap_or(DEFAULT_WAKES_PER_HOUR),
     };
     validate_clearance(&agent.clearance)?;
     validate_retire_on(&agent)?;
