@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:outer_office/forms/form_model.dart';
+import 'package:outer_office/forms/form_host.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/settings/oo_config.dart';
 import 'package:outer_office/settings/oo_schema.dart';
@@ -226,6 +226,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
             body: Padding(
               padding: const EdgeInsets.all(8),
@@ -239,7 +240,7 @@ void main() {
     }
 
     test('fits its schema, judged by guatiao_intake, for every table', () {
-      final model = FormModel(schema: OoSchema.schema, form: OoSchema.form);
+      final model = ooFormModel(schema: OoSchema.schema, form: OoSchema.form);
       addTearDown(model.close);
       expect(model.schema.member('chat')?.title, "Moneypenny's chat");
       final fields = {for (final group in model.layout('')) ...group.fields};
@@ -260,6 +261,7 @@ void main() {
         ),
       );
       expect(find.text('How much a page asks for'), findsWidgets);
+      await tester.ensureVisible(find.text('Save settings'));
       await tester.tap(find.text('Save settings'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Saved.'), findsOneWidget);

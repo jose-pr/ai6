@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 import 'package:outer_office/compartments/compartments_page.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/routes/oo_route.dart';
@@ -100,6 +102,7 @@ Future<void> _open(WidgetTester tester, MissionBoard board) async {
   addTearDown(board.dispose);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: CompartmentsPage(
           board: board,

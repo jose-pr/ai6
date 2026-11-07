@@ -2,11 +2,16 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:ui' show Size;
 
+// guatiao_flutter's choice is Flutter's own DropdownButton; the app's are material_ui's.
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show DropdownButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
     show Card, DropdownButton, Key, MaterialApp, Scaffold;
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/operations/operation_tree.dart';
@@ -158,10 +163,10 @@ void main() {
     await tester.tap(find.byTooltip('Edit P'));
     await tester.pumpAndSettle();
 
-    final picker = tester.widget<DropdownButton<String>>(
+    final picker = tester.widget<flutter.DropdownButton<String>>(
       find.descendant(
         of: find.byKey(const Key('form-field-parent')),
-        matching: find.byType(DropdownButton<String>),
+        matching: find.byType(flutter.DropdownButton<String>),
       ),
     );
     final offered = [
@@ -189,6 +194,7 @@ void main() {
     });
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: EffectivePolicyView(effective: effective)),
       ),
     );

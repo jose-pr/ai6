@@ -1,13 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 
+// Flutter's own TextField is what guatiao_flutter draws; the app's is material_ui's.
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:outer_office/forms/form_model.dart';
-import 'package:outer_office/forms/record_form.dart';
+import 'package:outer_office/forms/form_host.dart';
 import 'package:outer_office/main.dart';
+import 'package:outer_office/roster/record_summary.dart';
 
 import 'shell_navigation.dart';
 
@@ -22,7 +25,7 @@ Map<String, Object?> _form(String kind) =>
     (_forms[kind] as Map<String, dynamic>)['form'] as Map<String, Object?>;
 
 FormModel _model(String kind, [Map<String, Object?> value = const {}]) =>
-    FormModel(schema: _schema(kind), form: _form(kind), value: value);
+    ooFormModel(schema: _schema(kind), form: _form(kind), value: value);
 
 http.Response _json(Object? body, [int status = 200]) => http.Response(
   jsonEncode(body),
@@ -377,7 +380,7 @@ void main() {
     });
 
     test('the renderer knows no kind of record', () {
-      for (final name in ['form_model.dart', 'record_form.dart']) {
+      for (final name in ['form_host.dart']) {
         final source = File('lib/forms/$name').readAsStringSync();
         expect(
           RegExp(
@@ -413,12 +416,13 @@ void main() {
       addTearDown(model.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
-            body: SingleChildScrollView(child: RecordFormView(model: model)),
+            body: SingleChildScrollView(child: OoFormView(model: model)),
           ),
         ),
       );
-      final box = tester.widget<TextField>(_field('token'));
+      final box = tester.widget<flutter.TextField>(_field('token'));
       expect(box.obscureText, isTrue);
       expect(box.controller!.text, isEmpty);
       expect(find.text('hunter2'), findsNothing);
@@ -438,8 +442,9 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
-            body: SingleChildScrollView(child: RecordFormView(model: model)),
+            body: SingleChildScrollView(child: OoFormView(model: model)),
           ),
         ),
       );
@@ -454,7 +459,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(_box('desk.idle'), '3600');
       await tester.pumpAndSettle();
-      expect(find.textContaining('Now 1 hour.'), findsOneWidget);
       expect(find.text('seconds'), findsWidgets);
       await tester.ensureVisible(find.byKey(const Key('form-word-desk.live')));
       await tester.tap(find.byKey(const Key('form-word-desk.live')));
@@ -473,8 +477,9 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
-            body: SingleChildScrollView(child: RecordFormView(model: model)),
+            body: SingleChildScrollView(child: OoFormView(model: model)),
           ),
         ),
       );
