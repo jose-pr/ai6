@@ -136,3 +136,7 @@ russh-sftp = "3"
 # to hash; optimized, a scan of a whole deps directory takes seconds, not minutes.
 [profile.dev.package.sha2]
 opt-level = 3
+
+# coqui-agentic-peer depends on coqui-peer by git revision; one copy for the whole build.
+[patch.crates-io]
+coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "1f00bfe6319f64e7ec038a7003746f4f031d538c" }

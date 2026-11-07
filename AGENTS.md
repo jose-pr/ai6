@@ -79,7 +79,7 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
   carry their own Guatiao entry point; do not add forwarding-only crates.
 - Access kinds, the role authorizer, the access providers and Station mutual TLS are the shared
   `coqui-access`, `coqui-roles`, `coqui-peer` and `coqui-peer-tls` crates: `coqui-peer` and
-  `coqui-peer-tls` at an exact crates.io version, `coqui-access` and `coqui-roles` (unpublished)
+  `coqui-peer-tls` at an exact crates.io version (`coqui-peer` patched to the git revision coqui-agentic-peer uses, so one copy builds), `coqui-access` and `coqui-roles` (unpublished)
   pinned by git revision beside Guatiao. AI6 keeps only its scope kinds, actions and where it
   stores things.
   The host's tests build the access plugins as dev-dependencies and load them from beside the

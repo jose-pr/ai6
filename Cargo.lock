@@ -120,7 +120,7 @@ dependencies = [
  "coqui-access-system-plugin",
  "coqui-acp",
  "coqui-acp-provider",
- "coqui-peer 0.0.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "coqui-peer",
  "coqui-peer-tls",
  "coqui-roles",
  "coqui-roles-plugin",
@@ -991,7 +991,7 @@ source = "git+https://github.com/Boriken-Dev/coqui-access?rev=add863cf24394a9c88
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
- "coqui-peer 0.0.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "coqui-peer",
  "coqui-peer-tls",
 ]
 
@@ -1003,7 +1003,7 @@ dependencies = [
  "coqui-access",
  "coqui-access-kit",
  "coqui-access-mtls",
- "coqui-peer 0.0.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "coqui-peer",
  "coqui-peer-tls",
  "serde",
  "serde_json",
@@ -1104,7 +1104,7 @@ name = "coqui-agentic-peer"
 version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-agentic-peer?rev=f6da790585e51345fa58f5e989cedd6500a0b962#f6da790585e51345fa58f5e989cedd6500a0b962"
 dependencies = [
- "coqui-peer 0.0.0-alpha.1 (git+https://github.com/Boriken-Dev/coqui-peer?rev=1f00bfe6319f64e7ec038a7003746f4f031d538c)",
+ "coqui-peer",
  "coqui-peer-noise",
  "coqui-peer-webcrypto",
  "coqui-web-channel",
@@ -1126,31 +1126,18 @@ dependencies = [
 [[package]]
 name = "coqui-peer"
 version = "0.0.0-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1104dd1f80f66a107e141b425516487c83f04b9bc570ab9e4acd06fe0f4dace"
-dependencies = [
- "data-encoding",
- "serde",
- "sha1 0.11.0",
- "sha2 0.11.1",
- "subtle",
- "tokio",
- "zeroize",
-]
-
-[[package]]
-name = "coqui-peer"
-version = "0.0.0-alpha.1"
 source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=1f00bfe6319f64e7ec038a7003746f4f031d538c#1f00bfe6319f64e7ec038a7003746f4f031d538c"
 dependencies = [
  "data-encoding",
  "hkdf 0.13.0",
  "hmac 0.13.0",
  "rand_core 0.6.4",
+ "serde",
  "sha1 0.11.0",
  "sha2 0.11.1",
  "spake2",
  "subtle",
+ "tokio",
  "zeroize",
 ]
 
@@ -1160,7 +1147,7 @@ version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=8777403807e3ad6eb6fddc98d9b5b6753bb0e424#8777403807e3ad6eb6fddc98d9b5b6753bb0e424"
 dependencies = [
  "aes-gcm",
- "coqui-peer 0.0.0-alpha.1 (git+https://github.com/Boriken-Dev/coqui-peer?rev=1f00bfe6319f64e7ec038a7003746f4f031d538c)",
+ "coqui-peer",
  "data-encoding",
  "getrandom 0.4.3",
  "hkdf 0.13.0",
@@ -1176,7 +1163,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b3dc15e86bd976c69b29425319a822dd3415393b41e8550d44180f6a2e5cca4"
 dependencies = [
  "coqui-net-acl",
- "coqui-peer 0.0.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "coqui-peer",
  "globset",
  "rcgen",
  "rustls",
@@ -1194,7 +1181,7 @@ version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-peer-webcrypto?rev=a3776fba131415d006f68ea493120fd7f894244a#a3776fba131415d006f68ea493120fd7f894244a"
 dependencies = [
  "aes-gcm",
- "coqui-peer 0.0.0-alpha.1 (git+https://github.com/Boriken-Dev/coqui-peer?rev=1f00bfe6319f64e7ec038a7003746f4f031d538c)",
+ "coqui-peer",
  "data-encoding",
  "getrandom 0.4.3",
  "hkdf 0.13.0",
