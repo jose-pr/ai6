@@ -837,6 +837,7 @@ impl CableSendRequest {
 
 type EndpointSource = dyn Fn() -> Vec<CableEndpoint> + Send + Sync;
 type LineageSource = dyn Fn(&str) -> Vec<String> + Send + Sync;
+type ResidentSource = dyn Fn(&CableTarget) -> Vec<CableEndpoint> + Send + Sync;
 type AuditSink = dyn Fn(&CableAuditRecord) + Send + Sync;
 type DurableAudit = dyn Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync;
 type EndpointKey = (String, String, Option<String>, Option<String>);
@@ -847,6 +848,7 @@ pub struct CableRelay {
     policy: RwLock<CablePolicy>,
     endpoints: Arc<EndpointSource>,
     lineage: Arc<LineageSource>,
+    residents: Option<Arc<ResidentSource>>,
     channels: BTreeMap<String, BTreeSet<String>>,
     max_fanout: usize,
     sender_rate: f64,
@@ -882,6 +884,7 @@ impl CableRelay {
             policy: RwLock::new(policy),
             endpoints: Arc::new(endpoints),
             lineage: Arc::new(|_: &str| Vec::new()),
+            residents: None,
             channels,
             max_fanout: MAX_CABLE_FANOUT,
             sender_rate: DEFAULT_SENDER_RATE,
@@ -954,6 +957,20 @@ impl CableRelay {
         lineage: impl Fn(&str) -> Vec<String> + Send + Sync + 'static,
     ) -> Self {
         self.lineage = Arc::new(lineage);
+        self
+    }
+
+    /// Sets who a Cable waits for when its addressee has no live Session: `residents` names, for an
+    /// `agent` or `operation` target, an endpoint with no Session for each Agent that Session
+    /// would be of (the Agent in each Operation it serves, or the Operation's coordinating
+    /// Agents). Such a Cable is delivered to the Agent's next Session, in its brief. Without it,
+    /// a Cable to an Agent with no live Session is refused.
+    #[must_use]
+    pub fn with_residents(
+        mut self,
+        residents: impl Fn(&CableTarget) -> Vec<CableEndpoint> + Send + Sync + 'static,
+    ) -> Self {
+        self.residents = Some(Arc::new(residents));
         self
     }
 
@@ -1312,7 +1329,53 @@ impl CableRelay {
         principal: &CablePrincipal,
         limit: usize,
     ) -> Result<Vec<CableDelivery>, CableRelayError> {
-        self.read_inbox(principal, None, limit)
+        self.read_inbox(principal, None, limit, None)
+    }
+
+    /// As [`inbox`](Self::inbox), but only for what is newly queued, and `permit` is asked once,
+    /// before the first of it is delivered: when it says no, nothing is delivered and what waits
+    /// stays queued. What was delivered before is not returned again. A brief takes the Cables
+    /// that waited for its Agent's next Session this way.
+    pub fn deliver_new(
+        &self,
+        principal: &CablePrincipal,
+        limit: usize,
+        permit: &mut dyn FnMut() -> bool,
+    ) -> Result<Vec<CableDelivery>, CableRelayError> {
+        self.read_inbox(principal, None, limit, Some(permit))
+    }
+
+    /// Delivers what is newly queued for a Session that is between turns, so that it can be woken
+    /// by it: at most `wakes_per_hour` wakes an hour for the Agent, counted across Stations and
+    /// against the Agent's Cable quota, none when it is `0`. Grants and compartments are asked
+    /// again, as for any delivery; a wake the quota refuses leaves the Cables queued, for the
+    /// Session's own `read_cables`.
+    pub fn wake(
+        &self,
+        principal: &CablePrincipal,
+        limit: usize,
+        wakes_per_hour: u32,
+    ) -> Result<Vec<CableDelivery>, CableRelayError> {
+        if wakes_per_hour == 0 {
+            return Ok(Vec::new());
+        }
+        let now = (self.now)();
+        let (agent_scope, wakes) = (
+            format!("scope:agent:{}", principal.agent),
+            format!("wake:{}", principal.agent),
+        );
+        let mut permit = || {
+            let buckets = [
+                (
+                    wakes.as_str(),
+                    f64::from(wakes_per_hour) / 3600.0,
+                    wakes_per_hour,
+                ),
+                (agent_scope.as_str(), self.scope_rate, self.scope_burst),
+            ];
+            self.registry.take_quotas(&buckets, now).unwrap_or(false)
+        };
+        self.read_inbox(principal, None, limit, Some(&mut permit))
     }
 
     /// As [`inbox`](Self::inbox), for the Cables sent in `operation` only: the others are left
@@ -1323,7 +1386,7 @@ impl CableRelay {
         operation: &str,
         limit: usize,
     ) -> Result<Vec<CableDelivery>, CableRelayError> {
-        self.read_inbox(principal, Some(operation), limit)
+        self.read_inbox(principal, Some(operation), limit, None)
     }
 
     fn read_inbox(
@@ -1331,7 +1394,9 @@ impl CableRelay {
         principal: &CablePrincipal,
         operation: Option<&str>,
         limit: usize,
+        mut permit: Option<&mut dyn FnMut() -> bool>,
     ) -> Result<Vec<CableDelivery>, CableRelayError> {
+        let mut permitted = None;
         let now = (self.now)();
         if !now.is_finite() || now <= 0.0 {
             return Err(CableRelayError::RegistryUnavailable);
@@ -1406,6 +1471,12 @@ impl CableRelay {
                     CableInboundMode::Hold => CableState::Held,
                     CableInboundMode::Refuse => CableState::Refused,
                 };
+                if state == CableState::Delivered
+                    && let Some(permit) = permit.as_deref_mut()
+                    && !*permitted.get_or_insert_with(permit)
+                {
+                    break;
+                }
                 // Nothing is delivered across an Operation that the log does not hold first.
                 if state == CableState::Delivered
                     && self
@@ -1454,7 +1525,10 @@ impl CableRelay {
                     "delivered",
                     Some(&updated),
                 );
-            } else if recipient.state() == CableState::Delivered && crossing.is_ok() {
+            } else if permit.is_none()
+                && recipient.state() == CableState::Delivered
+                && crossing.is_ok()
+            {
                 deliveries.push(delivery_view(&cable, recipient));
             }
         }
@@ -1892,6 +1966,27 @@ impl CableRelay {
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut candidates = self.candidates(&request.target)?;
+        // An Agent with no live Session, or an Operation with none of its Agents live, is
+        // reached by the Cable waiting for its next Session, whichever work that is for.
+        if let Some(residents) = &self.residents {
+            let waits = match request.target.scope() {
+                CableScope::Agent => !candidates
+                    .iter()
+                    .any(|endpoint| Some(endpoint.agent.as_str()) == request.target.name()),
+                CableScope::Operation => candidates.is_empty(),
+                _ => false,
+            };
+            if waits {
+                let mut waiting = residents(&request.target);
+                waiting.sort_by(|left, right| {
+                    (left.operation != principal.operation)
+                        .cmp(&(right.operation != principal.operation))
+                        .then_with(|| left.agent.cmp(&right.agent))
+                        .then_with(|| left.operation.cmp(&right.operation))
+                });
+                candidates.extend(waiting);
+            }
+        }
         // A Liaison peer named as an Agent is reached through the Registry, where Universal
         // Exports' Liaison reads what waits for it. A peer cannot address another peer.
         if request.target.scope() == CableScope::Agent
@@ -3682,5 +3777,226 @@ max_ttl = \"none\"",
         .unwrap();
         assert_eq!(unbounded.message_limits().0, Limit::UNBOUNDED);
         assert!(CableConfig::parse_toml("max_fanout = 5000").is_ok());
+    }
+
+    fn station_policy(receivers: &[&str]) -> CablePolicy {
+        let station = target(CableScope::Station, Some("station-a"));
+        let mut grants = vec![grant("007", CableAction::Send, station.clone())];
+        grants.extend(
+            receivers
+                .iter()
+                .map(|agent| grant(agent, CableAction::Receive, station.clone())),
+        );
+        CablePolicy::try_new(grants, BTreeMap::new()).unwrap()
+    }
+
+    /// The Agents as Session-less endpoints, which is where a waiting Cable is addressed.
+    fn residents(agents: &[&str]) -> impl Fn(&CableTarget) -> Vec<CableEndpoint> + use<> {
+        let agents: Vec<String> = agents.iter().map(|agent| (*agent).to_owned()).collect();
+        move |target| {
+            agents
+                .iter()
+                .filter(|agent| Some(agent.as_str()) == target.name())
+                .map(|agent| endpoint(agent, "operation-a", None))
+                .collect()
+        }
+    }
+
+    fn delivery_state(service: &CableRelay, id: &str) -> CableState {
+        service
+            .registry
+            .get_cable(id)
+            .unwrap()
+            .unwrap()
+            .recipients()[0]
+            .state()
+    }
+
+    fn sessionless(agent: &str, operation: &str) -> CablePrincipal {
+        CablePrincipal::try_new(
+            agent.into(),
+            operation.into(),
+            Some("theater-a".into()),
+            "station-a".into(),
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_cable_to_an_agent_with_no_session_waits_and_is_delivered_once_in_its_brief() {
+        let root = tempfile::tempdir().unwrap();
+        let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
+        let sender = principal("007", "operation-a");
+        let to = target(CableScope::Agent, Some("008"));
+
+        let without = relay(registry.clone(), station_policy(&["008"]), Vec::new());
+        assert_eq!(
+            without
+                .send(&sender, request(to.clone(), "no-residents"))
+                .unwrap_err(),
+            CableRelayError::Unavailable,
+            "with nobody to wait for, a Cable to an Agent that is not running is refused"
+        );
+
+        let service = relay(registry.clone(), station_policy(&["008"]), Vec::new())
+            .with_residents(residents(&["008"]));
+        let first = service.send(&sender, request(to.clone(), "first")).unwrap();
+        let second = service
+            .send(&sender, request(to.clone(), "second"))
+            .unwrap();
+        assert_eq!(first.recipients()[0].session_id(), None);
+        assert_eq!(delivery_state(&service, first.id()), CableState::Queued);
+        assert!(
+            service
+                .send(
+                    &sender,
+                    request(target(CableScope::Agent, Some("009")), "other")
+                )
+                .is_err(),
+            "an Agent nobody names is still refused"
+        );
+
+        let brief = sessionless("008", "operation-a");
+        let delivered = service.deliver_new(&brief, 10, &mut || true).unwrap();
+        assert_eq!(
+            delivered
+                .iter()
+                .map(|delivery| delivery.cable_id.as_str())
+                .collect::<Vec<_>>(),
+            [first.id(), second.id()],
+            "in the order they were sent"
+        );
+        assert_eq!(delivery_state(&service, first.id()), CableState::Delivered);
+        assert!(
+            service
+                .deliver_new(&brief, 10, &mut || true)
+                .unwrap()
+                .is_empty(),
+            "a Cable is in one brief"
+        );
+
+        let later = relay(registry, station_policy(&["008"]), Vec::new())
+            .with_clock(|| 1_700_000_000.0 + 86_400.0 * 365.0);
+        let stale = service
+            .send(&sender, request(to, "stale").with_ttl(30.0))
+            .unwrap();
+        assert!(
+            later
+                .deliver_new(&brief, 10, &mut || true)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            delivery_state(&service, stale.id()),
+            CableState::Queued,
+            "an expired Cable is not delivered"
+        );
+    }
+
+    #[test]
+    fn a_cable_to_an_operation_with_nobody_running_waits_for_its_coordinator() {
+        let root = tempfile::tempdir().unwrap();
+        let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
+        let operation = target(CableScope::Operation, Some("operation-a"));
+        let policy = CablePolicy::try_new(
+            vec![
+                grant("007", CableAction::Send, operation.clone()),
+                grant("*", CableAction::Receive, operation.clone()),
+            ],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let service = relay(registry, policy, Vec::new()).with_residents(|target| {
+            if target.name() == Some("operation-a") {
+                vec![endpoint("00", "operation-a", None)]
+            } else {
+                Vec::new()
+            }
+        });
+        let sent = service
+            .send(
+                &principal("007", "operation-a"),
+                request(operation, "coordinator"),
+            )
+            .unwrap();
+        assert_eq!(sent.recipients().len(), 1);
+        assert_eq!(sent.recipients()[0].agent(), "00");
+        let delivered = service
+            .deliver_new(&sessionless("00", "operation-a"), 10, &mut || true)
+            .unwrap();
+        assert_eq!(delivered.len(), 1);
+    }
+
+    #[test]
+    fn wakes_are_counted_and_a_refused_wake_leaves_the_cable_for_the_sessions_own_read() {
+        let root = tempfile::tempdir().unwrap();
+        let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
+        let service = relay(
+            registry,
+            station_policy(&["008"]),
+            vec![endpoint("008", "operation-a", Some("session-008"))],
+        );
+        let sender = principal("007", "operation-a");
+        let idle = principal("008", "operation-a");
+        let to = target(CableScope::Agent, Some("008"));
+
+        let mut sent = Vec::new();
+        for (round, expected) in [(0, 1), (1, 1), (2, 0)] {
+            sent.push(
+                service
+                    .send(&sender, request(to.clone(), &format!("storm-{round}")))
+                    .unwrap(),
+            );
+            let woken = service.wake(&idle, 10, 2).unwrap();
+            assert_eq!(woken.len(), expected, "wake {round} of 2 an hour");
+        }
+        assert_eq!(
+            delivery_state(&service, sent[1].id()),
+            CableState::Delivered
+        );
+        assert_eq!(
+            delivery_state(&service, sent[2].id()),
+            CableState::Queued,
+            "the third wake was refused and nothing was delivered"
+        );
+        assert_eq!(
+            service.inbox(&idle, 10).unwrap().len(),
+            3,
+            "the Session's own read takes it, and the two before it"
+        );
+        assert!(
+            service.wake(&idle, 10, 2).unwrap().is_empty(),
+            "what was delivered does not wake it again"
+        );
+
+        let never = service.send(&sender, request(to, "never")).unwrap();
+        assert!(service.wake(&idle, 10, 0).unwrap().is_empty());
+        assert_eq!(delivery_state(&service, never.id()), CableState::Queued);
+    }
+
+    #[test]
+    fn a_grant_revoked_before_the_wake_stops_the_delivery() {
+        let root = tempfile::tempdir().unwrap();
+        let service = relay(
+            Arc::new(FileRegistry::open(root.path())),
+            station_policy(&["008"]),
+            vec![endpoint("008", "operation-a", Some("session-008"))],
+        );
+        let sent = service
+            .send(
+                &principal("007", "operation-a"),
+                request(target(CableScope::Agent, Some("008")), "revoked"),
+            )
+            .unwrap();
+        service.update_policy(station_policy(&[])).unwrap();
+        assert!(
+            service
+                .wake(&principal("008", "operation-a"), 10, 60)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(delivery_state(&service, sent.id()), CableState::Refused);
     }
 }
