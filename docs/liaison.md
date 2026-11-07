@@ -134,4 +134,5 @@ tried again every `poll`, until it expires. A peer cannot address another peer. 
 
 Files, data parts and push notifications are not carried. A peer's addressee must be listed in
 the gateway's configuration; a peer cannot discover Agents beyond its card. A thread bound to a
-Session is delivered by polling as every Cable is; it does not wake a Session between turns.
+Session wakes that Session between turns as any Cable does; once the Session has ended, it waits
+for the Agent's next Session to read it, and is not put in a brief.

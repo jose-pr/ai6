@@ -188,8 +188,10 @@ peer may do only what its principal may (`cable.send`, `cable.read`), and the re
 name it as `a2a:<peer>`. An A2A Task is the peer's Cable (its ID is the Cable ID) and its context
 the Cable conversation; neither is a **Mission ID** (a unit of work that can group multiple
 Sessions) or a provider-issued **Session ID** (one resumable agent run). Inbox
-delivery currently uses polling through `read_cables` at agent-selected checkpoints; it
-does not wake an idle provider session.
+delivery is by polling through `read_cables` at agent-selected checkpoints, and a Station
+also starts a turn with a Cable in a live Session that is waiting at a prompt, unless its Agent has
+`wake_on_cable = false`; a Cable to an Agent with no Session waits for the brief of its next
+([Cables](agents.md#a-cable-that-finds-nobody-at-the-prompt)).
 
 ## Terminal handshakes
 

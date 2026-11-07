@@ -601,6 +601,8 @@ pub struct Agent {
     pub retire_on: Option<String>,                // UTC date YYYY-MM-DD the model reaches end of life
     pub on_retire: OnRetire,                      // Desk (default) | Retired
     pub retire_warning_days: u32,                 // DEFAULT_RETIRE_WARNING_DAYS = 14; 0 = no warning
+    pub wake_on_cable: bool,                      // true; false: a Cable waits for the Agent's own read_cables
+    pub wakes_per_hour: u32,                      // DEFAULT_WAKES_PER_HOUR = 60; 0 = no wake
 }
 #[non_exhaustive] pub struct AgentRoute {        // one way to its model; ToValue, FromValue, Schema, Form
     pub handler: String,                          // required
@@ -4567,6 +4569,25 @@ peer's Cable addressed to the Agent as a whole records the Session that took it
 answers it after. `withdraw(principal, cable_id) -> Result<Cable, CableRelayError>` lets the
 sending principal (Agent and Session) take back a Cable no recipient has had: queued and held
 recipients become `CableState::Withdrawn`, which is final; `Unavailable` once any recipient has it.
+
+`CableRelay::with_residents(impl Fn(&CableTarget) -> Vec<CableEndpoint>)` says where a Cable waits
+when its addressee has no live Session: for an `agent` target none of whose endpoints is live, or an
+`operation` target with no endpoint, the relay adds what it returns (endpoints with no Session; the
+daemon gives the Agent in each Operation it serves, or the Operation's 00 Agents), and the Cable is
+addressed to the Agent as a whole, queued; without it such a send is `Unavailable`. Grants and
+compartments are applied to those endpoints as to live ones. `deliver_new(principal, limit, permit)`
+reads as `inbox` does for what is newly queued only (what was delivered is not returned again), asks
+`permit` once before the first delivery and delivers nothing when it says no: a brief reads the
+Cables that waited for its Agent's next Session with a principal that has no Session (a Cable with an
+`affinity` is not given to it). `wake(principal, limit, wakes_per_hour)` is `deliver_new` for a Session
+between turns, its permit taking one wake of `wake:<agent>` (`wakes_per_hour` an hour, burst
+`wakes_per_hour`) and one token of `scope:agent:<agent>` through `take_quotas`; `0` delivers nothing.
+Both recheck the receiver's grants, compartments and inbound mode first, as `inbox` does. The daemon
+calls `wake` each beat for every live Session of an Agent with `wake_on_cable` whose Mission is
+`blocked` with no reason, and sends the deliveries as that Session's message (which turns the Mission
+`working`); such a Session is also a Cable endpoint, as a `working` one is. It fills the brief of a
+Mission start or resume (a standing window's too) through `deliver_new`, when the Session has the
+Cable tools. Neither creates a Mission, a brief or a placement.
 
 The daemon reads strict `cables.toml` from its config directory. Missing configuration
 denies every action. `[[grants]]` entries name `agent`, `action`, `scope`, and optional

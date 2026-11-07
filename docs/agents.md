@@ -454,6 +454,36 @@ Incoming message text is untrusted input. It cannot grant tools, clearance, secr
 authority. See [Agent Cables](architecture.md#agent-cables) for the message and
 permission contract.
 
+### A Cable that finds nobody at the prompt
+
+A Cable reaches an Agent whether or not it is polling:
+
+- **A Session between turns is woken.** A live Session waiting at a prompt (its Mission
+  `blocked` with no reason of its own) takes a turn with the Cable as its input, marked
+  untrusted as in `read_cables`, and its Mission is `working` again. The Cable shows `delivered`
+  when the turn starts. The Agent's `wake_on_cable = false` opts out: its Cables wait for its own
+  `read_cables`. `wakes_per_hour` (default 60, no floor; `0` wakes none) bounds the wakes of
+  an Agent, counted across Stations and against its Cable quota; a wake the count refuses leaves
+  the Cable queued for the Session's own read.
+- **An Agent with no Session has it in the brief of its next.** A Cable to an Agent that is not
+  running, or to an `operation` none of whose Agents run (it waits for that Operation's 00
+  Agents), stays queued in the Registry until its `expires`. The next Session of that Agent
+  (a Mission's, or a standing Sleeper's window, which takes the Cables sent since the last one)
+  starts with them in its brief, in the order they were sent, and the sender's Cable shows
+  `delivered` then. A Cable bound to the Session of a thread (a Liaison peer's) waits for that
+  Session's own read.
+
+```toml
+[agent.007]
+wake_on_cable = true   # the default; false leaves its Cables for its own read_cables
+wakes_per_hour = 60    # the default; 0 wakes none
+```
+
+Neither path adds authority: the relay asks for the sender's and the receiver's grants and for
+any compartment again when it wakes a Session or fills a brief, so a grant revoked since the
+Cable was sent refuses it. A Cable never creates a Mission, a brief or a placement; it waits for
+whatever the addressee's next Session was started for.
+
 Agents outside AI6 reach these Cables over A2A through [Liaison](liaison.md). A peer's message
 arrives as a Cable from `a2a:<peer>` (shown as `a2a:<peer> for <principal>`), and its reply goes
 back with `reply_to_cable` as to any Cable; a Cable to `a2a:<peer>`, or `a2a:<peer>/<addressee>`
