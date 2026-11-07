@@ -420,6 +420,11 @@ pub struct StationLimits { /* one field per table, and */ pub providers: BTreeMa
 impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero queues/pages/attempts, a non-table provider
 ```
 
+`ProbeLimits` (`[probes]`, the timeouts of a verifier's reads of a Mission's deliverables: `git_timeout` 30 s,
+`http_timeout` 20 s, `tracker_timeout` 30 s, `file_timeout` 5 s, and `comments` 100, the latest comments a
+tracker probe reads). `[registry.limits.sessions]` also holds `amendment_bytes` (8 KiB), `deliverables` (32 per
+attempt), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300).
+
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
 `bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false, `context_bytes` 24 KiB, `fetch_timeout` 300 s,
 `deps_timeout` 600 s, `output_bytes` 1 MiB, `dotagents_pyz` and `dotagents_pin` none) has `tree() ->
@@ -649,8 +654,10 @@ pub struct AgentRole {
     pub purpose: String,
     pub policy: String,
     pub require_approval_before_done: bool,       // a done with no green ink decided in that attempt is held
+    pub deliverables: Vec<String>,                // each `kind` or `kind:target` every Mission of the role owes; validated
 }
 impl AgentRole {
+    pub fn with_deliverables(self, Vec<String>) -> Self;
     pub fn new(id: impl Into<String>, purpose: impl Into<String>, policy: impl Into<String>) -> Self;
     pub fn requiring_approval_before_done(self, bool) -> Self;
     pub fn validate(&self) -> Result<(), RosterError>;
@@ -1223,7 +1230,7 @@ pub struct StationRuntime { max_concurrent_missions, stall_timeout, loop_timeout
     // the tables, each #[serde(default)]: see "Station runtime limits"
     scheduler, publisher, sources, transports, recovery, vetting, accounts, approvals, harness,
     provision, secrets, terminal_output, green_ink, detached, runner, api, audit, theaters,
-    theater_tools, head_of_station,
+    theater_tools, head_of_station, probes,
     providers: BTreeMap<String, serde_json::Value> }   // [providers.<id>], each a table
 impl StationRuntime { pub fn validate(&self) -> Result<(), String>;   // includes StationLimits::validate
     pub fn limits(&self) -> StationLimits;                             // the tables and providers
@@ -2447,19 +2454,29 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub result: Option<SessionResult>,       // how its Mission stood at the holder's last write
     pub window: Option<String>,              // the standing Sleeper's window the run answers
     pub verdict: Option<MissionVerdict>,     // what a person found; needs no lease, the latest stands
+    pub deliverables: Vec<Deliverable>,      // what the Mission was to deliver; set when the attempt goes verifying
+    pub evidence: Vec<Evidence>,             // what probes found of them, oldest first, bounded (evidence_entries)
+    pub probe_requested: Option<f64>,        // when a person asked for a probe, until the Station ran it
 }
+#[non_exhaustive] pub enum ProbeResult { Found, Missing, Unprobed, Failed }   // serde kebab-case; as_str()
+    // Missing: the place was read and it is not there. Failed: the look failed or timed out, nothing is known.
+#[non_exhaustive] pub struct Evidence { pub deliverable: Deliverable, pub result: ProbeResult,
+    pub detail: String /* one line, data: may quote a tracker or server */, pub at: f64 }
+    // new(deliverable, result, detail, at); detail within evidence_detail_chars
 #[non_exhaustive] pub struct SessionResult { pub state: String /* the Mission state: working, blocked,
-    stalled, done, failed, blown, abandoned, parked, quarantined */, pub reason: Option<String>
+    stalled, done, failed, blown, abandoned, parked, quarantined, held, verifying */, pub reason: Option<String>
     /* a blocked Mission's reason (green-ink, issue, budget, interrupted, clearance-lowered), or
        SessionResult::HANDED_OFF */, pub denied_tools: u32 }
 impl SessionResult { pub const HANDED_OFF: &'static str; pub fn new(state) -> Self;
     pub fn with_reason(self, Option<String>) -> Self; pub fn with_denied_tools(self, usize) -> Self }
 impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool;   // false once closed
-    pub fn takes_verdict(&self) -> Result<(), SessionError> }   // Unsettled unless it ended done or held
-#[non_exhaustive] pub enum OutcomeVerdict { Confirmed, Disputed, FailedVerification }   // serde kebab-case;
-    // ALL, as_str(), from_name(), is_fault() (the last two)
+    pub fn takes_verdict(&self) -> Result<(), SessionError> }   // Unsettled unless it ended done or held, or is verifying
+#[non_exhaustive] pub enum OutcomeVerdict { Confirmed, Disputed, FailedVerification, Redispatch }   // serde kebab-case;
+    // ALL, as_str(), from_name(), is_fault() (every verdict but Confirmed). Redispatch only settles a verifying Mission:
+    // its next attempt, told the note and the amendment; the verified attempt counts against its Agent.
 #[non_exhaustive] pub struct MissionVerdict { pub verdict: OutcomeVerdict, pub note: Option<String>,
-    pub by: String, pub at: f64 }   // new(verdict, by, at, note); note within verdict_note_bytes (4 KiB)
+    pub amendment: Option<String> /* a redispatch's, within amendment_bytes (8 KiB) */,
+    pub by: String, pub at: f64 }   // new(verdict, by, at, note) .with_amendment(Option<String>); note within verdict_note_bytes (4 KiB)
 #[non_exhaustive] pub struct FinalReport { pub session_id: String, pub mission_id: String, pub text: String,
     pub at: f64 }   // new(session_id, mission_id, text, at, limit): a longer text is cut, the cut marked
 pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt() -> Option<Self>
@@ -2472,6 +2489,8 @@ pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStat
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
                           //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
                           //   .account(AccountRef) .result(SessionResult) (closing the status sets closed_at)
+                          //   .deliverables(Vec<Deliverable>) (replaces) .evidence(Vec<Evidence>) (appends, bounded)
+                          //   .probed() (answers a probe request)
 #[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, Unsettled(String), HeldBy(String), Stale,
     Io(io::Error) }
 
@@ -2486,7 +2505,10 @@ pub trait SessionStore {
     fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
     fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<SessionRecord, SessionError>
-        // on the latest attempt; NotFound, or Unsettled when it has not ended done or held
+        // on the latest attempt; NotFound, or Unsettled when it has not ended done or held or is not verifying
+    fn request_probe(&self, operation, mission_id, at: f64) -> Result<SessionRecord, SessionError>
+        // asks the Station that holds a verifying latest attempt to probe its deliverables; no lease needed;
+        // NotFound, or Unsettled when the attempt is not verifying
     fn file_final_report(&self, &FinalReport) -> io::Result<()>   // replaces the Session's; SQL: ai6_final_reports
     fn final_report(&self, session_id) -> io::Result<Option<FinalReport>>
 }
@@ -5040,7 +5062,7 @@ trimmed, never empty. Handlers spawn with `cols: STREAM_COLS` so that few lines 
 with an AI6-owned `MissionId`, records safe-house disposition and optional `CoverReport`,
 and increments a revision for changes. Repeating the current state is a no-op and does not
 increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
-`stalled`, `parked`, `quarantined`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy
+`stalled`, `parked`, `quarantined`, `held`, `verifying`, `done`, `failed`, `blown` or `abandoned`; `blown` means a cover policy
 violation when the Operation uses `on_blown = "fail"`. `parked` means a provider usage limit
 paused the work: `Mission.parked_until` (Unix seconds, `None` unless parked) is
 when it resumes. `MissionStore::park(id, until)` parks a `Working`, `Blocked`, `Stalled` or
@@ -5100,6 +5122,43 @@ The daemon's
 `/internal/missions` routes expose Mission state to local control components, each request with
 `Authorization: Bearer TOKEN` from `<state dir>/api-token` (`server::API_TOKEN_FILE`; 401
 otherwise, from loopback too; `/healthz` is open); Universal Exports remains the public API.
+
+## Deliverables and verifying (`ai6::directorates::m::deliverables`)
+
+A Session that ends done does not settle its Mission: a Mission of an Operation goes `verifying`
+(`MissionState::Verifying`; non-terminal, no harness, its brief stays claimed) and leaves it only by a
+decision. Review and panel Missions, Head of Station rounds and Missions with no Operation settle done as
+before. A `held` Mission (a role's `require_approval_before_done` unmet) stays `held`.
+
+```rust
+pub const BRIEF_DELIVERABLES_KEY: &str = "deliverables";   // a brief's `data` key: an array of strings
+#[non_exhaustive] pub enum DeliverableKind { Branch, CommitOn, Comment, Artifact, Approval, File }
+    // ALL, as_str() ("branch", "commit_on", "comment", "artifact", "approval", "file"), from_name()
+#[non_exhaustive] pub struct Deliverable { pub kind: DeliverableKind, pub target: Option<String> }
+    // text `kind` or `kind:target` (serde, Display, Deliverable::parse); commit_on, comment, artifact
+    // and file need a target: `commit_on:BRANCH[@COMMIT]`, `comment:TEXT`, `artifact:URL`, `file:PATH`
+pub fn parse_all(&[String]) -> Result<Vec<Deliverable>, InvalidDeliverable>
+pub fn declared(role: &[String], brief_data: &BTreeMap<String, serde_json::Value>)
+    -> Result<Vec<Deliverable>, InvalidDeliverable>   // the role's, then the brief's, each once
+```
+
+`AgentRole::deliverables` is validated with the role. The Station records `declared(..)` on the attempt's
+`SessionRecord::deliverables` when it goes verifying. Probes (crate-private, `station::probes`) read them
+back, each within its `[probes]` timeout, and never say whether they are enough: `branch` is `git ls-remote
+--exit-code --heads origin` in the Mission's working directory (else its Operation's checkout), `commit_on`
+adds a fetch of the branch to read its history, `file` stays inside the working directory, `artifact` is an
+http(s) GET with the body unread, `approval` is a decided, approved, unrevoked green ink request,
+`comment` reads the linked tracker item back by id and looks for the text (only a Station that holds the
+tracker's credentials can). Work on a Theater this Station cannot read is `unprobed`; a read that failed or
+timed out is `failed`, never `missing`. `SessionStore::request_probe` asks the Station holding the attempt
+to run them on its next pass; the findings are appended to `SessionRecord::evidence`.
+
+A decision is a verdict on the verifying attempt (`record_verdict`): `Confirmed` settles the Mission done,
+`Disputed` and `FailedVerification` fail it, `Redispatch` queues its next attempt: attempt N+1 of the same
+Mission for the best qualified Agent (`MissionStore::redispatch(id, agent, amendment)`, which keeps the safe
+house and starts a new provider Session), told the person's reason and amendment after its brief
+(`Mission::task()`). The verified attempt keeps its verdict and counts against its Agent on the scorecard.
+Nothing else leaves `verifying`.
 
 ## Operation cover (`ai6::directorates::m::cover`)
 

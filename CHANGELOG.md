@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `CableRelay::withdraw` and `CableState::Withdrawn` back `CancelTask`;
   `CableStore::cables_from` lists one sender's Cables, and `update_cable_delivery` takes the
   Session that took a delivery. Every call is audited (`liaison.*`).
+- A Session that ends done no longer settles its Mission: a Mission of an Operation is `verifying` until a
+  decision, never by itself, whether or not it declares anything to check. What it is to deliver is declared
+  by its role (`deliverables = [...]`) and its brief (`ai6ctl missions create --deliverable`), each `kind`
+  or `kind:target` (`branch`, `commit_on`, `comment`, `artifact`, `approval`, `file`). The Station gives
+  read-only probes of them, each with a timeout in `[probes]` (`git_timeout`, `http_timeout`,
+  `tracker_timeout`, `file_timeout`, `comments`), and keeps what each found on the attempt as evidence
+  without judging it. A person with `mission.verify` asks (`ai6ctl missions probe`, `POST .../probe`) and
+  decides (`ai6ctl missions verify done|redispatch|failed --reason`, `POST .../verify`): `redispatch` is the
+  Mission's next attempt, told the reason and an amendment, and counts against the Agent that ran the
+  verified one. `[registry.limits.sessions]` gains `amendment_bytes`, `deliverables`, `evidence_entries` and
+  `evidence_detail_chars`. Review and panel Missions, Head of Station rounds and Missions with no Operation
+  still settle done.
 - Harness logins kept sealed in the Registry. A `harness-login` account with `files` has its login
   sealed separately to each Station named, opened only by those Stations' own sealing keys
   (`sealing.key` beside `identity.pem`, its public half published and signed by the identity), and

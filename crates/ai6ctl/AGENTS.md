@@ -98,7 +98,15 @@ origin leaves the public roots alone.
 - `ai6ctl missions verdict <MISSION> <confirmed|disputed|failed-verification> [--note <TEXT>]
   [--operation <ID>]` (`mission.verify`) posts `.../verdict` and prints `MISSION attempt N: VERDICT by
   PERSON`; a refusal prints the gateway's words. `ai6ctl mission <ID>` also prints a `VERDICT` line under
-  a run and, from the Mission's detail, a `FINAL REPORT`.
+  a run and, from the Mission's detail, a `FINAL REPORT`, the latest attempt's `DELIVERABLES` and its
+  `EVIDENCE` (`DELIVERABLE RESULT DETAIL`).
+- `ai6ctl missions probe <MISSION> [--wait <SECS>] [--operation <ID>]` (`mission.verify`, default wait
+  60 s) posts `.../probe`, waits for the Station to answer (`probe_requested` clears in the Mission's
+  detail) and prints the findings made since; at the end of the wait it says the Station has not
+  answered. `ai6ctl missions verify <MISSION> <done|redispatch|failed> --reason <TEXT> [--amend <TEXT>]
+  [--operation <ID>]` posts `.../verify` and prints `MISSION attempt N: DECISION by PERSON`; `--reason` is
+  required, `--amend` only with `redispatch`. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
+  repeatable.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
   gateway's words and exits `1`. The Operation is looked up when not given.

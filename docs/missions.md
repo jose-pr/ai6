@@ -249,7 +249,8 @@ of the Mission's page. It is the Agent's own account, as data. What another Oper
 Mission through a [compartment](compartments.md) does not include it.
 
 **A verdict.** A person with `mission.verify` on the Operation gives one on the latest attempt, once
-it has ended `done` or `held`; anything else is refused (`409`, saying how it stands):
+it has ended `done` or `held`, or is [verifying](#verifying); anything else is refused (`409`, saying how
+it stands):
 
 ```bash
 curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/$MISSION/verdict" \
@@ -292,6 +293,77 @@ scheduler pass, and its brief is then filed with the outcome and the verdict. It
 retried while held; `cancel` abandons it. If its Station is lost, its Session is lost like any other's,
 and [Recovery](#recovery) decides. Review Missions are never held. It counts as waiting on a person on
 the scorecard until the verdict.
+
+## Verifying
+
+A Session saying it is done does not make its Mission done. A Mission of an Operation whose Session ends
+done is `verifying`: its work is kept, no harness runs, its brief stays claimed, and it holds no place in
+the Station's capacity. It leaves `verifying` only by a decision, and never by itself: not when it is
+old, and not when it declares nothing to check. Review and panel Missions, Head of Station rounds and
+Missions with no Operation settle done as before.
+
+**Deliverables.** What a Mission is to deliver is declared before the work, as text, `kind` or
+`kind:target`, by its role and by its brief:
+
+| Kind | Target | Read back by |
+| --- | --- | --- |
+| `branch` | a branch name; without one, the Mission's own branch | `git ls-remote` of the remote, from the Mission's working directory or its Operation's checkout |
+| `commit_on` | `BRANCH`, or `BRANCH@COMMIT` | the branch's tip, then its history (the branch is fetched); without a commit, the one the working directory is at |
+| `comment` | text a comment carries | the linked tracker item read back by id, its latest comments |
+| `artifact` | a URL | an HTTP GET, status only |
+| `approval` | optional: the kind of step | the Mission's green ink requests: one approved and not withdrawn |
+| `file` | a path inside the working directory | the file, when the work is on the Station's own disk |
+
+```toml
+[role.releaser]
+purpose = "Cuts releases"
+policy = "..."
+deliverables = ["branch", "commit_on:main", "approval"]
+```
+
+```bash
+ai6ctl missions create --operation G --title "Fix the build" --prompt "..." \
+  --deliverable branch --deliverable file:docs/report.md
+```
+
+The Station records the list on the attempt when it goes `verifying` (`deliverables` in the Mission's
+detail), the role's first, then the brief's, each once.
+
+**Probes.** The Station provides the means to look and decides nothing about what it finds. Each
+probe reports `found`, `missing` (the place was read and the thing is not there, by name), `unprobed`
+(this Station cannot look: the work is on a Theater it does not reach, or no tracker item is linked) or
+`failed` (the look failed or ran out of time, so nothing is known). Each has its timeout in the Station's
+`[probes]` table (`git_timeout`, `http_timeout`, `tracker_timeout`, `file_timeout`), and what each
+found is kept on the attempt as `evidence`, oldest first, up to `[registry.limits.sessions]
+evidence_entries`. A tracker probe works where the Station holds the tracker's credentials, and an
+`artifact` probe makes a request from the Station to the address the role or brief names.
+
+**The decision.** Until an Operation's own watch decides, a person with `mission.verify` on the
+Operation does:
+
+```bash
+ai6ctl missions probe "$MISSION"                  # asks the Station to probe, waits, prints the findings
+ai6ctl missions verify "$MISSION" done --reason "branch and approval are there"
+ai6ctl missions verify "$MISSION" failed --reason "the work was never pushed"
+ai6ctl missions verify "$MISSION" redispatch --reason "no branch on the remote" \
+  --amend "Push the branch before you finish."
+```
+
+`POST /v1/user/operations/{operation_id}/missions/{mission_id}/probe` and `.../verify` (body
+`{"decision": "done"|"redispatch"|"failed", "reason", "amendment"?}`) are the routes. A decision needs
+its reason, is audited first (`mission.verify`, target `MISSION DECISION`, never the reason), goes on the
+timeline (kind `verify`) and is refused with `409` unless the Mission's latest attempt is verifying.
+Its Station then settles the Mission within a scheduler pass:
+
+| Decision | The Mission | The attempt |
+| --- | --- | --- |
+| `done` | Becomes `done` | Counts as done on the scorecard |
+| `failed` | Becomes `failed` | Disputed: a failure of that Agent |
+| `redispatch` | Is queued as attempt N+1 of the same Mission, for the best qualified Agent, in the safe house the last attempt kept, with a new provider Session told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
+
+A person who gives a verdict on a `verifying` Mission with `ai6ctl missions verdict` settles it the same
+way as `confirmed` or `failed-verification`; only `verify` redispatches. A standing order whose attempt is
+`verifying` waits for the decision like one that is held: its next window does not fire over it.
 
 ## Green ink
 

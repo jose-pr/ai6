@@ -75,6 +75,8 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `green-ink list --operation <ID> [--expired]` | The steps Agents wait to take with green ink (`approval.decide`), or those that expired undecided |
 | `green-ink rearm <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Opens an expired, undecided step again |
 | `missions verdict <MISSION> <confirmed\|disputed\|failed-verification> [--note <TEXT>] [--operation <ID>]` | Says what you found when you checked a Mission's outcome (`mission.verify`) |
+| `missions probe <MISSION> [--wait <SECS>] [--operation <ID>]` | Asks the Station to read back what a verifying Mission was to deliver and prints what it found (`mission.verify`) |
+| `missions verify <MISSION> <done\|redispatch\|failed> --reason <TEXT> [--amend <TEXT>] [--operation <ID>]` | Decides a Mission whose Session ended done: settles it, fails it, or queues its next attempt (`mission.verify`) |
 | `green-ink approve <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Signs a waiting step as you, for an hour unless chosen |
 | `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
 | `green-ink revoke <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Withdraws an approval before it expires |
