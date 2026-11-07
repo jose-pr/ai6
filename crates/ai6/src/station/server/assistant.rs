@@ -3918,6 +3918,35 @@ mod tests {
         }
     }
 
+    /// Connects to a Cable endpoint as her harness would; retried until the deadline, since a
+    /// launch is recorded before the endpoint it names is listening.
+    #[cfg(feature = "cables-mcp")]
+    async fn cable_client(
+        url: &str,
+        token: &str,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+        use rmcp::ServiceExt;
+        use rmcp::transport::StreamableHttpClientTransport;
+        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let transport = StreamableHttpClientTransport::from_config(
+                StreamableHttpClientTransportConfig::with_uri(url.to_owned())
+                    .auth_header(token.to_owned()),
+            );
+            match ().serve(transport).await {
+                Ok(client) => return client,
+                Err(error) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "Cable endpoint never answered: {error}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        }
+    }
+
     /// Her routes in the owner's order: free first, then a gateway through Claude Code.
     const HER_ROUTES: &str = r#"
 [agent.moneypenny]
@@ -5853,10 +5882,7 @@ event_bytes = 7
     /// would call the tool; what the person is shown, and how they would confirm it.
     #[cfg(feature = "cables-mcp")]
     async fn hold_a_cable(fixture: &Fixture, conversation: &str, key: &str) -> AssistantJob {
-        use rmcp::ServiceExt;
         use rmcp::model::CallToolRequestParams;
-        use rmcp::transport::StreamableHttpClientTransport;
-        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 
         use crate::directorates::section_00::assistant::{
             ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
@@ -5884,15 +5910,11 @@ event_bytes = 7
                 None => asked.starts[0].environment.clone(),
             }
         };
-        let client = ()
-            .serve(StreamableHttpClientTransport::from_config(
-                StreamableHttpClientTransportConfig::with_uri(
-                    environment[ASSISTANT_CABLE_MCP_URL_ENV].clone(),
-                )
-                .auth_header(environment[ASSISTANT_CABLE_MCP_TOKEN_ENV].clone()),
-            ))
-            .await
-            .unwrap();
+        let client = cable_client(
+            &environment[ASSISTANT_CABLE_MCP_URL_ENV],
+            &environment[ASSISTANT_CABLE_MCP_TOKEN_ENV],
+        )
+        .await;
         let arguments = serde_json::json!({
             "operation": "G", "scope": "agent", "target": "008",
             "body": format!("Is the build green? {key}"), "idempotency_key": key
@@ -6026,10 +6048,7 @@ event_bytes = 7
 
     #[tokio::test]
     async fn cable_grants_give_her_a_cable_server_that_sends_for_the_person() {
-        use rmcp::ServiceExt;
         use rmcp::model::{CallToolRequestParams, ContentBlock};
-        use rmcp::transport::StreamableHttpClientTransport;
-        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 
         use crate::directorates::section_00::assistant::{
             ASSISTANT_CABLE_MCP_TOKEN_ENV, ASSISTANT_CABLE_MCP_URL_ENV, AssistantCableDecision,
@@ -6057,12 +6076,7 @@ event_bytes = 7
         let token = start.environment[ASSISTANT_CABLE_MCP_TOKEN_ENV].clone();
 
         // The harness calls the Cable server, as Claude Code would.
-        let client = ()
-            .serve(StreamableHttpClientTransport::from_config(
-                StreamableHttpClientTransportConfig::with_uri(url).auth_header(token),
-            ))
-            .await
-            .unwrap();
+        let client = cable_client(&url, &token).await;
         let send = |operation: &str, key: &str| {
             let arguments = serde_json::json!({
                 "operation": operation, "scope": "agent", "target": "008",
