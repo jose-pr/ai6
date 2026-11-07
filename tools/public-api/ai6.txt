@@ -1113,6 +1113,7 @@ pub ai6::directorates::m::config::StationRuntime::max_runtime: core::option::Opt
 pub ai6::directorates::m::config::StationRuntime::normalize_digits: core::option::Option<bool>
 pub ai6::directorates::m::config::StationRuntime::overlays: ai6::station::limits::OverlayLimits
 pub ai6::directorates::m::config::StationRuntime::partial_line_bytes: core::option::Option<ai6::bounds::Limit>
+pub ai6::directorates::m::config::StationRuntime::probes: ai6::station::limits::ProbeLimits
 pub ai6::directorates::m::config::StationRuntime::providers: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
 pub ai6::directorates::m::config::StationRuntime::provision: ai6::station::limits::ProvisionLimits
 pub ai6::directorates::m::config::StationRuntime::publisher: ai6::station::limits::PublisherLimits
@@ -1264,6 +1265,37 @@ pub fn ai6::directorates::m::cover::Covers::names(&self) -> alloc::vec::Vec<&str
 pub fn ai6::directorates::m::cover::Covers::parse_toml(&str) -> core::result::Result<Self, ai6::directorates::m::cover::CoverError>
 impl core::default::Default for ai6::directorates::m::cover::Covers
 pub fn ai6::directorates::m::cover::Covers::default() -> Self
+pub mod ai6::directorates::m::deliverables
+#[non_exhaustive] pub enum ai6::directorates::m::deliverables::DeliverableKind
+pub ai6::directorates::m::deliverables::DeliverableKind::Approval
+pub ai6::directorates::m::deliverables::DeliverableKind::Artifact
+pub ai6::directorates::m::deliverables::DeliverableKind::Branch
+pub ai6::directorates::m::deliverables::DeliverableKind::Comment
+pub ai6::directorates::m::deliverables::DeliverableKind::CommitOn
+pub ai6::directorates::m::deliverables::DeliverableKind::File
+impl ai6::directorates::m::deliverables::DeliverableKind
+pub const ai6::directorates::m::deliverables::DeliverableKind::ALL: [Self; 6]
+pub const fn ai6::directorates::m::deliverables::DeliverableKind::as_str(self) -> &'static str
+pub fn ai6::directorates::m::deliverables::DeliverableKind::from_name(&str) -> core::option::Option<Self>
+#[non_exhaustive] pub struct ai6::directorates::m::deliverables::Deliverable
+pub ai6::directorates::m::deliverables::Deliverable::kind: ai6::directorates::m::deliverables::DeliverableKind
+pub ai6::directorates::m::deliverables::Deliverable::target: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::deliverables::Deliverable
+pub fn ai6::directorates::m::deliverables::Deliverable::new(ai6::directorates::m::deliverables::DeliverableKind, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::deliverables::Deliverable::parse(&str) -> core::result::Result<Self, ai6::directorates::m::deliverables::InvalidDeliverable>
+impl core::fmt::Display for ai6::directorates::m::deliverables::Deliverable
+pub fn ai6::directorates::m::deliverables::Deliverable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for ai6::directorates::m::deliverables::Deliverable
+pub fn ai6::directorates::m::deliverables::Deliverable::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::m::deliverables::Deliverable
+pub fn ai6::directorates::m::deliverables::Deliverable::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct ai6::directorates::m::deliverables::InvalidDeliverable(_)
+impl core::error::Error for ai6::directorates::m::deliverables::InvalidDeliverable
+impl core::fmt::Display for ai6::directorates::m::deliverables::InvalidDeliverable
+pub fn ai6::directorates::m::deliverables::InvalidDeliverable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const ai6::directorates::m::deliverables::BRIEF_DELIVERABLES_KEY: &str
+pub fn ai6::directorates::m::deliverables::declared(&[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>, ai6::directorates::m::deliverables::InvalidDeliverable>
+pub fn ai6::directorates::m::deliverables::parse_all(&[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>, ai6::directorates::m::deliverables::InvalidDeliverable>
 pub mod ai6::directorates::m::harness
 #[non_exhaustive] pub enum ai6::directorates::m::harness::ProjectSettings
 pub ai6::directorates::m::harness::ProjectSettings::Ignore
@@ -1537,12 +1569,14 @@ pub ai6::directorates::m::mission::MissionState::Parked
 pub ai6::directorates::m::mission::MissionState::Quarantined
 pub ai6::directorates::m::mission::MissionState::Queued
 pub ai6::directorates::m::mission::MissionState::Stalled
+pub ai6::directorates::m::mission::MissionState::Verifying
 pub ai6::directorates::m::mission::MissionState::Working
 impl ai6::directorates::m::mission::MissionState
 pub fn ai6::directorates::m::mission::MissionState::as_str(self) -> &'static str
 pub struct ai6::directorates::m::mission::Mission
 pub ai6::directorates::m::mission::Mission::after_failure: bool
 pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::amendments: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::blocked_reason: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::brief_digest: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::cover: core::option::Option<ai6::directorates::m::cover::CoverReport>
@@ -1567,6 +1601,8 @@ pub ai6::directorates::m::mission::Mission::safe_house: core::option::Option<ai6
 pub ai6::directorates::m::mission::Mission::session_ids: alloc::vec::Vec<ai6::directorates::m::identity::SessionId>
 pub ai6::directorates::m::mission::Mission::state: ai6::directorates::m::mission::MissionState
 pub ai6::directorates::m::mission::Mission::waiting: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::mission::Mission
+pub fn ai6::directorates::m::mission::Mission::task(&self) -> alloc::string::String
 pub struct ai6::directorates::m::mission::MissionStore
 impl ai6::directorates::m::mission::MissionStore
 pub fn ai6::directorates::m::mission::MissionStore::attach_session(&mut self, &str, ai6::directorates::m::identity::SessionId) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -1590,6 +1626,7 @@ pub fn ai6::directorates::m::mission::MissionStore::record_handle(&mut self, &st
 pub fn ai6::directorates::m::mission::MissionStore::record_name(&mut self, &str, alloc::string::String) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_provenance(&mut self, &str, ai6::directorates::registry::bona_fides::Provenance) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_review_naming(&mut self, &str, ai6::directorates::m::review::BriefNaming) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::redispatch(&mut self, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::refuse_resume(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::reopen(&mut self, &str, alloc::string::String, alloc::string::String, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -2003,6 +2040,7 @@ pub fn ai6::directorates::m::roster::AgentQuery<'a>::operation(self, core::optio
 pub fn ai6::directorates::m::roster::AgentQuery<'a>::role(self, core::option::Option<&'a str>) -> Self
 pub fn ai6::directorates::m::roster::AgentQuery<'a>::tags(self, &'a [alloc::string::String]) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRole
+pub ai6::directorates::m::roster::AgentRole::deliverables: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::AgentRole::id: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::policy: alloc::string::String
 pub ai6::directorates::m::roster::AgentRole::purpose: alloc::string::String
@@ -2012,6 +2050,7 @@ impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::requiring_approval_before_done(self, bool) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::AgentRole::with_deliverables(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::with_review(self, ai6::directorates::m::review::ReviewChoice) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::AgentRoute
 pub ai6::directorates::m::roster::AgentRoute::effort: core::option::Option<alloc::string::String>
@@ -5178,6 +5217,7 @@ pub fn ai6::directorates::registry::backend::SessionStore::mission_exposure(&sel
 pub fn ai6::directorates::registry::backend::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::backend::SessionStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::backend::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5191,6 +5231,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &s
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5204,6 +5245,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5958,6 +6000,10 @@ pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&s
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::SessionLimits
+pub ai6::directorates::registry::limits::SessionLimits::amendment_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::SessionLimits::deliverables: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::SessionLimits::evidence_detail_chars: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::SessionLimits::evidence_entries: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::exposure_source_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::exposure_sources: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::exposures: ai6::bounds::Limit
@@ -6619,11 +6665,19 @@ pub mod ai6::directorates::registry::sessions
 pub ai6::directorates::registry::sessions::OutcomeVerdict::Confirmed
 pub ai6::directorates::registry::sessions::OutcomeVerdict::Disputed
 pub ai6::directorates::registry::sessions::OutcomeVerdict::FailedVerification
+pub ai6::directorates::registry::sessions::OutcomeVerdict::Redispatch
 impl ai6::directorates::registry::sessions::OutcomeVerdict
-pub const ai6::directorates::registry::sessions::OutcomeVerdict::ALL: [Self; 3]
+pub const ai6::directorates::registry::sessions::OutcomeVerdict::ALL: [Self; 4]
 pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::as_str(self) -> &'static str
 pub fn ai6::directorates::registry::sessions::OutcomeVerdict::from_name(&str) -> core::option::Option<Self>
 pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::is_fault(self) -> bool
+#[non_exhaustive] pub enum ai6::directorates::registry::sessions::ProbeResult
+pub ai6::directorates::registry::sessions::ProbeResult::Failed
+pub ai6::directorates::registry::sessions::ProbeResult::Found
+pub ai6::directorates::registry::sessions::ProbeResult::Missing
+pub ai6::directorates::registry::sessions::ProbeResult::Unprobed
+impl ai6::directorates::registry::sessions::ProbeResult
+pub const fn ai6::directorates::registry::sessions::ProbeResult::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::directorates::registry::sessions::SessionError
 pub ai6::directorates::registry::sessions::SessionError::Ended
 pub ai6::directorates::registry::sessions::SessionError::Exists
@@ -6645,6 +6699,13 @@ pub ai6::directorates::registry::sessions::SessionStatus::Lost
 pub ai6::directorates::registry::sessions::SessionStatus::Parked
 impl ai6::directorates::registry::sessions::SessionStatus
 pub fn ai6::directorates::registry::sessions::SessionStatus::is_closed(self) -> bool
+#[non_exhaustive] pub struct ai6::directorates::registry::sessions::Evidence
+pub ai6::directorates::registry::sessions::Evidence::at: f64
+pub ai6::directorates::registry::sessions::Evidence::deliverable: ai6::directorates::m::deliverables::Deliverable
+pub ai6::directorates::registry::sessions::Evidence::detail: alloc::string::String
+pub ai6::directorates::registry::sessions::Evidence::result: ai6::directorates::registry::sessions::ProbeResult
+impl ai6::directorates::registry::sessions::Evidence
+pub fn ai6::directorates::registry::sessions::Evidence::new(ai6::directorates::m::deliverables::Deliverable, ai6::directorates::registry::sessions::ProbeResult, impl core::convert::Into<alloc::string::String>, f64) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::FinalReport
 pub ai6::directorates::registry::sessions::FinalReport::at: f64
 pub ai6::directorates::registry::sessions::FinalReport::mission_id: alloc::string::String
@@ -6653,12 +6714,14 @@ pub ai6::directorates::registry::sessions::FinalReport::text: alloc::string::Str
 impl ai6::directorates::registry::sessions::FinalReport
 pub fn ai6::directorates::registry::sessions::FinalReport::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, &str, f64, ai6::bounds::Limit) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::sessions::MissionVerdict
+pub ai6::directorates::registry::sessions::MissionVerdict::amendment: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::MissionVerdict::at: f64
 pub ai6::directorates::registry::sessions::MissionVerdict::by: alloc::string::String
 pub ai6::directorates::registry::sessions::MissionVerdict::note: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::MissionVerdict::verdict: ai6::directorates::registry::sessions::OutcomeVerdict
 impl ai6::directorates::registry::sessions::MissionVerdict
 pub fn ai6::directorates::registry::sessions::MissionVerdict::new(ai6::directorates::registry::sessions::OutcomeVerdict, impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::MissionVerdict::with_amendment(self, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::directorates::registry::sessions::NewSession
 impl ai6::directorates::registry::sessions::NewSession
 pub fn ai6::directorates::registry::sessions::NewSession::attempt(&self) -> u32
@@ -6700,6 +6763,8 @@ pub ai6::directorates::registry::sessions::SessionRecord::attempt: u32
 pub ai6::directorates::registry::sessions::SessionRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::directorates::registry::sessions::SessionRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::closed_at: core::option::Option<f64>
+pub ai6::directorates::registry::sessions::SessionRecord::deliverables: alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>
+pub ai6::directorates::registry::sessions::SessionRecord::evidence: alloc::vec::Vec<ai6::directorates::registry::sessions::Evidence>
 pub ai6::directorates::registry::sessions::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::directorates::registry::sessions::SessionRecord::fence: u64
 pub ai6::directorates::registry::sessions::SessionRecord::handle: core::option::Option<alloc::string::String>
@@ -6711,6 +6776,7 @@ pub ai6::directorates::registry::sessions::SessionRecord::opened_at: core::optio
 pub ai6::directorates::registry::sessions::SessionRecord::operation: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::predecessor: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::probe_requested: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::result: core::option::Option<ai6::directorates::registry::sessions::SessionResult>
@@ -6736,9 +6802,12 @@ pub struct ai6::directorates::registry::sessions::SessionUpdate
 impl ai6::directorates::registry::sessions::SessionUpdate
 pub fn ai6::directorates::registry::sessions::SessionUpdate::account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::checkpoint(self, ai6::directorates::q::safehouse::SafeHouseCheckpoint, f64) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::deliverables(self, alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::evidence(self, alloc::vec::Vec<ai6::directorates::registry::sessions::Evidence>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::exposed(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::probed(self) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::result(self, ai6::directorates::registry::sessions::SessionResult) -> Self
@@ -6752,6 +6821,7 @@ pub fn ai6::directorates::registry::sessions::SessionStore::mission_exposure(&se
 pub fn ai6::directorates::registry::sessions::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sessions::SessionStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sessions::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sessions::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -6765,6 +6835,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &s
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -6778,6 +6849,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -7048,6 +7120,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &s
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -7317,6 +7390,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -8508,6 +8582,14 @@ pub fn ai6::station::limits::OverlayLimits::tree(&self) -> ai6::directorates::q:
 pub fn ai6::station::limits::OverlayLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::station::limits::OverlayLimits
 pub fn ai6::station::limits::OverlayLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::station::limits::ProbeLimits
+pub ai6::station::limits::ProbeLimits::comments: ai6::bounds::Limit
+pub ai6::station::limits::ProbeLimits::file_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::ProbeLimits::git_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::ProbeLimits::http_timeout: ai6::bounds::Seconds
+pub ai6::station::limits::ProbeLimits::tracker_timeout: ai6::bounds::Seconds
+impl core::default::Default for ai6::station::limits::ProbeLimits
+pub fn ai6::station::limits::ProbeLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::ProvisionLimits
 pub ai6::station::limits::ProvisionLimits::command_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::ProvisionLimits::name_bytes: ai6::bounds::Limit
@@ -8612,6 +8694,7 @@ pub ai6::station::limits::StationLimits::green_ink: ai6::station::limits::GreenI
 pub ai6::station::limits::StationLimits::harness: ai6::station::limits::HarnessLimits
 pub ai6::station::limits::StationLimits::head_of_station: ai6::station::limits::HeadOfStationLimits
 pub ai6::station::limits::StationLimits::overlays: ai6::station::limits::OverlayLimits
+pub ai6::station::limits::StationLimits::probes: ai6::station::limits::ProbeLimits
 pub ai6::station::limits::StationLimits::providers: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
 pub ai6::station::limits::StationLimits::provision: ai6::station::limits::ProvisionLimits
 pub ai6::station::limits::StationLimits::publisher: ai6::station::limits::PublisherLimits
@@ -9232,8 +9315,9 @@ pub fn ai6::directorates::registry::bona_fides::Origin::fmt(&self, &mut core::fm
 pub ai6::OutcomeVerdict::Confirmed
 pub ai6::OutcomeVerdict::Disputed
 pub ai6::OutcomeVerdict::FailedVerification
+pub ai6::OutcomeVerdict::Redispatch
 impl ai6::directorates::registry::sessions::OutcomeVerdict
-pub const ai6::directorates::registry::sessions::OutcomeVerdict::ALL: [Self; 3]
+pub const ai6::directorates::registry::sessions::OutcomeVerdict::ALL: [Self; 4]
 pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::as_str(self) -> &'static str
 pub fn ai6::directorates::registry::sessions::OutcomeVerdict::from_name(&str) -> core::option::Option<Self>
 pub const fn ai6::directorates::registry::sessions::OutcomeVerdict::is_fault(self) -> bool
@@ -9289,6 +9373,13 @@ pub ai6::PoolStrategy::RoundRobin
 impl ai6::PoolStrategy
 pub fn ai6::PoolStrategy::as_str(self) -> &'static str
 pub fn ai6::PoolStrategy::parse(&str) -> core::option::Option<Self>
+#[non_exhaustive] pub enum ai6::ProbeResult
+pub ai6::ProbeResult::Failed
+pub ai6::ProbeResult::Found
+pub ai6::ProbeResult::Missing
+pub ai6::ProbeResult::Unprobed
+impl ai6::directorates::registry::sessions::ProbeResult
+pub const fn ai6::directorates::registry::sessions::ProbeResult::as_str(self) -> &'static str
 #[non_exhaustive] pub enum ai6::ProjectSettings
 pub ai6::ProjectSettings::Ignore
 pub ai6::ProjectSettings::Load
@@ -9786,6 +9877,7 @@ pub ai6::AgentResume::project_settings: bool
 pub ai6::AgentResume::session_id: ai6::directorates::m::identity::SessionId
 pub ai6::AgentResume::working_directory: alloc::string::String
 #[non_exhaustive] pub struct ai6::AgentRole
+pub ai6::AgentRole::deliverables: alloc::vec::Vec<alloc::string::String>
 pub ai6::AgentRole::id: alloc::string::String
 pub ai6::AgentRole::policy: alloc::string::String
 pub ai6::AgentRole::purpose: alloc::string::String
@@ -9795,6 +9887,7 @@ impl ai6::directorates::m::roster::AgentRole
 pub fn ai6::directorates::m::roster::AgentRole::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::requiring_approval_before_done(self, bool) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::roster::AgentRole::with_deliverables(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRole::with_review(self, ai6::directorates::m::review::ReviewChoice) -> Self
 #[non_exhaustive] pub struct ai6::AgentRoleLimits
 pub ai6::AgentRoleLimits::record_bytes: ai6::bounds::Limit
@@ -10867,6 +10960,13 @@ pub fn ai6::directorates::m::theaters::EphemeralAccess::keeping_failed(self, usi
 pub fn ai6::directorates::m::theaters::EphemeralAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::theaters::EphemeralAccess::settings_toml(&self) -> core::result::Result<alloc::string::String, ai6::directorates::m::theaters::TheaterError>
 pub fn ai6::directorates::m::theaters::EphemeralAccess::with_setting(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<serde_json::value::Value>) -> Self
+#[non_exhaustive] pub struct ai6::Evidence
+pub ai6::Evidence::at: f64
+pub ai6::Evidence::deliverable: ai6::directorates::m::deliverables::Deliverable
+pub ai6::Evidence::detail: alloc::string::String
+pub ai6::Evidence::result: ai6::directorates::registry::sessions::ProbeResult
+impl ai6::directorates::registry::sessions::Evidence
+pub fn ai6::directorates::registry::sessions::Evidence::new(ai6::directorates::m::deliverables::Deliverable, ai6::directorates::registry::sessions::ProbeResult, impl core::convert::Into<alloc::string::String>, f64) -> Self
 pub struct ai6::ExitInfo
 pub ai6::ExitInfo::code: core::option::Option<i64>
 pub ai6::ExitInfo::running: bool
@@ -11064,6 +11164,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -11547,12 +11648,14 @@ pub ai6::MissionUsage::daily_cost_micro_usd: alloc::collections::btree::map::BTr
 pub ai6::MissionUsage::sessions: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::medical::usage::UsageTotals>
 pub ai6::MissionUsage::total: ai6::directorates::medical::usage::UsageTotals
 #[non_exhaustive] pub struct ai6::MissionVerdict
+pub ai6::MissionVerdict::amendment: core::option::Option<alloc::string::String>
 pub ai6::MissionVerdict::at: f64
 pub ai6::MissionVerdict::by: alloc::string::String
 pub ai6::MissionVerdict::note: core::option::Option<alloc::string::String>
 pub ai6::MissionVerdict::verdict: ai6::directorates::registry::sessions::OutcomeVerdict
 impl ai6::directorates::registry::sessions::MissionVerdict
 pub fn ai6::directorates::registry::sessions::MissionVerdict::new(ai6::directorates::registry::sessions::OutcomeVerdict, impl core::convert::Into<alloc::string::String>, f64, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::sessions::MissionVerdict::with_amendment(self, core::option::Option<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::ModelCard
 pub ai6::ModelCard::model: core::option::Option<alloc::string::String>
 pub ai6::ModelCard::standing: ai6::directorates::m::scorecard::Standing
@@ -12457,6 +12560,10 @@ pub fn ai6::directorates::registry::sessions::SessionLaunch::with_overlays(self,
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_pool(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionLaunch::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::SessionLimits
+pub ai6::SessionLimits::amendment_bytes: ai6::bounds::Limit
+pub ai6::SessionLimits::deliverables: ai6::bounds::Limit
+pub ai6::SessionLimits::evidence_detail_chars: ai6::bounds::Limit
+pub ai6::SessionLimits::evidence_entries: ai6::bounds::Limit
 pub ai6::SessionLimits::exposure_source_bytes: ai6::bounds::Limit
 pub ai6::SessionLimits::exposure_sources: ai6::bounds::Limit
 pub ai6::SessionLimits::exposures: ai6::bounds::Limit
@@ -12482,6 +12589,8 @@ pub ai6::SessionRecord::attempt: u32
 pub ai6::SessionRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::SessionRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::SessionRecord::closed_at: core::option::Option<f64>
+pub ai6::SessionRecord::deliverables: alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>
+pub ai6::SessionRecord::evidence: alloc::vec::Vec<ai6::directorates::registry::sessions::Evidence>
 pub ai6::SessionRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
 pub ai6::SessionRecord::fence: u64
 pub ai6::SessionRecord::handle: core::option::Option<alloc::string::String>
@@ -12493,6 +12602,7 @@ pub ai6::SessionRecord::opened_at: core::option::Option<f64>
 pub ai6::SessionRecord::operation: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::parked_until: core::option::Option<f64>
 pub ai6::SessionRecord::predecessor: core::option::Option<alloc::string::String>
+pub ai6::SessionRecord::probe_requested: core::option::Option<f64>
 pub ai6::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
 pub ai6::SessionRecord::result: core::option::Option<ai6::directorates::registry::sessions::SessionResult>
@@ -12525,9 +12635,12 @@ pub struct ai6::SessionUpdate
 impl ai6::directorates::registry::sessions::SessionUpdate
 pub fn ai6::directorates::registry::sessions::SessionUpdate::account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::checkpoint(self, ai6::directorates::q::safehouse::SafeHouseCheckpoint, f64) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::deliverables(self, alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::evidence(self, alloc::vec::Vec<ai6::directorates::registry::sessions::Evidence>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::exposed(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::launch(self, ai6::directorates::registry::sessions::SessionLaunch) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::parked_until(self, f64) -> Self
+pub fn ai6::directorates::registry::sessions::SessionUpdate::probed(self) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::provider_session(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::sessions::SessionUpdate::result(self, ai6::directorates::registry::sessions::SessionResult) -> Self
@@ -12820,6 +12933,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &s
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -13030,6 +13144,7 @@ pub ai6::StationRuntime::max_runtime: core::option::Option<f64>
 pub ai6::StationRuntime::normalize_digits: core::option::Option<bool>
 pub ai6::StationRuntime::overlays: ai6::station::limits::OverlayLimits
 pub ai6::StationRuntime::partial_line_bytes: core::option::Option<ai6::bounds::Limit>
+pub ai6::StationRuntime::probes: ai6::station::limits::ProbeLimits
 pub ai6::StationRuntime::providers: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
 pub ai6::StationRuntime::provision: ai6::station::limits::ProvisionLimits
 pub ai6::StationRuntime::publisher: ai6::station::limits::PublisherLimits
@@ -14210,6 +14325,7 @@ pub fn ai6::SessionStore::mission_exposure(&self, &str) -> core::io::error::Resu
 pub fn ai6::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::SessionStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::SessionStore::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -14223,6 +14339,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &s
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -14236,6 +14353,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::session(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::sessions(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sessions::SessionRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::take_session(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>

@@ -25,6 +25,7 @@ pub ai6_diptel::SessionState::Parked
 pub ai6_diptel::SessionState::Quarantined
 pub ai6_diptel::SessionState::Queued
 pub ai6_diptel::SessionState::Stalled
+pub ai6_diptel::SessionState::Verifying
 pub ai6_diptel::SessionState::Working
 impl ai6_diptel::SessionState
 pub const fn ai6_diptel::SessionState::as_str(self) -> &'static str

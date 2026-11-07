@@ -2321,6 +2321,16 @@
           "description": "Whether a Session of this role that ends done with no green ink request decided in that attempt is held for a person's verdict instead of being done.",
           "x-advanced": true,
           "default": false
+        },
+        "deliverables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Deliverables",
+          "description": "What every Mission of this role is to deliver, each a kind or `kind:target`: `branch`, `commit_on:BRANCH`, `comment:TEXT`, `artifact:URL`, `approval` or `file:PATH`. A Session that ends done leaves its Mission to be verified against them.",
+          "x-advanced": true,
+          "default": []
         }
       },
       "additionalProperties": false

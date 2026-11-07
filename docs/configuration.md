@@ -454,6 +454,10 @@ global one.
 | `exposure_sources` | 32 | **Sources of exposure per brief.** Sources of exposure one Session's brief records; the rest are not kept. |
 | `final_report_bytes` | 64 KiB | **Longest final report.** Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and says so. |
 | `verdict_note_bytes` | 4 KiB | **Longest verdict note.** Bytes of the note a person gives with a verdict on a Mission's outcome. |
+| `amendment_bytes` | 8 KiB | **Longest redispatch amendment.** Bytes of what a redispatch adds to the next attempt's task. |
+| `deliverables` | 32 | **Deliverables per attempt.** Deliverables kept on one attempt. |
+| `evidence_entries` | 64 | **Probe findings per attempt.** Probe findings kept on one attempt; the oldest go first. |
+| `evidence_detail_chars` | 300 | **Longest probe finding.** Characters kept of a probe finding's detail. |
 <!-- schema:registry.limits.sessions:end -->
 
 `[registry.limits.sleepers]`
