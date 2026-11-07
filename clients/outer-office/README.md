@@ -134,6 +134,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   Reasons are rendered as Markdown, what they name links to the Operation's Sources, and a request's
   links follow them. The Expired tab lists what no one decided in time, and re-arms it. A Mission's
   page shows its Agent's final message and any verdict, and takes one with `mission.verify`.
+  The Missions board counts `verifying` Missions, those waiting for a decision. Such a Mission's page
+  shows each deliverable with the latest probe of it (found, missing, unprobed or failed), the final
+  report, and, with `mission.verify`, Probe now and Done, Redispatch (as the next attempt, with an
+  amendment) and Failed, each with a required reason.
 - Agents, Account pools and Green ink open on **All Operations**: every Operation the person
   may read there, each one's rows under its name, an Operation that could not be read named with
   why. The picker narrows to one (`operation_id` in the route), and an action on a row goes to
