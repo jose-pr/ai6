@@ -195,7 +195,7 @@ async fn retry(
     }
     let agent = match agent {
         Some(key) => qualified_agent(state, mission, key)?,
-        None => retry_agent(state, mission)?,
+        None => agents::retry_agent(state, mission)?,
     };
     let agent = Some(agent);
     let mission_id = mission.mission_id.as_str();
@@ -222,48 +222,6 @@ async fn retry(
         state: retried.state,
         announced: false,
     })
-}
-
-/// The Agent a retry that names none goes to, chosen again from the roster as it is now: the
-/// best posted Agent qualified for the Mission's role and its brief's tags, not quarantined,
-/// held or retired, whose handler this Station can run. The Agent the Mission had keeps it when
-/// it still qualifies and ranks as high.
-fn retry_agent(state: &DaemonState, mission: &Mission) -> Result<String, String> {
-    let operation = mission.operation_id.as_deref();
-    let role = mission.role_id.as_deref();
-    let tags = state
-        .intake
-        .filed_brief(mission.mission_id.as_str())
-        .ok()
-        .flatten()
-        .map(|filed| filed.brief.tags)
-        .unwrap_or_default();
-    let handlers = super::available_handlers(state);
-    let best = agents::select(state, operation, role, &tags, Some(&handlers), &[])
-        .map_err(|error| format!("no Agent can take the retry: {error}"))?;
-    let kept = mission.agent_id.as_deref().filter(|current| {
-        *current != best.id
-            && agents::select(
-                state,
-                operation,
-                role,
-                &tags,
-                Some(&handlers),
-                &others(state, operation, current),
-            )
-            .is_ok_and(|agent| agent.id == *current && agent.priority == best.priority)
-    });
-    Ok(kept.map_or(best.id, str::to_owned))
-}
-
-/// Every Agent of the roster but `kept`, so a selection can only find `kept`.
-fn others(state: &DaemonState, operation: Option<&str>, kept: &str) -> Vec<String> {
-    state
-        .roster
-        .agent_ids()
-        .filter(|id| *id != kept)
-        .filter_map(|id| state.roster.agent(operation, id).ok().map(|agent| agent.id))
-        .collect()
 }
 
 /// The codename of an Agent that may take the Mission: configured for its Operation,
@@ -575,7 +533,9 @@ mod tests {
 
     use ai6_diptel::{ControlId, MissionId, OperationId, SessionId};
 
-    use super::super::tests::{mission_state, start_mission_by_id, test_state, wait_for_state};
+    use super::super::tests::{
+        mission_state, start_mission_by_id, test_state, wait_for_done, wait_for_state,
+    };
     use super::super::{DEFAULT_LEASE, schedule_queued_once, unix_now};
     use super::*;
     use crate::directorates::registry::store::FileRegistry;
@@ -796,7 +756,7 @@ mod tests {
             ControlOutcome::applied("working")
         );
         // The mock's resumed turn completes on the provider Session it was given.
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.session_ids.len(), 1);
         assert_eq!(mission.session_ids[0].as_str(), PROVIDER_SESSION);

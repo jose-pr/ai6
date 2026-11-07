@@ -7,6 +7,7 @@ pub mod assistant;
 pub mod compartments;
 pub mod config;
 pub mod cover;
+pub mod deliverables;
 pub mod harness;
 pub mod identity;
 pub mod inherit;

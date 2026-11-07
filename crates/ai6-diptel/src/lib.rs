@@ -109,6 +109,9 @@ pub enum SessionState {
     /// The operation ended done with something its role requires missing; a person's verdict
     /// settles it.
     Held,
+    /// The operation ended done; whether the Mission is done waits on someone checking what it
+    /// was to deliver.
+    Verifying,
     /// The operation finished.
     Done,
     /// The agent operation exited unsuccessfully.
@@ -128,6 +131,7 @@ impl SessionState {
             Self::Parked => "parked",
             Self::Quarantined => "quarantined",
             Self::Held => "held",
+            Self::Verifying => "verifying",
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Abandoned => "abandoned",
@@ -144,6 +148,7 @@ impl SessionState {
             "parked" => Self::Parked,
             "quarantined" => Self::Quarantined,
             "held" => Self::Held,
+            "verifying" => Self::Verifying,
             "done" => Self::Done,
             "failed" => Self::Failed,
             "abandoned" => Self::Abandoned,

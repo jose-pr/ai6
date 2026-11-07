@@ -518,6 +518,10 @@ pub struct AgentRole {
     /// attempt is held for a person's verdict instead of being `done`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub require_approval_before_done: bool,
+    /// What every Mission of this role is to deliver, each `kind` or `kind:target` (see
+    /// [`Deliverable`](crate::directorates::m::deliverables::Deliverable)); a brief may add more.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<String>,
 }
 
 fn review_choice_is_empty(choice: &ReviewChoice) -> bool {
@@ -538,7 +542,15 @@ impl AgentRole {
             policy: policy.into(),
             review: ReviewChoice::default(),
             require_approval_before_done: false,
+            deliverables: Vec::new(),
         }
+    }
+
+    /// This role with the deliverables its Missions owe.
+    #[must_use]
+    pub fn with_deliverables(mut self, deliverables: Vec<String>) -> Self {
+        self.deliverables = deliverables;
+        self
     }
 
     /// This role with a `done` needing a decided green ink request, or held otherwise.
@@ -567,6 +579,8 @@ impl AgentRole {
                 "Agent role purpose or policy is empty or exceeds its limit",
             ));
         }
+        crate::directorates::m::deliverables::parse_all(&self.deliverables)
+            .map_err(|invalid| error(format!("Agent role {}: {invalid}", self.id)))?;
         Ok(())
     }
 }
@@ -2453,6 +2467,12 @@ pub(crate) struct AgentRoleDefinition {
     #[schema(title = "Require a decision before done", advanced)]
     #[map(default)]
     require_approval_before_done: bool,
+    /// What every Mission of this role is to deliver, each a kind or `kind:target`: `branch`,
+    /// `commit_on:BRANCH`, `comment:TEXT`, `artifact:URL`, `approval` or `file:PATH`. A Session
+    /// that ends done leaves its Mission to be verified against them.
+    #[schema(title = "Deliverables", advanced)]
+    #[map(default)]
+    deliverables: Vec<String>,
 }
 
 impl AgentRoleDefinition {
@@ -2463,6 +2483,7 @@ impl AgentRoleDefinition {
             policy: self.policy,
             review: self.review,
             require_approval_before_done: self.require_approval_before_done,
+            deliverables: self.deliverables,
         };
         role.validate()
             .map_err(|validation| error(format!("{source}: {validation}")))?;

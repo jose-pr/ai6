@@ -1397,7 +1397,7 @@ mod tests {
     use crate::directorates::registry::timeline::TimelineEvent;
 
     use super::super::routes;
-    use super::super::tests::{limited_state, start_mission_by_id, wait_for_state};
+    use super::super::tests::{limited_state, start_mission_by_id, wait_for_done, wait_for_state};
     use super::super::{
         StartMission, publish_station_check_in, schedule_intake_once, schedule_parked_once,
         schedule_queued_once, session_hold, start_mission,
@@ -1636,7 +1636,7 @@ priority = 2
     async fn run(state: &DaemonState, id: &str) {
         create_mission(state, id);
         start_mission_by_id(state, id).await;
-        wait_for_state(state, id, MissionState::Done).await;
+        wait_for_done(state, id).await;
         until_released(state).await;
     }
 
@@ -2085,7 +2085,7 @@ handler = "mock-pooled"
             .expose("route-env-1", &["brief:source".to_owned()])
             .unwrap();
         start_mission_by_id(&state, "route-env-1").await;
-        wait_for_state(&state, "route-env-1", MissionState::Done).await;
+        wait_for_done(&state, "route-env-1").await;
         let (_, _, environment, _) = calls("route-env-1").remove(0);
         assert_eq!(environment["GATEWAY_URL"], "https://llm.example");
         assert_eq!(
@@ -2119,7 +2119,7 @@ handler = "mock-pooled"
             )
             .unwrap();
         start_mission_by_id(&state, "route-plain-1").await;
-        wait_for_state(&state, "route-plain-1", MissionState::Done).await;
+        wait_for_done(&state, "route-plain-1").await;
         let (_, _, environment, _) = calls("route-plain-1").remove(0);
         assert!(!environment.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
         assert_eq!(
@@ -2198,7 +2198,7 @@ secret = "two-b"
         );
         assert!(account(&state, "one", "a").limited_until.is_some());
         schedule_parked_once(&state).await;
-        wait_for_state(&state, "route-move", MissionState::Done).await;
+        wait_for_done(&state, "route-move").await;
         let made = calls("route-move");
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
@@ -2241,7 +2241,7 @@ secret = "keep-limited-a"
         assert_eq!(calls("route-keep").len(), 1, "it waits for the reset");
         now.store(POOLED_RESET + 3_600, Ordering::SeqCst);
         schedule_parked_once(&state).await;
-        wait_for_state(&state, "route-keep", MissionState::Done).await;
+        wait_for_done(&state, "route-keep").await;
         let made = calls("route-keep");
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
@@ -2308,7 +2308,7 @@ secrets = ["second"]
         );
         // The attempt it replaces closes just after the Mission is queued.
         schedule_queued_once(&state).await;
-        wait_for_state(&state, "route-fresh", MissionState::Done).await;
+        wait_for_done(&state, "route-fresh").await;
         let made = calls("route-fresh");
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
@@ -2434,7 +2434,7 @@ secrets = ["second"]
                 .expose(mission, &["brief:source".to_owned()])
                 .unwrap();
             start_mission_by_id(&state, mission).await;
-            wait_for_state(&state, mission, MissionState::Done).await;
+            wait_for_done(&state, mission).await;
             let (_, _, environment, _) = calls(mission).remove(0);
             assert_eq!(
                 environment
@@ -2464,7 +2464,7 @@ secrets = ["second"]
         declare(&state);
         create_mission(&state, "pooled-env");
         start_mission_by_id(&state, "pooled-env").await;
-        wait_for_state(&state, "pooled-env", MissionState::Done).await;
+        wait_for_done(&state, "pooled-env").await;
         let (_, _, environment, _) = calls("pooled-env").remove(0);
         let carried: Vec<_> = CREDENTIAL_VARIABLES
             .iter()
@@ -2601,7 +2601,7 @@ secret = "rotate-b"
             "resume on another account"
         );
         schedule_parked_once(&state).await;
-        wait_for_state(&state, "pooled-rotate", MissionState::Done).await;
+        wait_for_done(&state, "pooled-rotate").await;
         let made = calls("pooled-rotate");
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
@@ -2633,7 +2633,7 @@ secret = "rotate-b"
         now.store(START + 10, Ordering::SeqCst);
         create_mission(&state, "pooled-rotate-3");
         start_mission_by_id(&state, "pooled-rotate-3").await;
-        wait_for_state(&state, "pooled-rotate-3", MissionState::Done).await;
+        wait_for_done(&state, "pooled-rotate-3").await;
         assert_eq!(token("pooled-rotate-3"), "fake-rotate-b-0451");
         until_released(&state).await;
 
@@ -2641,7 +2641,7 @@ secret = "rotate-b"
         now.store(POOLED_RESET + 1, Ordering::SeqCst);
         create_mission(&state, "pooled-rotate-4");
         start_mission_by_id(&state, "pooled-rotate-4").await;
-        wait_for_state(&state, "pooled-rotate-4", MissionState::Done).await;
+        wait_for_done(&state, "pooled-rotate-4").await;
         assert_eq!(token("pooled-rotate-4"), "fake-rotate-limited-a-0451");
     }
 
@@ -2686,7 +2686,7 @@ secret = "codex-b"
         .await
         .expect("the limited attempt is closed");
         schedule_queued_once(&state).await;
-        wait_for_state(&state, "pooled-codex", MissionState::Done).await;
+        wait_for_done(&state, "pooled-codex").await;
         let made = calls("pooled-codex");
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
@@ -3099,7 +3099,7 @@ secret = "race-only"
         }));
         create_mission(&state, "pooled-race");
         start_mission_by_id(&state, "pooled-race").await;
-        wait_for_state(&state, "pooled-race", MissionState::Done).await;
+        wait_for_done(&state, "pooled-race").await;
         assert_eq!(
             *kept.lock().unwrap(),
             Some(true),

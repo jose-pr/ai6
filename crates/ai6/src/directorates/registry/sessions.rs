@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::directorates::m::deliverables::Deliverable;
 use crate::directorates::m::placement::ExecutionMode;
 use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::q::safehouse::SafeHouseCheckpoint;
@@ -228,6 +229,76 @@ pub struct SessionRecord {
     /// What a person found when they checked how the attempt ended; the latest one stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verdict: Option<MissionVerdict>,
+    /// What its Mission was to deliver, when the attempt ended done and went to be checked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<Deliverable>,
+    /// What the Station's probes found of those, oldest first and bounded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
+    /// When a person asked for the deliverables to be probed, as Unix seconds, until the Station
+    /// has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_requested: Option<f64>,
+}
+
+/// What a probe found of one deliverable.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProbeResult {
+    /// It is there.
+    Found,
+    /// The place it should be was read, and it is not there.
+    Missing,
+    /// This Station has no means to look, as for work on a Theater it cannot reach.
+    Unprobed,
+    /// The look failed or ran out of time, so nothing is known.
+    Failed,
+}
+
+impl ProbeResult {
+    /// The spelling on the wire and in reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Found => "found",
+            Self::Missing => "missing",
+            Self::Unprobed => "unprobed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// What one probe of one deliverable found, kept on the attempt it was run for.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Evidence {
+    /// What was probed.
+    pub deliverable: Deliverable,
+    /// What was found.
+    pub result: ProbeResult,
+    /// What was read, in a line: the name that is missing, the address that answered. It may quote
+    /// what a tracker or a server said, so it is data.
+    pub detail: String,
+    /// When the probe ran, as Unix seconds.
+    pub at: f64,
+}
+
+impl Evidence {
+    /// `result` for `deliverable`, as found at `at`.
+    pub fn new(
+        deliverable: Deliverable,
+        result: ProbeResult,
+        detail: impl Into<String>,
+        at: f64,
+    ) -> Self {
+        Self {
+            deliverable,
+            result,
+            detail: detail.into(),
+            at,
+        }
+    }
 }
 
 /// What a person found when they checked a Mission's outcome.
@@ -241,11 +312,18 @@ pub enum OutcomeVerdict {
     Disputed,
     /// The person checked, and the work does not hold up.
     FailedVerification,
+    /// The work did not deliver what it was to: the Mission goes to its next attempt, told why.
+    Redispatch,
 }
 
 impl OutcomeVerdict {
     /// Every verdict.
-    pub const ALL: [Self; 3] = [Self::Confirmed, Self::Disputed, Self::FailedVerification];
+    pub const ALL: [Self; 4] = [
+        Self::Confirmed,
+        Self::Disputed,
+        Self::FailedVerification,
+        Self::Redispatch,
+    ];
 
     /// The wire spelling.
     pub const fn as_str(self) -> &'static str {
@@ -253,6 +331,7 @@ impl OutcomeVerdict {
             Self::Confirmed => "confirmed",
             Self::Disputed => "disputed",
             Self::FailedVerification => "failed-verification",
+            Self::Redispatch => "redispatch",
         }
     }
 
@@ -265,7 +344,10 @@ impl OutcomeVerdict {
 
     /// Whether the outcome counts as a failure of the Agent that ran it.
     pub const fn is_fault(self) -> bool {
-        matches!(self, Self::Disputed | Self::FailedVerification)
+        matches!(
+            self,
+            Self::Disputed | Self::FailedVerification | Self::Redispatch
+        )
     }
 }
 
@@ -279,6 +361,9 @@ pub struct MissionVerdict {
     /// Why, in their words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// For a redispatch, what the next attempt is told beyond its brief and the reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amendment: Option<String>,
     /// The authenticated person.
     pub by: String,
     /// When, as Unix seconds.
@@ -296,9 +381,17 @@ impl MissionVerdict {
         Self {
             verdict,
             note,
+            amendment: None,
             by: by.into(),
             at,
         }
+    }
+
+    /// This verdict with what a redispatch tells the next attempt.
+    #[must_use]
+    pub fn with_amendment(mut self, amendment: Option<String>) -> Self {
+        self.amendment = amendment;
+        self
     }
 }
 
@@ -397,7 +490,8 @@ impl SessionResult {
 }
 
 impl SessionRecord {
-    /// Whether a person may give a verdict on the attempt: it ended done or held.
+    /// Whether a person may give a verdict on the attempt: it ended done or held, or is being
+    /// verified.
     ///
     /// # Errors
     ///
@@ -410,7 +504,7 @@ impl SessionRecord {
             .result
             .as_ref()
             .map_or("unrecorded", |result| result.state.as_str());
-        if matches!(state, "done" | "held") {
+        if matches!(state, "done" | "held" | "verifying") {
             Ok(())
         } else {
             Err(SessionError::Unsettled(state.to_owned()))
@@ -547,9 +641,31 @@ pub struct SessionUpdate {
     checkpoint: Option<(SafeHouseCheckpoint, f64)>,
     account: Option<AccountRef>,
     result: Option<SessionResult>,
+    deliverables: Option<Vec<Deliverable>>,
+    evidence: Vec<Evidence>,
+    probed: bool,
 }
 
 impl SessionUpdate {
+    /// Records what the Mission was to deliver, replacing the earlier list.
+    pub fn deliverables(mut self, deliverables: Vec<Deliverable>) -> Self {
+        self.deliverables = Some(deliverables);
+        self
+    }
+
+    /// Adds what probes found; the oldest entries beyond `[registry.limits.sessions]
+    /// evidence_entries` go first.
+    pub fn evidence(mut self, evidence: Vec<Evidence>) -> Self {
+        self.evidence = evidence;
+        self
+    }
+
+    /// Answers the request for a probe: it has been run.
+    pub fn probed(mut self) -> Self {
+        self.probed = true;
+        self
+    }
+
     /// Records how the Mission stands, replacing the earlier result.
     pub fn result(mut self, result: SessionResult) -> Self {
         self.result = Some(result);
@@ -830,6 +946,9 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
         result: None,
         window: new.window,
         verdict: None,
+        deliverables: Vec::new(),
+        evidence: Vec::new(),
+        probe_requested: None,
     }
 }
 
@@ -910,6 +1029,29 @@ pub(super) fn apply_fenced(
             record.exposure.push(exposure);
         }
     }
+    if let Some(deliverables) = update.deliverables {
+        let skip = deliverables
+            .len()
+            .saturating_sub(limits.deliverables.or_max());
+        record.deliverables = deliverables.into_iter().skip(skip).collect();
+    }
+    if !update.evidence.is_empty() {
+        let detail = limits.evidence_detail_chars.or_max();
+        record
+            .evidence
+            .extend(update.evidence.into_iter().map(|mut found| {
+                found.detail = found.detail.chars().take(detail).collect();
+                found
+            }));
+        let skip = record
+            .evidence
+            .len()
+            .saturating_sub(limits.evidence_entries.or_max());
+        record.evidence.drain(..skip);
+    }
+    if update.probed {
+        record.probe_requested = None;
+    }
     if let Some(result) = update.result {
         let cut = |text: String| {
             text.chars()
@@ -983,6 +1125,22 @@ pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &SessionLimits)
             limits.verdict_note_bytes
         )));
     }
+    if let Some(amendment) = &verdict.amendment
+        && (verdict.verdict != OutcomeVerdict::Redispatch
+            || amendment.trim().is_empty()
+            || !limits.amendment_bytes.allows(amendment.len())
+            || amendment.chars().any(|character| {
+                character.is_control()
+                    && !"
+	"
+                    .contains(character)
+            }))
+    {
+        return Err(invalid(format!(
+            "an amendment goes only with a redispatch, within {} bytes and without control              characters other than newlines",
+            limits.amendment_bytes
+        )));
+    }
     Ok(())
 }
 
@@ -993,6 +1151,19 @@ pub(super) fn apply_verdict(
 ) -> Result<(), SessionError> {
     record.takes_verdict()?;
     record.verdict = Some(verdict);
+    Ok(())
+}
+
+/// Marks `record` as asked to be probed; only an attempt being verified takes the request.
+pub(super) fn apply_probe_request(record: &mut SessionRecord, at: f64) -> Result<(), SessionError> {
+    let state = record
+        .result
+        .as_ref()
+        .map_or("unrecorded", |result| result.state.as_str());
+    if state != "verifying" || record.status.is_closed() {
+        return Err(SessionError::Unsettled(state.to_owned()));
+    }
+    record.probe_requested = Some(at);
     Ok(())
 }
 
@@ -1138,6 +1309,21 @@ pub trait SessionStore {
         verdict: &MissionVerdict,
     ) -> Result<SessionRecord, SessionError>;
 
+    /// Asks for the latest attempt at a Mission of `operation` to have its deliverables probed;
+    /// the Station that holds it does so on its next pass and clears the request. It needs no
+    /// lease: a person's word, not a holder's write.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the Operation has no attempt at the Mission; `Unsettled` when the latest
+    /// is not being verified; `Io` for a Registry failure.
+    fn request_probe(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        at: f64,
+    ) -> Result<SessionRecord, SessionError>;
+
     /// Keeps a Session's final report, replacing the one it has.
     ///
     /// # Errors
@@ -1238,6 +1424,22 @@ impl SessionStore for FileRegistry {
         }))
         .ok_or(SessionError::NotFound)?;
         apply_verdict(&mut record, verdict.clone())?;
+        self.write_session(&self.session_path(&record.session_id), &record)?;
+        Ok(record)
+    }
+
+    fn request_probe(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        at: f64,
+    ) -> Result<SessionRecord, SessionError> {
+        let _lock = self.lock()?;
+        let mut record = latest(self.sessions_locked()?.into_iter().filter(|record| {
+            record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
+        }))
+        .ok_or(SessionError::NotFound)?;
+        apply_probe_request(&mut record, at)?;
         self.write_session(&self.session_path(&record.session_id), &record)?;
         Ok(record)
     }

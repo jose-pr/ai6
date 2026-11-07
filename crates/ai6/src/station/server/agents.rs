@@ -496,6 +496,48 @@ pub(super) fn count(
     }
 }
 
+/// The Agent a retry that names none goes to, chosen again from the roster as it is now: the
+/// best posted Agent qualified for the Mission's role and its brief's tags, not quarantined,
+/// held or retired, whose handler this Station can run. The Agent the Mission had keeps it when
+/// it still qualifies and ranks as high.
+pub(super) fn retry_agent(state: &DaemonState, mission: &Mission) -> Result<String, String> {
+    let operation = mission.operation_id.as_deref();
+    let role = mission.role_id.as_deref();
+    let tags = state
+        .intake
+        .filed_brief(mission.mission_id.as_str())
+        .ok()
+        .flatten()
+        .map(|filed| filed.brief.tags)
+        .unwrap_or_default();
+    let handlers = super::available_handlers(state);
+    let best = select(state, operation, role, &tags, Some(&handlers), &[])
+        .map_err(|error| format!("no Agent can take the retry: {error}"))?;
+    let kept = mission.agent_id.as_deref().filter(|current| {
+        *current != best.id
+            && select(
+                state,
+                operation,
+                role,
+                &tags,
+                Some(&handlers),
+                &others(state, operation, current),
+            )
+            .is_ok_and(|agent| agent.id == *current && agent.priority == best.priority)
+    });
+    Ok(kept.map_or(best.id, str::to_owned))
+}
+
+/// Every Agent of the roster but `kept`, so a selection can only find `kept`.
+fn others(state: &DaemonState, operation: Option<&str>, kept: &str) -> Vec<String> {
+    state
+        .roster
+        .agent_ids()
+        .filter(|id| *id != kept)
+        .filter_map(|id| state.roster.agent(operation, id).ok().map(|agent| agent.id))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

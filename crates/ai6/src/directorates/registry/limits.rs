@@ -904,6 +904,22 @@ pub struct SessionLimits {
     #[schema(title = "Longest verdict note", format = "bytes")]
     #[map(default = SessionLimits::default().verdict_note_bytes)]
     pub verdict_note_bytes: Limit,
+    /// Bytes of what a redispatch adds to the next attempt's task.
+    #[schema(title = "Longest redispatch amendment", format = "bytes")]
+    #[map(default = SessionLimits::default().amendment_bytes)]
+    pub amendment_bytes: Limit,
+    /// Deliverables kept on one attempt.
+    #[schema(title = "Deliverables per attempt")]
+    #[map(default = SessionLimits::default().deliverables)]
+    pub deliverables: Limit,
+    /// Probe findings kept on one attempt; the oldest go first.
+    #[schema(title = "Probe findings per attempt")]
+    #[map(default = SessionLimits::default().evidence_entries)]
+    pub evidence_entries: Limit,
+    /// Characters kept of a probe finding's detail.
+    #[schema(title = "Longest probe finding")]
+    #[map(default = SessionLimits::default().evidence_detail_chars)]
+    pub evidence_detail_chars: Limit,
 }
 
 impl Default for SessionLimits {
@@ -919,6 +935,10 @@ impl Default for SessionLimits {
             exposure_sources: Limit::at(32),
             final_report_bytes: Limit::at(64 * KIB),
             verdict_note_bytes: Limit::at(4 * KIB),
+            amendment_bytes: Limit::at(8 * KIB),
+            deliverables: Limit::at(32),
+            evidence_entries: Limit::at(64),
+            evidence_detail_chars: Limit::at(300),
         }
     }
 }

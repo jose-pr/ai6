@@ -194,6 +194,7 @@ fn full_example(record: ConfigRecord) -> Value {
         ConfigRecord::Role => json!({
             "purpose": "Runs cases",
             "require_approval_before_done": true,
+            "deliverables": ["branch", "file:report.md"],
             "policy": "Follow the brief",
             "review": {"plan": "none", "output": "two-models"}
         }),

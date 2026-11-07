@@ -141,6 +141,8 @@ pub fn judge(record: &SessionRecord) -> Judgment {
         "done" => Judgment::Done,
         "held" if verdict == Some(OutcomeVerdict::Confirmed) => Judgment::Done,
         "held" => Judgment::WaitingOnPerson,
+        "verifying" if verdict == Some(OutcomeVerdict::Confirmed) => Judgment::Done,
+        "verifying" => Judgment::WaitingOnPerson,
         "failed" => Judgment::Failed,
         "blown" => Judgment::Blown,
         "stalled" => Judgment::Stalled,
@@ -569,6 +571,9 @@ mod tests {
             result: Some(SessionResult::new(state).with_reason(reason.map(str::to_owned))),
             window: None,
             verdict: None,
+            deliverables: Vec::new(),
+            evidence: Vec::new(),
+            probe_requested: None,
         }
     }
 

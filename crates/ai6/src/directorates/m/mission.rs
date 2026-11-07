@@ -43,6 +43,10 @@ pub enum MissionState {
     /// Its Session ended done with nothing a role requires, so a person's verdict settles it: the
     /// work is kept and no harness runs. `blocked_reason` says why.
     Held,
+    /// Its Session ended done, and the work is kept for someone to check against what the
+    /// Mission was to deliver. It leaves this state only by a decision: done, redispatched as
+    /// the next attempt, or failed.
+    Verifying,
 }
 
 impl MissionState {
@@ -60,6 +64,7 @@ impl MissionState {
             Self::Parked => "parked",
             Self::Quarantined => "quarantined",
             Self::Held => "held",
+            Self::Verifying => "verifying",
         }
     }
 }
@@ -156,6 +161,23 @@ pub struct Mission {
     /// recovered. `None` for a Mission not run from the Registry's queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief_digest: Option<String>,
+    /// What each redispatch said was wrong and what to do differently, oldest first: the next
+    /// attempt's task is its brief followed by these. Unlike the brief, they are not what the
+    /// Registry filed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub amendments: Vec<String>,
+}
+
+impl Mission {
+    /// What the harness is told to do: the brief, then what each redispatch added.
+    pub fn task(&self) -> String {
+        let mut task = self.prompt.clone();
+        for amendment in &self.amendments {
+            task.push_str("\n\n");
+            task.push_str(amendment);
+        }
+        task
+    }
 }
 
 /// Mission records held in memory and persisted as one atomic snapshot.
@@ -304,6 +326,7 @@ impl MissionStore {
             provenance: None,
             waiting: None,
             brief_digest: None,
+            amendments: Vec::new(),
         };
         let mut next = self.missions.clone();
         next.insert(key, mission.clone());
@@ -888,6 +911,48 @@ impl MissionStore {
         Ok(updated)
     }
 
+    /// Queues a Mission that is verifying as its next attempt for `agent_id`, told `amendment` after
+    /// its brief. The attempt starts a new provider Session and, like a failed one, does not take
+    /// up the last one; the safe house the last attempt kept stays.
+    pub fn redispatch(
+        &mut self,
+        mission_id: &str,
+        agent_id: String,
+        amendment: String,
+    ) -> Result<Mission, MissionError> {
+        if amendment.trim().is_empty() {
+            return Err(MissionError::EmptyPrompt);
+        }
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if mission.state != MissionState::Verifying {
+            return Err(MissionError::InvalidTransition {
+                from: mission.state,
+                to: MissionState::Queued,
+            });
+        }
+        mission.state = MissionState::Queued;
+        mission.after_failure = true;
+        mission.agent_id = Some(agent_id);
+        mission.amendments.push(amendment);
+        mission.parked_until = None;
+        mission.blocked_reason = None;
+        mission.failure = None;
+        mission.reported_failure = None;
+        mission.resume_refused = None;
+        mission.waiting = None;
+        mission.denied_tools.clear();
+        mission.revision += 1;
+        let updated = mission.clone();
+        let mut operations = self.operations.clone();
+        if let Some(manifest) = operations.get_mut(mission_id) {
+            manifest.session = None;
+            manifest.runner = None;
+        }
+        self.commit_with(next, operations)?;
+        Ok(updated)
+    }
+
     /// Associates a provider-issued Session ID with the Mission that operation serves.
     pub fn attach_session(
         &mut self,
@@ -1024,16 +1089,16 @@ pub enum MissionError {
 fn valid_transition(from: MissionState, to: MissionState) -> bool {
     use MissionState::{
         Abandoned, Blocked, Blown, Done, Failed, Held, Parked, Quarantined, Queued, Stalled,
-        Working,
+        Verifying, Working,
     };
     matches!(
         (from, to),
         (Queued, Working | Failed | Abandoned)
             | (
                 Working,
-                Blocked | Stalled | Done | Failed | Abandoned | Held
+                Blocked | Stalled | Done | Failed | Abandoned | Held | Verifying
             )
-            | (Held, Done | Failed | Abandoned)
+            | (Held | Verifying, Done | Failed | Abandoned)
             | (Blocked, Stalled | Working | Failed | Abandoned)
             | (Working, Blown)
             | (Blocked, Blown)

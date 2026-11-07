@@ -91,6 +91,33 @@ fn mission(state: &DaemonState, id: &str) -> Option<Mission> {
     state.missions.lock().unwrap().get(id).cloned()
 }
 
+/// Rounds until the Mission, its Session ended done, is verifying; then a person's confirmation as
+/// the gateway records it, and rounds until the Station has settled it done.
+async fn done(state: &DaemonState, id: &str) {
+    until(state, "verifying", |state| {
+        mission(state, id).is_some_and(|mission| mission.state == MissionState::Verifying)
+            && state
+                .intake
+                .latest_session(id)
+                .unwrap()
+                .and_then(|record| record.result)
+                .is_some_and(|result| result.state == "verifying")
+    })
+    .await;
+    let confirmed = crate::directorates::registry::sessions::MissionVerdict::new(
+        crate::directorates::registry::sessions::OutcomeVerdict::Confirmed,
+        "person-test",
+        state.clock.now() as f64,
+        Some("checked".to_owned()),
+    );
+    state.intake.record_verdict("G", id, &confirmed).unwrap();
+    until(state, "done", |state| {
+        super::super::verdicts::settle_held(state);
+        mission(state, id).is_some_and(|mission| mission.state == MissionState::Done)
+    })
+    .await;
+}
+
 fn is(state: &DaemonState, id: &str, wanted: MissionState) -> bool {
     mission(state, id).is_some_and(|mission| mission.state == wanted)
 }
@@ -138,10 +165,7 @@ async fn a_mission_with_no_policy_finishes_with_no_review() {
     let root = tempfile::tempdir().unwrap();
     let state = station(root.path(), "", "", &agents(&[]));
     submit(&state, "rv-none", "the goals");
-    until(&state, "done", |state| {
-        is(state, "rv-none", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-none").await;
     assert!(output_review(&state, "rv-none").is_none());
     assert!(actions(&state).is_empty());
     stop(&state);
@@ -208,10 +232,7 @@ updates = \"all\"
         state.intake.read_claimed("rv-two").unwrap().is_some(),
         "its brief is not filed as finished"
     );
-    until(&state, "done", |state| {
-        is(state, "rv-two", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-two").await;
     assert_eq!(votes(&state, "rv-two").len(), 2);
     assert_eq!(status(&state, "rv-two"), Some(ReviewStatus::Passed));
     assert_eq!(done_statuses(&state), 1, "the pass moves it on");
@@ -237,10 +258,7 @@ async fn a_reviewer_runs_answer_only_and_sees_the_goals_and_the_output_fenced() 
         "rv-fence",
         "the goals of rv-fence\nOUTPUT:my report",
     );
-    until(&state, "done", |state| {
-        is(state, "rv-fence", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-fence").await;
     let start = REVIEWER_STARTS
         .lock()
         .unwrap()
@@ -277,10 +295,7 @@ async fn a_redo_goes_back_on_the_authors_session_with_the_reasons_then_passes() 
         &agents(&[("r1", "strict")]),
     );
     submit(&state, "rv-redo", "the goals");
-    until(&state, "done", |state| {
-        is(state, "rv-redo", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-redo").await;
     let review = output_review(&state, "rv-redo").unwrap();
     assert_eq!(review.sent_back, 1);
     assert_eq!(review.iteration, 2);
@@ -393,10 +408,7 @@ async fn a_second_round_shows_each_the_others_reasons_and_the_first_does_not() {
         &agents(&[("r1", "pass"), ("r2", "persuaded")]),
     );
     submit(&state, "rv-round", "the goals of rv-round");
-    until(&state, "done", |state| {
-        is(state, "rv-round", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-round").await;
     let review = output_review(&state, "rv-round").unwrap();
     assert_eq!(review.round, 2);
     assert_eq!(review.iteration, 1);
@@ -618,10 +630,7 @@ async fn a_label_cannot_turn_a_review_off_and_a_person_can_with_an_audit() {
         .data
         .insert("review".to_owned(), serde_json::json!({ "output": "none" }));
     state.intake.submit_brief(&outside).unwrap();
-    until(&state, "done", |state| {
-        is(state, "rv-label", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-label").await;
     assert_eq!(
         status(&state, "rv-label"),
         Some(ReviewStatus::Passed),
@@ -637,10 +646,7 @@ async fn a_label_cannot_turn_a_review_off_and_a_person_can_with_an_audit() {
         .with_principal("operator-1");
     person.provenance = Some(provenance);
     state.intake.submit_brief(&person).unwrap();
-    until(&state, "done", |state| {
-        is(state, "rv-person", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-person").await;
     assert_eq!(status(&state, "rv-person"), None, "a person may weaken it");
     let audited = state
         .intake
@@ -743,10 +749,7 @@ async fn a_restart_mid_review_carries_on_from_the_record_and_counts_no_vote_twic
         state.startup_recovery.lock().unwrap().len() >= 2,
         "both turns in flight are recovered"
     );
-    until(&state, "done", |state| {
-        is(state, "rv-restart", MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-restart").await;
     let review = output_review(&state, "rv-restart").unwrap();
     let recorded = review
         .votes

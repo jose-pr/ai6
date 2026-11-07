@@ -215,8 +215,8 @@ pub use directorates::registry::mission_ids::{
 };
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
-    FinalReport, MissionVerdict, NewSession, OutcomeVerdict, SessionError, SessionLaunch,
-    SessionRecord, SessionResult, SessionStatus, SessionUpdate,
+    Evidence, FinalReport, MissionVerdict, NewSession, OutcomeVerdict, ProbeResult, SessionError,
+    SessionLaunch, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization, SleeperMark,

@@ -3849,6 +3849,7 @@ mod tests {
     fn test_agent_role(id: &str, purpose: &str) -> AgentRole {
         AgentRole {
             require_approval_before_done: false,
+            deliverables: Vec::new(),
             id: id.to_owned(),
             purpose: purpose.to_owned(),
             policy: "Follow the Operation policy.".to_owned(),

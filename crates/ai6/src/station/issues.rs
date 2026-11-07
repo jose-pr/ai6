@@ -44,7 +44,8 @@ pub(crate) type TrackerBuilder<'a> =
 /// The phase a Mission state shows on its issue, if it shows one.
 pub(crate) fn phase_of(state: MissionState, blocked_reason: Option<&str>) -> Option<&'static str> {
     match state {
-        MissionState::Working => Some("working"),
+        // Not finished until someone has checked it: the issue still reads as being worked on.
+        MissionState::Working | MissionState::Verifying => Some("working"),
         MissionState::Blocked if blocked_reason == Some(ISSUE_REASON) => Some("waiting"),
         MissionState::Blocked
         | MissionState::Stalled

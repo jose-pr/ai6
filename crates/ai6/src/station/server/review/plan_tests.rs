@@ -77,6 +77,33 @@ fn mission(state: &DaemonState, id: &str) -> Option<Mission> {
     state.missions.lock().unwrap().get(id).cloned()
 }
 
+/// Rounds until the Mission, its Session ended done, is verifying; then a person's confirmation as
+/// the gateway records it, and rounds until the Station has settled it done.
+async fn done(state: &DaemonState, id: &str) {
+    until(state, "verifying", |state| {
+        mission(state, id).is_some_and(|mission| mission.state == MissionState::Verifying)
+            && state
+                .intake
+                .latest_session(id)
+                .unwrap()
+                .and_then(|record| record.result)
+                .is_some_and(|result| result.state == "verifying")
+    })
+    .await;
+    let confirmed = crate::directorates::registry::sessions::MissionVerdict::new(
+        crate::directorates::registry::sessions::OutcomeVerdict::Confirmed,
+        "person-test",
+        state.clock.now() as f64,
+        Some("checked".to_owned()),
+    );
+    state.intake.record_verdict("G", id, &confirmed).unwrap();
+    until(state, "done", |state| {
+        super::super::verdicts::settle_held(state);
+        mission(state, id).is_some_and(|mission| mission.state == MissionState::Done)
+    })
+    .await;
+}
+
 fn plan_review(state: &DaemonState, id: &str) -> Option<MissionReview> {
     state.intake.mission_review(id, ReviewGate::Plan).unwrap()
 }
@@ -131,10 +158,7 @@ async fn a_plan_is_reviewed_before_the_agent_gets_its_tools_and_then_it_works() 
         clearances("rv-plan").1.is_empty(),
         "nothing resumed it before the pass"
     );
-    until(&state, "done", |state| {
-        mission(state, "rv-plan").is_some_and(|mission| mission.state == MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-plan").await;
     let (starts, resumes) = clearances("rv-plan");
     assert_eq!(starts, [READ_CLEARANCE]);
     assert_eq!(resumes.len(), 1, "one resume, after the pass");
@@ -178,10 +202,7 @@ async fn a_plan_sent_back_is_redone_still_holding_only_what_reads() {
         "[operation.G.review]\nplan = \"one\"\n",
     );
     submit(&state, "rv-plan-redo");
-    until(&state, "done", |state| {
-        mission(state, "rv-plan-redo").is_some_and(|mission| mission.state == MissionState::Done)
-    })
-    .await;
+    done(&state, "rv-plan-redo").await;
     let (starts, resumes) = clearances("rv-plan-redo");
     assert_eq!(starts, [READ_CLEARANCE]);
     assert_eq!(resumes.len(), 2, "sent back once, then on after the pass");

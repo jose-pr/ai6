@@ -13,7 +13,7 @@ use axum::extract::State;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{Provider, Status};
 
-use super::tests::{mission_state, start_mission_by_id, test_state, wait_for_state};
+use super::tests::{mission_state, start_mission_by_id, test_state, wait_for_done, wait_for_state};
 use super::*;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
@@ -354,7 +354,7 @@ async fn a_resume_is_accepted_before_the_stream_reports_its_session() {
         started.provider_session_id.as_ref().map(SessionId::as_str),
         Some("stream-resume")
     );
-    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    wait_for_done(&state, "mission-1").await;
     assert_eq!(log_of("resume").resumed, vec![Some("go on".to_owned())]);
 }
 
@@ -376,7 +376,7 @@ async fn a_resume_with_no_message_tells_the_silent_harness_to_go_on() {
     let _ = resume(&state, "mission-1", None)
         .await
         .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
-    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    wait_for_done(&state, "mission-1").await;
     let resumed = log_of("silent").resumed;
     assert!(resumed[0].is_some(), "{resumed:?}");
 }
@@ -488,7 +488,7 @@ async fn a_resume_before_an_interrupted_turn_ended_goes_on() {
     let _ = resume(&state, "mission-1", Some("go on"))
         .await
         .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
-    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    wait_for_done(&state, "mission-1").await;
 }
 
 /// A pump whose Session is no longer the Mission's has no say in it, however late it gets there.
@@ -629,7 +629,7 @@ async fn an_interrupted_turn_leaves_the_mission_blocked_however_it_ends() {
             .await
             .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
         assert_eq!(status, StatusCode::ACCEPTED);
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
     }
 }
 
@@ -683,7 +683,7 @@ async fn an_interrupt_answered_by_silence_leaves_the_mission_waiting() {
     )
     .await
     .unwrap_or_else(|error| panic!("the message was refused: {:?}", error.1.0.error));
-    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    wait_for_done(&state, "mission-1").await;
 }
 
 fn stalling_state(root: &Path, key: &str) -> DaemonState {
@@ -717,7 +717,7 @@ async fn a_stalled_mission_keeps_its_safe_house_until_it_ends() {
     let _ = resume(&state, "mission-1", Some("go on"))
         .await
         .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
-    wait_for_state(&state, "mission-1", MissionState::Done).await;
+    wait_for_done(&state, "mission-1").await;
     let report_after = mission_state(&state, "mission-1").safe_house.unwrap();
     assert!(!report_after.kept, "the end of the Mission finishes it");
     assert!(!Path::new(&report.path).exists());

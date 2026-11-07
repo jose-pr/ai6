@@ -929,7 +929,7 @@ mod tests {
 
     use super::super::tests::{
         DRIP_INTERVAL, DRIP_TICKS, RECORDED_STARTS, SAFE_HOUSE_OPENS, start_test_runner,
-        test_state, ticks, wait_for_state,
+        test_state, ticks, wait_for_done, wait_for_state,
     };
     use super::super::{
         StationConfig, mission_id_for_brief, plugins, pop_event, publish_station_check_in,
@@ -1272,7 +1272,7 @@ mod tests {
             ticks(&replayed).1
         })
         .await;
-        wait_for_state(&b, &mission_id, MissionState::Done).await;
+        wait_for_done(&b, &mission_id).await;
         let (before, _) = ticks(&seen);
         let (after, completed) = ticks(&replayed);
         assert!(completed);
@@ -1420,7 +1420,7 @@ mod tests {
             ticks(&events).1
         })
         .await;
-        wait_for_state(state, mission_id, MissionState::Done).await;
+        wait_for_done(state, mission_id).await;
         ticks(&events).0
     }
 

@@ -652,6 +652,43 @@ enum MissionsCommand {
         /// The created ticket's body; the Mission's prompt when left out.
         #[arg(long, requires = "create_issue")]
         issue_body: Option<String>,
+        /// What it is to deliver, as KIND or KIND:TARGET (branch, commit_on:BRANCH,
+        /// comment:TEXT, artifact:URL, approval, file:PATH), beyond its role's; repeat for
+        /// several. A verifier checks them before the Mission is done.
+        #[arg(long = "deliverable")]
+        deliverables: Vec<String>,
+    },
+    /// Ask the Station to read back what a verifying Mission was to deliver and wait for what it
+    /// found (needs mission.verify). The Station reports each deliverable found, missing,
+    /// unprobed or failed, and decides nothing.
+    Probe {
+        /// The Mission: its UID, or any handle it had.
+        mission_id: String,
+        /// Seconds to wait for the findings; 0 asks and returns.
+        #[arg(long, default_value_t = 60)]
+        wait: u64,
+        /// The Operation, when the Mission is not on the visible board.
+        #[arg(long)]
+        operation: Option<String>,
+    },
+    /// Decide a Mission whose Session ended done (needs mission.verify): `done` settles it,
+    /// `failed` fails it, `redispatch` queues its next attempt told the reason. A Mission stays
+    /// verifying until someone decides.
+    Verify {
+        /// The Mission: its UID, or any handle it had.
+        mission_id: String,
+        /// `done`, `redispatch` or `failed`.
+        #[arg(value_parser = ["done", "redispatch", "failed"])]
+        decision: String,
+        /// Why, for the record and for the next attempt when it is redispatched.
+        #[arg(long)]
+        reason: String,
+        /// For a redispatch, what the next attempt is told beyond its brief and the reason.
+        #[arg(long)]
+        amend: Option<String>,
+        /// The Operation, when the Mission is not on the visible board.
+        #[arg(long)]
+        operation: Option<String>,
     },
     /// Say what you found when you checked a Mission's outcome (needs mission.verify): a disputed
     /// or failed one counts against its Agent, and a held one is settled by it. A later verdict
@@ -918,6 +955,24 @@ struct BoardAttempt {
     /// The last message its Agent ended a turn with; only one Mission's detail has it.
     #[serde(default)]
     final_report: Option<String>,
+    /// What the Mission was to deliver, once the attempt went to be verified.
+    #[serde(default)]
+    deliverables: Vec<String>,
+    /// What the Station's probes found of those.
+    #[serde(default)]
+    evidence: Vec<BoardEvidence>,
+    /// When a probe was asked for, until the Station ran it.
+    #[serde(default)]
+    probe_requested: Option<f64>,
+}
+
+/// What one probe found of one deliverable.
+#[derive(Debug, Deserialize)]
+struct BoardEvidence {
+    deliverable: String,
+    result: String,
+    detail: String,
+    at: f64,
 }
 
 /// A person's verdict on how an attempt ended.
@@ -1365,10 +1420,11 @@ async fn run() -> Result<(), String> {
                     create_issue,
                     issue_title,
                     issue_body,
+                    deliverables,
                 }),
             ..
         } => {
-            let body = create_body(
+            let mut body = create_body(
                 (&title, &prompt),
                 (agent.as_deref(), role.as_deref()),
                 (&tags, &stations),
@@ -1376,6 +1432,9 @@ async fn run() -> Result<(), String> {
                 create_issue.as_deref(),
                 (issue_title.as_deref(), issue_body.as_deref()),
             )?;
+            if !deliverables.is_empty() {
+                body["deliverables"] = serde_json::json!(deliverables);
+            }
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let mut url = server.clone();
             url.path_segments_mut()
@@ -1393,6 +1452,90 @@ async fn run() -> Result<(), String> {
                     "waiting for its ticket: issue proposal {}",
                     access::text(&created["proposal"])
                 ),
+            }
+        }
+        Command::Missions {
+            command:
+                Some(MissionsCommand::Verify {
+                    mission_id,
+                    decision,
+                    reason,
+                    amend,
+                    operation,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let mut body = serde_json::json!({ "decision": decision, "reason": reason });
+            if let Some(amend) = amend {
+                body["amendment"] = amend.into();
+            }
+            let given = access::exchange(
+                &client,
+                &token,
+                Method::POST,
+                mission_action_url(&server, &operation, &mission_id, "verify")?,
+                None,
+                Some(body),
+            )
+            .await?;
+            println!(
+                "{} attempt {}: {} by {}",
+                access::text(&given["mission_id"]),
+                given["attempt"],
+                access::text(&given["decision"]),
+                access::text(&given["by"])
+            );
+        }
+        Command::Missions {
+            command:
+                Some(MissionsCommand::Probe {
+                    mission_id,
+                    wait,
+                    operation,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let asked = access::exchange(
+                &client,
+                &token,
+                Method::POST,
+                mission_action_url(&server, &operation, &mission_id, "probe")?,
+                None,
+                None,
+            )
+            .await?;
+            let uid = access::text(&asked["mission_id"]);
+            let since = asked["requested_at"].as_f64().unwrap_or_default();
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(wait);
+            loop {
+                let detail = mission_detail(&client, &server, &token, &operation, &uid).await?;
+                let latest = detail.attempts.into_iter().last();
+                let answered = latest
+                    .as_ref()
+                    .is_some_and(|attempt| attempt.probe_requested.is_none());
+                if answered || tokio::time::Instant::now() >= deadline {
+                    match latest {
+                        Some(attempt) => print_verification(&attempt, Some(since)),
+                        None => println!("no attempt was recorded"),
+                    }
+                    if !answered {
+                        println!(
+                            "the Station has not answered within {wait}s; run the command again to read what it finds"
+                        );
+                    }
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
         Command::Missions {
@@ -1915,17 +2058,98 @@ async fn print_final_report(
         "Mission",
     )
     .await;
-    let report = detail.ok().and_then(|detail| {
-        detail
-            .attempts
-            .into_iter()
-            .last()
-            .and_then(|attempt| attempt.final_report)
-    });
+    let latest = detail
+        .ok()
+        .and_then(|detail| detail.attempts.into_iter().last());
+    let report = latest
+        .as_ref()
+        .and_then(|attempt| attempt.final_report.clone());
     if let Some(report) = report {
         println!("FINAL REPORT");
         for line in report.lines() {
             println!("{}", plain(line));
+        }
+    }
+    if let Some(attempt) = latest {
+        print_verification(&attempt, None);
+    }
+}
+
+/// `/v1/user/operations/OPERATION/missions/MISSION/ACTION`, each an encoded path segment.
+fn mission_action_url(
+    server: &Url,
+    operation: &str,
+    mission: &str,
+    action: &str,
+) -> Result<Url, String> {
+    let mut url = server.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+        .extend([
+            "v1",
+            "user",
+            "operations",
+            operation,
+            "missions",
+            mission,
+            action,
+        ]);
+    Ok(url)
+}
+
+/// One Mission with its attempts, as the Operation's detail route answers.
+async fn mission_detail(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    operation: &str,
+    mission: &str,
+) -> Result<BoardMission, String> {
+    let mut url = server.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+        .extend(["v1", "operations", operation, "missions", mission]);
+    send(
+        client.get(url).bearer_auth(access_token),
+        "a signed-in user",
+        "Mission",
+    )
+    .await
+}
+
+/// What a Mission was to deliver and what the Station's probes found of it; with `since`, only
+/// the findings made then or later.
+fn print_verification(attempt: &BoardAttempt, since: Option<f64>) {
+    if since.is_none() && !attempt.deliverables.is_empty() {
+        println!("DELIVERABLES");
+        for deliverable in &attempt.deliverables {
+            println!("{}", plain(deliverable));
+        }
+    }
+    let found: Vec<_> = attempt
+        .evidence
+        .iter()
+        .filter(|found| since.is_none_or(|since| found.at >= since))
+        .collect();
+    if found.is_empty() && since.is_some() {
+        println!(
+            "{}",
+            if attempt.deliverables.is_empty() {
+                "the Mission declares no deliverables, so there is nothing to probe"
+            } else {
+                "no findings yet"
+            }
+        );
+    }
+    if !found.is_empty() {
+        println!("EVIDENCE\tRESULT\tDETAIL");
+        for found in found {
+            println!(
+                "{}\t{}\t{}",
+                plain(&found.deliverable),
+                plain(&found.result),
+                plain(&found.detail)
+            );
         }
     }
 }

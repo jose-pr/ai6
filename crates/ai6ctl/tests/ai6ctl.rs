@@ -1686,3 +1686,156 @@ async fn a_queued_mission_is_withdrawn_with_a_note_and_a_placed_one_is_told_to_c
     );
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
+    let (server, shutdown, access_token, registry_dir) = start_gateway().await;
+    let registry = FileRegistry::open(registry_dir.path());
+    // The board's Mission `mission-007` is `station-01`'s; a Station must serve that Operation.
+    registry
+        .check_in(
+            "worker-01",
+            BTreeMap::from([("operations".to_owned(), serde_json::json!(["station-01"]))]),
+        )
+        .unwrap();
+    let verifying = |key: &str, state: &str| {
+        let opened = registry
+            .open_session(
+                ai6::NewSession::new(format!("{key}-run"), key, "worker-01")
+                    .with_operation("station-01"),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        registry
+            .update_session(
+                &opened.session_id,
+                "worker-01",
+                opened.fence,
+                ai6::SessionUpdate::default()
+                    .result(ai6::SessionResult::new(state))
+                    .deliverables(vec![
+                        ai6::directorates::m::deliverables::Deliverable::parse("branch:fix-1")
+                            .unwrap(),
+                    ]),
+            )
+            .unwrap();
+    };
+    let key = "mission-007";
+    verifying(key, "verifying");
+    let run = |args: Vec<&'static str>, key: String| {
+        let (server, token) = (server.clone(), access_token.clone());
+        async move {
+            let mut full = vec!["missions", args[0], key.as_str()];
+            full.extend_from_slice(&args[1..]);
+            ai6ctl(server, Some(token), &full).await
+        }
+    };
+
+    // Asked and not answered: the Station has not run it.
+    let asked = run(
+        vec!["probe", "--operation", "station-01", "--wait", "1"],
+        key.to_owned(),
+    )
+    .await;
+    assert!(
+        asked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&asked.stderr)
+    );
+    let said = String::from_utf8(asked.stdout).unwrap();
+    assert!(
+        said.contains("no findings yet") && said.contains("has not answered"),
+        "{said}"
+    );
+    let record = registry.latest_session(key).unwrap().unwrap();
+    assert!(record.probe_requested.is_some());
+
+    // The Station's findings are printed.
+    registry
+        .update_session(
+            &record.session_id,
+            "worker-01",
+            record.fence,
+            ai6::SessionUpdate::default()
+                .evidence(vec![ai6::Evidence::new(
+                    ai6::directorates::m::deliverables::Deliverable::parse("branch:fix-1").unwrap(),
+                    ai6::ProbeResult::Missing,
+                    "branch fix-1 is not on the remote",
+                    f64::MAX / 2.0,
+                )])
+                .probed(),
+        )
+        .unwrap();
+    let again = run(
+        vec!["probe", "--operation", "station-01", "--wait", "5"],
+        key.to_owned(),
+    )
+    .await;
+    let said = String::from_utf8(again.stdout).unwrap();
+    assert!(
+        said.contains("EVIDENCE\tRESULT\tDETAIL")
+            && said.contains("branch:fix-1\tmissing\tbranch fix-1 is not on the remote"),
+        "{said}"
+    );
+
+    // A decision needs its reason and is the attempt's verdict.
+    let bare = run(
+        vec!["verify", "redispatch", "--operation", "station-01"],
+        key.to_owned(),
+    )
+    .await;
+    assert_eq!(bare.status.code(), Some(2), "--reason is required");
+    let decided = run(
+        vec![
+            "verify",
+            "redispatch",
+            "--reason",
+            "no branch on the remote",
+            "--amend",
+            "Push the branch.",
+            "--operation",
+            "station-01",
+        ],
+        key.to_owned(),
+    )
+    .await;
+    assert!(
+        decided.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decided.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(decided.stdout).unwrap(),
+        format!("{key} attempt 1: redispatch by viewer-007\n")
+    );
+    let verdict = registry
+        .latest_session(key)
+        .unwrap()
+        .unwrap()
+        .verdict
+        .unwrap();
+    assert_eq!(verdict.verdict, ai6::OutcomeVerdict::Redispatch);
+    assert_eq!(verdict.note.as_deref(), Some("no branch on the remote"));
+    assert_eq!(verdict.amendment.as_deref(), Some("Push the branch."));
+
+    // A Mission that is not verifying is refused.
+    verifying("settled", "done");
+    let settled = run(
+        vec![
+            "verify",
+            "done",
+            "--reason",
+            "x",
+            "--operation",
+            "station-01",
+        ],
+        "settled".to_owned(),
+    )
+    .await;
+    assert_eq!(settled.status.code(), Some(1));
+    assert!(
+        String::from_utf8(settled.stderr).unwrap().contains("409"),
+        "refused with the gateway's status"
+    );
+    let _ = shutdown.send(());
+}

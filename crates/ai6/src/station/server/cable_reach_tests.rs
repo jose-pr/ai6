@@ -20,7 +20,7 @@ use axum::extract::State;
 use guatiao::Provider;
 use guatiao::library::{Object, ProviderError};
 
-use super::tests::{start_test_runner, test_state, wait_for_state};
+use super::tests::{start_test_runner, test_state, wait_for_done};
 use super::*;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::registry::cables::{
@@ -426,8 +426,8 @@ async fn a_session_on_a_runner_sends_and_reads_cables_over_the_runners_connectio
     assert!(manifest.runner.is_some(), "mission-1 runs on the runner");
     let said = said(&state, &["mission-1", "mission-3"]).await;
     exchanged(&said, "mission-1");
-    wait_for_state(&state, "mission-1", MissionState::Done).await;
-    wait_for_state(&state, "mission-3", MissionState::Done).await;
+    wait_for_done(&state, "mission-1").await;
+    wait_for_done(&state, "mission-3").await;
 }
 
 #[cfg(unix)]

@@ -1,10 +1,12 @@
 //! What a Mission's end leaves for a person to check: the Agent's final message is filed, a role
 //! that requires a decided green ink request holds a `done` that has none, and a person's verdict,
-//! written to the Registry by Universal Exports, settles what is held.
+//! written to the Registry by Universal Exports, settles what is held or being verified.
 
 use coqui_acp_provider::AgentEvent;
 
-use super::{DaemonState, FinishOutcome, publish_finished_event, review, session_hold, vetting};
+use super::{
+    DaemonState, FinishOutcome, publish_finished_event, review, session_hold, verification, vetting,
+};
 use crate::directorates::m::approvals::NO_APPROVAL_REASON;
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision};
@@ -91,7 +93,8 @@ pub(super) fn hold_unapproved(
         .and_then(|missions| missions.get(mission_id).cloned());
     if event.kind == "completed"
         && mission.is_some_and(|mission| {
-            mission.state != MissionState::Held && lacks_decision(state, &mission)
+            !matches!(mission.state, MissionState::Held | MissionState::Verifying)
+                && lacks_decision(state, &mission)
         })
     {
         event.kind = HELD_EVENT.to_owned();
@@ -100,23 +103,34 @@ pub(super) fn hold_unapproved(
     event
 }
 
-/// Settles each held Mission a person gave a verdict on: `done` when they confirmed it, `failed`
-/// otherwise. Its brief is filed on the next intake pass.
+/// Settles each held or verifying Mission a person gave a verdict on: `done` when they confirmed
+/// it, `failed` otherwise, and for a verifying one asked to be redispatched, its next attempt. Its
+/// brief is filed on the next intake pass.
 pub(super) fn settle_held(state: &DaemonState) {
-    let held = state
+    let waiting = state
         .missions
         .lock()
         .map(|missions| missions.list())
         .unwrap_or_default()
         .into_iter()
-        .filter(|mission| mission.state == MissionState::Held);
-    for mission in held {
+        .filter(|mission| matches!(mission.state, MissionState::Held | MissionState::Verifying));
+    for mission in waiting {
         let mission_id = mission.mission_id.as_str();
         let verdict = session_hold(state, mission_id)
             .and_then(|hold| state.intake.session(&hold.id).ok().flatten())
             .and_then(|record| record.verdict);
-        if let Some(verdict) = verdict {
-            settle(state, mission_id, &verdict);
+        match verdict {
+            Some(verdict)
+                if verdict.verdict == OutcomeVerdict::Redispatch
+                    && mission.state == MissionState::Verifying =>
+            {
+                verification::redispatch(state, &mission, &verdict);
+            }
+            // Only a verifying Mission is redispatched: a held one has no work to try again.
+            Some(verdict) if verdict.verdict != OutcomeVerdict::Redispatch => {
+                settle(state, mission_id, &verdict);
+            }
+            _ => {}
         }
     }
 }
@@ -158,7 +172,9 @@ fn settle(state: &DaemonState, mission_id: &str, verdict: &MissionVerdict) {
 mod tests {
     use std::path::Path;
 
-    use super::super::tests::{start_mission_by_id, test_state, wait_for_state};
+    use super::super::tests::{
+        start_mission_by_id, test_state, wait_for_done, wait_for_state, wait_for_verifying,
+    };
     use super::*;
     use crate::directorates::m::approvals::ActionScope;
     use crate::directorates::m::identity::{MissionId, SessionId};
@@ -215,9 +231,21 @@ mod tests {
         super::super::schedule_intake_once(&state);
         let mission_id = brief.key();
         super::super::schedule_queued_once(&state).await;
-        wait_for_state(&state, &mission_id, MissionState::Done).await;
+        wait_for_verifying(&state, &mission_id).await;
+        // Its brief is not filed while the Mission waits for a decision.
         super::super::schedule_intake_once(&state);
+        assert_eq!(
+            state
+                .intake
+                .filed_brief(&mission_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            "claimed"
+        );
 
+        wait_for_done(&state, &mission_id).await;
+        super::super::schedule_intake_once(&state);
         let outcome = outcome_of(root.path(), "done", &brief.key());
         assert_eq!(outcome["state"], "done");
         assert!(
@@ -226,7 +254,7 @@ mod tests {
                 .is_some_and(|report| report.starts_with("All good.")),
             "{outcome}"
         );
-        assert!(outcome.get("verdict").is_none(), "{outcome}");
+        assert_eq!(outcome["verdict"]["verdict"], "confirmed", "{outcome}");
         stop(&state);
     }
 
@@ -258,7 +286,7 @@ mod tests {
         // The same Agent under a role with no such requirement ends done.
         let free = mission_for(&state, "free", "writer");
         start_mission_by_id(&state, &free).await;
-        wait_for_state(&state, &free, MissionState::Done).await;
+        wait_for_done(&state, &free).await;
         stop(&state);
     }
 

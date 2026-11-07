@@ -657,6 +657,10 @@ pub struct StationRuntime {
     #[schema(title = "The Head of Station's rounds")]
     #[map(default)]
     pub head_of_station: limits::HeadOfStationLimits,
+    /// `[probes]`: reading a Mission's deliverables back.
+    #[schema(title = "Deliverable probes")]
+    #[map(default)]
+    pub probes: limits::ProbeLimits,
     /// Bytes of a terminal line the watchdog holds before it counts as a line. Default: 4096.
     #[schema(title = "Longest partial terminal line", format = "bytes")]
     pub partial_line_bytes: Option<Limit>,
@@ -739,6 +743,7 @@ impl StationRuntime {
             theaters: self.theaters.clone(),
             theater_tools: self.theater_tools.clone(),
             head_of_station: self.head_of_station.clone(),
+            probes: self.probes.clone(),
             providers: self.providers.clone(),
         }
     }

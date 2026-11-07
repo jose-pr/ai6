@@ -1319,6 +1319,7 @@ impl Delivery {
             MissionState::Stalled | MissionState::Parked | MissionState::Quarantined => Self::Later,
             MissionState::Queued
             | MissionState::Held
+            | MissionState::Verifying
             | MissionState::Done
             | MissionState::Failed
             | MissionState::Blown

@@ -17,6 +17,8 @@ pub mod limits;
 pub(crate) mod overlays;
 #[cfg(feature = "daemon")]
 pub mod plugins;
+#[cfg(feature = "daemon")]
+pub(crate) mod probes;
 #[cfg(feature = "publisher")]
 pub mod publisher;
 #[cfg(feature = "daemon")]
@@ -28,7 +30,7 @@ pub mod runner;
 pub mod safehouse;
 #[cfg(feature = "daemon")]
 pub mod server;
-#[cfg(feature = "publisher")]
+#[cfg(feature = "daemon")]
 pub(crate) mod source_reads;
 #[cfg(feature = "daemon")]
 pub(crate) mod sources;

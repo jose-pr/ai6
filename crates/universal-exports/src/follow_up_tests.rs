@@ -181,3 +181,40 @@ async fn a_mission_created_with_its_issue_waits_for_it_and_needs_issue_create() 
     );
     assert!(served.registry.list_new().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_mission_is_created_with_the_deliverables_it_owes_or_refused_for_a_malformed_one() {
+    let served = served_with(ROLES).await;
+    let (status, created) = create(
+        &served,
+        &served.operator,
+        json!({
+            "title": "Ship it", "prompt": "Push the branch.",
+            "deliverables": ["branch", "file:docs/report.md"],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{created}");
+    let queued = served
+        .registry
+        .list_new()
+        .unwrap()
+        .into_iter()
+        .find(|brief| brief.key() == created["mission_id"].as_str().unwrap())
+        .expect("queued");
+    let owed = ai6::directorates::m::deliverables::declared(&[], &queued.data).unwrap();
+    assert_eq!(
+        owed.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        ["branch", "file:docs/report.md"]
+    );
+
+    for bad in [json!(["tag:v1"]), json!(["file"]), json!([""])] {
+        let (status, refused) = create(
+            &served,
+            &served.operator,
+            json!({ "title": "Ship it", "prompt": "Push.", "deliverables": bad }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    }
+}

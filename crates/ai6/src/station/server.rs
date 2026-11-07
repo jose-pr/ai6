@@ -46,6 +46,7 @@ mod stream_tests;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
 mod verdicts;
+mod verification;
 mod vetting;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -1692,6 +1693,7 @@ async fn scheduler_loop(base: DaemonState) {
             }
             medical::enforce_quarantines(&tick);
             verdicts::settle_held(&tick);
+            verification::answer_probe_requests(&tick);
         })
         .await;
         // A renewal runs a harness's command: it never holds up the beat.
@@ -4951,10 +4953,11 @@ async fn start_mission(
             ),
         )
     });
+    let task = mission.task();
     let start_request = AgentStart {
         mission_id: mission.mission_id,
         agent_id: agent.id,
-        prompt: mission.prompt,
+        prompt: task,
         initial_context,
         working_directory: working_directory.clone(),
         clearance: launch_clearance.clone(),
@@ -7180,6 +7183,7 @@ fn apply_event_state(
         "failed" => MissionState::Failed,
         "blown" => MissionState::Blown,
         verdicts::HELD_EVENT => MissionState::Held,
+        verification::VERIFYING_EVENT => MissionState::Verifying,
         _ => return None,
     };
     let Ok(mut missions) = state.missions.lock() else {
@@ -7189,8 +7193,10 @@ fn apply_event_state(
         return Some(target);
     };
     if current != target {
-        if matches!(target, MissionState::Done | MissionState::Held)
-            && matches!(current, MissionState::Blocked | MissionState::Stalled)
+        if matches!(
+            target,
+            MissionState::Done | MissionState::Held | MissionState::Verifying
+        ) && matches!(current, MissionState::Blocked | MissionState::Stalled)
         {
             let _ = missions.transition(mission_id, MissionState::Working);
         }
@@ -7348,6 +7354,7 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
         MissionState::Queued => Some("queued"),
         MissionState::Abandoned => Some("abandoned"),
         MissionState::Held => Some("held"),
+        MissionState::Verifying => Some("verifying"),
     }
 }
 
@@ -7709,22 +7716,28 @@ fn publish_finished_event(
     let cover_blown = finished.cover_blown;
     let event = apply_finish_outcome(event, &finished);
     let event = verdicts::hold_unapproved(state, mission_id, event);
+    // What the Mission's state follows; the queued event stays what the harness said.
+    let settled = verification::verify_done(state, mission_id, event.clone());
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = finished.telemetry {
-        let (name, reason) = match event.kind.as_str() {
+        let (name, reason) = match settled.kind.as_str() {
             "completed" => (Some("done"), denied_reason(state, mission_id)),
             "failed" | "blown" => (
                 Some("failed"),
                 denied_reason(state, mission_id).or_else(|| order_reason(state, mission_id)),
             ),
             verdicts::HELD_EVENT => (Some("held"), Some(verdicts::NO_APPROVAL_CODE)),
+            verification::VERIFYING_EVENT => (Some("verifying"), None),
             _ => (None, None),
         };
         if let Some(name) = name {
             telemetry.publish_lifecycle_for(name, reason);
         }
     }
-    apply_event_state(state, mission_id, &event);
+    apply_event_state(state, mission_id, &settled);
+    if settled.kind == verification::VERIFYING_EVENT {
+        verification::begin(state, mission_id);
+    }
     queue_event(state, mission_id, event);
     if cover_blown {
         medical::report_incident(state, mission_id, IncidentKind::Blown);
@@ -8830,7 +8843,7 @@ queue = 1
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-denied\"\n");
         start_mission_by_id(&state, "mission-1").await;
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         let mission = mission_state(&state, "mission-1");
         let session = mission.session_ids[0].as_str().to_owned();
         let deadline = std::time::Instant::now() + Duration::from_secs(120);
@@ -8875,7 +8888,7 @@ queue = 1
         #[cfg(not(feature = "publisher"))]
         let _ = &mut state;
         start_mission_by_id(&state, "mission-1").await;
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         assert_eq!(
             mission_state(&state, "mission-1").denied_tools,
             ["Write", "Bash"]
@@ -9630,6 +9643,55 @@ queue = 1
         );
     }
 
+    /// Waits for a Mission to be verifying, in the book and in its Session record, which is
+    /// written just after: a decision is taken on the record.
+    pub(super) async fn wait_for_verifying(state: &DaemonState, mission_id: &str) {
+        wait_for_state(state, mission_id, MissionState::Verifying).await;
+        let recorded = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let result = state
+                    .intake
+                    .latest_session(mission_id)
+                    .unwrap()
+                    .and_then(|record| record.result);
+                if result.is_some_and(|result| result.state == "verifying") {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        assert!(
+            recorded.is_ok(),
+            "Mission {mission_id}'s record never said verifying"
+        );
+    }
+
+    /// Waits for a Mission of an Operation to settle done: its Session ends and it goes verifying,
+    /// a person confirms it as the gateway would record, and the Station settles it.
+    pub(super) async fn wait_for_done(state: &DaemonState, mission_id: &str) {
+        wait_for_verifying(state, mission_id).await;
+        let operation = state
+            .missions
+            .lock()
+            .unwrap()
+            .get(mission_id)
+            .and_then(|mission| mission.operation_id.clone())
+            .expect("a verifying Mission has an Operation");
+        let confirmed = crate::directorates::registry::sessions::MissionVerdict::new(
+            crate::directorates::registry::sessions::OutcomeVerdict::Confirmed,
+            "person-test",
+            state.clock.now() as f64,
+            Some("checked".to_owned()),
+        );
+        state
+            .intake
+            .record_verdict(&operation, mission_id, &confirmed)
+            .unwrap();
+        verdicts::settle_held(state);
+        wait_for_state(state, mission_id, MissionState::Done).await;
+    }
+
     #[tokio::test]
     async fn a_started_session_is_recorded_in_the_shared_registry() {
         let root = tempfile::tempdir().unwrap();
@@ -9804,7 +9866,7 @@ queue = 1
         // Once the clock passes the reset the same provider Session resumes.
         now.store(resume_at, Ordering::SeqCst);
         schedule_parked_once(&state).await;
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         let done = state
             .missions
             .lock()
@@ -10769,6 +10831,7 @@ queue = 1
                 "G",
                 &AgentRole {
                     require_approval_before_done: false,
+                    deliverables: Vec::new(),
                     id: "case-officer".to_owned(),
                     purpose: "Coordinate this Operation's work".to_owned(),
                     policy: "Use the Operation-specific role policy".to_owned(),
@@ -10975,7 +11038,8 @@ queue = 1
             event.event.as_ref().map(|event| event.kind.as_str()),
             Some("completed")
         );
-        assert_eq!(event.mission.state, MissionState::Done);
+        // The Session ended done; the Mission waits for someone to verify it.
+        assert_eq!(event.mission.state, MissionState::Verifying);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -14073,7 +14137,7 @@ queue = 1
         })
         .await
         .expect("the restarted Station receives the rest of the Session");
-        wait_for_state(&second, "mission-1", MissionState::Done).await;
+        wait_for_done(&second, "mission-1").await;
 
         // Every tick arrives: what A did not take is replayed, at most the last one twice.
         let (after, completed) = ticks(&replayed);
@@ -14334,7 +14398,7 @@ queue = 1
                 "release absent".to_owned()
             ]
         );
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         let home = root.path().join("home");
         assert!(
             home.join(".ai6/detached").is_dir(),
@@ -14423,7 +14487,7 @@ queue = 1
             (1..=LINES).collect::<Vec<_>>(),
             "every line the harness printed while the link was down is read after it"
         );
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         // The harness ran detached, in its own directory under the login user's home.
         let wrapped: Vec<_> = fs::read_dir(root.path().join("home/.ai6/detached"))
             .unwrap()
@@ -14559,7 +14623,7 @@ queue = 1
             (1..=DRIP_TICKS).collect::<Vec<_>>(),
             "the runner kept the events spooled while the link was down"
         );
-        wait_for_state(&state, "mission-1", MissionState::Done).await;
+        wait_for_done(&state, "mission-1").await;
         assert_eq!(
             forwards.load(Ordering::Acquire),
             0,

@@ -1666,6 +1666,14 @@ impl Gateway {
                 post(verdicts::give),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/verify",
+                post(verdicts::verify),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/probe",
+                post(verdicts::probe),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/rename",
                 post(rename_user_mission),
             )
@@ -2349,6 +2357,12 @@ async fn create_user_mission(
         authorize_operation_action(&gateway, person.clone(), &operation_id, "mission.review")
             .await?;
     }
+    if request.deliverables.len() > 32 || request.deliverables.iter().any(|text| text.len() > 512) {
+        return Err(ApiError::bad_request());
+    }
+    if let Err(invalid) = ai6::directorates::m::deliverables::parse_all(&request.deliverables) {
+        return Err(ApiError::invalid(invalid.to_string()));
+    }
     let reference = |text: &str| {
         !text.trim().is_empty() && text.len() <= 256 && !text.chars().any(char::is_control)
     };
@@ -2399,6 +2413,12 @@ async fn create_user_mission(
             )])
         })
         .unwrap_or_default();
+    if !request.deliverables.is_empty() {
+        data.insert(
+            ai6::directorates::m::deliverables::BRIEF_DELIVERABLES_KEY.to_owned(),
+            serde_json::json!(request.deliverables),
+        );
+    }
     if let Some(issue) = &request.issue {
         data.insert(
             "follow_up".to_owned(),
@@ -4787,6 +4807,9 @@ struct CreateUserMissionRequest {
     /// needs `issue.create`.
     #[serde(default)]
     create_issue: Option<NewMissionIssue>,
+    /// What the Mission is to deliver, each `kind` or `kind:target`, beyond its role's.
+    #[serde(default)]
+    deliverables: Vec<String>,
 }
 
 /// The item a Mission follows up.
@@ -4956,6 +4979,16 @@ pub struct MissionAttempt {
     /// What a person found when they checked how it ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<ai6::MissionVerdict>,
+    /// What the Mission was to deliver, as `kind` or `kind:target`, once the attempt ended done
+    /// and went to be verified.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<String>,
+    /// What the Station's probes found of those, oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<ai6::Evidence>,
+    /// When a probe was asked for, as Unix seconds, until the Station has run it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_requested: Option<f64>,
     /// The last message its Agent ended a turn with, as data. Only one Mission's detail has it:
     /// each can be as long as `[registry.limits.sessions] final_report_bytes`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4974,6 +5007,13 @@ impl MissionAttempt {
             }),
             account: record.account.clone(),
             verdict: record.verdict.clone(),
+            deliverables: record
+                .deliverables
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            evidence: record.evidence.clone(),
+            probe_requested: record.probe_requested,
             final_report: None,
             attempt: record.attempt,
             session_id: record.session_id.clone(),

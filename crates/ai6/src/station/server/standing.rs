@@ -494,7 +494,7 @@ pub(super) mod testing {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::super::tests::{test_state, wait_for_state};
+    use super::super::tests::{test_state, wait_for_done, wait_for_state};
     use super::super::{publish_station_check_in, schedule_intake_once, schedule_queued_once};
     use super::*;
     use crate::directorates::m::mission::MissionState;
@@ -545,7 +545,7 @@ mod tests {
         assert!(schedule_intake_once(state));
         let mission = standing_mission(state);
         schedule_queued_once(state).await;
-        wait_for_state(state, &mission, MissionState::Done).await;
+        wait_for_done(state, &mission).await;
         schedule_intake_once(state);
         assert_eq!(
             state.intake.filed_brief(&mission).unwrap().unwrap().state,
@@ -663,7 +663,7 @@ mod tests {
         assert!(schedule_intake_once(&state));
         let mission = standing_mission(&state);
         schedule_queued_once(&state).await;
-        wait_for_state(&state, &mission, MissionState::Done).await;
+        wait_for_done(&state, &mission).await;
 
         assert!(
             state
@@ -855,7 +855,7 @@ mod tests {
             MissionState::Queued,
             "the attempt must not keep asking for a Session that cannot resume"
         );
-        wait_for_state(&state, &mission, MissionState::Done).await;
+        wait_for_done(&state, &mission).await;
         schedule_intake_once(&state);
 
         let runs = runs(&state, &mission);

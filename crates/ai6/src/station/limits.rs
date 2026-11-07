@@ -68,6 +68,8 @@ pub struct StationLimits {
     pub theater_tools: TheaterToolLimits,
     /// `[head_of_station]`: the Head of Station's rounds.
     pub head_of_station: HeadOfStationLimits,
+    /// `[probes]`: reading a Mission's deliverables back.
+    pub probes: ProbeLimits,
     /// `[providers.<id>]`: the Guatiao configuration a Station hands provider `<id>` when it
     /// builds it with none of its own (handlers, terminals and safe houses).
     pub providers: BTreeMap<String, serde_json::Value>,
@@ -1211,6 +1213,45 @@ impl Default for HeadOfStationLimits {
             survey_entries: Limit::at(500_000),
             reason_bytes: Limit::at(2_000),
             audit_target_bytes: Limit::at(500),
+        }
+    }
+}
+
+/// `[probes]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct ProbeLimits {
+    /// Seconds a `git` read of a remote may take before the branch or commit is reported unread.
+    #[schema(title = "Longest git probe")]
+    #[map(default = ProbeLimits::default().git_timeout)]
+    pub git_timeout: Seconds,
+    /// Seconds an HTTP request for an artifact may take.
+    #[schema(title = "Longest HTTP probe")]
+    #[map(default = ProbeLimits::default().http_timeout)]
+    pub http_timeout: Seconds,
+    /// Seconds a read of a tracker item and its comments may take.
+    #[schema(title = "Longest tracker probe")]
+    #[map(default = ProbeLimits::default().tracker_timeout)]
+    pub tracker_timeout: Seconds,
+    /// Seconds a look at a file in a Mission's working directory may take.
+    #[schema(title = "Longest file probe")]
+    #[map(default = ProbeLimits::default().file_timeout)]
+    pub file_timeout: Seconds,
+    /// Comments of a tracker item a probe reads, the latest.
+    #[schema(title = "Comments a probe reads")]
+    #[map(default = ProbeLimits::default().comments)]
+    pub comments: Limit,
+}
+
+impl Default for ProbeLimits {
+    fn default() -> Self {
+        Self {
+            git_timeout: Seconds::new(30),
+            http_timeout: Seconds::new(20),
+            tracker_timeout: Seconds::new(30),
+            file_timeout: Seconds::new(5),
+            comments: Limit::at(100),
         }
     }
 }
