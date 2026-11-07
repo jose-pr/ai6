@@ -310,7 +310,8 @@ mod tests {
         peers.record_waiting_certificate(second.certificate_der(), Some(source));
         let waiting = peers.waiting().unwrap();
         assert_eq!(waiting.len(), 1, "one source holds one place");
-        assert_eq!(waiting[0].id, second.fingerprint());
+        // A full source refuses the newcomer rather than evicting the peer already waiting.
+        assert_eq!(waiting[0].id, first.fingerprint());
         assert_eq!(waiting[0].source, Some(source));
     }
 
