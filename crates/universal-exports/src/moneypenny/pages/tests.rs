@@ -120,6 +120,13 @@ fn text_is_escaped_dates_are_utc_and_tokens_are_long_and_distinct() {
         utc_text(951_782_400.0 + 86_400.0 * 59.0 + 3_600.0 * 13.0 + 60.0 * 5.0),
         "2000-04-28 13:05 UTC"
     );
+    assert_eq!(utc_text(4_107_542_399.0), "2100-02-28 23:59 UTC");
+    assert_eq!(utc_text(4_107_542_400.0), "2100-03-01 00:00 UTC");
+    assert_eq!(
+        utc_text(-5.0),
+        "1970-01-01 00:00 UTC",
+        "before the epoch reads as the epoch"
+    );
     let (a, b) = (random_token(), random_token());
     assert_ne!(a, b);
     assert_eq!(a.len(), 43, "32 bytes as unpadded base64url");

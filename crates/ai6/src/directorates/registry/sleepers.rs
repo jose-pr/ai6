@@ -370,19 +370,27 @@ impl Cron {
     }
 }
 
-/// Days since 1970-01-01 to (year, month, day) in the proleptic Gregorian calendar.
+/// Days since 1970-01-01 to (year, month, day) in the proleptic Gregorian calendar; a day past
+/// the years `time` represents (+-9999) stays at the nearest one.
 pub(super) fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month, day)
+    let julian = days.saturating_add(UNIX_EPOCH_JULIAN_DAY);
+    let date = i32::try_from(julian)
+        .ok()
+        .and_then(|julian| time::Date::from_julian_day(julian).ok())
+        .unwrap_or(if days < 0 {
+            time::Date::MIN
+        } else {
+            time::Date::MAX
+        });
+    (
+        i64::from(date.year()),
+        u32::from(u8::from(date.month())),
+        u32::from(date.day()),
+    )
 }
+
+/// The Julian day number of 1970-01-01.
+const UNIX_EPOCH_JULIAN_DAY: i64 = 2_440_588;
 
 /// `20261025T0300Z` for a window start.
 pub fn window_label(window: i64) -> String {
@@ -677,6 +685,19 @@ impl SleeperStore for FileRegistry {
 
 #[cfg(test)]
 pub(super) mod tests {
+    #[test]
+    fn civil_days_cross_the_century_and_leap_boundaries() {
+        use super::civil_from_days;
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
+        assert_eq!(civil_from_days(47_540), (2100, 2, 28));
+        assert_eq!(civil_from_days(47_541), (2100, 3, 1));
+        assert_eq!(civil_from_days(-25_508), (1900, 3, 1));
+        assert_eq!(civil_from_days(i64::MAX).0, 9999);
+        assert_eq!(civil_from_days(i64::MIN).0, -9999);
+    }
+
     use super::*;
     use crate::directorates::registry::suite::{Store, backend_tests};
 
@@ -906,16 +927,12 @@ pub(super) mod tests {
     }
 
     fn at(day: &str) -> i64 {
-        // Midnight of an ISO date, through the same calendar code the schedule uses.
-        let parts: Vec<i64> = day.split('-').map(|p| p.parse().unwrap()).collect();
-        let (y, m, d) = (parts[0], parts[1], parts[2]);
-        let y = if m <= 2 { y - 1 } else { y };
-        let era = y.div_euclid(400);
-        let yoe = y.rem_euclid(400);
-        let mp = if m > 2 { m - 3 } else { m + 9 };
-        let doy = (153 * mp + 2) / 5 + d - 1;
-        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-        (era * 146_097 + doe - 719_468) * 86_400
+        // Midnight of an ISO date.
+        time::Date::parse(day, &time::format_description::well_known::Iso8601::DATE)
+            .unwrap()
+            .midnight()
+            .assume_utc()
+            .unix_timestamp()
     }
 
     fn label(cron: &str, now: i64) -> Option<String> {

@@ -355,73 +355,14 @@ fn app_link(
 /// Unix seconds of an RFC 3339 time (`2026-10-29T08:00:00Z`, `2026-10-29T08:00:00.5+07:00`),
 /// or `None` when `text` is not one.
 pub(crate) fn rfc3339(text: &str) -> Option<f64> {
-    let bytes = text.as_bytes();
-    if !text.is_ascii()
-        || bytes.len() < 20
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || !matches!(bytes[10], b'T' | b't')
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-    {
+    // `time` also takes a space for the `T`, which RFC 3339 allows but a schedule does not.
+    if !matches!(text.as_bytes().get(10), Some(b'T' | b't')) {
         return None;
     }
-    let digits = |from: usize, to: usize| -> Option<i64> {
-        let part = &text[from..to];
-        if part.bytes().all(|byte| byte.is_ascii_digit()) {
-            part.parse().ok()
-        } else {
-            None
-        }
-    };
-    let (year, month, day) = (digits(0, 4)?, digits(5, 7)?, digits(8, 10)?);
-    let (hour, minute, second) = (digits(11, 13)?, digits(14, 16)?, digits(17, 19)?);
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_in_month = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return None,
-    };
-    if day < 1 || day > days_in_month || hour > 23 || minute > 59 || second > 60 {
-        return None;
-    }
-    let mut at = 19;
-    let mut fraction = 0.0;
-    if bytes[at] == b'.' {
-        let end = text[at + 1..]
-            .find(|c: char| !c.is_ascii_digit())
-            .map_or(text.len(), |end| at + 1 + end);
-        if end == at + 1 {
-            return None;
-        }
-        fraction = format!("0{}", &text[at..end]).parse().ok()?;
-        at = end;
-    }
-    let zone = &text[at..];
-    let offset = match zone {
-        "Z" | "z" => 0,
-        _ if zone.len() == 6 && matches!(bytes[at], b'+' | b'-') && bytes[at + 3] == b':' => {
-            let (hours, minutes) = (digits(at + 1, at + 3)?, digits(at + 4, at + 6)?);
-            if hours > 23 || minutes > 59 {
-                return None;
-            }
-            let sign = if bytes[at] == b'-' { -1 } else { 1 };
-            sign * (hours * 3600 + minutes * 60)
-        }
-        _ => return None,
-    };
-    // Days since 1970-01-01 of the civil date (Howard Hinnant's `days_from_civil`).
-    let shifted = if month <= 2 { year - 1 } else { year };
-    let era = shifted.div_euclid(400);
-    let year_of_era = shifted - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second - offset;
+    let at =
+        time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()?;
     #[allow(clippy::cast_precision_loss)]
-    Some(seconds as f64 + fraction)
+    Some(at.unix_timestamp() as f64 + f64::from(at.nanosecond()) / 1e9)
 }
 
 /// A schedule's time, an RFC 3339 string or a finite number: whether it is a string, and its
@@ -1178,7 +1119,15 @@ mod tests {
             Some(0.0),
             "an offset west of UTC"
         );
+        assert_eq!(
+            rfc3339("2024-02-29T23:59:59-08:00"),
+            Some(1_709_279_999.0),
+            "a leap day west of UTC"
+        );
+        assert_eq!(rfc3339("2100-03-01T00:00:00Z"), Some(4_107_542_400.0));
+        assert_eq!(rfc3339("1900-03-01T00:00:00Z"), Some(-2_203_891_200.0));
         for refused in [
+            "2100-02-29T00:00:00Z",
             "2026-02-29T00:00:00Z",
             "2026-10-29 08:00:00Z",
             "2026-10-29T08:00:00",

@@ -71,24 +71,15 @@ fn walk(node: &Value, out: &mut String) {
 }
 
 /// The UTC calendar day of a Unix time in milliseconds, which is how ADF stores a date.
-///
-/// The arithmetic is the `civil_from_days` algorithm of <https://howardhinnant.github.io/date_algorithms.html>.
 fn utc_day(millis: &str) -> Option<String> {
-    let shifted = millis.parse::<i64>().ok()?.div_euclid(86_400_000) + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
-    let month = if shifted_month < 10 {
-        shifted_month + 3
-    } else {
-        shifted_month - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    Some(format!("{year:04}-{month:02}-{day:02}"))
+    let seconds = millis.parse::<i64>().ok()?.div_euclid(1_000);
+    let day = time::OffsetDateTime::from_unix_timestamp(seconds).ok()?;
+    Some(format!(
+        "{:04}-{:02}-{:02}",
+        day.year(),
+        u8::from(day.month()),
+        day.day()
+    ))
 }
 
 /// Turns Markdown into an ADF document: headings, bullet and numbered lists, fenced code

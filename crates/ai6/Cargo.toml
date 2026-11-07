@@ -13,7 +13,7 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "acp","dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "dep:base64", "dep:crypto_box", "dep:time", "guatiao/load"]
+daemon = ["gate", "acp","dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "dep:base64", "dep:crypto_box", "guatiao/load"]
 # The Agent Client Protocol wire (`ai6::directorates::section_00::acp`): the client a Station
 # and the `acp` handler drive agents with, and the agent side serving any AgentHandler.
 acp = ["dep:agent-client-protocol", "dep:coqui-acp", "dep:futures"]
@@ -95,7 +95,7 @@ ring = { version = "0.17.14", optional = true }
 base64 = { workspace = true, optional = true }
 coqui-peer-tls = { workspace = true, optional = true }
 crypto_box = { workspace = true, optional = true }
-time = { workspace = true, optional = true }
+time = { workspace = true }
 rustls = { workspace = true, optional = true }
 globset.workspace = true
 lru.workspace = true

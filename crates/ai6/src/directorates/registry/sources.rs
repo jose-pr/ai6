@@ -351,33 +351,22 @@ pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief) -> Ingest {
 /// repeats as unchanged ([`Ingest::Unchanged`]).
 #[must_use]
 pub fn settled_cursor(cursor: &str, settling_secs: u64) -> Option<String> {
-    let (date, time) = cursor.split_once('T')?;
-    let mut date = date.splitn(3, '-');
-    let year: i64 = date.next()?.parse().ok()?;
-    let month: i64 = date.next()?.parse().ok()?;
-    let day: i64 = date.next()?.parse().ok()?;
-    let clock = time.get(..8)?;
-    let zone = &time[8..];
-    let mut clock = clock.splitn(3, ':');
-    let hour: i64 = clock.next()?.parse().ok()?;
-    let minute: i64 = clock.next()?.parse().ok()?;
-    let second: i64 = clock.next()?.parse().ok()?;
-    // `days_from_civil` of <https://howardhinnant.github.io/date_algorithms.html>.
-    let shifted_year = if month <= 2 { year - 1 } else { year };
-    let era = shifted_year.div_euclid(400);
-    let year_of_era = shifted_year.rem_euclid(400);
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    let earlier = (days * 86_400 + hour * 3_600 + minute * 60 + second)
-        .checked_sub(i64::try_from(settling_secs).ok()?)?;
-    let (year, month, day) = super::sleepers::civil_from_days(earlier.div_euclid(86_400));
-    let seconds = earlier.rem_euclid(86_400);
+    let (date, clock) = cursor.split_once('T')?;
+    let zone = clock.get(8..)?;
+    let wall = time::PrimitiveDateTime::parse(
+        &format!("{date}T{}", &clock[..8]),
+        &time::format_description::well_known::Iso8601::DEFAULT,
+    )
+    .ok()?;
+    let earlier = wall.checked_sub(time::Duration::seconds(i64::try_from(settling_secs).ok()?))?;
     Some(format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}{zone}",
-        seconds / 3_600,
-        seconds / 60 % 60,
-        seconds % 60
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{zone}",
+        earlier.year(),
+        u8::from(earlier.month()),
+        earlier.day(),
+        earlier.hour(),
+        earlier.minute(),
+        earlier.second()
     ))
 }
 
@@ -714,6 +703,14 @@ mod tests {
             ),
             ("2028-03-01T00:00:00Z", 1, Some("2028-02-29T23:59:59Z")),
             ("2027-01-01T00:00:00Z", 86_400, Some("2026-12-31T00:00:00Z")),
+            ("2100-03-01T00:00:00Z", 1, Some("2100-02-28T23:59:59Z")),
+            ("2000-03-01T00:00:00Z", 1, Some("2000-02-29T23:59:59Z")),
+            (
+                "2024-12-31T23:59:59-08:00",
+                86_399,
+                Some("2024-12-31T00:00:00-08:00"),
+            ),
+            ("2026-02-29T00:00:00Z", 60, None),
             ("c", 60, None),
             ("2026-11-01", 60, None),
             ("2026-11-01T15:5", 60, None),
