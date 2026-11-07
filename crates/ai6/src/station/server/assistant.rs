@@ -46,7 +46,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use ureq::tls::TlsConfig;
@@ -82,7 +81,7 @@ use coqui_acp_provider::{
     AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, DENIED_EVENT, LIMIT_EVENT,
     TURN_CANCELLED,
 };
-use workspace::{Houses, PERSONAL, SCRATCH, Workspace};
+use workspace::{Houses, PERSONAL, SCRATCH, Workspace, sha256_hex};
 
 /// How long one read of a harness's events waits, so a message never waits long for the lock.
 const READ_SLICE_MS: i64 = 250;
@@ -2547,20 +2546,7 @@ fn job_groups<'a>(
 
 /// A file-safe name for a conversation, the same on every Station.
 fn conversation_digest(conversation: &str) -> String {
-    let digest = Sha256::digest(conversation.as_bytes());
-    digest
-        .iter()
-        .take(16)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// The lowercase hex SHA-256 of `bytes`.
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    sha256_hex(conversation.as_bytes())[..32].to_owned()
 }
 
 impl Drop for Desk {

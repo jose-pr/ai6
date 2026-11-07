@@ -11,6 +11,7 @@ use axum::extract::State;
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use coqui_peer::PeerId;
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::transport::streamable_http_server::{
@@ -20,7 +21,6 @@ use rmcp::transport::streamable_http_server::{
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -2615,10 +2615,6 @@ struct AssistantCableDesk {
     gate: Arc<dyn CableGate>,
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn target_label(target: &CableTarget) -> String {
     let scope = match target.scope() {
         CableScope::Agent => "agent",
@@ -2682,7 +2678,7 @@ impl AssistantCableDesk {
     /// A retry key of this conversation's own: the relay keys retries by sender Agent, which
     /// every conversation with the assistant shares.
     fn key(&self, key: &str) -> String {
-        let digest = hex(&Sha256::digest(key.as_bytes()));
+        let digest = PeerId::of(key.as_bytes()).hex();
         format!("{}:{}", self.identity.session, &digest[..32])
     }
 
