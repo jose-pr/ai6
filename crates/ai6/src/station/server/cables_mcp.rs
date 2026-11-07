@@ -1657,6 +1657,33 @@ pub(super) async fn authorize(
     next.run(request).await
 }
 
+/// Marks `exposure` for each of `deliveries` that another Operation's Agent or an exposed
+/// Session wrote: what it says is untrusted input from outside this Operation or this Session.
+pub(super) fn mark_exposure(
+    intake: &dyn RegistryBackend,
+    exposure: &ExposureGate,
+    operation: &str,
+    deliveries: &[crate::directorates::registry::cables::CableDelivery],
+) {
+    for delivery in deliveries {
+        let from_elsewhere = delivery.from_operation != operation;
+        let from_exposed = delivery.mission_id.as_deref().is_some_and(|mission| {
+            intake
+                .mission_exposure(mission)
+                .is_ok_and(|exposed| !exposed.is_empty())
+        });
+        if from_elsewhere || from_exposed {
+            exposure.mark(
+                &cable_source(
+                    &delivery.from_agent,
+                    intake.limits().sessions.exposure_source_bytes,
+                ),
+                unix_now(),
+            );
+        }
+    }
+}
+
 /// Whether the harness behind an endpoint is answering and has not been told to stop.
 pub(super) type TurnRunning = Arc<dyn Fn() -> bool + Send + Sync>;
 
@@ -2419,23 +2446,12 @@ impl CableTools {
         let (exposure, intake) = (self.exposure.clone(), self.intake.clone());
         let read = move || {
             let deliveries = relay.inbox(&principal, limit)?;
-            for delivery in &deliveries {
-                let from_elsewhere = delivery.from_operation != principal.operation();
-                let from_exposed = delivery.mission_id.as_deref().is_some_and(|mission| {
-                    intake
-                        .mission_exposure(mission)
-                        .is_ok_and(|exposed| !exposed.is_empty())
-                });
-                if from_elsewhere || from_exposed {
-                    exposure.mark(
-                        &cable_source(
-                            &delivery.from_agent,
-                            intake.limits().sessions.exposure_source_bytes,
-                        ),
-                        unix_now(),
-                    );
-                }
-            }
+            mark_exposure(
+                intake.as_ref(),
+                &exposure,
+                principal.operation(),
+                &deliveries,
+            );
             Ok::<_, crate::directorates::registry::cables::CableRelayError>(deliveries)
         };
         match tokio::task::spawn_blocking(read).await {

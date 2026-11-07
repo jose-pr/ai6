@@ -7,6 +7,10 @@ mod assistant;
 mod bona_fides;
 #[cfg(test)]
 mod cable_reach_tests;
+#[cfg(test)]
+mod cable_wake_tests;
+#[cfg(feature = "cables-mcp")]
+mod cable_wakes;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
 #[cfg(feature = "cables-mcp")]
@@ -92,7 +96,7 @@ use crate::directorates::q::transport::TransportClient;
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{
     CableDelivery, CableEndpoint, CableHeldDelivery, CablePrincipal, CableRelay, CableRelayError,
-    CableRelease, CableSendRequest, CableTarget, CrossOperation,
+    CableRelease, CableScope, CableSendRequest, CableTarget, CrossOperation,
 };
 use crate::directorates::registry::contexts::ContextOwner;
 use crate::directorates::registry::mission_ids::new_uid;
@@ -887,6 +891,8 @@ where
     let cable_live = live_config.clone();
     let cable_roster = roster.clone();
     let (lineage_live, lineage_roster) = (live_config.clone(), roster.clone());
+    let (resident_live, resident_roster, resident_site) =
+        (live_config.clone(), roster.clone(), station_id.clone());
     let cable_missions = missions.clone();
     let cable_sessions = sessions.clone();
     let cable_site = station_id.clone();
@@ -913,6 +919,12 @@ where
             .into_iter()
             .map(str::to_owned)
             .collect()
+    })
+    .with_residents(move |target| {
+        let roster = resident_live
+            .roster()
+            .unwrap_or_else(|| resident_roster.clone());
+        cable_residents(&roster, &resident_site, target)
     })
     .with_audit_sink(move |record| {
         audit_refused_cable_for_person(audit_registry.as_ref(), &audit_station, record);
@@ -1296,7 +1308,10 @@ fn cable_endpoints(
         .list()
         .into_iter()
         .filter_map(|mission| {
-            if mission.state != MissionState::Working {
+            // A Session waiting at a prompt is between turns, not gone: a Cable reaches it.
+            let between_turns =
+                mission.state == MissionState::Blocked && mission.blocked_reason.is_none();
+            if mission.state != MissionState::Working && !between_turns {
                 return None;
             }
             let (operation, agent) = (mission.operation_id.as_ref()?, mission.agent_id.as_ref()?);
@@ -1341,6 +1356,51 @@ fn cable_endpoints(
         }
     }
     endpoints
+}
+
+/// Where a Cable waits when its addressee has no live Session: the Agent `target` names in each
+/// Operation it serves, or the 00 Agents of the Operation it names (its coordinating role).
+fn cable_residents(roster: &Roster, station: &str, target: &CableTarget) -> Vec<CableEndpoint> {
+    let now = unix_now() as i64;
+    let mut found = Vec::new();
+    let mut serve = |operation: &roster::Operation, agent: &roster::Agent| {
+        if agent.retirement(now) == roster::Retirement::Retired {
+            return;
+        }
+        if let Ok(endpoint) = CableEndpoint::try_new(
+            agent.id.clone(),
+            operation.id.clone(),
+            operation.theater.clone(),
+            station.to_owned(),
+            None,
+            None,
+        ) {
+            found.push(endpoint);
+        }
+    };
+    match (target.scope(), target.name()) {
+        (CableScope::Agent, Some(name)) => {
+            for operation in roster.operations() {
+                if let Ok(agent) = roster.agent(Some(&operation.id), name) {
+                    serve(operation, &agent);
+                }
+            }
+        }
+        (CableScope::Operation, Some(name)) => {
+            if let Ok(operation) = roster.operation(name) {
+                for agent in roster
+                    .agents_for_operation(&operation.id)
+                    .unwrap_or_default()
+                {
+                    if agent.clearance == "00" {
+                        serve(operation, &agent);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    found
 }
 
 fn cable_principal(
@@ -1715,6 +1775,7 @@ async fn scheduler_loop(base: DaemonState) {
         #[cfg(feature = "cables-mcp")]
         {
             green_ink::deliver_decisions(&state).await;
+            cable_wakes::wake_idle(&state).await;
             issues::deliver_replies(&state).await;
             issues::deliver_proposal_outcomes(&state).await;
         }
@@ -4953,6 +5014,21 @@ async fn start_mission(
             ),
         )
     });
+    // The Cables that waited for this Agent while it had no Session, now that it has one that
+    // can answer them.
+    #[cfg(feature = "cables-mcp")]
+    if cables_mcp.is_some()
+        && let Some(operation_id) = mission.operation_id.clone()
+    {
+        let (waiting, agent_id, exposed) = (state.clone(), agent.id.clone(), exposure.clone());
+        if let Ok(Some(text)) = tokio::task::spawn_blocking(move || {
+            cable_wakes::brief(&waiting, &agent_id, &operation_id, &exposed)
+        })
+        .await
+        {
+            initial_context.push(text);
+        }
+    }
     let task = mission.task();
     let start_request = AgentStart {
         mission_id: mission.mission_id,
@@ -9266,6 +9342,7 @@ queue = 1
         providers = [
             MockHandler,
             super::cable_reach_tests::MockCablesHandler,
+            super::cable_wake_tests::MockWakeHandler,
             MockLimitedHandler,
             super::accounts::testing::MockPooledHandler,
             MockSpendHandler,
@@ -10268,6 +10345,7 @@ queue = 1
                 "mock-standing",
                 "mock-stream",
                 "mock-verdict",
+                "mock-wake",
             ])
         );
 

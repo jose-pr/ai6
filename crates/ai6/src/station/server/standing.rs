@@ -405,6 +405,9 @@ pub(super) mod testing {
     pub(in crate::station::server) static RESUMED: Mutex<Vec<(String, String)>> =
         Mutex::new(Vec::new());
     static STARTS: AtomicUsize = AtomicUsize::new(0);
+    /// The brief context of each start or resume, as (Mission, context), in the order they came.
+    pub(in crate::station::server) static BRIEFS: Mutex<Vec<(String, Vec<String>)>> =
+        Mutex::new(Vec::new());
     /// The Missions whose first attempt has gone the way its prompt asks.
     static FIRST_DONE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
@@ -440,6 +443,10 @@ pub(super) mod testing {
             _terminal: Object<dyn AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             let started = STARTS.fetch_add(1, Ordering::Relaxed);
+            BRIEFS.lock().unwrap().push((
+                request.mission_id.as_str().to_owned(),
+                request.initial_context.clone(),
+            ));
             let session =
                 SessionId::try_new(format!("provider-standing-{started}")).map_err(|error| {
                     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
@@ -469,6 +476,10 @@ pub(super) mod testing {
             RESUMED.lock().unwrap().push((
                 request.mission_id.as_str().to_owned(),
                 request.session_id.as_str().to_owned(),
+            ));
+            BRIEFS.lock().unwrap().push((
+                request.mission_id.as_str().to_owned(),
+                request.initial_context.clone(),
             ));
             let message = request.message.as_deref().unwrap_or_default();
             if message.contains("resume-refused") {
@@ -640,6 +651,100 @@ mod tests {
                 .count(),
             1,
             "one standing Mission on the board"
+        );
+        state
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Each window's brief carries the Cables sent to the Agent since the last one, once.
+    #[cfg(feature = "cables-mcp")]
+    #[tokio::test]
+    async fn a_windows_brief_carries_the_cables_sent_since_the_last_window() {
+        use crate::directorates::registry::cables::{
+            CablePrincipal, CableScope, CableSendRequest, CableState, CableTarget,
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let mut state = standing_state(root.path(), false);
+        super::super::cable_wake_tests::open_cables(&mut state);
+        let mut warned = BTreeSet::new();
+        let sender = CablePrincipal::try_new(
+            "008".to_owned(),
+            "G".to_owned(),
+            None,
+            "test".to_owned(),
+            None,
+            None,
+        )
+        .unwrap();
+        let send = |body: &str| {
+            state
+                .cables
+                .send(
+                    &sender,
+                    CableSendRequest::new(
+                        CableTarget::try_new(CableScope::Agent, Some("007".to_owned())).unwrap(),
+                        body.to_owned(),
+                        format!("key-{body}"),
+                    ),
+                )
+                .unwrap()
+                .id()
+                .to_owned()
+        };
+        let before = send("sent before the first window");
+        let mission = {
+            assert_eq!(
+                fire_due_sleepers(
+                    state.intake.as_ref(),
+                    &state.roster,
+                    "test",
+                    FIRST + 60,
+                    &mut warned
+                ),
+                1
+            );
+            run_attempt(&state).await
+        };
+        let between = send("sent between the windows");
+        run_window(&state, FIRST + DAY, &mut warned).await;
+
+        let briefs: Vec<String> = testing::BRIEFS
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(of, _)| *of == mission)
+            .map(|(_, context)| {
+                context.join(
+                    "
+",
+                )
+            })
+            .collect();
+        assert_eq!(briefs.len(), 2, "{briefs:?}");
+        assert!(briefs[0].contains("sent before the first window"));
+        assert!(!briefs[0].contains("sent between the windows"));
+        assert!(briefs[1].contains("sent between the windows"));
+        assert!(
+            !briefs[1].contains("sent before the first window"),
+            "a Cable is in one brief"
+        );
+        for cable in [before, between] {
+            let held = state.intake.get_cable(&cable).unwrap().unwrap();
+            assert_eq!(held.recipients()[0].state(), CableState::Delivered);
+        }
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .list()
+                .iter()
+                .filter(|listed| listed.handle.as_deref() == Some("G-nightly-1"))
+                .count(),
+            1,
+            "the Cables made no Mission: one standing Mission on the board"
         );
         state
             .stopping
