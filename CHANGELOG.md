@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office: the Missions board counts `verifying` Missions as waiting for a decision, and such a
+  Mission's page shows its deliverables with their probe evidence and the final report, and lets a person
+  with `mission.verify` probe again and decide done, redispatch (with an amendment) or failed.
 - Liaison: A2A 1.0 as the wire format of Cables, in Universal Exports. A configured peer
   (`[unex.liaison.peer.<name>]`: its link key `id`, the `principal` it acts as, its `addressees`)
   reaches AI6 on a proven coqui-agentic-peer link (`[unex.liaison] listen`, the `a2a/1` binding of
