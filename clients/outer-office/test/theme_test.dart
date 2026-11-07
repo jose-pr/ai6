@@ -167,6 +167,7 @@ void main() {
     final tokens = OoThemeId.light.tokens;
     expect(tokens.stateColor('working'), tokens.success);
     expect(tokens.stateColor('blocked'), tokens.warning);
+    expect(tokens.stateColor('verifying'), tokens.warning);
     for (final state in ['stalled', 'failed', 'quarantined']) {
       expect(tokens.stateColor(state), tokens.danger, reason: state);
     }
@@ -174,7 +175,7 @@ void main() {
     for (final state in ['queued', 'done', 'abandoned']) {
       expect(tokens.stateColor(state), tokens.muted, reason: state);
     }
-    expect(boardStates, hasLength(9));
+    expect(boardStates, hasLength(10));
   });
 
   test('high contrast and turning the wallpaper off drop the wallpaper and '

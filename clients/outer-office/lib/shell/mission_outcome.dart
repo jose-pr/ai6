@@ -81,6 +81,7 @@ class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
       final attempt = snapshot.data;
       final report = attempt?.finalReport;
       final verdict = attempt?.verdict;
+      if (widget.state == 'verifying') return const SizedBox.shrink();
       if (report == null && verdict == null && !_settled) {
         return const SizedBox.shrink();
       }

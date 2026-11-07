@@ -244,3 +244,10 @@ class FreshnessNote extends StatelessWidget {
 /// A blocked reason in words: `issue` is a person's to answer, so it says where.
 String reasonWords(String reason) =>
     reason == 'issue' ? 'Waiting on the issue' : reason.replaceAll('-', ' ');
+
+/// A Mission's state with why, for a row or heading: a verifying one says it waits on a person.
+String stateLine(String state, String? reason) => [
+  state,
+  if (state == 'verifying') 'waiting for a decision',
+  if (reason != null) reasonWords(reason),
+].join(' · ');
