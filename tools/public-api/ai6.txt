@@ -8892,6 +8892,9 @@ pub async fn ai6::station::server::serve_with_config_dir_and_capacity<F>(core::n
 pub async fn ai6::station::server::serve_with_options<F>(ai6::station::server::ServeConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_plugins<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_plugins_and_capacity<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
+pub mod ai6::tls
+pub fn ai6::tls::trusting(&[alloc::vec::Vec<u8>]) -> ureq::tls::TlsConfig
+pub fn ai6::tls::trusting_file(&std::path::Path) -> core::result::Result<ureq::tls::TlsConfig, alloc::string::String>
 #[non_exhaustive] pub enum ai6::AccountKind
 pub ai6::AccountKind::AnthropicApiKey
 pub ai6::AccountKind::AnthropicAuthToken
