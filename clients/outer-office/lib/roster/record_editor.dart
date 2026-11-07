@@ -4,8 +4,7 @@ import 'dart:convert';
 import 'package:material_ui/material_ui.dart';
 import 'package:toml/toml.dart';
 
-import '../forms/form_model.dart';
-import '../forms/record_form.dart';
+import '../forms/form_host.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
 import 'roster_page.dart';
@@ -252,7 +251,7 @@ class _RecordEditorState extends State<_RecordEditor> {
         _spec = spec;
         _choices = choices;
         _revision = revision;
-        _model = FormModel(
+        _model = ooFormModel(
           schema: spec.schema,
           form: spec.form,
           value: definition,
@@ -409,7 +408,7 @@ class _RecordEditorState extends State<_RecordEditor> {
                             ),
                           ),
                         ),
-                      RecordFormView(
+                      OoFormView(
                         // A reloaded record starts its boxes over.
                         key: ObjectKey(model),
                         model: model,

@@ -4,8 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
 
-import '../forms/form_model.dart';
-import '../forms/record_form.dart';
+import '../forms/form_host.dart';
 import '../main.dart';
 import '../roster/record_editor.dart' show RecordFormSpec;
 import '../routes/oo_route.dart';
@@ -494,7 +493,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       if (!mounted) return;
       setState(() {
         _spec = spec;
-        _model = FormModel(
+        _model = ooFormModel(
           schema: spec.schema,
           form: spec.form,
           value: widget.view?.settings ?? const {},
@@ -567,7 +566,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               if (model == null && _problem == null)
                 const Center(child: CircularProgressIndicator()),
               if (model != null)
-                RecordFormView(
+                OoFormView(
                   key: ObjectKey(model),
                   model: model,
                   problems: _problems,

@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../forms/form_host.dart' show flutterMaterialLocalizations;
 import 'oo_tokens.dart';
 
 export 'oo_tokens.dart';
@@ -288,6 +289,7 @@ class OoMaterialApp extends StatelessWidget {
         darkTheme: theme(chosen ?? OoThemeId.nightOps),
         themeMode: themeMode,
         themeAnimationDuration: animation,
+        localizationsDelegates: const [flutterMaterialLocalizations],
         routerConfig: routerConfig,
         builder: _selectable,
       );
@@ -299,6 +301,7 @@ class OoMaterialApp extends StatelessWidget {
       darkTheme: theme(chosen ?? OoThemeId.nightOps),
       themeMode: themeMode,
       themeAnimationDuration: animation,
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: home,
       builder: _selectable,
     );

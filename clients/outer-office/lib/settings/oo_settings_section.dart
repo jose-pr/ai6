@@ -1,7 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../forms/form_model.dart';
-import '../forms/record_form.dart';
+import '../forms/form_host.dart';
 import 'oo_config.dart';
 import 'oo_schema.dart';
 
@@ -42,7 +41,7 @@ class _OoSettingsSectionState extends State<OoSettingsSection> {
       final oo = text == null
           ? const <String, Object?>{}
           : decodeOoConfig(text, path: widget.path)['oo'];
-      _model = FormModel(
+      _model = ooFormModel(
         schema: OoSchema.schema,
         form: OoSchema.form,
         value: oo is Map ? oo.cast<String, Object?>() : const {},
@@ -110,7 +109,7 @@ class _OoSettingsSectionState extends State<OoSettingsSection> {
       },
       children: [
         if (model != null)
-          RecordFormView(
+          OoFormView(
             key: ObjectKey(model),
             model: model,
             problems: _problems,
