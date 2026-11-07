@@ -613,6 +613,16 @@ async fn a_harness_on_the_agents_own_path_starts() {
 /// A Station whose check-in comes every 100 ms and is dark after a second of silence, with a
 /// route whose handler takes `models_ms` to list its models.
 fn slow_listing_state(root: &Path, key: &str, models_ms: u64) -> DaemonState {
+    slow_listing_state_dark_after(root, key, models_ms, Duration::from_secs(1))
+}
+
+/// [`slow_listing_state`] with the Station dark after `dark` of silence.
+fn slow_listing_state_dark_after(
+    root: &Path,
+    key: &str,
+    models_ms: u64,
+    dark: Duration,
+) -> DaemonState {
     let agents = format!(
         "[agent.009]\n[[agent.009.route]]\nhandler = \"mock-program\"\nmodel = \"slow\"\n\
          handler_settings = {{ models_ms = {models_ms}, key = \"{key}\" }}\n"
@@ -625,7 +635,7 @@ fn slow_listing_state(root: &Path, key: &str, models_ms: u64) -> DaemonState {
     limits.accounts.model_probe_timeout = TimeLimit::UNBOUNDED;
     state.station = state.station.clone().with_limits(limits);
     let mut registry = RegistryLimits::default();
-    registry.stations.gone_dark_after = Seconds(Duration::from_secs(1));
+    registry.stations.gone_dark_after = Seconds(dark);
     state.intake = Arc::new(FileRegistry::open(root.join("registry")).with_limits(registry));
     state
 }
@@ -633,12 +643,15 @@ fn slow_listing_state(root: &Path, key: &str, models_ms: u64) -> DaemonState {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_model_listing_slower_than_going_dark_leaves_the_check_ins_on_time() {
     let root = tempfile::tempdir().unwrap();
-    let state = slow_listing_state(root.path(), "slow-beat", 3_000);
+    // The listing outlasts going dark by far, so a beat it blocked goes about 7 s stale, while
+    // a loaded machine delays an unblocked 100 ms beat by about 2 s at most.
+    let state =
+        slow_listing_state_dark_after(root.path(), "slow-beat", 7_000, Duration::from_secs(3));
     let running = tokio::spawn(scheduler_loop(state.clone()));
     let started = Instant::now();
     let mut stalest = 0.0_f64;
     let mut found = false;
-    while started.elapsed() < Duration::from_secs(10) && !found {
+    while started.elapsed() < Duration::from_secs(20) && !found {
         tokio::time::sleep(Duration::from_millis(100)).await;
         if let Some(record) = state
             .intake
@@ -659,8 +672,8 @@ async fn a_model_listing_slower_than_going_dark_leaves_the_check_ins_on_time() {
     let _ = running.await;
     assert!(found, "the look finished");
     assert!(
-        started.elapsed() >= Duration::from_secs(3),
-        "the listing took its three seconds"
+        started.elapsed() >= Duration::from_secs(7),
+        "the listing took its seven seconds"
     );
     let dark = state
         .intake
