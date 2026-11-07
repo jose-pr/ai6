@@ -2010,6 +2010,8 @@ pub ai6::directorates::m::roster::Agent::retire_warning_days: u32
 pub ai6::directorates::m::roster::Agent::roles: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::Agent::routes: alloc::vec::Vec<ai6::directorates::m::roster::AgentRoute>
 pub ai6::directorates::m::roster::Agent::tags: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::Agent::wake_on_cable: bool
+pub ai6::directorates::m::roster::Agent::wakes_per_hour: u32
 impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::effective_clearance(&self, &ai6::directorates::m::roster::Operation, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, i64) -> alloc::string::String
 pub fn ai6::directorates::m::roster::Agent::is_retired(&self, i64) -> bool
@@ -2188,6 +2190,7 @@ pub const ai6::directorates::m::roster::DEFAULT_CHECKPOINT_SECS: u64
 pub const ai6::directorates::m::roster::DEFAULT_MAX_COMPARTMENT_RULES: usize
 pub const ai6::directorates::m::roster::DEFAULT_MAX_OPERATION_DEPTH: usize
 pub const ai6::directorates::m::roster::DEFAULT_RETIRE_WARNING_DAYS: u32
+pub const ai6::directorates::m::roster::DEFAULT_WAKES_PER_HOUR: u32
 pub mod ai6::directorates::m::scorecard
 #[non_exhaustive] pub enum ai6::directorates::m::scorecard::Judgment
 pub ai6::directorates::m::scorecard::Judgment::Blown
@@ -5666,6 +5669,7 @@ impl ai6::CableRelay
 pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::body_bytes(&self) -> ai6::bounds::Limit
 pub fn ai6::CableRelay::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
+pub fn ai6::CableRelay::deliver_new(&self, &ai6::CablePrincipal, usize, &mut dyn core::ops::function::FnMut() -> bool) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
 pub fn ai6::CableRelay::discover_through_compartments(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::cables::CablePeer>, ai6::CableRelayError>
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
@@ -5680,6 +5684,7 @@ pub fn ai6::CableRelay::send(&self, &ai6::CablePrincipal, ai6::CableSendRequest)
 pub fn ai6::CableRelay::set_compartments(&self, alloc::sync::Arc<dyn ai6::directorates::registry::cables::CableCompartments>)
 pub fn ai6::CableRelay::unregister_endpoint(&self, &ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::wake(&self, &ai6::CablePrincipal, usize, u32) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_cross_operation(self, ai6::directorates::registry::cables::CrossOperation) -> Self
@@ -5687,6 +5692,7 @@ pub fn ai6::CableRelay::with_durable_audit(self, impl core::ops::function::Fn(&a
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_message_limits(self, (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::with_residents(self, impl core::ops::function::Fn(&ai6::directorates::registry::cables::CableTarget) -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::withdraw(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 #[non_exhaustive] pub struct ai6::directorates::registry::cables::CableRelease
 pub ai6::directorates::registry::cables::CableRelease::delivered: usize
@@ -9790,6 +9796,8 @@ pub ai6::Agent::retire_warning_days: u32
 pub ai6::Agent::roles: alloc::vec::Vec<alloc::string::String>
 pub ai6::Agent::routes: alloc::vec::Vec<ai6::directorates::m::roster::AgentRoute>
 pub ai6::Agent::tags: alloc::vec::Vec<alloc::string::String>
+pub ai6::Agent::wake_on_cable: bool
+pub ai6::Agent::wakes_per_hour: u32
 impl ai6::directorates::m::roster::Agent
 pub fn ai6::directorates::m::roster::Agent::effective_clearance(&self, &ai6::directorates::m::roster::Operation, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, i64) -> alloc::string::String
 pub fn ai6::directorates::m::roster::Agent::is_retired(&self, i64) -> bool
@@ -10637,6 +10645,7 @@ impl ai6::CableRelay
 pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::body_bytes(&self) -> ai6::bounds::Limit
 pub fn ai6::CableRelay::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
+pub fn ai6::CableRelay::deliver_new(&self, &ai6::CablePrincipal, usize, &mut dyn core::ops::function::FnMut() -> bool) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::discover(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::CableEndpoint>, ai6::CableRelayError>
 pub fn ai6::CableRelay::discover_through_compartments(&self, &ai6::CablePrincipal) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::cables::CablePeer>, ai6::CableRelayError>
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
@@ -10651,6 +10660,7 @@ pub fn ai6::CableRelay::send(&self, &ai6::CablePrincipal, ai6::CableSendRequest)
 pub fn ai6::CableRelay::set_compartments(&self, alloc::sync::Arc<dyn ai6::directorates::registry::cables::CableCompartments>)
 pub fn ai6::CableRelay::unregister_endpoint(&self, &ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::update_policy(&self, ai6::CablePolicy) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::wake(&self, &ai6::CablePrincipal, usize, u32) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::with_audit_sink(self, impl core::ops::function::Fn(&ai6::CableAuditRecord) + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_cross_operation(self, ai6::directorates::registry::cables::CrossOperation) -> Self
@@ -10658,6 +10668,7 @@ pub fn ai6::CableRelay::with_durable_audit(self, impl core::ops::function::Fn(&a
 pub fn ai6::CableRelay::with_limits(self, usize, f64, u32, f64, u32) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::with_lineage(self, impl core::ops::function::Fn(&str) -> alloc::vec::Vec<alloc::string::String> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::with_message_limits(self, (ai6::bounds::Limit, ai6::bounds::TimeLimit, ai6::bounds::Seconds)) -> core::result::Result<Self, ai6::directorates::registry::cables::CableError>
+pub fn ai6::CableRelay::with_residents(self, impl core::ops::function::Fn(&ai6::directorates::registry::cables::CableTarget) -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::CableRelay::withdraw(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 #[non_exhaustive] pub struct ai6::CableRelease
 pub ai6::CableRelease::delivered: usize
