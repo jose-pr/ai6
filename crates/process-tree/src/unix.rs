@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Unix: a terminal program's process tree, killed whole. Compiled into the `pipe` and `pty`
-//! providers alike (each includes this file with `#[path]`), so both kill the same way.
+//! Unix: a program's process tree, killed whole.
 //!
 //! The program leads a session and a process group of its own. Killing the group misses a
 //! process that left it (`setsid`, `setpgid`), so the tree is also found by parent: every
@@ -21,7 +20,7 @@ use std::io;
 /// A program's process tree: its process ID, which is also its process group and session ID,
 /// and how many times the process table is read again for processes started meanwhile (each
 /// scan stops what it finds, so a tree stops growing after a few).
-pub(crate) struct ProcessTree(libc::pid_t, usize);
+pub struct ProcessTree(libc::pid_t, usize);
 
 /// One process of the table: its ID, its parent's, its process group's and, where the platform
 /// says, its session's.
@@ -34,7 +33,7 @@ struct Entry {
 
 impl ProcessTree {
     /// The tree of the program with process ID `pid`, which leads its own process group.
-    pub(crate) fn of(pid: Option<u32>, scans: usize) -> io::Result<Self> {
+    pub fn of(pid: Option<u32>, scans: usize) -> io::Result<Self> {
         pid.and_then(|pid| libc::pid_t::try_from(pid).ok())
             .filter(|&pid| pid > 1)
             .map(|pid| Self(pid, scans))
@@ -45,7 +44,7 @@ impl ProcessTree {
     /// process found by parent from it. `leader_alive` says the program has not been reaped:
     /// only then may a process whose parent ID is the program's be taken for its child, since a
     /// reaped program's ID can be reused.
-    pub(crate) fn kill(&self, leader_alive: bool) -> io::Result<()> {
+    pub fn kill(&self, leader_alive: bool) -> io::Result<()> {
         let leader = self.0;
         // SAFETY: killpg and kill take plain integers and touch no memory. An error means the
         // process or group is gone (or not ours to signal), which leaves nothing to do.
@@ -100,7 +99,7 @@ impl ProcessTree {
 
     /// Always `false`: a Unix directory or file can be removed while processes still use it,
     /// so nothing waits on the rest of the tree once the program itself has exited.
-    pub(crate) fn running(&self) -> bool {
+    pub fn running(&self) -> bool {
         false
     }
 }

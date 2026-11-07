@@ -30,12 +30,6 @@ mod os;
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod os;
-#[cfg(unix)]
-#[path = "../../process_tree/unix.rs"]
-mod process_tree;
-#[cfg(windows)]
-#[path = "../../process_tree/windows.rs"]
-mod process_tree;
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};

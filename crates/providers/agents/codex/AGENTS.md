@@ -6,11 +6,10 @@ the package and is self-contained. Development documentation lives with the sour
 <https://github.com/jose-pr/ai6>.
 
 No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`), `serde_json`,
-`tempfile`, and `libc` (Unix) or `windows-sys` (Windows). It re-exports `CodexHandler` and
+`tempfile`, `ai6-process-tree` (`crates/process-tree/`, which kills the sandbox probe's process
+tree), and `libc` (Unix) or `windows-sys` (Windows). It re-exports `CodexHandler` and
 `CodexConfig` from the root, beside the tool check's `TOOL_CHECK_ENV` and `KEPT_FEATURES`. Its
-only `unsafe` code kills the sandbox probe's process tree: the terminal providers'
-`crates/providers/terminals/process_tree/{unix,windows}.rs`, included with `#[path]`, and, on
-Windows, putting the probe in its Job Object before it runs.
+only `unsafe` code, on Windows, puts the probe in its Job Object before it runs.
 
 ## `CodexConfig`
 

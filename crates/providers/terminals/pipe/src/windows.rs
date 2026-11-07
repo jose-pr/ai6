@@ -34,8 +34,8 @@ use windows_sys::Win32::System::Threading::{
     WaitForSingleObject,
 };
 
-use crate::process_tree::ProcessTree;
 use crate::{ErrorOutput, Launch};
+use ai6_process_tree::ProcessTree;
 
 /// What `PATHEXT` holds when the environment does not say.
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";

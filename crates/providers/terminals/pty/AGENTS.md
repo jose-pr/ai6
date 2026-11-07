@@ -9,7 +9,7 @@ No Cargo features. MSRV: Rust 1.89. Depends on `ai6` (no default features) and
 `portable-pty`; `libc` and `nix` (`term`) on Unix and `windows-sys` on Windows. The crate root exports
 `Pty` (and its `PtyConfig`), which implements `ai6::directorates::q::terminal::Terminal`; the library is both an
 `rlib` and the Guatiao `cdylib` a Station loads. Provider ID: `pty`. Unsafe code is
-limited to the platform calls that own the process tree (`../process_tree/`, shared with
+limited to the platform calls that own the process tree (`ai6-process-tree`, shared with
 `pipe`, and `windows.rs`), each with a safety comment.
 
 `PtyConfig` (`ToValue`, `FromValue`, `Schema`, `Default`; `Pty::new(PtyConfig)`) holds the

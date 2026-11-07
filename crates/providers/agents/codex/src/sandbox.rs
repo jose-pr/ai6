@@ -451,7 +451,7 @@ mod tree {
     use std::os::unix::process::CommandExt;
     use std::process::{Child, Command};
 
-    use crate::process_tree::ProcessTree;
+    use ai6_process_tree::ProcessTree;
 
     /// Spawns `command` leading a process group of its own.
     pub(super) fn spawn(
@@ -490,7 +490,7 @@ mod tree {
         CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
     };
 
-    use crate::process_tree::ProcessTree;
+    use ai6_process_tree::ProcessTree;
 
     /// Spawns `command` suspended, puts it in a new Job Object and only then lets it run, so
     /// nothing it starts is outside the job.

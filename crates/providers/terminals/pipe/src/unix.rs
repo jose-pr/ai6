@@ -13,8 +13,8 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 
 use ai6::directorates::q::terminal::ExitInfo;
 
-use crate::process_tree::ProcessTree;
 use crate::{ErrorOutput, Launch};
+use ai6_process_tree::ProcessTree;
 
 /// A started child.
 pub(crate) struct Process(Child);
