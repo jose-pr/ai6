@@ -20,9 +20,9 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use coqui_peer::PeerId;
 use guatiao::Bytes;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::directorates::m::placement::Resources;
 use crate::directorates::m::theaters::Theater;
@@ -1008,7 +1008,7 @@ fn place_file(
             );
         }
     };
-    let wanted = hex(&Sha256::digest(&bytes));
+    let wanted = PeerId::of(&bytes).hex();
     let digest = |client: &TransportClient| {
         run(
             client,
@@ -1133,10 +1133,6 @@ fn failure(output: &Output) -> String {
         Some(line) => format!("{status}: {line}"),
         None => status,
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn unix_now() -> u64 {

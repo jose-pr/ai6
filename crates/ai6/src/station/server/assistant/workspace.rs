@@ -19,6 +19,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use coqui_peer::PeerId;
+
 use crate::bounds::Limit;
 use crate::directorates::m::assistant::{
     AssistantDeskLimits, AssistantLimits, RepoKind, SKILLS_PLUGIN,
@@ -315,12 +317,7 @@ fn exactly(change: &AssistantChange) -> Vec<CheckpointFile> {
 
 /// The hex SHA-256 of `bytes`: a file's [`AssistantChange::base`].
 pub(super) fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    hex(&Sha256::digest(bytes))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    PeerId::of(bytes).hex()
 }
 
 /// The notice for work saved to `branch` because `main` refused it.
@@ -787,7 +784,7 @@ fn file_digest(path: &Path) -> Option<String> {
             read => hasher.update(&chunk[..read]),
         }
     }
-    Some(hex(&hasher.finalize()))
+    Some(PeerId::from_bytes(hasher.finalize().into()).hex())
 }
 
 /// The path of `file`, a `/`-separated path relative to `root`.
@@ -799,6 +796,15 @@ pub(super) fn in_tree(root: &Path, file: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_digest_is_lowercase_sha256_hex() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(sha256_hex(b"").len(), 64);
+    }
 
     fn limits() -> AssistantLimits {
         AssistantLimits::default()
