@@ -32,9 +32,12 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use coqui_peer::PeerId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use tokio::sync::Notify;
 
 use super::tools;
@@ -301,33 +304,13 @@ pub(crate) fn utc_text(seconds: f64) -> String {
     )
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
-}
-
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
+    PeerId::of(bytes).hex()
 }
-
-const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// `bytes` as unpadded base64url.
 fn base64url(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, byte)| n | (u32::from(*byte) << (16 - 8 * i)));
-        for i in 0..=chunk.len() {
-            out.push(char::from(BASE64URL[(n >> (18 - 6 * i) & 63) as usize]));
-        }
-    }
-    out
+    URL_SAFE_NO_PAD.encode(bytes)
 }
 
 /// 32 random bytes.

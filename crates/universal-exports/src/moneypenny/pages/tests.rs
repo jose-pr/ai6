@@ -637,3 +637,18 @@ fn feeds_are_read_tools_with_valid_input_distinct_names_and_a_cap() {
         PageNetwork::Own
     );
 }
+
+#[test]
+fn digests_are_lowercase_hex_and_tokens_are_unpadded_base64url() {
+    assert_eq!(
+        sha256_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        base64url(&[0xfb, 0xff]),
+        "-_8",
+        "the url-safe alphabet, no padding"
+    );
+    assert_eq!(base64url(b"a"), "YQ");
+    assert_eq!(base64url(b""), "");
+}
