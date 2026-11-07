@@ -89,6 +89,7 @@ serde_json.workspace = true
 rmcp = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 sha2.workspace = true
+coqui-net-acl = { workspace = true }
 coqui-peer = { workspace = true, features = ["serde"] }
 # Ed25519 for publisher signatures on provider libraries; already built for rustls.
 ring = { version = "0.17.14", optional = true }

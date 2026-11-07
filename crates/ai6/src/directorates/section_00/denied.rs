@@ -19,6 +19,8 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use coqui_net_acl::IpNet;
+
 use super::assistant::host_pattern;
 
 /// The categories a deny list may name.
@@ -55,12 +57,14 @@ impl DenyEntry {
                 .ok()
                 .filter(|bits| *bits <= max)
                 .ok_or_else(|| format!("{entry:?} is not a network: 0 to {max} bits after '/'"))?;
-            return Ok(Self::Net(canonical(address), bits));
+            let net = network(&format!("{address}/{bits}"))
+                .ok_or_else(|| format!("{entry:?} is not a network"))?;
+            return Ok(Self::of_net(net));
         }
         if let Some(address) = parse_address(entry) {
-            let address = canonical(address);
-            let bits = if address.is_ipv4() { 32 } else { 128 };
-            return Ok(Self::Net(address, bits));
+            let net = network(&compatible(address).to_string())
+                .ok_or_else(|| format!("{entry:?} is not an address"))?;
+            return Ok(Self::of_net(net));
         }
         if host_pattern(entry) || entry == "localhost" {
             return Ok(Self::Host(entry.to_owned()));
@@ -69,6 +73,15 @@ impl DenyEntry {
             "{entry:?} is not a category ({}), a network, an address or a host name",
             DENY_CATEGORIES.join(", ")
         ))
+    }
+
+    /// The entry for a network `network` read from an address or CIDR text, never `any`.
+    fn of_net(net: IpNet) -> Self {
+        match net {
+            IpNet::V6(address, bits) => Self::Net(Ipv6Addr::from(address).into(), bits),
+            IpNet::V4(address, bits) => Self::Net(Ipv4Addr::from(address).into(), bits),
+            IpNet::Any => Self::Net(Ipv4Addr::UNSPECIFIED.into(), 0),
+        }
     }
 
     /// Whether the entry needs an address range checked, which only resolving a name and
@@ -87,7 +100,7 @@ impl DenyEntry {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DenyList {
     hosts: Vec<String>,
-    nets: Vec<(IpAddr, u8)>,
+    nets: Vec<IpNet>,
     entries: Vec<DenyEntry>,
 }
 
@@ -103,12 +116,15 @@ impl DenyList {
             let entry = DenyEntry::parse(entry.as_ref())?;
             match &entry {
                 DenyEntry::Host(host) => list.hosts.push(host.clone()),
-                DenyEntry::Net(address, bits) => list.nets.push((*address, *bits)),
+                DenyEntry::Net(address, bits) => list.nets.push(net_of(*address, *bits)),
                 DenyEntry::Category(category) => {
                     let (hosts, nets) = category_members(category);
                     list.hosts
                         .extend(hosts.iter().map(|host| (*host).to_owned()));
-                    list.nets.extend(nets);
+                    list.nets.extend(
+                        nets.into_iter()
+                            .map(|(address, bits)| net_of(address, bits)),
+                    );
                 }
             }
             list.entries.push(entry);
@@ -145,23 +161,19 @@ impl DenyList {
     /// Whether `address` is in a denied network, an IPv4-mapped or IPv4-compatible IPv6 address
     /// counting as its IPv4 address.
     pub fn denies_address(&self, address: IpAddr) -> bool {
-        let address = canonical(address);
-        self.nets
-            .iter()
-            .any(|(network, bits)| contains(*network, *bits, address))
+        let address = compatible(address);
+        self.nets.iter().any(|net| net.contains(address))
     }
 
     /// The names and single addresses of the list, categories expanded, each as a host
     /// pattern, an IPv4 address or a bracketed IPv6 address: what a list of names can carry.
     pub fn names_and_addresses(&self) -> Vec<String> {
         let mut out: Vec<String> = self.hosts.clone();
-        for (address, bits) in &self.nets {
-            let single = *bits == if address.is_ipv4() { 32 } else { 128 };
-            if single {
-                out.push(match address {
-                    IpAddr::V4(v4) => v4.to_string(),
-                    IpAddr::V6(v6) => format!("[{v6}]"),
-                });
+        for net in &self.nets {
+            match *net {
+                IpNet::V4(address, 32) => out.push(Ipv4Addr::from(address).to_string()),
+                IpNet::V6(address, 128) => out.push(format!("[{}]", Ipv6Addr::from(address))),
+                _ => {}
             }
         }
         out.sort();
@@ -229,40 +241,32 @@ fn parse_address(text: &str) -> Option<IpAddr> {
     inner.parse().ok()
 }
 
-/// `address`, an IPv4-mapped (`::ffff:a.b.c.d`) or IPv4-compatible (`::a.b.c.d`, but `::` and
-/// `::1`) IPv6 address as its IPv4 address.
-fn canonical(address: IpAddr) -> IpAddr {
-    match address {
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return IpAddr::V4(v4);
-            }
-            let segments = v6.segments();
-            let compatible = segments[..6].iter().all(|segment| *segment == 0)
-                && (segments[6] != 0 || segments[7] > 1);
-            if compatible {
-                let [a, b] = segments[6].to_be_bytes();
-                let [c, d] = segments[7].to_be_bytes();
-                return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
-            }
-            IpAddr::V6(v6)
+/// `address`, an IPv4-compatible (`::a.b.c.d`, but `::` and `::1`) IPv6 address as its IPv4
+/// address. [`IpNet`] already reads an IPv4-mapped one as its IPv4 address.
+fn compatible(address: IpAddr) -> IpAddr {
+    if let IpAddr::V6(v6) = address {
+        let segments = v6.segments();
+        let compatible = segments[..6].iter().all(|segment| *segment == 0)
+            && (segments[6] != 0 || segments[7] > 1);
+        if compatible {
+            let [a, b] = segments[6].to_be_bytes();
+            let [c, d] = segments[7].to_be_bytes();
+            return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
         }
-        v4 => v4,
     }
+    address
 }
 
-/// Whether `address` lies in `network`/`bits` of the same family.
-fn contains(network: IpAddr, bits: u8, address: IpAddr) -> bool {
-    match (network, address) {
-        (IpAddr::V4(network), IpAddr::V4(address)) => {
-            let mask = u32::MAX.checked_shl(32 - u32::from(bits)).unwrap_or(0);
-            u32::from(network) & mask == u32::from(address) & mask
-        }
-        (IpAddr::V6(network), IpAddr::V6(address)) => {
-            let mask = u128::MAX.checked_shl(128 - u32::from(bits)).unwrap_or(0);
-            u128::from(network) & mask == u128::from(address) & mask
-        }
-        _ => false,
+/// `text` (an address or `address/bits`) as a network.
+fn network(text: &str) -> Option<IpNet> {
+    text.parse().ok()
+}
+
+/// The network of `address` and its `bits` leading bits, as [`DenyEntry::Net`] holds it.
+fn net_of(address: IpAddr, bits: u8) -> IpNet {
+    match address {
+        IpAddr::V4(address) => IpNet::V4(u32::from(address), bits),
+        IpAddr::V6(address) => IpNet::V6(u128::from(address), bits),
     }
 }
 
@@ -272,6 +276,18 @@ mod tests {
 
     fn list(entries: &[&str]) -> DenyList {
         DenyList::parse(entries).unwrap()
+    }
+
+    #[test]
+    fn a_mapped_network_is_its_ipv4_network() {
+        let mapped = list(&["::ffff:10.0.0.0/104"]);
+        assert!(mapped.denies_name("10.1.2.3"));
+        assert!(mapped.denies_name("::ffff:10.9.9.9"));
+        assert!(!mapped.denies_name("11.0.0.1"));
+        assert_eq!(
+            mapped.entries(),
+            &[DenyEntry::Net("10.0.0.0".parse().unwrap(), 8)]
+        );
     }
 
     #[test]

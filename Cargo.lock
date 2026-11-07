@@ -120,6 +120,7 @@ dependencies = [
  "coqui-access-system-plugin",
  "coqui-acp",
  "coqui-acp-provider",
+ "coqui-net-acl",
  "coqui-peer",
  "coqui-peer-tls",
  "coqui-roles",
