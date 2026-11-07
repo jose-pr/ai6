@@ -33,13 +33,14 @@ impl Default for Limits {
 }
 
 /// The states of a Mission or Session on the board, in the board's order.
-pub(crate) const STATES: [&str; 9] = [
+pub(crate) const STATES: [&str; 10] = [
     "queued",
     "working",
     "blocked",
     "stalled",
     "parked",
     "quarantined",
+    "verifying",
     "done",
     "failed",
     "abandoned",
@@ -70,7 +71,7 @@ enum Kind {
     Identifier,
     /// Free text of 1 to [`Limits::text_bytes`] bytes, without control or invisible characters.
     Text,
-    /// 1 to 9 distinct board states: a JSON array, comma-joined in a link.
+    /// 1 to 10 distinct board states: a JSON array, comma-joined in a link.
     States,
     /// One of these words.
     OneOf(&'static [&'static str]),

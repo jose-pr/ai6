@@ -9,6 +9,7 @@ import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
 import 'mission_outcome.dart';
 import 'mission_rename.dart';
+import 'mission_verification.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
@@ -121,11 +122,7 @@ class MissionDetail extends StatelessWidget {
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
-                      [
-                        mission.state,
-                        if (mission.reason case final reason?)
-                          reasonWords(reason),
-                      ].join(' · '),
+                      stateLine(mission.state, mission.reason),
                       style: text.titleSmall,
                     ),
                   ),
@@ -148,6 +145,14 @@ class MissionDetail extends StatelessWidget {
             Text(control.describe(), style: text.labelMedium),
           ],
           const SizedBox(height: 20),
+          if (mission.state == 'verifying')
+            MissionVerificationPanel(
+              // Keyed so that opening another Mission reads its own attempt.
+              key: ValueKey(('verifying', operationId, mission.missionId)),
+              board: board,
+              operationId: operationId,
+              missionId: mission.missionId,
+            ),
           MissionOutcomeSection(
             board: board,
             operationId: operationId,

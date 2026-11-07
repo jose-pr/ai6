@@ -192,6 +192,7 @@ List<MissionControlOption> missionControls({
           'quarantined' =>
             'A quarantined Mission waits for an operator to release its Agent.',
           'held' => 'A held Mission waits for a verdict, or a cancel.',
+          'verifying' => 'A verifying Mission waits for a decision.',
           _ => 'Only a stalled or finished Mission can be retried; cancel it first.',
         },
       ),

@@ -145,7 +145,9 @@ class BoardHeader extends StatelessWidget {
                     ),
                     for (final state in boardStates)
                       _CountChip(
-                        label: state,
+                        label: state == 'verifying'
+                            ? 'verifying (waiting for a decision)'
+                            : state,
                         count: counts[state] ?? 0,
                         state: state,
                         selected: selectedStates.contains(state),
@@ -196,7 +198,11 @@ class _CountChip extends StatelessWidget {
     selected: selected,
     onSelected: (_) => onPressed(),
     visualDensity: VisualDensity.compact,
-    tooltip: state == null ? 'Show every Mission' : 'Missions that are $label',
+    tooltip: switch (state) {
+      null => 'Show every Mission',
+      'verifying' => 'Missions waiting for a decision',
+      _ => 'Missions that are $label',
+    },
   );
 }
 
@@ -493,10 +499,7 @@ class MissionFacts extends StatelessWidget {
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                [
-                  mission.state,
-                  if (mission.reason case final reason?) reasonWords(reason),
-                ].join(' · '),
+                stateLine(mission.state, mission.reason),
                 style: Theme.of(context).textTheme.labelMedium,
               ),
             ),

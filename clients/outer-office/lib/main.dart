@@ -2922,6 +2922,59 @@ class MissionBoard extends ChangeNotifier
     await refresh();
   }
 
+  /// Asks the Station to probe a verifying Mission's deliverables; the findings arrive on the
+  /// attempt's evidence once it has run them.
+  Future<void> probeMission({
+    required String operationId,
+    required String missionId,
+  }) async {
+    if (demo) throw StateError('A probe is unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}/probe',
+      body: const <String, Object?>{},
+    );
+    _requireOk(response, 'the probe');
+  }
+
+  /// Decides a verifying Mission: `done`, `redispatch` (with an optional [amendment] for the
+  /// next attempt) or `failed`, each with its [reason].
+  Future<void> verifyMission({
+    required String operationId,
+    required String missionId,
+    required String decision,
+    required String reason,
+    String? amendment,
+  }) async {
+    if (demo) throw StateError('A decision is unavailable in preview.');
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}'
+          '/missions/${Uri.encodeComponent(missionId)}/verify',
+      body: {'decision': decision, 'reason': reason, 'amendment': ?amendment},
+    );
+    _requireOk(response, 'the decision');
+    await refresh();
+  }
+
+  /// Throws the gateway's own words when [response] is not a 200.
+  void _requireOk(http.Response response, String what) {
+    if (response.statusCode == 200) return;
+    String? words;
+    try {
+      words =
+          (jsonDecode(response.body) as Map<String, dynamic>)['error']
+              as String?;
+    } on Object {
+      words = null;
+    }
+    throw GatewayRefused(
+      response.statusCode,
+      words ?? 'The gateway refused $what (HTTP ${response.statusCode}).',
+    );
+  }
+
   /// The latest attempt at a Mission, whose Session sets its state; `null` before one is
   /// recorded.
   MissionAttemptSummary? currentAttempt(String operationId, String missionId) =>
@@ -4358,12 +4411,45 @@ class AttemptVerdictSummary {
       '${verdictWords(verdict)}, by $by${note == null ? '' : ': $note'}';
 }
 
+/// What one probe found of one deliverable.
+class ProbeEvidenceSummary {
+  const ProbeEvidenceSummary({
+    required this.deliverable,
+    required this.result,
+    required this.detail,
+    required this.at,
+  });
+
+  /// `kind` or `kind:target`.
+  final String deliverable;
+
+  /// `found`, `missing`, `unprobed` or `failed`.
+  final String result;
+
+  /// What was read, in a line; it may quote a tracker or a server, so it is data.
+  final String detail;
+
+  /// When the probe ran, as Unix seconds.
+  final double at;
+
+  factory ProbeEvidenceSummary.fromJson(Map<String, dynamic> json) =>
+      ProbeEvidenceSummary(
+        deliverable: json['deliverable'] as String,
+        result: json['result'] as String,
+        detail: json['detail'] as String? ?? '',
+        at: (json['at'] as num).toDouble(),
+      );
+}
+
 /// One attempt at a Mission: where it ran and how it stands.
 class MissionAttemptSummary {
   const MissionAttemptSummary({
     required this.attempt,
     required this.station,
     required this.status,
+    this.deliverables = const [],
+    this.evidence = const [],
+    this.probeRequested,
     this.runId,
     this.handle,
     this.theater,
@@ -4402,6 +4488,15 @@ class MissionAttemptSummary {
   /// The last message its Agent ended a turn with, as data; only one Mission's detail has it.
   final String? finalReport;
 
+  /// What the Mission was to deliver, as `kind` or `kind:target`, once it went verifying.
+  final List<String> deliverables;
+
+  /// What the Station's probes found of those, oldest first.
+  final List<ProbeEvidenceSummary> evidence;
+
+  /// When a probe was asked for, as Unix seconds, until the Station has run it.
+  final double? probeRequested;
+
   /// `handler model (pool name)`, from what a Session record says of its route.
   static String? _routeOf(Map<String, dynamic>? route) {
     if (route == null) return null;
@@ -4430,6 +4525,15 @@ class MissionAttemptSummary {
           _ => null,
         },
         finalReport: json['final_report'] as String?,
+        deliverables: [
+          for (final item in json['deliverables'] as List<dynamic>? ?? const [])
+            item as String,
+        ],
+        evidence: [
+          for (final item in json['evidence'] as List<dynamic>? ?? const [])
+            ProbeEvidenceSummary.fromJson(item as Map<String, dynamic>),
+        ],
+        probeRequested: (json['probe_requested'] as num?)?.toDouble(),
       );
 
   String describe() => [

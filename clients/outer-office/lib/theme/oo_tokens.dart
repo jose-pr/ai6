@@ -277,7 +277,7 @@ class OoTokens extends ThemeExtension<OoTokens> {
   /// The colour of a Mission or Session state; the state's name is always shown beside it.
   Color stateColor(String state) => switch (state) {
     'working' => success,
-    'blocked' || 'held' => warning,
+    'blocked' || 'held' || 'verifying' => warning,
     'stalled' || 'failed' || 'quarantined' => danger,
     'parked' => accent,
     _ => muted,

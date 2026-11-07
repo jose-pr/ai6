@@ -15,6 +15,7 @@ const boardStates = [
   'stalled',
   'parked',
   'quarantined',
+  'verifying',
   'done',
   'failed',
   'abandoned',

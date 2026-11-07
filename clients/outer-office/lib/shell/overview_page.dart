@@ -329,6 +329,7 @@ const activeMissionStates = [
   'stalled',
   'parked',
   'quarantined',
+  'verifying',
 ];
 
 /// A count that opens [route], the page filtered to what it counted.
@@ -509,6 +510,7 @@ class _ActiveOperations extends StatelessWidget {
             'stalled',
             'quarantined',
             'held',
+            'verifying',
           }.contains(mission.state),
         )
         ? (tokens.warning, 'needs attention')
