@@ -964,8 +964,9 @@ pub ai6::directorates::m::config::ConfigRecord::Station
 pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
+pub ai6::directorates::m::config::ConfigRecord::Watch
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 23]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 24]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -1171,7 +1172,7 @@ pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directora
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 23]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 24]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::ConfigProvider::definitions(&self, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope) -> core::result::Result<ai6::directorates::m::config::ConfigDefinitions, ai6::directorates::m::roster::RosterError>
@@ -2138,6 +2139,7 @@ pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::tr
 pub fn ai6::directorates::m::roster::Roster::select_agent(&self, &ai6::directorates::m::roster::AgentQuery<'_>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::settings(&self) -> &ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::Roster::subtree(&self, &str) -> alloc::vec::Vec<&str>
+pub fn ai6::directorates::m::roster::Roster::watches(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::watches::Watch>
 pub struct ai6::directorates::m::roster::RosterBuilder
 impl ai6::directorates::m::roster::RosterBuilder
 pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorates::m::roster::Agent) -> Self
@@ -2150,6 +2152,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directo
 pub fn ai6::directorates::m::roster::RosterBuilder::review(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::review::ReviewPolicy) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::watch(self, ai6::directorates::m::watches::Watch) -> Self
 pub struct ai6::directorates::m::roster::RosterError
 impl ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::kind(&self) -> ai6::directorates::m::roster::RosterErrorKind
@@ -2618,6 +2621,45 @@ pub fn ai6::directorates::m::vetting::review_target(&ai6::directorates::registry
 pub fn ai6::directorates::m::vetting::sleeper_of(&ai6::directorates::registry::store::Brief) -> core::option::Option<(alloc::string::String, alloc::string::String)>
 pub fn ai6::directorates::m::vetting::vet(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::VettingPolicy, &ai6::directorates::m::vetting::VettingContext) -> ai6::directorates::m::vetting::Vetting
 pub fn ai6::directorates::m::vetting::work_title(&ai6::directorates::registry::store::Brief) -> alloc::string::String
+pub mod ai6::directorates::m::watches
+#[non_exhaustive] pub enum ai6::directorates::m::watches::WatchScope
+pub ai6::directorates::m::watches::WatchScope::M
+pub ai6::directorates::m::watches::WatchScope::Operation(alloc::string::String)
+pub ai6::directorates::m::watches::WatchScope::Station(alloc::string::String)
+impl ai6::directorates::m::watches::WatchScope
+pub fn ai6::directorates::m::watches::WatchScope::operation(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::watches::WatchScope::station(&self) -> core::option::Option<&str>
+impl core::fmt::Display for ai6::directorates::m::watches::WatchScope
+pub fn ai6::directorates::m::watches::WatchScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::m::watches::WatchScope
+pub type ai6::directorates::m::watches::WatchScope::Err = alloc::string::String
+pub fn ai6::directorates::m::watches::WatchScope::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub struct ai6::directorates::m::watches::Watch
+pub ai6::directorates::m::watches::Watch::scope: ai6::directorates::m::watches::WatchScope
+pub ai6::directorates::m::watches::Watch::settings: ai6::directorates::m::watches::WatchDefinition
+impl ai6::directorates::m::watches::Watch
+pub fn ai6::directorates::m::watches::Watch::new(ai6::directorates::m::watches::WatchScope, ai6::directorates::m::watches::WatchDefinition) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::watches::WatchDefinition
+pub ai6::directorates::m::watches::WatchDefinition::agent: alloc::string::String
+pub ai6::directorates::m::watches::WatchDefinition::lease: ai6::bounds::Seconds
+pub ai6::directorates::m::watches::WatchDefinition::max_events_per_turn: ai6::bounds::Limit
+pub ai6::directorates::m::watches::WatchDefinition::max_turns_per_hour: ai6::bounds::Limit
+pub ai6::directorates::m::watches::WatchDefinition::max_waiting_events: ai6::bounds::Limit
+pub ai6::directorates::m::watches::WatchDefinition::operation: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::watches::WatchDefinition::turn_timeout: ai6::bounds::TimeLimit
+pub ai6::directorates::m::watches::WatchDefinition::wake_every: ai6::bounds::TimeLimit
+impl ai6::directorates::m::watches::WatchDefinition
+pub const ai6::directorates::m::watches::WatchDefinition::DEFAULTS: Self
+pub fn ai6::directorates::m::watches::WatchDefinition::cable_operation<'a>(&'a self, &'a ai6::directorates::m::watches::WatchScope) -> core::option::Option<&'a str>
+pub fn ai6::directorates::m::watches::WatchDefinition::lease(self, core::time::Duration) -> Self
+pub fn ai6::directorates::m::watches::WatchDefinition::max_turns_per_hour(self, ai6::bounds::Limit) -> Self
+pub fn ai6::directorates::m::watches::WatchDefinition::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::watches::WatchDefinition::validate(&self, &ai6::directorates::m::watches::WatchScope) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::watches::WatchDefinition::wake_every(self, ai6::bounds::TimeLimit) -> Self
+pub const ai6::directorates::m::watches::M_SCOPE: &str
+pub const ai6::directorates::m::watches::OPERATION_PREFIX: &str
+pub const ai6::directorates::m::watches::STATION_PREFIX: &str
+pub fn ai6::directorates::m::watches::watches_from_records(impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::watches::Watch>, alloc::string::String>
 pub mod ai6::directorates::medical
 pub mod ai6::directorates::medical::exposure
 #[non_exhaustive] pub enum ai6::directorates::medical::exposure::ExposurePreset
@@ -5176,8 +5218,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
 pub trait ai6::directorates::registry::backend::SealedStore
 pub fn ai6::directorates::registry::backend::SealedStore::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::SealedStore::remove_sealed(&self, &str) -> core::io::error::Result<bool>
@@ -5361,6 +5403,24 @@ pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_brief(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub trait ai6::directorates::registry::backend::WatchStore
+pub fn ai6::directorates::registry::backend::WatchStore::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::backend::WatchStore::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::backend::WatchStore::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::backend::WatchStore::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::backend::WatchStore::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
 pub fn ai6::directorates::registry::backend::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub fn ai6::directorates::registry::backend::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>>
 pub mod ai6::directorates::registry::bona_fides
@@ -6001,6 +6061,7 @@ pub ai6::directorates::registry::limits::RegistryLimits::stations: ai6::director
 pub ai6::directorates::registry::limits::RegistryLimits::timeline: ai6::directorates::registry::limits::TimelineLimits
 pub ai6::directorates::registry::limits::RegistryLimits::tokens: ai6::directorates::registry::limits::TokenLimits
 pub ai6::directorates::registry::limits::RegistryLimits::usage: ai6::directorates::registry::limits::UsageLimits
+pub ai6::directorates::registry::limits::RegistryLimits::watches: ai6::directorates::registry::watches::WatchLimits
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&self) -> ai6::bounds::Limit
 impl ai6::directorates::registry::limits::RegistryLimits
@@ -7220,6 +7281,12 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::refuse_held(&self, &str, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::withdraw_brief(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
 pub fn ai6::directorates::registry::sql::redact(&str) -> alloc::string::String
 pub fn ai6::directorates::registry::sql::weakenings(&str) -> alloc::vec::Vec<alloc::string::String>
 pub mod ai6::directorates::registry::store
@@ -7490,6 +7557,12 @@ pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_brief(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
 #[non_exhaustive] pub struct ai6::directorates::registry::store::FiledBrief
 pub ai6::directorates::registry::store::FiledBrief::attempts: u32
 pub ai6::directorates::registry::store::FiledBrief::brief: ai6::directorates::registry::store::Brief
@@ -7932,6 +8005,87 @@ pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_brief(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+pub mod ai6::directorates::registry::watches
+#[non_exhaustive] pub enum ai6::directorates::registry::watches::WatchError
+pub ai6::directorates::registry::watches::WatchError::HeldBy(alloc::string::String)
+pub ai6::directorates::registry::watches::WatchError::Io(core::io::error::Error)
+pub ai6::directorates::registry::watches::WatchError::NotFound
+pub ai6::directorates::registry::watches::WatchError::Stale
+impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::watches::WatchError
+pub fn ai6::directorates::registry::watches::WatchError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::registry::watches::WatchError
+pub fn ai6::directorates::registry::watches::WatchError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for ai6::directorates::registry::watches::WatchError
+pub fn ai6::directorates::registry::watches::WatchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::registry::watches::WatchControl
+pub ai6::directorates::registry::watches::WatchControl::at: f64
+pub ai6::directorates::registry::watches::WatchControl::by: alloc::string::String
+pub ai6::directorates::registry::watches::WatchControl::id: alloc::string::String
+pub ai6::directorates::registry::watches::WatchControl::note: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::watches::WatchLimits
+pub ai6::directorates::registry::watches::WatchLimits::controls: ai6::bounds::Limit
+pub ai6::directorates::registry::watches::WatchLimits::entry_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::watches::WatchLimits::logbook: ai6::bounds::Limit
+pub ai6::directorates::registry::watches::WatchLimits::record_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::watches::WatchLimits::records: ai6::bounds::Limit
+pub ai6::directorates::registry::watches::WatchLimits::seen: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::watches::WatchLimits
+pub fn ai6::directorates::registry::watches::WatchLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::watches::WatchLogEntry
+pub ai6::directorates::registry::watches::WatchLogEntry::at: f64
+pub ai6::directorates::registry::watches::WatchLogEntry::kind: alloc::string::String
+pub ai6::directorates::registry::watches::WatchLogEntry::text: alloc::string::String
+impl ai6::directorates::registry::watches::WatchLogEntry
+pub fn ai6::directorates::registry::watches::WatchLogEntry::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::watches::WatchRecord
+pub ai6::directorates::registry::watches::WatchRecord::agent: alloc::string::String
+pub ai6::directorates::registry::watches::WatchRecord::controls: alloc::vec::Vec<ai6::directorates::registry::watches::WatchControl>
+pub ai6::directorates::registry::watches::WatchRecord::fence: u64
+pub ai6::directorates::registry::watches::WatchRecord::handler: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::watches::WatchRecord::last_wake: core::option::Option<f64>
+pub ai6::directorates::registry::watches::WatchRecord::lease_expires: f64
+pub ai6::directorates::registry::watches::WatchRecord::logbook: alloc::vec::Vec<ai6::directorates::registry::watches::WatchLogEntry>
+pub ai6::directorates::registry::watches::WatchRecord::opened_at: f64
+pub ai6::directorates::registry::watches::WatchRecord::provider_session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::watches::WatchRecord::scope: alloc::string::String
+pub ai6::directorates::registry::watches::WatchRecord::seen: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::watches::WatchRecord::station: alloc::string::String
+pub ai6::directorates::registry::watches::WatchRecord::turns: alloc::vec::Vec<f64>
+impl ai6::directorates::registry::watches::WatchRecord
+pub fn ai6::directorates::registry::watches::WatchRecord::turns_since(&self, f64) -> usize
+#[non_exhaustive] pub struct ai6::directorates::registry::watches::WatchUpdate
+pub ai6::directorates::registry::watches::WatchUpdate::last_wake: core::option::Option<f64>
+pub ai6::directorates::registry::watches::WatchUpdate::log: alloc::vec::Vec<ai6::directorates::registry::watches::WatchLogEntry>
+pub ai6::directorates::registry::watches::WatchUpdate::seen: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::registry::watches::WatchUpdate::session: core::option::Option<core::option::Option<(alloc::string::String, alloc::string::String)>>
+pub ai6::directorates::registry::watches::WatchUpdate::taken_controls: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::watches::WatchUpdate::turn_at: core::option::Option<f64>
+impl ai6::directorates::registry::watches::WatchUpdate
+pub fn ai6::directorates::registry::watches::WatchUpdate::forget_session(self) -> Self
+pub fn ai6::directorates::registry::watches::WatchUpdate::log(self, ai6::directorates::registry::watches::WatchLogEntry) -> Self
+pub fn ai6::directorates::registry::watches::WatchUpdate::seen(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::watches::WatchUpdate::session(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::watches::WatchUpdate::took_controls(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::watches::WatchUpdate::woke(self, f64, bool) -> Self
+pub const ai6::directorates::registry::watches::TURN_WINDOW_SECS: f64
+pub trait ai6::directorates::registry::watches::WatchStore
+pub fn ai6::directorates::registry::watches::WatchStore::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::watches::WatchStore::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::watches::WatchStore::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::watches::WatchStore::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::watches::WatchStore::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
 pub mod ai6::directorates::section_00
 pub mod ai6::directorates::section_00::acp
 pub use ai6::directorates::section_00::acp::Authenticate
@@ -8464,7 +8618,7 @@ pub fn ai6::directorates::section_00::records::find_file(&std::path::Path, usize
 pub fn ai6::directorates::section_00::records::home(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
 pub mod ai6::settings
 pub mod ai6::settings::reference
-pub const ai6::settings::reference::DOCS: [&str; 5]
+pub const ai6::settings::reference::DOCS: [&str; 6]
 pub const ai6::settings::reference::OO_DART: &str
 pub fn ai6::settings::reference::rewritten(&str) -> core::result::Result<alloc::string::String, alloc::string::String>
 pub fn ai6::settings::reference::stale(&std::path::Path) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, alloc::string::String>
@@ -9129,8 +9283,9 @@ pub ai6::ConfigRecord::Station
 pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
+pub ai6::ConfigRecord::Watch
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 23]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 24]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -9623,6 +9778,18 @@ pub ai6::Vote::Pass
 pub ai6::Vote::Redo
 impl ai6::directorates::m::review::Vote
 pub const fn ai6::directorates::m::review::Vote::as_str(self) -> &'static str
+#[non_exhaustive] pub enum ai6::WatchScope
+pub ai6::WatchScope::M
+pub ai6::WatchScope::Operation(alloc::string::String)
+pub ai6::WatchScope::Station(alloc::string::String)
+impl ai6::directorates::m::watches::WatchScope
+pub fn ai6::directorates::m::watches::WatchScope::operation(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::watches::WatchScope::station(&self) -> core::option::Option<&str>
+impl core::fmt::Display for ai6::directorates::m::watches::WatchScope
+pub fn ai6::directorates::m::watches::WatchScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::m::watches::WatchScope
+pub type ai6::directorates::m::watches::WatchScope::Err = alloc::string::String
+pub fn ai6::directorates::m::watches::WatchScope::from_str(&str) -> core::result::Result<Self, Self::Err>
 #[non_exhaustive] pub struct ai6::AccessPolicy
 pub ai6::AccessPolicy::chief: alloc::vec::Vec<alloc::string::String>
 pub ai6::AccessPolicy::delegable: core::option::Option<alloc::vec::Vec<alloc::string::String>>
@@ -11272,6 +11439,12 @@ pub fn ai6::directorates::registry::store::FileRegistry::refuse_held(&self, &str
 pub fn ai6::directorates::registry::store::FileRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::store::FileRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::withdraw_brief(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::store::FileRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
 #[non_exhaustive] pub struct ai6::FiledBrief
 pub ai6::FiledBrief::attempts: u32
 pub ai6::FiledBrief::brief: ai6::directorates::registry::store::Brief
@@ -12090,6 +12263,7 @@ pub ai6::RegistryLimits::stations: ai6::directorates::registry::limits::StationL
 pub ai6::RegistryLimits::timeline: ai6::directorates::registry::limits::TimelineLimits
 pub ai6::RegistryLimits::tokens: ai6::directorates::registry::limits::TokenLimits
 pub ai6::RegistryLimits::usage: ai6::directorates::registry::limits::UsageLimits
+pub ai6::RegistryLimits::watches: ai6::directorates::registry::watches::WatchLimits
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&self) -> ai6::bounds::Limit
 impl ai6::directorates::registry::limits::RegistryLimits
@@ -12220,6 +12394,7 @@ pub fn ai6::directorates::m::roster::Roster::roles(&self) -> impl core::iter::tr
 pub fn ai6::directorates::m::roster::Roster::select_agent(&self, &ai6::directorates::m::roster::AgentQuery<'_>) -> core::result::Result<ai6::directorates::m::roster::Agent, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::Roster::settings(&self) -> &ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::Roster::subtree(&self, &str) -> alloc::vec::Vec<&str>
+pub fn ai6::directorates::m::roster::Roster::watches(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::m::watches::Watch>
 pub struct ai6::RosterBuilder
 impl ai6::directorates::m::roster::RosterBuilder
 pub fn ai6::directorates::m::roster::RosterBuilder::agent(self, ai6::directorates::m::roster::Agent) -> Self
@@ -12232,6 +12407,7 @@ pub fn ai6::directorates::m::roster::RosterBuilder::operation(self, ai6::directo
 pub fn ai6::directorates::m::roster::RosterBuilder::review(self, impl core::convert::Into<alloc::string::String>, ai6::directorates::m::review::ReviewPolicy) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::role(self, ai6::directorates::m::roster::AgentRole) -> Self
 pub fn ai6::directorates::m::roster::RosterBuilder::settings(self, ai6::directorates::m::roster::RosterSettings) -> Self
+pub fn ai6::directorates::m::roster::RosterBuilder::watch(self, ai6::directorates::m::watches::Watch) -> Self
 pub struct ai6::RosterError
 impl ai6::directorates::m::roster::RosterError
 pub fn ai6::directorates::m::roster::RosterError::kind(&self) -> ai6::directorates::m::roster::RosterErrorKind
@@ -13041,6 +13217,12 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::refuse_held(&self, &str, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_held(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
 pub fn ai6::directorates::registry::sql::SqlRegistry::requeue_held(&self, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::withdraw_brief(&self, &str, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::store::Brief>
+impl ai6::directorates::registry::watches::WatchStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::claim_watch(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::request_watch_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::watches::WatchControl, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::update_watch(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::watches::WatchUpdate) -> core::result::Result<ai6::directorates::registry::watches::WatchRecord, ai6::directorates::registry::watches::WatchError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watch(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::watches::WatchRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::watches(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::watches::WatchRecord>>
 #[non_exhaustive] pub struct ai6::SshAccess
 pub ai6::SshAccess::connect_timeout_secs: core::option::Option<u64>
 pub ai6::SshAccess::exit_grace_ms: core::option::Option<u64>
@@ -13553,6 +13735,28 @@ pub fn ai6::directorates::m::vetting::VettingPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::VoteAnswer
 pub ai6::VoteAnswer::reasons: alloc::vec::Vec<alloc::string::String>
 pub ai6::VoteAnswer::vote: ai6::directorates::m::review::Vote
+#[non_exhaustive] pub struct ai6::Watch
+pub ai6::Watch::scope: ai6::directorates::m::watches::WatchScope
+pub ai6::Watch::settings: ai6::directorates::m::watches::WatchDefinition
+impl ai6::directorates::m::watches::Watch
+pub fn ai6::directorates::m::watches::Watch::new(ai6::directorates::m::watches::WatchScope, ai6::directorates::m::watches::WatchDefinition) -> Self
+#[non_exhaustive] pub struct ai6::WatchDefinition
+pub ai6::WatchDefinition::agent: alloc::string::String
+pub ai6::WatchDefinition::lease: ai6::bounds::Seconds
+pub ai6::WatchDefinition::max_events_per_turn: ai6::bounds::Limit
+pub ai6::WatchDefinition::max_turns_per_hour: ai6::bounds::Limit
+pub ai6::WatchDefinition::max_waiting_events: ai6::bounds::Limit
+pub ai6::WatchDefinition::operation: core::option::Option<alloc::string::String>
+pub ai6::WatchDefinition::turn_timeout: ai6::bounds::TimeLimit
+pub ai6::WatchDefinition::wake_every: ai6::bounds::TimeLimit
+impl ai6::directorates::m::watches::WatchDefinition
+pub const ai6::directorates::m::watches::WatchDefinition::DEFAULTS: Self
+pub fn ai6::directorates::m::watches::WatchDefinition::cable_operation<'a>(&'a self, &'a ai6::directorates::m::watches::WatchScope) -> core::option::Option<&'a str>
+pub fn ai6::directorates::m::watches::WatchDefinition::lease(self, core::time::Duration) -> Self
+pub fn ai6::directorates::m::watches::WatchDefinition::max_turns_per_hour(self, ai6::bounds::Limit) -> Self
+pub fn ai6::directorates::m::watches::WatchDefinition::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::watches::WatchDefinition::validate(&self, &ai6::directorates::m::watches::WatchScope) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::watches::WatchDefinition::wake_every(self, ai6::bounds::TimeLimit) -> Self
 pub struct ai6::Watchdog
 impl ai6::directorates::medical::watchdog::Watchdog
 pub fn ai6::directorates::medical::watchdog::Watchdog::is_max_runtime_exceeded(&self) -> bool
@@ -14189,8 +14393,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
