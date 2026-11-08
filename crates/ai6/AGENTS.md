@@ -1921,7 +1921,7 @@ pub trait WatchStore;        // each watch's record, lease and logbook (watches.
 pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
-    + QuarantineStore + SessionContextStore + SessionStore + SleeperStore + SourceStore + TimelineStore
+    + QuarantineStore + ReportStore + SessionContextStore + SessionStore + SleeperStore + SourceStore + TimelineStore
     + UsageStore + VettingStore + WatchStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
@@ -1943,7 +1943,8 @@ pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits
     pub approvals: ApprovalLimits, pub assistant_log: AssistantLogLimits, pub audit: AuditLimits,
     pub briefs: BriefLimits, pub cables: CableLimits, pub clearance: ClearanceLimits,
     pub contexts: ContextLimits, pub files: FileLimits, pub held: HeldLimits, pub logbook: LogbookLimits,
-    pub proposals: ProposalLimits, pub quarantine: QuarantineLimits, pub sessions: SessionLimits,
+    pub proposals: ProposalLimits, pub quarantine: QuarantineLimits, pub reports: ReportLimits,
+    pub sessions: SessionLimits,
     pub sleepers: SleeperLimits, pub sources: SourceLimits, pub stations: StationLimits,
     pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits,
     pub watches: WatchLimits }
@@ -2800,6 +2801,97 @@ class authorisation) is spent and becomes a hold in the signer's name; a `prefer
 `auto_hold` it holds by itself and audits `agent.hold.applied`. Selection (`agents::select`,
 `reassign_if_unavailable`) passes held Agents over; `routes::standing_of` refuses a held route. Nothing
 touches a running Session.
+
+## Reports (`ai6::directorates::registry::reports`, `ai6::directorates::m::reports`)
+
+One record of something observed, in a scope, never deleted before `keep_closed`. Filing creates no
+Mission, brief or placement. Assessment and closing are not implemented: a Report is filed `open`.
+
+```rust
+// ai6::directorates::registry::reports
+pub enum ReportScope { Operation(String), Station(String), M } // "operation:ID", "station:ID", "m"; Display, FromStr, serde
+impl ReportScope { pub fn operation(&self) -> Option<&str>; }
+#[non_exhaustive] pub enum ReportState { Open, Assessed, Closed }     // snake_case; as_str, FromStr
+#[non_exhaustive] pub enum ReportFiler { Source { source, item }, Agent { agent, session /* provider
+    Session, or the Mission's ID until known */, mission }, Person { person }, Probe { probe },
+    Review { mission }, Watchdog }       // serde tag "type"; is_person(), session(), source_key()
+#[non_exhaustive] pub enum ReportLinkKind { Mission, Report, Decision, Evidence } // as_str, FromStr
+pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, id), mission(id)
+#[non_exhaustive] pub struct Tearline { pub text, pub classification: Option<String>, pub compartments: Vec<String> }
+    // new(text), classified, in_compartments; never above its Report, compartments within the Report's
+#[non_exhaustive] pub struct ReportAssessment { pub verdict, pub by, pub at: f64, pub comment: Option<String> }
+#[non_exhaustive] pub struct ReportResolution { pub by, pub at: f64, pub note: Option<String> }
+#[non_exhaustive] pub struct Report { pub id, pub scope: ReportScope, pub kind, pub severity: Severity,
+    pub title, pub text, pub filer: ReportFiler, pub links: Vec<ReportLink>, pub sub_source: Option<String>,
+    pub from: Option<f64>, pub credibility: Option<u8> /* 1..=6, unset until assessed */,
+    pub classification: Option<String>, pub handling: Option<String>, pub compartments: Vec<String>,
+    pub tearline: Option<Tearline>, pub priority: Option<String>, pub deadline: Option<f64>,
+    pub state: ReportState, pub assessment, pub resolution, pub created: f64, pub updated: f64 }
+impl Report { pub fn new(id, scope, kind, severity, title, text, filer, at) -> Self; // open
+    /* linked, via, information_from, believed, classified, handled, in_compartments, with_tearline,
+       prioritised, due */ pub fn untrusted(&self) -> bool /* all but a person's */;
+    pub fn about_mission(&self, id) -> bool;
+    pub fn validate(&self, &ReportLimits) -> io::Result<()>; } // InvalidInput: bounds, a marking or
+    // priority not in its list, credibility 1 with no Report or Evidence link
+#[non_exhaustive] #[derive(Default)] pub struct ReportFilter { pub scope, pub state, pub kind, pub mission, pub limit }
+    // all(), in_scope, about_mission, in_state, of_kind, at_most
+#[non_exhaustive] pub enum Reliability { A, B, C, D, E, F }   // Ord: A first; as_str, FromStr
+#[non_exhaustive] pub struct ReportSource { pub key, pub reliability: Reliability, pub rated: f64 } // new(key): F
+pub type ReportChange<'a> = &'a mut dyn FnMut(&mut Report) -> io::Result<()>;
+pub trait ReportStore {  // part of RegistryBackend; reports/SCOPE/ID.json, report-sources/; ai6_reports,
+                         // ai6_report_links, ai6_report_sources
+    fn file_report(&self, &Report) -> io::Result<()>;
+        // AlreadyExists; QuotaExceeded past per_session / per_operation (Agent filers, per scope,
+        // over window); InvalidData past `reports`; drops Reports closed longer than keep_closed
+    fn report(&self, id) -> io::Result<Option<Report>>;
+    fn reports(&self, &ReportFilter) -> io::Result<Vec<Report>>;
+        // priority (the settings' order, unset last), deadline, credibility, the source's
+        // reliability (no record: F), then oldest first; cut to `page` after ordering
+    fn change_report(&self, id, ReportChange<'_>) -> io::Result<Report>; // atomic; keeps ID, scope,
+        // filer and `created` (InvalidInput otherwise); NotFound
+    fn report_source(&self, key) -> io::Result<ReportSource>; // F when nobody rated it
+    fn put_report_source(&self, &ReportSource) -> io::Result<()>;
+}
+pub struct ReportLimits { pub record_bytes, reports, text_bytes, name_bytes /* also the title */, links,
+    page, per_session /* 20 */, per_operation /* 200 */: Limit, pub window: Seconds /* 3600 */,
+    pub keep_closed: TimeLimit /* none */, pub classifications /* unclassified, restricted,
+    confidential: lowest first */, handlings /* operation, compartments, peers */, priorities
+    /* critical, high, normal, low */: Vec<String>, pub clearances: BTreeMap<String, String>
+    /* person:ID, group:NAME or agent:CODENAME -> a classification; none: the lowest */ }
+impl ReportLimits { pub fn rank(&self, Option<&str>) -> Option<usize> /* unset is 0 */;
+    pub fn clearance<'a>(&self, subjects) -> usize; } // the highest that matches, else 0
+
+// ai6::directorates::m::reports
+pub trait ReportReader {   // answered from what is granted now
+    fn reads_scope(&self, &ReportScope) -> bool;  // mission.read on an Operation (a compartment's
+                                                  // crossing audited first); station.read
+    fn read_in(&self, compartment) -> bool;       // CompiledCompartments::person_read_in / field_read_in
+    fn subjects(&self) -> Vec<String>;            // what `clearances` is looked up by
+}
+#[non_exhaustive] pub enum ReportSight { Content, Tearline, Markings }
+pub fn sight(&dyn ReportReader, &Report, &ReportLimits) -> ReportSight;
+    // Content: the scope's read, read in to EACH compartment, cleared for the classification.
+    // Tearline: the scope's read and cleared for the tearline's marking. Else Markings, also for
+    // anything that only links to it. Nobody is exempt, a chief included.
+pub fn report_json(&Report, ReportSight, Option<&ReportSource>) -> Value;
+    // always id, scope, classification, handling, compartments, sight; never title or text below Content
+pub struct ReportMarkings { pub classification, pub handling, pub compartments, pub tearline: Option<TearlineFiling> }
+pub fn remark(&dyn ReportReader, &mut Report, ReportMarkings, &ReportLimits) -> Result<(), String>;
+    // the reader sees Content before and after, so lowering needs someone read in
+pub struct ReportFiling { pub title, pub text, pub kind, pub severity, pub priority, pub deadline,
+    pub information_from, pub sub_source, pub classification, pub handling, pub compartments,
+    pub tearline: Option<TearlineFiling>, pub links: Vec<LinkFiling> } // serde, unknown keys refused
+impl ReportFiling { pub fn into_report(self, scope, filer, links, at, &ReportLimits) -> Result<Report, String>; }
+pub fn new_report_id() -> String;   // "report-" + 32 hex
+```
+
+Every Session (feature `cables-mcp`) has `file_report` (against its Mission's Operation, linked to
+its Mission; a Head of Station round's goes to the logbook, check-in and channel and is also a
+`station` Report of its Station), `reports` and `read_report`, answering inside `<ai6-data>`; another
+Operation's content marks the Session `product:<operation>`. Universal Exports serves `POST`, `GET
+/v1/reports`, `GET /v1/reports/{id}` (`403` with the markings below Content), `PUT
+/v1/reports/{id}/markings` and `GET /v1/missions/{id}/reports`; filing needs `mission.create`, or
+`station.configure` on `station:ID` or `config:reports`.
 
 ## Promotion and clearance grants (`ai6::directorates::m::promotion`, `ai6::directorates::registry::clearance`)
 

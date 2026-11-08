@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   hourly turn and waiting-event quotas. A Station's watch has `station_report` and `file_report`.
   A watch is no Mission, brief or placement. Its record is the `WatchStore` family (SQL table
   `ai6_watches`, bounded by `[registry.limits.watches]`). `docs/watches.md`.
+- Reports: one Registry record for what is observed (`ai6::directorates::registry::reports`, both
+  backends), scoped to an Operation, a Station or M, with its filer and sub-source, links to Missions,
+  Reports, decisions and evidence, a state, credibility `1` to `6` (`1` only with a corroborating
+  link), a source reliability `A` to `F` (`F` when new), a priority and deadline, and markings: a
+  classification and handling mark from `[registry.limits.reports]`, compartments and a tearline.
+  Reading the content needs the scope's read, being read in to each compartment and a clearance at
+  or above the classification (`clearances`), for people and Agents alike; a link shows only the ID
+  and markings. Every Agent's Session has `file_report`, `reports` and `read_report`, rate limited per
+  Session and per scope; the Head of Station's round report is also a Station Report. People file,
+  list, show and remark them through `/v1/reports` and `GET /v1/missions/{id}/reports`, and with
+  `ai6ctl reports file|list|show`. Filing creates no Mission or brief.
 - Outer Office: the Missions board counts `verifying` Missions as waiting for a decision, and such a
   Mission's page shows its deliverables with their probe evidence and the final report, and lets a person
   with `mission.verify` probe again and decide done, redispatch (with an amendment) or failed.

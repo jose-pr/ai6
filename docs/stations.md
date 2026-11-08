@@ -282,8 +282,13 @@ name = "heads-of-station"
 heads-of-station = ["007", "008"]
 ```
 
-Every call checks again that its Mission is still a live round of this Station; a Session of
-any other role, or a round that is over, is refused.
+The same report is also kept as a [Report](reports.md) of the Station (kind `station`, linked to
+the round's Mission), read with `station.read` on `station:ID`; when it cannot be stored, the logbook
+entry stands and the answer says why.
+
+Every call checks again that its Mission is still a live round of this Station; a round that is over
+is refused. A Session of any other role has none of the Station's tools, and its `file_report` files
+a Report of its own Operation, not a round's report.
 
 ### Safe-house hygiene: fixed limits
 

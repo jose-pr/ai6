@@ -439,6 +439,27 @@ global one.
 | `keep_incidents` | 604,800 (7 days) | **Keep an incident for.** Seconds an incident is kept. |
 <!-- schema:registry.limits.quarantine:end -->
 
+`[registry.limits.reports]` ([Reports](reports.md))
+
+<!-- schema:registry.limits.reports:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `record_bytes` | 64 KiB | **Largest Report.** Bytes of one Report record. |
+| `reports` | 100,000 | Reports kept. |
+| `text_bytes` | 16 KiB | **Longest Report text.** Bytes of a Report's text. |
+| `name_bytes` | 256 | **Longest title or name.** Bytes of a Report's kind and title, and of each name on it: filer, links, compartments. |
+| `links` | 64 | **Links on a Report.** Links on one Report. |
+| `page` | 1,000 | **Reports in one list.** Reports one list returns. |
+| `per_session` | 20 | **Reports per Session in the window.** Reports one Agent Session may file in the window. |
+| `per_operation` | 200 | **Agent Reports per scope in the window.** Reports Agents together may file against one scope in the window. |
+| `window` | 3,600 | **Rate window.** Seconds the two counts above look back over. |
+| `keep_closed` | none | **Keep a closed Report for.** Seconds a closed Report is kept; `null` keeps it for good. |
+| `classifications` | `unclassified`, `restricted`, `confidential` | **Classifications, lowest first.** A Report carries one of these or none, which is the lowest; reading it needs a clearance at or above it. |
+| `handlings` | `operation`, `compartments`, `peers` | **Handling marks, narrowest first.** How far a Report may go. |
+| `priorities` | `critical`, `high`, `normal`, `low` | **Priorities, most urgent first.** A Report's proposed or assessed urgency; one without comes last. |
+| `clearances` | none | **Clearance per person, group or Agent.** The classification each reader may read up to, by subject (`person:ID`, `group:NAME` or `agent:CODENAME`); the highest of those that match counts, and a reader no entry names, or one naming a classification not in the list, reads the lowest. |
+<!-- schema:registry.limits.reports:end -->
+
 `[registry.limits.sessions]`
 
 <!-- schema:registry.limits.sessions:begin -->

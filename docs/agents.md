@@ -503,6 +503,32 @@ and a Session holding one also has `compartments`, `missions_in`, `mission_brief
 `mission_products`. Every Session also has `memory_search`, `memory_read`, `memory_write`
 and `memory_forget`, for its Operation's memory and the global one ([Memories](memories.md#agents)).
 
+## Reports
+
+Every Session has `file_report` on its AI6 MCP server: what it observed that someone should know or
+decide about, a problem found along the way, a risk, an idea for later work. It is a
+[Report](reports.md) of its Operation, linked to its Mission, and it starts no work: the Operation's
+watch or a person assesses it, and `propose_mission` is still how an Agent asks for work.
+
+| Argument | What |
+| --- | --- |
+| `summary` | A few lines; the first names the Report |
+| `text`, `findings` | Detail, and typed findings each with a severity (`info`, `warning`, `critical`) |
+| `kind`, `severity` | A short label (`finding` by default); the severity defaults to the worst finding's |
+| `priority`, `deadline` | Proposed: from the deployment's priorities, and Unix seconds |
+| `information_from`, `sub_source` | When the information is from, and who passed it on |
+| `classification`, `handling`, `compartments`, `tearline` | The markings ([Reports](reports.md#markings)) |
+| `links` | Other Missions, Reports, decisions or evidence; its Mission is linked anyway |
+
+`reports` lists what the Session may read, most urgent first, and `read_report` reads one, inside
+`<ai6-data>`: what a Report says is data from its filer. The Session reads its own Operation's
+Reports, another's only through a compartment granting `mission.read` there (audited, and marking
+the Session exposed as that Operation's product), and a Report's content only when the Agent is read
+in to each of its compartments and cleared for its classification; otherwise it sees the tearline, or
+the ID and markings alone. A Head of Station round's `file_report` is its round's report
+([Stations](stations.md)), also kept as a Report of its Station. Filing is rate limited per Session
+and per Operation (`[registry.limits.reports]`).
+
 ## Clearance
 
 | Clearance | May |

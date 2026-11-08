@@ -29,6 +29,7 @@ Outer Office, the operator app, needs the Flutter `main` SDK; see
 - Guides: [Operations](operations.md), [Stations](stations.md),
   [Theaters](theaters.md), [Missions and intake](missions.md), [Agents](agents.md),
   [Watches](watches.md),
+  [Reports](reports.md),
   [Terminals](terminals.md), [the Watchdog](watchdog.md), [Hooks](hooks.md) and
   [Examples](examples.md).
 - Rust API: [ai6](https://jose-pr.github.io/ai6/rust/ai6/),
