@@ -1968,13 +1968,13 @@ mod tests {
         assert_eq!(read.cipher_profiles.len(), 1);
         assert_eq!(read.cipher_profiles[0].as_str(), "fips-140-3-compliant");
         assert!(
-            read.weakened_against(&default).is_empty(),
+            read.non_defaults_against(&default).is_empty(),
             "modern is stricter"
         );
         let legacy = settings(Some(serde_json::json!({"profile": "legacy"})))
             .tls_policy()
             .unwrap();
-        assert!(!legacy.weakened_against(&default).is_empty());
+        assert!(!legacy.non_defaults_against(&default).is_empty());
         assert!(
             settings(Some(serde_json::json!({"profile": "lax"})))
                 .tls_policy()

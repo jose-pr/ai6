@@ -787,12 +787,12 @@ where
             .tls_policy()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         config.station.tls_weakened = policy
-            .weakened_against(&coqui_peer_tls::Policy::default())
+            .non_defaults_against(&coqui_peer_tls::Policy::default())
             .into_iter()
             .map(|weakening| {
                 format!(
                     "{} = {} (default {})",
-                    weakening.setting, weakening.value, weakening.strict
+                    weakening.setting, weakening.value, weakening.default
                 )
             })
             .collect();

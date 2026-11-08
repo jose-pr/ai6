@@ -12,8 +12,8 @@ use std::path::Path;
 
 pub use coqui_peer::{Digest, WaitingEntry, WaitingLimits};
 pub use coqui_peer_tls::{
-    Built, CaPolicy, Identity, PeerId, PeerIdentity, Pins, Policy, Trust, TrustStore,
-    TrustStoreExt, Weakening,
+    Built, CaPolicy, Identity, NonDefault, PeerId, PeerIdentity, Pins, Policy, Trust, TrustStore,
+    TrustStoreExt,
 };
 use coqui_peer_tls::{PeerError, client_config_with, server_config_with};
 use rustls::{ClientConfig, ServerConfig};
@@ -324,7 +324,7 @@ mod tests {
         let server_identity = Identity::generate().unwrap();
         let client_identity = Identity::generate().unwrap();
         let server = server_config(&server_identity, &trust_peers(peers.clone()), &policy).unwrap();
-        assert!(server.weakened.is_empty());
+        assert!(server.non_defaults.is_empty());
         let client =
             client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
         let refused = handshake(server.config, client.config).await;
@@ -414,7 +414,7 @@ mod tests {
         let mut policy = Policy::modern();
         policy.check_validity = false;
         let built = server_config(&identity, &Trust::AnyWithKeyProof, &policy).unwrap();
-        assert_eq!(built.weakened.len(), 1);
+        assert_eq!(built.non_defaults.len(), 1);
     }
 
     /// Runs one handshake over loopback. On success: the fingerprint each side saw of the
