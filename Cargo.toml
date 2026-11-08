@@ -24,17 +24,17 @@ publish = false
 
 [workspace.dependencies]
 # guatiao main, pinned until a release carries what these crates use.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "266baf9c9e0c4e03bedf8a830d8e434279f83b94" }
-guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "266baf9c9e0c4e03bedf8a830d8e434279f83b94", features = ["derive"] }
-guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "266baf9c9e0c4e03bedf8a830d8e434279f83b94", default-features = false }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "fe9efd3797ec5e178e1f9381db0e65146d2c866e" }
+guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "fe9efd3797ec5e178e1f9381db0e65146d2c866e", features = ["derive"] }
+guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "fe9efd3797ec5e178e1f9381db0e65146d2c866e", default-features = false }
 # Chooses a configuration document's format and hands it to a codec over guatiao's value.
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "add863cf24394a9c88e3aaf360287a6884fe9cf4" }
-coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "add863cf24394a9c88e3aaf360287a6884fe9cf4" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "af03569c43e1abc6599b95366e6df99bc88234b9" }
+coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "af03569c43e1abc6599b95366e6df99bc88234b9" }
 # Short-lived caches in front of the Directory and Authorizer a gateway loads.
-coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "add863cf24394a9c88e3aaf360287a6884fe9cf4", features = ["cache"] }
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "af03569c43e1abc6599b95366e6df99bc88234b9", features = ["cache"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
@@ -105,14 +105,14 @@ agent-client-protocol = { version = "3.6", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # The ACP client above the SDK: connect, resume and turn state, permission deciding, line transports.
 # Pinned by revision until a release.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d345437209eaea5b02091226a6bfa47e3" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
 # The agent session kind a handler returns and its events, shared with every project hosting agent
 # providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee19118d345437209eaea5b02091226a6bfa47e3" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b1bbd1ac316ccabcb946d713d854579434036f1e" }
 # A2A 1.0 over a proven coqui-agentic-peer link, for Liaison. The three move together: coqui-a2a
 # names the link crate and its channel crate at these revisions.
-coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "f6f17a979deadd566fbb6e8847cf518316b23f2d" }
-coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f6da790585e51345fa58f5e989cedd6500a0b962" }
+coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "4695046dd4718427dcc499b8fffb2064748a198b" }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "3cd5e04cfc7bc5d7a976a9e85d8eb808662db997" }
 coqui-web-channel = { git = "https://github.com/Boriken-Dev/coqui-web-channel.git", rev = "0b5b05c9af3417f6b13edc0fc7d9c86c02a63eca", features = ["websocket"] }
 # Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
 tower = { version = "0.5", default-features = false, features = ["util"] }
@@ -138,6 +138,9 @@ russh-sftp = "3"
 [profile.dev.package.sha2]
 opt-level = 3
 
-# coqui-agentic-peer depends on coqui-peer by git revision; one copy for the whole build.
+# The coqui-peer family reaches the build both from crates.io and by git revision; the git
+# revisions below are the ones coqui-agentic-peer and coqui-access name, so one copy builds.
 [patch.crates-io]
-coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "1f00bfe6319f64e7ec038a7003746f4f031d538c" }
+coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "b6aa1f47ca956578ffcd20f936c43e8663ed059a" }
+coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "50bd7ffc6ee75e9fdf1838d5668cfdbd07f286d1" }
+coqui-net-acl = { git = "https://github.com/Boriken-Dev/coqui-net-acl", rev = "1b21d825f66ffac5599136e07021534c2c9b3ad5" }
