@@ -2,7 +2,7 @@
 //! brief queue, held briefs and each brief's provenance ([`bona_fides`]), leases, Station
 //! check-ins, the Headquarters lease, audit records and access tokens, Source cursors and
 //! Sleeper approvals, green ink requests and decisions, pool accounts, Station logbooks, memories,
-//! the activity timeline, Moneypenny's conversation log and each Session's harness context; its relay carries Cables between Agents. [`backend`] names what a
+//! the activity timeline, Moneypenny's conversation log, each Session's harness context and each watch's record; its relay carries Cables between Agents. [`backend`] names what a
 //! store must do, one trait per record family, and opens a store by location: the
 //! [`FileRegistry`](store::FileRegistry) directory, or with the `sqlite` or `postgres`
 //! feature a SQL database (`sql::SqlRegistry`).
@@ -38,3 +38,4 @@ pub mod timeline;
 pub mod tracker;
 pub mod usage;
 pub mod vetting;
+pub mod watches;

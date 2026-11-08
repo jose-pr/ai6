@@ -39,6 +39,7 @@ mod sessions;
 mod stations;
 mod steps;
 mod transcripts;
+mod watches;
 
 use std::fmt;
 use std::io;

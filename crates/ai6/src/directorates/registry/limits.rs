@@ -119,6 +119,10 @@ pub struct RegistryLimits {
     #[schema(title = "The usage ledger")]
     #[map(default)]
     pub usage: UsageLimits,
+    /// `[registry.limits.watches]`: watch records.
+    #[schema(title = "Watch records")]
+    #[map(default)]
+    pub watches: super::watches::WatchLimits,
 }
 
 impl RegistryLimits {

@@ -243,6 +243,13 @@ CREATE TABLE IF NOT EXISTS ai6_logbooks (
     revision INTEGER NOT NULL
 );
 
+-- Each watch: its standing Session, lease and logbook as JSON, keyed by its scope.
+CREATE TABLE IF NOT EXISTS ai6_watches (
+    scope TEXT PRIMARY KEY,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ai6_source_cursors (
     operation TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -474,6 +481,14 @@ CREATE TABLE IF NOT EXISTS ai6_config_compartment (
 );
 
 CREATE TABLE IF NOT EXISTS ai6_config_review (
+    scope TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (scope, key)
+);
+
+CREATE TABLE IF NOT EXISTS ai6_config_watch (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,
