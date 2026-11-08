@@ -10,18 +10,156 @@
 //! The filer sets the markings. Changing them afterwards needs someone who reads the content both
 //! before and after the change, so lowering them needs someone read in.
 //!
-//! The caller answers [`ReportReader`] from what is granted at that moment (the access policy,
-//! `compartments::current`) and keeps nothing between calls.
+//! The lists a Report is marked and prioritised from are the `roster` record's `reports` table
+//! ([`ReportSettings`], read with [`settings`]); who is cleared for which classification is a
+//! [`ReportClearance`] record in the Registry, one per person, group or Agent. The caller reads
+//! both, and answers [`ReportReader`] from what is granted at that moment (the access policy,
+//! `compartments::current`), at every call, and keeps nothing between calls: a change holds from
+//! the next one.
 
+use guatiao::{FromValue, Schema, ToValue};
+use guatiao_intake::Form;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::directorates::m::config::{ConfigProvider, ConfigRecord, ConfigScope};
+use crate::directorates::m::records;
+use crate::directorates::m::roster::{RosterError, RosterErrorKind, RosterSettings};
 use crate::directorates::registry::limits::ReportLimits;
 use crate::directorates::registry::logbook::Severity;
 use crate::directorates::registry::reports::{
-    Report, ReportFiler, ReportLink, ReportScope, ReportSource, Tearline,
+    Report, ReportClearance, ReportFiler, ReportLink, ReportScope, ReportSource, Tearline,
 };
+
+/// The lists Reports are marked and prioritised from: the `reports` table of the `roster`
+/// record, a deployment policy kept by the configuration provider.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub struct ReportSettings {
+    /// A Report carries one of these or none, which is the lowest; reading it needs a clearance
+    /// at or above it.
+    #[schema(title = "Classifications, lowest first")]
+    #[map(default = ReportSettings::default().classifications)]
+    pub classifications: Vec<String>,
+    /// How far a Report may go.
+    #[schema(title = "Handling marks, narrowest first")]
+    #[map(default = ReportSettings::default().handlings)]
+    pub handlings: Vec<String>,
+    /// A Report's proposed or assessed urgency; one without comes last.
+    #[schema(title = "Priorities, most urgent first")]
+    #[map(default = ReportSettings::default().priorities)]
+    pub priorities: Vec<String>,
+}
+
+impl Default for ReportSettings {
+    fn default() -> Self {
+        let list = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+        Self {
+            classifications: list(&["unclassified", "restricted", "confidential"]),
+            handlings: list(&["operation", "compartments", "peers"]),
+            priorities: list(&["critical", "high", "normal", "low"]),
+        }
+    }
+}
+
+impl ReportSettings {
+    /// Where `classification` stands in `classifications`, lowest `0`; unset is the lowest, and
+    /// one not in the list is `None`.
+    pub fn rank(&self, classification: Option<&str>) -> Option<usize> {
+        match classification {
+            None => Some(0),
+            Some(name) => self.classifications.iter().position(|each| each == name),
+        }
+    }
+
+    /// Checks that `report`'s classification, handling mark and priority are in the lists, and
+    /// that its tearline is classified no higher than it.
+    ///
+    /// # Errors
+    ///
+    /// What is out of the lists, for the filer.
+    pub fn check(&self, report: &Report) -> Result<(), String> {
+        let listed = |value: &Option<String>, list: &[String]| {
+            value.as_ref().is_none_or(|value| list.contains(value))
+        };
+        if !listed(&report.classification, &self.classifications)
+            || !listed(&report.handling, &self.handlings)
+            || !listed(&report.priority, &self.priorities)
+        {
+            return Err(
+                "a report's classification, handling and priority are from the deployment's lists"
+                    .to_owned(),
+            );
+        }
+        if let Some(tearline) = &report.tearline {
+            let lower = match (
+                self.rank(tearline.classification.as_deref()),
+                self.rank(report.classification.as_deref()),
+            ) {
+                (Some(tearline), Some(report)) => tearline <= report,
+                _ => false,
+            };
+            if !lower {
+                return Err("a tearline is classified no higher than its report".to_owned());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The deployment's [`ReportSettings`] as `provider` holds them now: the `roster` record's
+/// `reports` table, or the defaults when there is none or it cannot be parsed.
+///
+/// # Errors
+///
+/// When the provider cannot be read; the caller refuses rather than answer from memory.
+pub fn settings(provider: &dyn ConfigProvider) -> Result<ReportSettings, RosterError> {
+    match provider.definitions(ConfigRecord::Roster, &ConfigScope::Global) {
+        Ok(definitions) => Ok(definitions
+            .records
+            .first()
+            .and_then(|(_, definition)| records::from_json::<RosterSettings>(definition).ok())
+            .unwrap_or_default()
+            .reports),
+        // A provider built in code lists nothing: its snapshot is what it holds.
+        Err(reason) if reason.kind() == RosterErrorKind::ReadOnly => {
+            Ok(provider.load("")?.roster.settings().reports.clone())
+        }
+        Err(reason) => Err(reason),
+    }
+}
+
+/// What a read is judged by: the deployment's lists and the clearances, both as they are now.
+#[derive(Debug, Clone, Copy)]
+pub struct ReportRules<'a> {
+    /// The lists.
+    pub settings: &'a ReportSettings,
+    /// Every clearance.
+    pub clearances: &'a [ReportClearance],
+}
+
+impl<'a> ReportRules<'a> {
+    /// Rules from `settings` and `clearances`.
+    pub fn new(settings: &'a ReportSettings, clearances: &'a [ReportClearance]) -> Self {
+        Self {
+            settings,
+            clearances,
+        }
+    }
+
+    /// The highest classification rank a clearance grants any of `subjects`; `0` for none, and
+    /// one naming a classification not in the list grants nothing above it.
+    pub fn clearance(&self, subjects: &[String]) -> usize {
+        self.clearances
+            .iter()
+            .filter(|clearance| subjects.contains(&clearance.subject))
+            .filter_map(|clearance| self.settings.rank(Some(&clearance.classification)))
+            .max()
+            .unwrap_or(0)
+    }
+}
 
 /// Who is asking about a Report, as granted now.
 pub trait ReportReader {
@@ -33,8 +171,8 @@ pub trait ReportReader {
     /// answers `false`.
     fn read_in(&self, compartment: &str) -> bool;
 
-    /// What the reader's clearance is looked up by in `[registry.limits.reports] clearances`:
-    /// `person:ID` and `group:NAME` for a person, `agent:CODENAME` for an Agent.
+    /// The subjects the reader's [`ReportClearance`]s are granted to: `person:ID` and
+    /// `group:NAME` for a person, `agent:CODENAME` for an Agent.
     fn subjects(&self) -> Vec<String>;
 }
 
@@ -53,13 +191,13 @@ pub enum ReportSight {
 /// Whether `reader` is cleared for `classification` and read in to each of `compartments`.
 fn cleared(
     reader: &dyn ReportReader,
-    limits: &ReportLimits,
+    rules: &ReportRules<'_>,
     classification: Option<&str>,
     compartments: &[String],
 ) -> bool {
-    let subjects = reader.subjects();
-    let held = limits.clearance(subjects.iter().map(String::as_str));
-    limits
+    let held = rules.clearance(&reader.subjects());
+    rules
+        .settings
         .rank(classification)
         .is_some_and(|needed| held >= needed)
         && compartments
@@ -69,13 +207,13 @@ fn cleared(
 
 /// What `reader` sees of `report`. Without the scope's read it is [`ReportSight::Markings`], as
 /// for anything that only links to it.
-pub fn sight(reader: &dyn ReportReader, report: &Report, limits: &ReportLimits) -> ReportSight {
+pub fn sight(reader: &dyn ReportReader, report: &Report, rules: &ReportRules<'_>) -> ReportSight {
     if !reader.reads_scope(&report.scope) {
         return ReportSight::Markings;
     }
     if cleared(
         reader,
-        limits,
+        rules,
         report.classification.as_deref(),
         &report.compartments,
     ) {
@@ -85,7 +223,7 @@ pub fn sight(reader: &dyn ReportReader, report: &Report, limits: &ReportLimits) 
         Some(tearline)
             if cleared(
                 reader,
-                limits,
+                rules,
                 tearline.classification.as_deref(),
                 &tearline.compartments,
             ) =>
@@ -158,7 +296,7 @@ pub fn report_json(report: &Report, sight: ReportSight, source: Option<&ReportSo
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReportMarkings {
-    /// From `[registry.limits.reports] classifications`; unset is the lowest.
+    /// From [`ReportSettings::classifications`]; unset is the lowest.
     #[serde(default)]
     pub classification: Option<String>,
     /// From `handlings`.
@@ -181,9 +319,9 @@ pub fn remark(
     reader: &dyn ReportReader,
     report: &mut Report,
     markings: ReportMarkings,
-    limits: &ReportLimits,
+    rules: &ReportRules<'_>,
 ) -> Result<(), String> {
-    if sight(reader, report, limits) != ReportSight::Content {
+    if sight(reader, report, rules) != ReportSight::Content {
         return Err(
             "changing a report's markings needs someone read in to it and cleared for it"
                 .to_owned(),
@@ -196,7 +334,7 @@ pub fn remark(
     changed.tearline = markings.tearline.map(TearlineFiling::into_tearline);
     if !cleared(
         reader,
-        limits,
+        rules,
         changed.classification.as_deref(),
         &changed.compartments,
     ) {
@@ -204,9 +342,7 @@ pub fn remark(
             "you may mark a report only as far as you are cleared and read in yourself".to_owned(),
         );
     }
-    changed
-        .validate(limits)
-        .map_err(|error| error.to_string())?;
+    rules.settings.check(&changed)?;
     *report = changed;
     Ok(())
 }
@@ -258,7 +394,7 @@ pub struct ReportFiling {
     /// `info`, `warning` or `critical`; `info` when left out.
     #[serde(default)]
     pub severity: Option<String>,
-    /// From `[registry.limits.reports] priorities`.
+    /// From [`ReportSettings::priorities`].
     #[serde(default)]
     pub priority: Option<String>,
     /// When it needs an answer by, as Unix seconds.
@@ -270,7 +406,7 @@ pub struct ReportFiling {
     /// Who passed it on to the filer.
     #[serde(default)]
     pub sub_source: Option<String>,
-    /// From `[registry.limits.reports] classifications`; unset is the lowest.
+    /// From [`ReportSettings::classifications`]; unset is the lowest.
     #[serde(default)]
     pub classification: Option<String>,
     /// From `handlings`.
@@ -306,6 +442,7 @@ impl ReportFiling {
         links: impl IntoIterator<Item = ReportLink>,
         at: f64,
         limits: &ReportLimits,
+        settings: &ReportSettings,
     ) -> Result<Report, String> {
         let severity = match self.severity.as_deref() {
             None => Severity::Info,
@@ -338,6 +475,7 @@ impl ReportFiling {
         report.compartments = self.compartments;
         report.tearline = self.tearline.map(TearlineFiling::into_tearline);
         report.validate(limits).map_err(|error| error.to_string())?;
+        settings.check(&report)?;
         Ok(report)
     }
 }
@@ -345,7 +483,6 @@ impl ReportFiling {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::collections::BTreeMap;
 
     use super::*;
     use crate::directorates::registry::reports::ReportLinkKind;
@@ -374,15 +511,17 @@ mod tests {
         }
     }
 
-    fn limits() -> ReportLimits {
-        ReportLimits {
-            clearances: BTreeMap::from([
-                ("person:cleared".to_owned(), "confidential".to_owned()),
-                ("group:analysts".to_owned(), "restricted".to_owned()),
-                ("agent:007".to_owned(), "unknown-mark".to_owned()),
-            ]),
-            ..ReportLimits::default()
-        }
+    fn clearances() -> Vec<ReportClearance> {
+        [
+            ("person:cleared", "confidential"),
+            ("group:analysts", "restricted"),
+            ("agent:007", "unknown-mark"),
+        ]
+        .into_iter()
+        .map(|(subject, classification)| {
+            ReportClearance::new(subject, classification, "person:chief", 1.0)
+        })
+        .collect()
     }
 
     fn operation() -> ReportScope {
@@ -417,33 +556,34 @@ mod tests {
 
     #[test]
     fn content_needs_the_scope_each_compartment_and_the_clearance() {
-        let limits = limits();
+        let (settings, clearances) = (ReportSettings::default(), clearances());
+        let rules = ReportRules::new(&settings, &clearances);
         let report = marked();
         let full = reader(&["person:cleared"], &["KESTREL"]);
-        assert_eq!(sight(&full, &report, &limits), ReportSight::Content);
+        assert_eq!(sight(&full, &report, &rules), ReportSight::Content);
         // Read in but below its classification: the tearline, which is restricted.
         let analyst = reader(&["person:x", "group:analysts"], &["KESTREL"]);
-        assert_eq!(sight(&analyst, &report, &limits), ReportSight::Tearline);
+        assert_eq!(sight(&analyst, &report, &rules), ReportSight::Tearline);
         // Cleared but not read in: still the tearline, which names no compartment.
         let outsider = reader(&["person:cleared"], &[]);
-        assert_eq!(sight(&outsider, &report, &limits), ReportSight::Tearline);
+        assert_eq!(sight(&outsider, &report, &rules), ReportSight::Tearline);
         // Below the tearline's marking too, or an unknown classification: markings alone.
         for nobody in [
             reader(&["person:x"], &["KESTREL"]),
             reader(&["agent:007"], &["KESTREL"]),
         ] {
-            assert_eq!(sight(&nobody, &report, &limits), ReportSight::Markings);
+            assert_eq!(sight(&nobody, &report, &rules), ReportSight::Markings);
         }
         // Without the scope's read, even full clearance sees markings, as a link shows.
         let elsewhere = Given {
             scopes: Vec::new(),
             ..reader(&["person:cleared"], &["KESTREL"])
         };
-        assert_eq!(sight(&elsewhere, &report, &limits), ReportSight::Markings);
+        assert_eq!(sight(&elsewhere, &report, &rules), ReportSight::Markings);
         // No tearline: markings.
         let mut bare = report.clone();
         bare.tearline = None;
-        assert_eq!(sight(&analyst, &bare, &limits), ReportSight::Markings);
+        assert_eq!(sight(&analyst, &bare, &rules), ReportSight::Markings);
     }
 
     #[test]
@@ -471,7 +611,8 @@ mod tests {
 
     #[test]
     fn lowering_markings_needs_someone_read_in() {
-        let limits = limits();
+        let (settings, clearances) = (ReportSettings::default(), clearances());
+        let rules = ReportRules::new(&settings, &clearances);
         let lower = ReportMarkings {
             classification: Some("restricted".to_owned()),
             tearline: None,
@@ -480,33 +621,33 @@ mod tests {
         // Someone who reads only the tearline cannot lower it.
         let mut report = marked();
         let analyst = reader(&["group:analysts"], &["KESTREL"]);
-        assert!(remark(&analyst, &mut report, lower.clone(), &limits).is_err());
+        assert!(remark(&analyst, &mut report, lower.clone(), &rules).is_err());
         assert_eq!(report, marked(), "a refusal changes nothing");
         // Someone read in and cleared can.
         let full = reader(&["person:cleared"], &["KESTREL"]);
-        remark(&full, &mut report, lower, &limits).unwrap();
+        remark(&full, &mut report, lower, &rules).unwrap();
         assert_eq!(report.classification.as_deref(), Some("restricted"));
         assert!(report.compartments.is_empty());
-        assert_eq!(sight(&analyst, &report, &limits), ReportSight::Content);
+        assert_eq!(sight(&analyst, &report, &rules), ReportSight::Content);
         // Nobody marks it past what they themselves hold.
         let past = ReportMarkings {
             compartments: vec!["OTHER".to_owned()],
             ..ReportMarkings::default()
         };
-        assert!(remark(&full, &mut report, past, &limits).is_err());
+        assert!(remark(&full, &mut report, past, &rules).is_err());
         // Raising within what they hold is theirs to do.
         let raise = ReportMarkings {
             classification: Some("confidential".to_owned()),
             compartments: vec!["KESTREL".to_owned()],
             ..ReportMarkings::default()
         };
-        remark(&full, &mut report, raise, &limits).unwrap();
-        assert_eq!(sight(&analyst, &report, &limits), ReportSight::Markings);
+        remark(&full, &mut report, raise, &rules).unwrap();
+        assert_eq!(sight(&analyst, &report, &rules), ReportSight::Markings);
     }
 
     #[test]
     fn a_filing_becomes_a_report_with_its_links() {
-        let limits = limits();
+        let settings = ReportSettings::default();
         let filing: ReportFiling = serde_json::from_value(json!({
             "title": "disk",
             "text": "full",
@@ -523,7 +664,8 @@ mod tests {
                 ReportFiler::Watchdog,
                 [ReportLink::mission("G-1")],
                 5.0,
-                &limits,
+                &ReportLimits::default(),
+                &settings,
             )
             .unwrap();
         assert!(report.id.starts_with("report-"));
@@ -542,9 +684,44 @@ mod tests {
             let filed = serde_json::from_value::<ReportFiling>(refused.clone())
                 .map_err(|error| error.to_string())
                 .and_then(|filing| {
-                    filing.into_report(operation(), ReportFiler::Watchdog, [], 5.0, &limits)
+                    filing.into_report(
+                        operation(),
+                        ReportFiler::Watchdog,
+                        [],
+                        5.0,
+                        &ReportLimits::default(),
+                        &settings,
+                    )
                 });
             assert!(filed.is_err(), "{refused}");
         }
+    }
+
+    #[test]
+    fn the_lists_are_the_roster_records_and_default_without_one() {
+        use crate::directorates::m::config::FileProvider;
+
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        assert_eq!(settings(&provider).unwrap(), ReportSettings::default());
+        std::fs::write(
+            root.path().join("operations.toml"),
+            "[roster.reports]\npriorities = [\"now\", \"later\"]\n",
+        )
+        .unwrap();
+        let read = settings(&provider).unwrap();
+        assert_eq!(read.priorities, ["now", "later"]);
+        assert_eq!(
+            read.classifications,
+            ReportSettings::default().classifications
+        );
+        let mut report = marked();
+        report.priority = Some("high".to_owned());
+        assert!(
+            read.check(&report).is_err(),
+            "high is not in this deployment's list"
+        );
+        report.priority = Some("now".to_owned());
+        read.check(&report).unwrap();
     }
 }

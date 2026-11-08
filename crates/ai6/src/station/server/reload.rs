@@ -19,6 +19,8 @@ use crate::directorates::m::compartments::{self, CompiledCompartments};
 use crate::directorates::m::config::{
     ConfigProvider, ConfigRevision, ConfigSnapshot, ConfigStatus,
 };
+#[cfg(feature = "cables-mcp")]
+use crate::directorates::m::reports::{self, ReportSettings};
 use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind};
 use crate::directorates::q::LoadoutCatalog;
 use crate::directorates::registry::store::AuditRecord;
@@ -98,6 +100,23 @@ impl LiveConfig {
         match &self.source {
             Some(source) => compartments::current(source.as_ref()),
             None => Ok(CompiledCompartments::default()),
+        }
+    }
+
+    /// The lists Reports are marked and prioritised from, read from the provider now; without
+    /// one, the running roster's.
+    ///
+    /// # Errors
+    ///
+    /// When the provider cannot be read: the caller refuses, and nothing answers from memory.
+    #[cfg(feature = "cables-mcp")]
+    pub(super) fn report_settings(&self) -> Result<ReportSettings, RosterError> {
+        match &self.source {
+            Some(source) => reports::settings(source.as_ref()),
+            None => Ok(self
+                .roster()
+                .map(|roster| roster.settings().reports.clone())
+                .unwrap_or_default()),
         }
     }
 

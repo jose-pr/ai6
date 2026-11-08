@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::Path as FsPath;
 use std::sync::Arc;
 
@@ -17,12 +16,8 @@ const AGENTS: &str = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"fi
                       [agent.licensed]\nhandler = \"mock-recorder\"\nclearance = \"00\"\n";
 
 /// A Station reading its configuration from `root`, with `limits` on Reports; `agent:licensed`
-/// is cleared to `confidential` and `agent:007` to `restricted`.
-fn station(root: &FsPath, mut limits: ReportLimits) -> DaemonState {
-    limits.clearances = BTreeMap::from([
-        ("agent:licensed".to_owned(), "confidential".to_owned()),
-        ("agent:007".to_owned(), "restricted".to_owned()),
-    ]);
+/// is cleared to `confidential` and `agent:007` to `restricted` in the Registry.
+fn station(root: &FsPath, limits: ReportLimits) -> DaemonState {
     let mut state = test_state(root, "clearance = \"00\"\n[operation.B]\n", AGENTS);
     state.intake = Arc::new(FileRegistry::open(root.join("registry")).with_limits(
         RegistryLimits {
@@ -40,6 +35,20 @@ fn station(root: &FsPath, mut limits: ReportLimits) -> DaemonState {
         state.roster.clone(),
         None,
     ));
+    for (subject, classification) in [
+        ("agent:licensed", "confidential"),
+        ("agent:007", "restricted"),
+    ] {
+        state
+            .intake
+            .put_report_clearance(&ReportClearance::new(
+                subject,
+                classification,
+                "person:chief",
+                1.0,
+            ))
+            .unwrap();
+    }
     state
 }
 
@@ -275,6 +284,9 @@ fn a_classification_above_the_agents_is_refused_and_its_tearline_shown_in_its_pl
     let refused = read(&state, &lower, &without);
     assert_eq!(refused["status"], "refused");
     assert!(!refused.to_string().contains("secret detail"));
+    // Revoked in the Registry, the next call holds it to the lowest: not even the tearline.
+    assert!(state.intake.revoke_report_clearance("agent:007").unwrap());
+    assert_eq!(read(&state, &lower, &with_tearline)["status"], "refused");
 }
 
 #[test]

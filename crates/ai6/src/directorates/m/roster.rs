@@ -26,6 +26,7 @@ use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
 use crate::directorates::m::records;
 use crate::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS;
+use crate::directorates::m::reports::ReportSettings;
 use crate::directorates::m::review::{ReviewChoice, ReviewPolicy, policies_from_records};
 use crate::directorates::m::scorecard::{ScorecardDefinition, ScorecardPolicy};
 use crate::directorates::m::stewardship::StewardshipPolicy;
@@ -857,6 +858,10 @@ pub struct RosterSettings {
     #[schema(title = "Largest compartment")]
     #[map(default = RosterSettings::default().max_compartment_rules)]
     pub max_compartment_rules: Limit,
+    /// `[roster.reports]`: the lists Reports are marked and prioritised from.
+    #[schema(title = "Reports")]
+    #[map(default)]
+    pub reports: ReportSettings,
 }
 
 impl Default for RosterSettings {
@@ -865,6 +870,7 @@ impl Default for RosterSettings {
         Self {
             max_operation_depth: Limit::at(DEFAULT_MAX_OPERATION_DEPTH as u64),
             max_compartment_rules: Limit::at(DEFAULT_MAX_COMPARTMENT_RULES as u64),
+            reports: ReportSettings::default(),
         }
     }
 }
@@ -879,6 +885,13 @@ impl RosterSettings {
     #[must_use]
     pub fn with_max_operation_depth(mut self, depth: Limit) -> Self {
         self.max_operation_depth = depth;
+        self
+    }
+
+    /// These settings with the Report lists `reports`.
+    #[must_use]
+    pub fn with_reports(mut self, reports: ReportSettings) -> Self {
+        self.reports = reports;
         self
     }
 

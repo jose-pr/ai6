@@ -240,7 +240,15 @@ fn full_example(record: ConfigRecord) -> Value {
             "gateway": {"conversations": 3, "conversation_age": 60, "token_ttl": 60},
             "pages": {"max_pages": 3, "network": "own", "scripts": false, "open_ttl": 60}
         }),
-        ConfigRecord::Roster => json!({"max_operation_depth": 3, "max_compartment_rules": 100}),
+        ConfigRecord::Roster => json!({
+            "max_operation_depth": 3,
+            "max_compartment_rules": 100,
+            "reports": {
+                "classifications": ["open", "secret"],
+                "handlings": ["here"],
+                "priorities": ["now", "later"]
+            }
+        }),
         ConfigRecord::Review => json!({
             "panel": [
                 {"role": "reviewer", "weight": 2, "veto": true},

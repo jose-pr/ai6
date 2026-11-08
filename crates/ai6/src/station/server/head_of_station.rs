@@ -234,6 +234,10 @@ impl Desk {
                 links,
                 state.clock.now() as f64,
                 &state.intake.limits().reports,
+                &state
+                    .config
+                    .report_settings()
+                    .unwrap_or_else(|_| state.roster.settings().reports.clone()),
             )
             .and_then(|stored| {
                 state

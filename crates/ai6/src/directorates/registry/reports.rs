@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use super::limits::ReportLimits;
 use super::logbook::{Severity, station_key};
 use super::store::{FileRegistry, invalid_data, validate_registry_key, validate_station_id};
+use crate::directorates::m::reports::ReportSettings;
 
 /// What a Report is filed against.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -411,11 +412,11 @@ pub struct Report {
     /// judged); unset until assessed. `1` needs a corroborating Report or evidence link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credibility: Option<u8>,
-    /// The classification a reader's clearance must meet, from `[registry.limits.reports]
-    /// classifications`; unset is the lowest.
+    /// The classification a reader's clearance must meet, from the `roster` record's
+    /// `reports.classifications`; unset is the lowest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<String>,
-    /// How far it may go, from `handlings`.
+    /// How far it may go, from `reports.handlings`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handling: Option<String>,
     /// The compartments a reader must be read in to, each of them.
@@ -424,7 +425,7 @@ pub struct Report {
     /// What those cleared for its own marking read in the Report's place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tearline: Option<Tearline>,
-    /// How urgent, from `priorities`: the filer's proposal until assessed.
+    /// How urgent, from `reports.priorities`: the filer's proposal until assessed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
     /// When it needs an answer by, as Unix seconds.
@@ -570,9 +571,10 @@ impl Report {
     /// # Errors
     ///
     /// `InvalidInput` naming what is out of bounds: an ID or scope that is not a key, an empty
-    /// or long kind, title or text, too many links, a long ID or name, a marking or priority not
-    /// in the settings' lists, a tearline marked above the Report, credibility `1` with no
-    /// corroborating link, or a time that is not finite.
+    /// or long kind, title or text, too many links, a long ID or name, a tearline in a
+    /// compartment the Report is not in, credibility `1` with no corroborating link, or a time
+    /// that is not finite. Whether its markings and priority are in the deployment's lists is
+    /// `ReportSettings::check`, since those lists are configuration, not Registry bounds.
     pub fn validate(&self, limits: &ReportLimits) -> io::Result<()> {
         validate_registry_key(&self.id)?;
         self.scope.validate()?;
@@ -622,17 +624,6 @@ impl Report {
                 "a report's links and filer carry names, each in bounds",
             ));
         }
-        let listed = |value: &Option<String>, list: &[String]| {
-            value.as_ref().is_none_or(|value| list.contains(value))
-        };
-        if !listed(&self.classification, &limits.classifications)
-            || !listed(&self.handling, &limits.handlings)
-            || !listed(&self.priority, &limits.priorities)
-        {
-            return Err(bad(
-                "a report's classification, handling and priority are from the lists in the settings",
-            ));
-        }
         if !limits.links.allows(self.compartments.len())
             || self.compartments.iter().any(|name| !named(name))
             || self.sub_source.as_deref().is_some_and(|name| !named(name))
@@ -645,21 +636,12 @@ impl Report {
             if !text_in_bounds(&tearline.text) {
                 return Err(bad("a tearline's text is in the bounds of a report's text"));
             }
-            let lower = match (
-                limits.rank(tearline.classification.as_deref()),
-                limits.rank(self.classification.as_deref()),
-            ) {
-                (Some(tearline), Some(report)) => tearline <= report,
-                _ => false,
-            };
             let within = tearline
                 .compartments
                 .iter()
                 .all(|name| self.compartments.contains(name));
-            if !lower || !within {
-                return Err(bad(
-                    "a tearline is classified no higher than its report, in compartments of its report",
-                ));
+            if !within {
+                return Err(bad("a tearline's compartments are its report's"));
             }
         }
         match self.credibility {
@@ -692,9 +674,9 @@ impl Report {
     }
 }
 
-/// Which Reports to list. Every set field must match.
+/// Which Reports to list, and the priorities they are ordered by. Every set field must match.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReportFilter {
     /// Only this scope.
     pub scope: Option<ReportScope>,
@@ -706,12 +688,35 @@ pub struct ReportFilter {
     pub mission: Option<String>,
     /// At most this many; the Registry's `page` bounds it anyway.
     pub limit: Option<usize>,
+    /// The deployment's priorities, most urgent first; a Report with another or none comes
+    /// after them.
+    pub priorities: Vec<String>,
+}
+
+impl Default for ReportFilter {
+    fn default() -> Self {
+        Self {
+            scope: None,
+            state: None,
+            kind: None,
+            mission: None,
+            limit: None,
+            priorities: ReportSettings::default().priorities,
+        }
+    }
 }
 
 impl ReportFilter {
-    /// Every Report, up to the Registry's page.
+    /// Every Report, up to the Registry's page, ordered by the default priorities.
     pub fn all() -> Self {
         Self::default()
+    }
+
+    /// Ordered by `priorities`, most urgent first.
+    #[must_use]
+    pub fn ordered_by(mut self, priorities: Vec<String>) -> Self {
+        self.priorities = priorities;
+        self
     }
 
     /// Only `scope`.
@@ -877,7 +882,7 @@ impl ReportSource {
 /// and age (oldest first). Unset priority, deadline and credibility come last, and a source
 /// without a record counts as `F`.
 pub(super) fn order_reports(
-    limits: &ReportLimits,
+    priorities: &[String],
     sources: &[ReportSource],
     reports: &mut [Report],
 ) {
@@ -892,8 +897,8 @@ pub(super) fn order_reports(
         let priority = report
             .priority
             .as_ref()
-            .and_then(|wanted| limits.priorities.iter().position(|name| name == wanted))
-            .unwrap_or(limits.priorities.len());
+            .and_then(|wanted| priorities.iter().position(|name| name == wanted))
+            .unwrap_or(priorities.len());
         (
             priority,
             report.deadline.unwrap_or(f64::INFINITY),
@@ -911,6 +916,69 @@ pub(super) fn order_reports(
             .then(a.4.total_cmp(&b.4))
             .then_with(|| left.id.cmp(&right.id))
     });
+}
+
+/// Who may read Reports up to which classification: one record per subject, granted by a
+/// person and revocable at once.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportClearance {
+    /// `person:ID`, `group:NAME` or `agent:CODENAME`.
+    pub subject: String,
+    /// The highest classification the subject reads, from the `roster` record's
+    /// `reports.classifications`.
+    pub classification: String,
+    /// Who granted it.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
+}
+
+impl ReportClearance {
+    /// `subject` cleared to `classification`, granted by `by` at `at`.
+    pub fn new(
+        subject: impl Into<String>,
+        classification: impl Into<String>,
+        by: impl Into<String>,
+        at: f64,
+    ) -> Self {
+        Self {
+            subject: subject.into(),
+            classification: classification.into(),
+            by: by.into(),
+            at,
+        }
+    }
+
+    /// Checks the subject's form and the bounds of its names.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a subject that is not `person:`, `group:` or `agent:` and a name, or a
+    /// name out of bounds.
+    pub fn validate(&self, limits: &ReportLimits) -> io::Result<()> {
+        let named = |text: &str| {
+            !text.trim().is_empty()
+                && limits.name_bytes.allows(text.len())
+                && !text.contains(char::is_control)
+        };
+        let subject = self.subject.split_once(':').is_some_and(|(kind, name)| {
+            matches!(kind, "person" | "group" | "agent") && !name.is_empty()
+        });
+        if !subject
+            || !named(&self.subject)
+            || !named(&self.classification)
+            || !named(&self.by)
+            || !self.at.is_finite()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a clearance names person:ID, group:NAME or agent:CODENAME and a classification",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// A change to a stored Report, applied where the store holds it.
@@ -965,6 +1033,27 @@ pub trait ReportStore {
     ///
     /// `InvalidInput` for a record out of bounds; I/O errors otherwise.
     fn put_report_source(&self, source: &ReportSource) -> io::Result<()>;
+
+    /// Every clearance, by subject. Unreadable ones are skipped, which clears nobody.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors.
+    fn report_clearances(&self) -> io::Result<Vec<ReportClearance>>;
+
+    /// Stores a clearance, replacing the subject's.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a record out of bounds; I/O errors otherwise.
+    fn put_report_clearance(&self, clearance: &ReportClearance) -> io::Result<()>;
+
+    /// Removes the subject's clearance; `false` when it had none.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors.
+    fn revoke_report_clearance(&self, subject: &str) -> io::Result<bool>;
 }
 
 /// Refuses `report` when its Agent's Session, or its scope, filed too much in the window.
@@ -1055,6 +1144,10 @@ impl FileRegistry {
 
     fn report_sources_root(&self) -> PathBuf {
         self.root().join("report-sources")
+    }
+
+    fn report_clearances_root(&self) -> PathBuf {
+        self.root().join("report-clearances")
     }
 
     fn scope_directories(&self, scope: Option<&ReportScope>) -> io::Result<Vec<PathBuf>> {
@@ -1166,7 +1259,7 @@ impl ReportStore for FileRegistry {
             .filter(|report| filter.matches(report))
             .collect();
         let sources = self.read_sources()?;
-        order_reports(&self.limits.reports, &sources, &mut found);
+        order_reports(&filter.priorities, &sources, &mut found);
         found.truncate(filter.page(&self.limits.reports));
         Ok(found)
     }
@@ -1205,6 +1298,52 @@ impl ReportStore for FileRegistry {
             &bytes,
         )
     }
+
+    fn report_clearances(&self) -> io::Result<Vec<ReportClearance>> {
+        let entries = match fs::read_dir(self.report_clearances_root()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut clearances = Vec::new();
+        for entry in entries {
+            let path = entry?.path();
+            if let Ok(bytes) = fs::read(&path)
+                && let Ok(clearance) = serde_json::from_slice::<ReportClearance>(&bytes)
+                && clearance.validate(&self.limits.reports).is_ok()
+                && path.file_stem().and_then(|stem| stem.to_str())
+                    == Some(station_key(&clearance.subject).as_str())
+            {
+                clearances.push(clearance);
+            }
+        }
+        clearances.sort_by(|left, right| left.subject.cmp(&right.subject));
+        Ok(clearances)
+    }
+
+    fn put_report_clearance(&self, clearance: &ReportClearance) -> io::Result<()> {
+        clearance.validate(&self.limits.reports)?;
+        let bytes = serde_json::to_vec(clearance).map_err(io::Error::other)?;
+        let _lock = self.lock()?;
+        let directory = self.report_clearances_root();
+        fs::create_dir_all(&directory)?;
+        self.write_atomic(
+            &directory.join(format!("{}.json", station_key(&clearance.subject))),
+            &bytes,
+        )
+    }
+
+    fn revoke_report_clearance(&self, subject: &str) -> io::Result<bool> {
+        let _lock = self.lock()?;
+        let path = self
+            .report_clearances_root()
+            .join(format!("{}.json", station_key(subject)));
+        match fs::remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1221,7 +1360,8 @@ mod tests {
         a_new_source_is_f_until_rated,
         a_change_keeps_what_was_filed_and_stays_in_bounds,
         an_agents_storm_is_refused_per_session_and_per_scope,
-        closed_reports_go_after_their_age_and_the_count_is_bounded
+        closed_reports_go_after_their_age_and_the_count_is_bounded,
+        a_clearance_is_kept_per_subject_and_revoked_at_once
     );
 
     fn agent(session: &str, mission: &str) -> ReportFiler {
@@ -1324,11 +1464,7 @@ mod tests {
             watchdog("b3", operation("G"), "finding", "  ", 1.0),
             watchdog("b4", operation("G/.."), "finding", "t", 1.0),
             watchdog("b5", operation("G"), "finding", "t", f64::NAN),
-            watchdog("b6", operation("G"), "finding", "t", 1.0).classified("cosmic"),
-            watchdog("b7", operation("G"), "finding", "t", 1.0).prioritised("whenever"),
-            // A tearline above its Report, or in a compartment the Report is not in.
-            watchdog("b8", operation("G"), "finding", "t", 1.0)
-                .with_tearline(Tearline::new("x").classified("restricted")),
+            // A tearline in a compartment the Report is not in.
             watchdog("b9", operation("G"), "finding", "t", 1.0)
                 .with_tearline(Tearline::new("x").in_compartments(vec!["K".to_owned()])),
         ] {
@@ -1401,6 +1537,15 @@ mod tests {
             ids(registry.reports(&ReportFilter::all().at_most(2)).unwrap()),
             ["critical", "normal-soon"],
             "the page is cut after ordering"
+        );
+        // The deployment's own list orders them: here low first; normal is then unlisted, so
+        // it falls back on the deadline.
+        let low_first = ReportFilter::all()
+            .ordered_by(vec!["low".to_owned(), "critical".to_owned()])
+            .at_most(3);
+        assert_eq!(
+            ids(registry.reports(&low_first).unwrap()),
+            ["low", "critical", "normal-soon"]
         );
     }
 
@@ -1501,7 +1646,7 @@ mod tests {
                 Ok(())
             }),
             registry.change_report("r", &mut |report| {
-                report.classification = Some("cosmic".to_owned());
+                report.title = String::new();
                 Ok(())
             }),
         ] {
@@ -1634,5 +1779,39 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
+    }
+
+    fn a_clearance_is_kept_per_subject_and_revoked_at_once(store: &dyn Store) {
+        let registry = store.handle();
+        assert!(registry.report_clearances().unwrap().is_empty());
+        let ana = ReportClearance::new("person:ana", "confidential", "person:chief", 5.0);
+        let security = ReportClearance::new("group:security", "restricted", "person:chief", 6.0);
+        registry.put_report_clearance(&ana).unwrap();
+        registry.put_report_clearance(&security).unwrap();
+        // Another handle on the same storage sees them at once.
+        let other = store.handle();
+        assert_eq!(other.report_clearances().unwrap(), [security.clone(), ana]);
+        let lowered = ReportClearance::new("person:ana", "restricted", "person:chief", 7.0);
+        registry.put_report_clearance(&lowered).unwrap();
+        assert_eq!(
+            other.report_clearances().unwrap(),
+            [security.clone(), lowered],
+            "one per subject"
+        );
+        assert!(registry.revoke_report_clearance("person:ana").unwrap());
+        assert!(!registry.revoke_report_clearance("person:ana").unwrap());
+        assert_eq!(other.report_clearances().unwrap(), [security]);
+        for bad in [
+            ReportClearance::new("ana", "restricted", "person:chief", 1.0),
+            ReportClearance::new("operation:G", "restricted", "person:chief", 1.0),
+            ReportClearance::new("person:", "restricted", "person:chief", 1.0),
+            ReportClearance::new("person:ana", "", "person:chief", 1.0),
+        ] {
+            assert_eq!(
+                registry.put_report_clearance(&bad).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{bad:?}"
+            );
+        }
     }
 }

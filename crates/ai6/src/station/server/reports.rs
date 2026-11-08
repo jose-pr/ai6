@@ -26,11 +26,11 @@ use crate::directorates::m::compartments::{
 };
 use crate::directorates::m::memories::{bounded, fenced};
 use crate::directorates::m::reports::{
-    ReportFiling, ReportReader, ReportSight, report_json, sight,
+    ReportFiling, ReportReader, ReportRules, ReportSettings, ReportSight, report_json, sight,
 };
 use crate::directorates::medical::exposure::product_source;
 use crate::directorates::registry::reports::{
-    Report, ReportFiler, ReportFilter, ReportLink, ReportScope, ReportState,
+    Report, ReportClearance, ReportFiler, ReportFilter, ReportLink, ReportScope, ReportState,
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -52,6 +52,10 @@ struct SessionReader<'a> {
     compiled: Option<CompiledCompartments>,
     /// Each Operation crossed into in this call, so one is audited once.
     crossed: Mutex<BTreeMap<String, bool>>,
+    /// The deployment's lists, as the provider holds them now.
+    settings: ReportSettings,
+    /// Every clearance, as the Registry holds them now.
+    clearances: Vec<ReportClearance>,
 }
 
 impl SessionReader<'_> {
@@ -149,6 +153,14 @@ impl ReportDesk {
         let clearance = agents::effective(&state, Some(&reader.operation), &reader.agent)
             .map_err(|_| UNAVAILABLE.to_owned())?
             .clearance;
+        let settings = state
+            .config
+            .report_settings()
+            .map_err(|_| UNAVAILABLE.to_owned())?;
+        let clearances = state
+            .intake
+            .report_clearances()
+            .map_err(|_| UNAVAILABLE.to_owned())?;
         let caller = SessionReader {
             state: &state,
             reader,
@@ -161,6 +173,8 @@ impl ReportDesk {
             station,
             compiled: state.config.compartments().ok(),
             crossed: Mutex::default(),
+            settings,
+            clearances,
         };
         Ok(work(&state, &caller))
     }
@@ -189,6 +203,10 @@ impl ReportDesk {
             [ReportLink::mission(mission.clone())],
             state.clock.now() as f64,
             &state.intake.limits().reports,
+            &state
+                .config
+                .report_settings()
+                .map_err(|_| UNAVAILABLE.to_owned())?,
         )?;
         state
             .intake
@@ -262,14 +280,16 @@ impl ReportDesk {
                 }
                 filter = filter.clone().about_mission(mission);
             }
-            let limits = &state.intake.limits().reports;
+            let filter = filter
+                .clone()
+                .ordered_by(caller.settings.priorities.clone());
             let reports = match state.intake.reports(&filter) {
                 Ok(reports) => reports,
                 Err(_) => return refused("the reports could not be read"),
             };
             let shown: Vec<Value> = reports
                 .iter()
-                .map(|report| self.shown(state, caller, report, limits))
+                .map(|report| self.shown(state, caller, report))
                 .collect();
             json!({ "reports": shown })
         })?;
@@ -296,8 +316,7 @@ impl ReportDesk {
             if !caller.reads_scope(&report.scope) {
                 return refused("no such report");
             }
-            let limits = &state.intake.limits().reports;
-            let shown = self.shown(state, caller, &report, limits);
+            let shown = self.shown(state, caller, &report);
             if shown["sight"] == "markings" {
                 return json!({
                     "status": "refused",
@@ -314,14 +333,9 @@ impl ReportDesk {
     }
 
     /// `report` as `caller` may see it; content from another Operation marks the Session.
-    fn shown(
-        &self,
-        state: &DaemonState,
-        caller: &SessionReader<'_>,
-        report: &Report,
-        limits: &crate::directorates::registry::limits::ReportLimits,
-    ) -> Value {
-        let seen = sight(caller, report, limits);
+    fn shown(&self, state: &DaemonState, caller: &SessionReader<'_>, report: &Report) -> Value {
+        let rules = ReportRules::new(&caller.settings, &caller.clearances);
+        let seen = sight(caller, report, &rules);
         if seen != ReportSight::Markings
             && let Some(operation) = report.scope.operation()
             && operation != caller.reader.operation

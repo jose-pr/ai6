@@ -6,8 +6,8 @@ use std::io;
 use super::db::{Tx, Value};
 use super::{SqlRegistry, from_json, to_json};
 use crate::directorates::registry::reports::{
-    Report, ReportChange, ReportFilter, ReportSource, ReportState, ReportStore, apply_change,
-    check_rate, closed_before, parse_report, report_bytes, window_start,
+    Report, ReportChange, ReportClearance, ReportFilter, ReportSource, ReportState, ReportStore,
+    apply_change, check_rate, closed_before, parse_report, report_bytes, window_start,
 };
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
@@ -151,14 +151,14 @@ impl ReportStore for SqlRegistry {
         };
         // The deployment's priorities, most urgent first; one not in the list, or none, last.
         let mut arms = String::new();
-        for (rank, priority) in limits.priorities.iter().enumerate() {
+        for (rank, priority) in filter.priorities.iter().enumerate() {
             params.push(priority.as_str().into());
             arms.push_str(&format!("WHEN ${} THEN {rank} ", params.len()));
         }
         let priority = if arms.is_empty() {
             "0".to_owned()
         } else {
-            format!("CASE r.priority {arms}ELSE {} END", limits.priorities.len())
+            format!("CASE r.priority {arms}ELSE {} END", filter.priorities.len())
         };
         params.push(
             i64::try_from(filter.page(limits))
@@ -233,6 +233,55 @@ impl ReportStore for SqlRegistry {
                 ],
             )?;
             Ok(())
+        })
+    }
+
+    fn report_clearances(&self) -> io::Result<Vec<ReportClearance>> {
+        let limits = &self.limits.reports;
+        let rows = self.read(|tx| {
+            tx.query(
+                "SELECT record FROM ai6_report_clearances ORDER BY subject",
+                &[],
+            )
+        })?;
+        let mut clearances = Vec::with_capacity(rows.len());
+        for row in rows {
+            if let Ok(clearance) = from_json::<ReportClearance>(&row.text(0)?, "report clearance")
+                && clearance.validate(limits).is_ok()
+            {
+                clearances.push(clearance);
+            }
+        }
+        Ok(clearances)
+    }
+
+    fn put_report_clearance(&self, clearance: &ReportClearance) -> io::Result<()> {
+        clearance.validate(&self.limits.reports)?;
+        let text = to_json(clearance)?;
+        self.write(|tx, revision| {
+            tx.execute(
+                "DELETE FROM ai6_report_clearances WHERE subject = $1",
+                &[clearance.subject.as_str().into()],
+            )?;
+            tx.execute(
+                "INSERT INTO ai6_report_clearances (subject, record, revision) VALUES ($1, $2, $3)",
+                &[
+                    clearance.subject.as_str().into(),
+                    text.into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn revoke_report_clearance(&self, subject: &str) -> io::Result<bool> {
+        self.write(|tx, _| {
+            let removed = tx.execute(
+                "DELETE FROM ai6_report_clearances WHERE subject = $1",
+                &[subject.into()],
+            )?;
+            Ok(removed > 0)
         })
     }
 }

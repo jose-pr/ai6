@@ -542,6 +542,13 @@ CREATE TABLE IF NOT EXISTS ai6_report_sources (
     revision BIGINT NOT NULL
 );
 
+-- Who reads Reports up to which classification: one JSON record per person, group or Agent.
+CREATE TABLE IF NOT EXISTS ai6_report_clearances (
+    subject TEXT PRIMARY KEY,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);
+
 -- The issues a Mission is linked to, as one JSON list per Mission.
 CREATE TABLE IF NOT EXISTS ai6_mission_issues (
     mission_id TEXT PRIMARY KEY,

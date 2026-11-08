@@ -4993,6 +4993,72 @@
           "title": "Largest compartment",
           "description": "How many read-in and cover pairs one compartment may have.",
           "default": 10000
+        },
+        "reports": {
+          "type": "object",
+          "properties": {
+            "classifications": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Classifications, lowest first",
+              "description": "A Report carries one of these or none, which is the lowest; reading it needs a clearance at or above it.",
+              "default": [
+                "unclassified",
+                "restricted",
+                "confidential"
+              ]
+            },
+            "handlings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Handling marks, narrowest first",
+              "description": "How far a Report may go.",
+              "default": [
+                "operation",
+                "compartments",
+                "peers"
+              ]
+            },
+            "priorities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Priorities, most urgent first",
+              "description": "A Report's proposed or assessed urgency; one without comes last.",
+              "default": [
+                "critical",
+                "high",
+                "normal",
+                "low"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "title": "Reports",
+          "description": "`[roster.reports]`: the lists Reports are marked and prioritised from.",
+          "default": {
+            "classifications": [
+              "unclassified",
+              "restricted",
+              "confidential"
+            ],
+            "handlings": [
+              "operation",
+              "compartments",
+              "peers"
+            ],
+            "priorities": [
+              "critical",
+              "high",
+              "normal",
+              "low"
+            ]
+          }
         }
       },
       "additionalProperties": false

@@ -1419,6 +1419,24 @@ mod tests {
     }
 
     #[test]
+    fn no_report_clearance_or_marking_list_is_a_bootstrap_setting() {
+        // Who is cleared for what, and the marking lists, are the Registry's and the roster's.
+        let reports = crate::settings::schema("registry.limits.reports").unwrap();
+        let keys = reports["properties"].as_object().unwrap();
+        for key in ["clearances", "classifications", "handlings", "priorities"] {
+            assert!(!keys.contains_key(key), "{key} is a bootstrap setting");
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(FILE_NAME);
+            std::fs::write(&path, format!("[registry.limits.reports]\n{key} = []\n")).unwrap();
+            assert!(Bootstrap::find(Some(&path)).is_err(), "{key} is accepted");
+        }
+        assert!(
+            crate::settings::schema("reports").is_none(),
+            "no [reports] section"
+        );
+    }
+
+    #[test]
     fn how_long_a_replacement_waits_is_read_and_is_no_weakening() {
         let default = located("");
         assert_eq!(
