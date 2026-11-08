@@ -792,7 +792,14 @@ mod tests {
             .unwrap();
         assert!(registry.request_watch_wake("station:s", " ", "").is_err());
         let waiting = registry.watch("station:s").unwrap().unwrap();
-        assert_eq!(waiting.controls, std::slice::from_ref(&control));
+        assert_eq!(waiting.controls.len(), 1);
+        let kept = &waiting.controls[0];
+        assert_eq!(
+            (&kept.id, &kept.by, &kept.note),
+            (&control.id, &control.by, &control.note)
+        );
+        // A time read back from JSON may differ in its last place.
+        assert!((kept.at - control.at).abs() < 1e-6);
         let taken = registry
             .update_watch(
                 "station:s",
