@@ -535,6 +535,19 @@ global one.
 | `kept_days` | 8 | Days of usage kept. |
 <!-- schema:registry.limits.usage:end -->
 
+`[registry.limits.watches]`: each watch's record ([Watches](watches.md)).
+
+<!-- schema:registry.limits.watches:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `records` | 1,024 | **Watch records.** Watch records the Registry keeps. |
+| `record_bytes` | 1 MiB | **Largest watch record.** Bytes of one watch's record. |
+| `logbook` | 100 | **Logbook entries per watch.** Logbook entries kept per watch, and handed to a fresh Session; past it the oldest go. |
+| `entry_bytes` | 2 KiB | **Longest logbook entry.** Bytes of one logbook entry's text, or of a control's note; a longer entry is cut. |
+| `seen` | 1,024 | **Events remembered per watch.** Events a watch remembers being told of, so it is not told twice; past it the oldest go. |
+| `controls` | 32 | **Controls waiting per watch.** Controls waiting for a watch's Station; past it a control is refused. |
+<!-- schema:registry.limits.watches:end -->
+
 ### `ai6ctl`
 
 `ai6ctl` has no file of its own. `--timeout SECONDS` (default 5, fractions allowed, `0` for no
@@ -817,6 +830,8 @@ refused, and a running Station keeps the last good one.
 | `operation_access` | `operation_access` | no | no | live, in Universal Exports | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
 | `unex` | `unex` | no | yes | restart | the whole file: Universal Exports' sign-in, limits and assistant |
 | `compartment` | `compartments` | no | no | at each call | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
+| `review` | `reviews` | no | no | live | `[review.<name>]`: [review policies](review.md) |
+| `watch` | `watches` | no | no | live | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live
 reaches requests, the scheduler and new Sessions at once; running Sessions keep what they

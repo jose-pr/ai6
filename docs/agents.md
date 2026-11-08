@@ -479,6 +479,11 @@ wake_on_cable = true   # the default; false leaves its Cables for its own read_c
 wakes_per_hour = 60    # the default; 0 wakes none
 ```
 
+An Agent that keeps a [watch](watches.md) takes its Cables in the watch's Session instead: each
+is a `cable` event of a wake, counted against the watch's own `max_turns_per_hour`, not
+`wakes_per_hour`. A watch is not a Mission, and its Agent is best kept for the watch alone: a
+Cable to the Agent goes to whichever of its Sessions reads it first.
+
 Neither path adds authority: the relay asks for the sender's and the receiver's grants and for
 any compartment again when it wakes a Session or fills a brief, so a grant revoked since the
 Cable was sent refuses it. A Cable never creates a Mission, a brief or a placement; it waits for

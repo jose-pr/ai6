@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Watches: a standing Session per scope (`m`, `operation:<codename>`, `station:<id>`), configured
+  as `[watch.<scope>]` (the `watch` family: `agent`, `operation`, `wake_every`,
+  `max_turns_per_hour`, `max_events_per_turn`, `max_waiting_events`, `turn_timeout`, `lease`). The
+  scope's Station claims it like a Session's lease (M's on the Headquarters Station, an Operation's
+  on a Station it allows, a Station's on itself), takes it over when the holder goes dark, keeps
+  one provider Session and resumes it, and starts a fresh one with the watch's logbook when the
+  resume fails. It wakes for a Mission entering `verifying`, a Cable to its Agent, a quarantine or
+  a dark Station, a control (`WatchStore::request_watch_wake`) and a timer, one turn per wake, with
+  hourly turn and waiting-event quotas. A Station's watch has `station_report` and `file_report`.
+  A watch is no Mission, brief or placement. Its record is the `WatchStore` family (SQL table
+  `ai6_watches`, bounded by `[registry.limits.watches]`). `docs/watches.md`.
 - Outer Office: the Missions board counts `verifying` Missions as waiting for a decision, and such a
   Mission's page shows its deliverables with their probe evidence and the final report, and lets a person
   with `mission.verify` probe again and decide done, redispatch (with an amendment) or failed.

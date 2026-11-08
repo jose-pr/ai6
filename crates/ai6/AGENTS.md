@@ -782,6 +782,7 @@ impl RosterBuilder {
     pub fn role(self, role: AgentRole) -> Self;
     pub fn cover(self, cover: Cover) -> Self;      // replaces a built-in of the same name
     pub fn assistant(self, settings: AssistantSettings) -> Self;
+    pub fn watch(self, watch: Watch) -> Self;      // build checks its Agent and Operations
     pub fn settings(self, settings: RosterSettings) -> Self;
     pub fn max_operation_depth(self, depth: Limit) -> Self;   // Limit::UNBOUNDED: no bound
     pub fn max_compartment_rules(self, rules: Limit) -> Self; // pairs per compartment
@@ -1284,15 +1285,15 @@ pub trait ConfigProvider: Send + Sync {
     /// Global and each Station scope that holds records (default: Global).
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError>;
 }
-pub const IMPORT_ORDER: [ConfigRecord; 22];   // each family after those it refers to
+pub const IMPORT_ORDER: [ConfigRecord; 24];   // each family after those it refers to
 pub fn family_document(record: ConfigRecord, records) -> Result<String, RosterError>;   // TOML
 pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError>;
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
     Mcp, Overlay, Secret, Pool, Cables, Plugin, Station, Tls, Access, OperationAccess, Unex,
-    Roster, Compartment, Review }
+    Roster, Compartment, Review, Watch }        // Watch: `[watch.<scope>]`, file `watches`, global
 impl ConfigRecord {
-    pub const ALL: [Self; 22];                  // Roster first
+    pub const ALL: [Self; 24];                  // Roster first
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
     pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex", "roster"
     pub fn from_name(name: &str) -> Option<Self>;
@@ -1916,11 +1917,12 @@ pub trait TimelineStore;     // the activity timeline (timeline.rs)
 pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
+pub trait WatchStore;        // each watch's record, lease and logbook (watches.rs)
 pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
     + QuarantineStore + SessionContextStore + SessionStore + SleeperStore + SourceStore + TimelineStore
-    + UsageStore + VettingStore + Send + Sync {}
+    + UsageStore + VettingStore + WatchStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
@@ -1943,7 +1945,8 @@ pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits
     pub contexts: ContextLimits, pub files: FileLimits, pub held: HeldLimits, pub logbook: LogbookLimits,
     pub proposals: ProposalLimits, pub quarantine: QuarantineLimits, pub sessions: SessionLimits,
     pub sleepers: SleeperLimits, pub sources: SourceLimits, pub stations: StationLimits,
-    pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits }
+    pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits,
+    pub watches: WatchLimits }
 impl RegistryLimits {
     pub fn weakenings(&self) -> Vec<String>;   // "registry.limits.T.KEY VALUE is looser than the default D"
     pub fn held_record_bytes(&self) -> Limit;  // briefs.record_bytes + 64 KiB
@@ -3644,6 +3647,66 @@ LogbookStore::file_station_report(report: &StationReport) -> io::Result<()>   //
 LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         // oldest first; empty when none
 ```
 
+## Watches (`ai6::directorates::m::watches`, `ai6::directorates::registry::watches`)
+
+A watch is one standing Session per scope (`m`, `operation:<codename>`, `station:<id>`), run by
+the Station the scope names (M's on the Headquarters Station, an Operation's on an execution
+Station it allows, a Station's on itself) and woken by its area's events, one turn per wake. It is
+not a Mission: no Mission record, brief, placement, attempt or Session record names it. Its record
+(`watches/<hex of scope>.json`, SQL table `ai6_watches`) holds its lease, fence, provider Session
+and handler, logbook, last wake, the turns of the last hour, what it was told, and controls.
+`docs/watches.md` has the behaviour. `Watch`, `WatchDefinition` and `WatchScope` are at the crate
+root.
+
+```rust
+pub const M_SCOPE: &str = "m"; pub const OPERATION_PREFIX: &str = "operation:"; pub const STATION_PREFIX: &str = "station:";
+#[non_exhaustive] pub enum WatchScope { M, Operation(String), Station(String) }  // FromStr, Display
+impl WatchScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self) -> Option<&str>; }
+/// `[watch.<scope>]`; ToValue, FromValue, Schema, Form; deny_unknown_fields.
+#[non_exhaustive] pub struct WatchDefinition {
+    pub agent: String, pub operation: Option<String>,   // operation: M's/a Station's Cables; an Operation's may only repeat its own
+    pub wake_every: TimeLimit,            // 3600; none: events only
+    pub max_turns_per_hour: Limit,        // 30, counted on the record across Stations
+    pub max_events_per_turn: Limit,       // 50
+    pub max_waiting_events: Limit,        // 500; past it the oldest are dropped and logged
+    pub turn_timeout: TimeLimit,          // 1800; the turn is interrupted
+    pub lease: Seconds,                   // 60; a lapsed lease is taken over
+}
+impl WatchDefinition {
+    pub const DEFAULTS: Self; pub fn new(agent) -> Self;
+    pub fn wake_every(self, TimeLimit) -> Self; pub fn max_turns_per_hour(self, Limit) -> Self; pub fn lease(self, Duration) -> Self;
+    pub fn cable_operation<'a>(&'a self, scope: &'a WatchScope) -> Option<&'a str>;
+    pub fn validate(&self, scope: &WatchScope) -> Result<(), String>;
+}
+#[non_exhaustive] pub struct Watch { pub scope: WatchScope, pub settings: WatchDefinition }   // Watch::new(scope, settings)
+pub fn watches_from_records(records) -> Result<BTreeMap<String, Watch>, String>;
+Roster::watches(&self) -> &BTreeMap<String, Watch>;   // by scope; `watches.toml` in Roster::load
+
+// ai6::directorates::registry::watches
+pub const TURN_WINDOW_SECS: f64 = 3_600.0;
+#[non_exhaustive] pub struct WatchLimits { pub records: Limit /*1024*/, pub record_bytes: Limit /*1 MiB*/,
+    pub logbook: Limit /*100*/, pub entry_bytes: Limit /*2 KiB, longer cut*/, pub seen: Limit /*1024*/, pub controls: Limit /*32*/ }
+#[non_exhaustive] pub struct WatchLogEntry { pub at: f64, pub kind: String, pub text: String }   // new(kind, text, at)
+#[non_exhaustive] pub struct WatchControl { pub id: String, pub by: String, pub note: String, pub at: f64 }
+#[non_exhaustive] pub struct WatchRecord { pub scope, pub agent, pub station, pub fence: u64, pub lease_expires: f64,
+    pub opened_at: f64, pub provider_session_id: Option<String>, pub handler: Option<String>, pub last_wake: Option<f64>,
+    pub turns: Vec<f64>, pub logbook: Vec<WatchLogEntry>, pub seen: Vec<String>, pub controls: Vec<WatchControl> }
+impl WatchRecord { pub fn turns_since(&self, since: f64) -> usize; }
+#[non_exhaustive] #[derive(Default)] pub struct WatchUpdate { pub session: Option<Option<(String, String)>>,
+    pub last_wake, pub turn_at, pub log: Vec<WatchLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String> }
+impl WatchUpdate { session(handler, id), forget_session(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids) }
+#[non_exhaustive] pub enum WatchError { NotFound, HeldBy(String), Stale, Io(io::Error) }
+pub trait WatchStore {
+    fn claim_watch(&self, scope, agent, station, ttl: Duration) -> Result<WatchRecord, WatchError>;
+        // makes, renews (same Station, same fence) or takes over a lapsed lease (fence + 1, logged);
+        // another Agent forgets the provider Session; HeldBy while another's lease is live
+    fn update_watch(&self, scope, station, fence: u64, renew: Option<Duration>, update: WatchUpdate) -> Result<WatchRecord, WatchError>;  // Stale unless holder and fence
+    fn request_watch_wake(&self, scope, by, note) -> Result<WatchControl, WatchError>;   // no lease; NotFound before a first claim
+    fn watch(&self, scope: &str) -> io::Result<Option<WatchRecord>>;
+    fn watches(&self) -> io::Result<Vec<WatchRecord>>;   // by scope
+}
+```
+
 ## Moneypenny's conversation log (`ai6::directorates::registry::assistant_log`, also at the crate root)
 
 One record per entry of a conversation, kept by Universal Exports; its retention is the gateway's
@@ -5249,6 +5312,16 @@ and, with feature `publisher`, `with_publisher` set those options before calling
 unless `with_config_provider(Arc<dyn ConfigProvider>)` names another provider; the roster is
 read once at start. `with_registry(Arc<dyn RegistryBackend>)` replaces the
 `FileRegistry::from_environment()` default.
+
+Each scheduler round also tends the watches on the roster this Station may run
+(`docs/watches.md`): on a check-in it claims or renews each, closes one another Station took, and
+looks at its area (Missions of its Operation in `verifying`, quarantines, dark Stations for M,
+controls); every round it takes the watch's Cables, adds a `wake_every` timer, and starts one turn
+of waiting events when the hour's `max_turns_per_hour` has room. The harness runs on this host in
+`<state dir>/watches/watch--<scope>`, started as `AgentStart.mission_id = "watch--<scope>"` (no
+Mission has that ID), resumed with the record's provider Session, or started fresh with the
+logbook when the resume is refused or fails before it answers. A Station's watch gets
+`station_report` and `file_report` on its Cable endpoint. Stopping closes every watch's harness.
 
 Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
 background scheduler starts assigned queued Missions and leases file-backed Registry
