@@ -536,6 +536,20 @@ pub(super) fn issue_for_assistant(
     issue_for(state, holder, agent, on, None, site, environment)
 }
 
+/// What a watch's Session of `agent` reaches its model with, under the name `holder` gives it: its
+/// route's account and secrets, and no loadout secret, since a watch reads untrusted text. Blocks
+/// on the backend and the Registry.
+pub(super) fn issue_for_watch(
+    state: &DaemonState,
+    holder: Holder<'_>,
+    agent: &Agent,
+    on: Option<&OnRoute>,
+    site: super::accounts::Site,
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    issue_for(state, holder, agent, on, None, site, environment)
+}
+
 fn issue_for(
     state: &DaemonState,
     holder: Holder<'_>,

@@ -52,6 +52,9 @@ mod theater_mcp;
 mod verdicts;
 mod verification;
 mod vetting;
+#[cfg(test)]
+mod watch_tests;
+mod watches;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -1004,6 +1007,7 @@ where
         clock: Clock::system(),
         vetting: Default::default(),
         models: Default::default(),
+        watches: Default::default(),
         #[cfg(feature = "publisher")]
         publisher,
     };
@@ -1060,6 +1064,7 @@ where
         }
     };
     let _ = tokio::time::timeout(shutdown_wait, drain).await;
+    let _ = tokio::time::timeout(shutdown_wait, watches::close_all(&state)).await;
     served.map_err(io::Error::other)
 }
 
@@ -1609,6 +1614,8 @@ struct DaemonState {
     vetting: Arc<vetting::VettingDesk>,
     /// The models each account and route may use, as their handlers last said.
     models: Arc<models::ModelBoard>,
+    /// The watches this Station runs.
+    watches: Arc<watches::WatchDesk>,
 }
 
 impl DaemonState {
@@ -1789,6 +1796,7 @@ async fn scheduler_loop(base: DaemonState) {
         let is_headquarters = tokio::task::spawn_blocking(move || schedule_intake_once(&intake))
             .await
             .unwrap_or_default();
+        watches::tend(&state, is_headquarters, check_in).await;
         #[cfg(feature = "publisher")]
         if check_in {
             controls::stop_settled(&state).await;
@@ -8466,6 +8474,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
 
         let Json(briefs) = list_intake_briefs(State(state)).await.unwrap();
@@ -8632,6 +8641,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
 
         let response = send_cable(
@@ -9360,7 +9370,8 @@ queue = 1
             super::review::testing::MockAuthorHandler,
             super::review::testing::MockReviewerHandler,
             super::placement_tests::MockProgramHandler,
-            super::standing::testing::MockStandingHandler
+            super::standing::testing::MockStandingHandler,
+            super::watch_tests::MockWatchHandler
         ]
     );
 
@@ -9598,6 +9609,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         }
     }
 
@@ -10136,6 +10148,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
 
         schedule_queued_once(&state).await;
@@ -10263,6 +10276,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -10346,6 +10360,7 @@ queue = 1
                 "mock-stream",
                 "mock-verdict",
                 "mock-wake",
+                "mock-watch",
             ])
         );
 
@@ -10487,6 +10502,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -10631,6 +10647,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -10688,6 +10705,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         }
     }
 
@@ -10827,6 +10845,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
         let result = create_mission(
             State(state.clone()),
@@ -10942,6 +10961,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
         let result = create_mission(
@@ -11169,6 +11189,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -11274,6 +11295,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
         let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
@@ -11473,6 +11495,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
             mission_id.to_string(),
@@ -11852,6 +11875,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            watches: Default::default(),
         };
         let spec = SafeHouseSpec {
             operation_id: "G".to_owned(),

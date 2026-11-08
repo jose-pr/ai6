@@ -7,7 +7,8 @@
 //! A round also gets the Station's own tools on its Cable endpoint (`station_report`,
 //! `file_report`). They act on this Station only, and every call checks again that its
 //! Mission is still a live round here; what they may change unattended is fixed in Station
-//! code, never in the prompt.
+//! code, never in the prompt. The Station's watch (`station:<id>`) reads and reports through the
+//! same two tools, each call checking that this Station still runs it.
 
 #[cfg(feature = "cables-mcp")]
 mod hygiene;
@@ -52,12 +53,23 @@ pub(super) fn check_in(state: &DaemonState, info: &mut BTreeMap<String, serde_js
     }
 }
 
-/// A round's access to its Station: what its Cable endpoint's Station tools call.
+/// Who a desk's Station tools answer for.
+#[cfg(feature = "cables-mcp")]
+#[derive(Clone)]
+enum Holder {
+    /// A round, by its Mission.
+    Round(String),
+    /// This Station's watch, by the Agent that keeps it.
+    Watch(String),
+}
+
+/// A round's, or the Station watch's, access to its Station: what its Cable endpoint's Station
+/// tools call.
 #[cfg(feature = "cables-mcp")]
 #[derive(Clone)]
 pub(super) struct Desk {
     state: DaemonState,
-    mission: String,
+    holder: Holder,
 }
 
 #[cfg(feature = "cables-mcp")]
@@ -65,18 +77,44 @@ impl Desk {
     pub(super) fn new(state: DaemonState, mission: impl Into<String>) -> Self {
         Self {
             state,
-            mission: mission.into(),
+            holder: Holder::Round(mission.into()),
+        }
+    }
+
+    /// The desk of this Station's watch, kept by `agent`.
+    pub(super) fn for_watch(state: DaemonState, agent: impl Into<String>) -> Self {
+        Self {
+            state,
+            holder: Holder::Watch(agent.into()),
+        }
+    }
+
+    /// The round's Mission, while it is not over and still a round of this Station; `None` for
+    /// the Station's watch while this Station runs it.
+    fn admit_any(&self) -> Result<Option<Mission>, String> {
+        match &self.holder {
+            Holder::Round(_) => self.admit().map(Some),
+            Holder::Watch(_) => {
+                if self.state.watches.is_live(&station_scope(&self.state)) {
+                    Ok(None)
+                } else {
+                    Err("this Station no longer runs its watch".to_owned())
+                }
+            }
         }
     }
 
     /// The round's Mission, while it is not over and still a round of this Station.
     fn admit(&self) -> Result<Mission, String> {
+        let Holder::Round(round) = &self.holder else {
+            return Err("this tool is for a Head of Station round".to_owned());
+        };
         let mission = self
             .state
             .missions
             .lock()
             .ok()
-            .and_then(|missions| missions.get(&self.mission).cloned())
+            .and_then(|missions| missions.get(round).cloned())
             .ok_or("this Station has no such Mission")?;
         if super::is_terminal_state(mission.state) {
             return Err("this round is over".to_owned());
@@ -89,7 +127,7 @@ impl Desk {
 
     /// Everything a round may read about its Station. Blocks; call from `spawn_blocking`.
     pub(super) fn report(&self) -> Result<StationState, String> {
-        self.admit()?;
+        self.admit_any()?;
         Ok(report::station_state(&self.state))
     }
 
@@ -100,14 +138,33 @@ impl Desk {
         summary: String,
         findings: Vec<StationFinding>,
     ) -> Result<StationReport, String> {
-        let mission = self.admit()?;
+        let mission = self.admit_any()?;
         let state = &self.state;
-        let report = StationReport::new(state.station_id.clone(), summary, state.clock.now())
-            .with_findings(findings)
-            .filed_by(
-                mission.mission_id.to_string(),
-                mission.agent_id.clone().unwrap_or_default(),
-            );
+        let mut report = StationReport::new(state.station_id.clone(), summary, state.clock.now())
+            .with_findings(findings);
+        let (operation, agent) = match (&mission, &self.holder) {
+            (Some(mission), _) => {
+                report = report.filed_by(
+                    mission.mission_id.to_string(),
+                    mission.agent_id.clone().unwrap_or_default(),
+                );
+                (
+                    mission.operation_id.clone().unwrap_or_default(),
+                    mission.agent_id.clone(),
+                )
+            }
+            (None, Holder::Watch(agent)) => {
+                report.agent = Some(agent.clone());
+                let operation = state
+                    .roster
+                    .watches()
+                    .get(&station_scope(state))
+                    .and_then(|watch| watch.settings.operation.clone())
+                    .unwrap_or_default();
+                (operation, Some(agent.clone()))
+            }
+            (None, Holder::Round(_)) => return Err("this round is over".to_owned()),
+        };
         state
             .intake
             .file_station_report(&report)
@@ -115,14 +172,16 @@ impl Desk {
         let mut event = TimelineEvent::new(
             "head_of_station",
             "reported",
-            mission.operation_id.clone().unwrap_or_default(),
+            operation,
             state.clock.now() as f64,
         )
         .station(state.station_id.clone())
-        .mission(mission.mission_id.to_string())
         .detail("findings", report.findings.len().to_string());
-        if let Some(agent) = &mission.agent_id {
-            event = event.actor(agent.clone());
+        if let Some(mission) = &mission {
+            event = event.mission(mission.mission_id.to_string());
+        }
+        if let Some(agent) = agent {
+            event = event.actor(agent);
         }
         if let Some(worst) = report.worst() {
             event = event.detail("worst", worst.as_str());
@@ -174,6 +233,12 @@ impl Desk {
         let provisioned = provision::provision_theater(&self.state, &round, theater, apply)?;
         serde_json::to_value(provisioned).map_err(|error| error.to_string())
     }
+}
+
+/// The scope of this Station's watch.
+#[cfg(feature = "cables-mcp")]
+fn station_scope(state: &DaemonState) -> String {
+    crate::directorates::m::watches::WatchScope::Station(state.station_id.clone()).to_string()
 }
 
 /// Whether `mission` is a round of this Station: its role is the Head of Station's, and the

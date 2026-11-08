@@ -268,7 +268,6 @@ pub(super) fn choose(
 /// # Errors
 ///
 /// Why no route has room, naming each and why.
-#[cfg(feature = "publisher")]
 pub(super) fn for_conversation(
     state: &DaemonState,
     agent: &Agent,
