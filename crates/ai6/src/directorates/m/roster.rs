@@ -30,6 +30,7 @@ use crate::directorates::m::review::{ReviewChoice, ReviewPolicy, policies_from_r
 use crate::directorates::m::scorecard::{ScorecardDefinition, ScorecardPolicy};
 use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::m::vetting::{VettingPolicy, VettingSetting, policy_of};
+use crate::directorates::m::watches::{Watch, watches_from_records};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
@@ -45,6 +46,8 @@ const AGENTS_STEM: &str = "agents";
 const OPERATIONS_FILE: &str = "operations.toml";
 /// The review policies' file.
 const REVIEWS_FILE: &str = "reviews.toml";
+/// The watches' file.
+const WATCHES_FILE: &str = "watches.toml";
 /// The clearances, lowest first.
 pub(crate) const CLEARANCES: &[&str] = &["desk", "field", "00"];
 
@@ -829,6 +832,7 @@ pub struct Roster {
     assistant: AssistantSettings,
     settings: RosterSettings,
     reviews: BTreeMap<String, ReviewPolicy>,
+    watches: BTreeMap<String, Watch>,
 }
 
 /// How deep an Operation may sit in the tree of Operations by default: 64 levels, a root
@@ -998,6 +1002,7 @@ pub struct RosterBuilder {
     assistant: AssistantSettings,
     settings: RosterSettings,
     reviews: BTreeMap<String, ReviewPolicy>,
+    watches: Vec<Watch>,
 }
 
 impl RosterBuilder {
@@ -1022,6 +1027,12 @@ impl RosterBuilder {
     /// Adds a review policy; [`RosterBuilder::build`] checks it and what names it.
     pub fn review(mut self, name: impl Into<String>, policy: ReviewPolicy) -> Self {
         self.reviews.insert(name.into(), policy);
+        self
+    }
+
+    /// Adds a watch; [`RosterBuilder::build`] checks its Agent and scope.
+    pub fn watch(mut self, watch: Watch) -> Self {
+        self.watches.push(watch);
         self
     }
 
@@ -1081,6 +1092,12 @@ impl RosterBuilder {
         }
         roster.reviews = self.reviews;
         roster.check_reviews()?;
+        roster.watches = self
+            .watches
+            .into_iter()
+            .map(|watch| (watch.scope.to_string(), watch))
+            .collect();
+        roster.check_watches()?;
         Ok(roster)
     }
 }
@@ -1149,8 +1166,8 @@ impl<'a> AgentQuery<'a> {
 }
 
 impl Roster {
-    /// Loads global `operations.toml`, `agents.toml` and `reviews.toml` from a configuration
-    /// directory. Missing files mean an empty registry; invalid files fail closed.
+    /// Loads global `operations.toml`, `agents.toml`, `reviews.toml` and `watches.toml` from a
+    /// configuration directory. Missing files mean an empty registry; invalid files fail closed.
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError> {
         let root = root.into();
         let mut roster = Self {
@@ -1207,12 +1224,54 @@ impl Roster {
                 .map_err(|reason| error(format!("{source}: {reason}")))?;
         }
         roster.check_reviews()?;
+        let watches_file = root.join(WATCHES_FILE);
+        if watches_file.exists() {
+            let document: WatchesDocument = parse_file(&watches_file)?;
+            let source = watches_file.display();
+            roster.watches = watches_from_records(document.watch)
+                .map_err(|reason| error(format!("{source}: {reason}")))?;
+            roster
+                .check_watches()
+                .map_err(|reason| error(format!("{source}: {reason}")))?;
+        }
         Ok(roster)
     }
 
     /// The review policies there are, by name.
     pub fn reviews(&self) -> &BTreeMap<String, ReviewPolicy> {
         &self.reviews
+    }
+
+    /// The watches there are, by scope (`m`, `operation:<codename>`, `station:<id>`).
+    pub fn watches(&self) -> &BTreeMap<String, Watch> {
+        &self.watches
+    }
+
+    /// Checks that each watch names an Agent of the global roster, and Operations the roster has:
+    /// an Operation's watch its own, and the Operation its Cables go in.
+    fn check_watches(&self) -> Result<(), RosterError> {
+        for (scope, watch) in &self.watches {
+            watch
+                .settings
+                .validate(&watch.scope)
+                .map_err(|reason| error(format!("watch {scope:?} {reason}")))?;
+            let agent = &watch.settings.agent;
+            let roster = &self.agents;
+            let aliased = |entry: &AgentEntry| entry.aliases().iter().any(|alias| alias == agent);
+            if !roster.contains_key(agent) && !roster.values().any(aliased) {
+                return Err(error(format!(
+                    "watch {scope:?}: its Agent {agent:?} is not on the roster"
+                )));
+            }
+            if let Some(operation) = watch.settings.cable_operation(&watch.scope)
+                && self.operation(operation).is_err()
+            {
+                return Err(error(format!(
+                    "watch {scope:?}: Operation {operation:?} is not on the roster"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Checks that what names a review policy names one that exists, and that a panel's seats name
@@ -1664,6 +1723,13 @@ impl Roster {
 struct ReviewsDocument {
     #[map(with = guatiao_serde::adapt::any, default)]
     review: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Default, FromValue)]
+#[map(deny_unknown_fields)]
+struct WatchesDocument {
+    #[map(with = guatiao_serde::adapt::any, default)]
+    watch: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, FromValue)]
@@ -2531,6 +2597,8 @@ pub(crate) struct RosterDefinitions {
     pub(crate) roles: Vec<(String, serde_json::Value)>,
     /// `[review.<name>]` tables.
     pub(crate) reviews: Vec<(String, serde_json::Value)>,
+    /// `[watch.<scope>]` tables.
+    pub(crate) watches: Vec<(String, serde_json::Value)>,
     /// The `[assistant]` table; `None` is the default settings.
     pub(crate) assistant: Option<serde_json::Value>,
     /// The `[roster]` table; `None` is the default settings.
@@ -2555,6 +2623,7 @@ pub(crate) fn roster_from_definitions(
         agents,
         roles,
         reviews,
+        watches,
         assistant,
         settings,
     } = definitions;
@@ -2617,6 +2686,11 @@ pub(crate) fn roster_from_definitions(
         policies_from_records(reviews).map_err(|reason| error(format!("{source}: {reason}")))?;
     roster
         .check_reviews()
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
+    roster.watches =
+        watches_from_records(watches).map_err(|reason| error(format!("{source}: {reason}")))?;
+    roster
+        .check_watches()
         .map_err(|reason| error(format!("{source}: {reason}")))?;
     Ok(roster)
 }

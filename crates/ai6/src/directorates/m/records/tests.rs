@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::directorates::m::config::{StationRuntime, UnexRecord};
 
-const KINDS: [ConfigRecord; 8] = [
+const KINDS: [ConfigRecord; 9] = [
     ConfigRecord::Operation,
     ConfigRecord::Agent,
     ConfigRecord::Role,
@@ -14,6 +14,7 @@ const KINDS: [ConfigRecord; 8] = [
     ConfigRecord::Roster,
     ConfigRecord::Compartment,
     ConfigRecord::Review,
+    ConfigRecord::Watch,
 ];
 
 /// Every key of an Operation's `issues`, apart, since a single `json!` has a recursion limit.
@@ -254,6 +255,16 @@ fn full_example(record: ConfigRecord) -> Value {
             "max_tokens": 100000,
             "reviewer_timeout_secs": 600
         }),
+        ConfigRecord::Watch => json!({
+            "agent": "M",
+            "operation": "G",
+            "wake_every": "none",
+            "max_turns_per_hour": 12,
+            "max_events_per_turn": 20,
+            "max_waiting_events": "none",
+            "turn_timeout": 600,
+            "lease": 30
+        }),
         ConfigRecord::Compartment => json!({
             "description": "Release work",
             "actions": ["mission.status", "product.read"],
@@ -409,6 +420,9 @@ fn records_parse(record: ConfigRecord, definition: &Value) -> Result<(), String>
         ConfigRecord::Compartment => from_json::<CompartmentSettings>(definition).map(drop),
         ConfigRecord::Review => {
             from_json::<crate::directorates::m::review::ReviewPolicy>(definition).map(drop)
+        }
+        ConfigRecord::Watch => {
+            from_json::<crate::directorates::m::watches::WatchDefinition>(definition).map(drop)
         }
         other => panic!("no type for {other:?}"),
     }

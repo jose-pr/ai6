@@ -17,6 +17,7 @@ use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
+use crate::directorates::m::watches::WatchDefinition;
 
 /// `T` from a value.
 pub(crate) fn from_value<T: FromValue>(value: &guatiao::Value) -> Result<T, String> {
@@ -166,6 +167,10 @@ impl ConfigRecord {
             Self::Review => built::<ReviewPolicy>(named(
                 "Policy name",
                 "What Operations, roles and briefs choose this policy by. It cannot be changed later.",
+            )),
+            Self::Watch => built::<WatchDefinition>(named(
+                "Scope",
+                "What the watch keeps: m, operation:<codename> or station:<id>. It cannot be changed later.",
             )),
             _ => return Ok(None),
         }

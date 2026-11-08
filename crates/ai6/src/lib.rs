@@ -115,6 +115,7 @@ pub use directorates::m::vetting::{
     VettingPolicy, VettingScope, VettingVerdict, content_digest, is_review, is_untrusted,
     read_review, review_brief, review_target, vet, work_title,
 };
+pub use directorates::m::watches::{Watch, WatchDefinition, WatchScope};
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_REGISTRY_DROP, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure,
     ExposureDefinition, ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction,
