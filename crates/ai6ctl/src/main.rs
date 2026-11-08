@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod access;
 mod compartments;
 mod memories;
+mod reports;
 mod reviews;
 
 use clap::{Args, Parser, Subcommand};
@@ -134,6 +135,12 @@ enum Command {
     Memories {
         #[command(subcommand)]
         command: memories::MemoriesCommand,
+    },
+    /// File, list and show Reports: what people and Agents observed, each read as far as you are
+    /// read in to it and cleared for it.
+    Reports {
+        #[command(subcommand)]
+        command: reports::ReportsCommand,
     },
     /// List the Operations you may act on as a tree, each under its nearest Operation you
     /// may read, with your actions; or show one.
@@ -1608,6 +1615,10 @@ async fn run() -> Result<(), String> {
         Command::Memories { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             memories::run(&client, &server, &token, command).await?;
+        }
+        Command::Reports { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            reports::run(&client, &server, &token, command).await?;
         }
         Command::Access { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

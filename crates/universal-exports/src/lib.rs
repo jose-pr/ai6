@@ -24,6 +24,7 @@ mod pools;
 mod profile_tests;
 #[cfg(test)]
 mod rename_tests;
+mod reports;
 mod reviews;
 mod roster;
 mod source_reads;
@@ -1530,6 +1531,13 @@ impl Gateway {
             .route(
                 "/v1/missions/{id}/products",
                 get(compartments::mission_products),
+            )
+            .route("/v1/missions/{id}/reports", get(reports::of_mission))
+            .route("/v1/reports", get(reports::list).post(reports::file))
+            .route("/v1/reports/{id}", get(reports::show))
+            .route(
+                "/v1/reports/{id}/markings",
+                axum::routing::put(reports::mark),
             )
             .route(
                 "/v1/user/operations/{operation_id}/missions",
