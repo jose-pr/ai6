@@ -167,6 +167,15 @@ pub enum ReportFiler {
         /// The Mission.
         mission: String,
     },
+    /// A standing watch's Agent, in the watch's own Session: no Mission.
+    Watch {
+        /// The Agent codename.
+        agent: String,
+        /// The watch's scope (`m`, `operation:P`, `station:S`).
+        scope: String,
+        /// The provider Session, or the scope until the harness has reported one.
+        session: String,
+    },
     /// A person, by subject.
     Person {
         /// The person's ID.
@@ -195,7 +204,7 @@ impl ReportFiler {
     /// The Session of an Agent's filing, which the rate limit counts.
     pub fn session(&self) -> Option<&str> {
         match self {
-            Self::Agent { session, .. } => Some(session),
+            Self::Agent { session, .. } | Self::Watch { session, .. } => Some(session),
             _ => None,
         }
     }
@@ -205,7 +214,7 @@ impl ReportFiler {
     pub fn source_key(&self) -> String {
         match self {
             Self::Source { source, .. } => format!("source:{source}"),
-            Self::Agent { agent, .. } => format!("agent:{agent}"),
+            Self::Agent { agent, .. } | Self::Watch { agent, .. } => format!("agent:{agent}"),
             Self::Person { person } => format!("person:{person}"),
             Self::Probe { probe } => format!("probe:{probe}"),
             Self::Review { .. } => "review".to_owned(),
@@ -221,6 +230,11 @@ impl ReportFiler {
                 session,
                 mission,
             } => vec![agent, session, mission],
+            Self::Watch {
+                agent,
+                scope,
+                session,
+            } => vec![agent, scope, session],
             Self::Person { person } => vec![person],
             Self::Probe { probe } => vec![probe],
             Self::Review { mission } => vec![mission],

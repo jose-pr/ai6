@@ -39,6 +39,8 @@ mod placement_tests;
 mod promotion;
 mod recovery;
 mod reload;
+#[cfg(feature = "cables-mcp")]
+mod reports;
 mod review;
 mod routes;
 #[cfg(feature = "publisher")]
@@ -4850,6 +4852,7 @@ async fn start_mission(
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
         endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
+        endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }
@@ -5857,6 +5860,7 @@ async fn resume_mission(
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
         endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
+        endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }

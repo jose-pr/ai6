@@ -131,13 +131,25 @@ impl Desk {
         Ok(report::station_state(&self.state))
     }
 
+    /// The Registry's limits on Reports.
+    pub(super) fn report_limits(&self) -> crate::directorates::registry::limits::ReportLimits {
+        self.state.intake.limits().reports.clone()
+    }
+
     /// Files a report in the Station's logbook: the next check-in publishes it and the next
-    /// round reads it. Blocks; call from `spawn_blocking`.
+    /// round reads it. `filing` is the same report as a Report of this Station, linked to the
+    /// round's Mission; why it was not stored is the second answer, and leaves the logbook as
+    /// filed. `session` is the round's provider Session once known. Blocks; call from
+    /// `spawn_blocking`.
     pub(super) fn file(
         &self,
         summary: String,
         findings: Vec<StationFinding>,
-    ) -> Result<StationReport, String> {
+        filing: crate::directorates::m::reports::ReportFiling,
+        session: Option<String>,
+    ) -> Result<(StationReport, Result<String, String>), String> {
+        use crate::directorates::registry::reports::{ReportFiler, ReportLink, ReportScope};
+
         let mission = self.admit_any()?;
         let state = &self.state;
         let mut report = StationReport::new(state.station_id.clone(), summary, state.clock.now())
@@ -189,7 +201,48 @@ impl Desk {
         if let Err(error) = state.intake.record_event(&event) {
             eprintln!("ai6: Head of Station report event was not recorded: {error}");
         }
-        Ok(report)
+        // A round files as its Agent on its Mission; a watch has no Mission and files as itself.
+        let (filer, links) = match (&mission, &self.holder) {
+            (Some(mission), _) => {
+                let mission_id = mission.mission_id.to_string();
+                (
+                    ReportFiler::Agent {
+                        agent: mission.agent_id.clone().unwrap_or_default(),
+                        session: session.unwrap_or_else(|| mission_id.clone()),
+                        mission: mission_id.clone(),
+                    },
+                    vec![ReportLink::mission(mission_id)],
+                )
+            }
+            (None, Holder::Watch(agent)) => {
+                let scope = station_scope(state);
+                (
+                    ReportFiler::Watch {
+                        agent: agent.clone(),
+                        session: session.unwrap_or_else(|| scope.clone()),
+                        scope,
+                    },
+                    Vec::new(),
+                )
+            }
+            (None, Holder::Round(_)) => return Err("this round is over".to_owned()),
+        };
+        let stored = filing
+            .into_report(
+                ReportScope::Station(state.station_id.clone()),
+                filer,
+                links,
+                state.clock.now() as f64,
+                &state.intake.limits().reports,
+            )
+            .and_then(|stored| {
+                state
+                    .intake
+                    .file_report(&stored)
+                    .map(|()| stored.id)
+                    .map_err(|error| format!("the Station report was not stored: {error}"))
+            });
+        Ok((report, stored))
     }
 
     /// This Station's ID.
@@ -849,6 +902,21 @@ pub(super) mod tests {
             filed["cable"].as_str().unwrap().contains("exposed"),
             "reading the report exposed the round, so it sends no Cable: {filed}"
         );
+        // The round's report is also a Report of this Station, linked to the round.
+        let id = filed["report"]["id"].as_str().unwrap();
+        let stored = state.intake.report(id).unwrap().unwrap();
+        assert_eq!(
+            stored.scope,
+            crate::directorates::registry::reports::ReportScope::Station("test".to_owned())
+        );
+        assert_eq!(stored.kind, "station");
+        assert_eq!(stored.title, "One safe house holds unexported work.");
+        assert_eq!(
+            stored.severity,
+            crate::directorates::registry::logbook::Severity::Warning
+        );
+        assert!(stored.text.contains("holds one unexported commit"));
+        assert!(stored.about_mission(&round));
         let bad = call(
             &state,
             &round,
@@ -887,16 +955,28 @@ pub(super) mod tests {
                 .await
                 .is_err()
         );
-        assert!(
-            call(
+        // Its file_report is any Agent's: a Report of its Operation, never the logbook.
+        let theirs: serde_json::Value = serde_json::from_str(
+            &call(
                 &state,
                 &analyst,
                 "file_report",
-                serde_json::json!({ "summary": "forged" })
+                serde_json::json!({ "summary": "forged" }),
             )
             .await
-            .is_err()
+            .unwrap(),
+        )
+        .unwrap();
+        let stored = state
+            .intake
+            .report(theirs["id"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.scope,
+            crate::directorates::registry::reports::ReportScope::Operation("H".to_owned())
         );
+        assert!(stored.about_mission(&analyst));
         assert_eq!(state.intake.logbook("test").unwrap().len(), 1);
 
         // Once its Sleeper's authorization is withdrawn the round's tools refuse.
