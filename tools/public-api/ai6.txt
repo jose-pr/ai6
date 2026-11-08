@@ -1787,6 +1787,63 @@ pub mod ai6::directorates::m::recovery
 pub const ai6::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS: u64
 pub fn ai6::directorates::m::recovery::adopter(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts], &ai6::directorates::registry::sessions::SessionRecord) -> core::result::Result<ai6::directorates::m::placement::PlacementChoice, alloc::string::String>
 pub fn ai6::directorates::m::recovery::reattach_delay(u32, &ai6::station::limits::RecoveryLimits) -> core::time::Duration
+pub mod ai6::directorates::m::reports
+#[non_exhaustive] pub enum ai6::directorates::m::reports::ReportSight
+pub ai6::directorates::m::reports::ReportSight::Content
+pub ai6::directorates::m::reports::ReportSight::Markings
+pub ai6::directorates::m::reports::ReportSight::Tearline
+pub struct ai6::directorates::m::reports::LinkFiling
+pub ai6::directorates::m::reports::LinkFiling::id: alloc::string::String
+pub ai6::directorates::m::reports::LinkFiling::kind: alloc::string::String
+pub struct ai6::directorates::m::reports::ReportFiling
+pub ai6::directorates::m::reports::ReportFiling::classification: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::deadline: core::option::Option<f64>
+pub ai6::directorates::m::reports::ReportFiling::handling: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::information_from: core::option::Option<f64>
+pub ai6::directorates::m::reports::ReportFiling::kind: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::links: alloc::vec::Vec<ai6::directorates::m::reports::LinkFiling>
+pub ai6::directorates::m::reports::ReportFiling::priority: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::severity: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::sub_source: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportFiling::tearline: core::option::Option<ai6::directorates::m::reports::TearlineFiling>
+pub ai6::directorates::m::reports::ReportFiling::text: alloc::string::String
+pub ai6::directorates::m::reports::ReportFiling::title: alloc::string::String
+impl ai6::directorates::m::reports::ReportFiling
+pub fn ai6::directorates::m::reports::ReportFiling::into_report(self, ai6::directorates::registry::reports::ReportScope, ai6::directorates::registry::reports::ReportFiler, impl core::iter::traits::collect::IntoIterator<Item = ai6::directorates::registry::reports::ReportLink>, f64, &ai6::directorates::registry::limits::ReportLimits, &ai6::directorates::m::reports::ReportSettings) -> core::result::Result<ai6::directorates::registry::reports::Report, alloc::string::String>
+pub struct ai6::directorates::m::reports::ReportMarkings
+pub ai6::directorates::m::reports::ReportMarkings::classification: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportMarkings::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportMarkings::handling: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::ReportMarkings::tearline: core::option::Option<ai6::directorates::m::reports::TearlineFiling>
+pub struct ai6::directorates::m::reports::ReportRules<'a>
+pub ai6::directorates::m::reports::ReportRules::clearances: &'a [ai6::directorates::registry::reports::ReportClearance]
+pub ai6::directorates::m::reports::ReportRules::settings: &'a ai6::directorates::m::reports::ReportSettings
+impl<'a> ai6::directorates::m::reports::ReportRules<'a>
+pub fn ai6::directorates::m::reports::ReportRules<'a>::clearance(&self, &[alloc::string::String]) -> usize
+pub fn ai6::directorates::m::reports::ReportRules<'a>::new(&'a ai6::directorates::m::reports::ReportSettings, &'a [ai6::directorates::registry::reports::ReportClearance]) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::reports::ReportSettings
+pub ai6::directorates::m::reports::ReportSettings::classifications: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportSettings::handlings: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportSettings::priorities: alloc::vec::Vec<alloc::string::String>
+impl ai6::directorates::m::reports::ReportSettings
+pub fn ai6::directorates::m::reports::ReportSettings::check(&self, &ai6::directorates::registry::reports::Report) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::reports::ReportSettings::rank(&self, core::option::Option<&str>) -> core::option::Option<usize>
+impl core::default::Default for ai6::directorates::m::reports::ReportSettings
+pub fn ai6::directorates::m::reports::ReportSettings::default() -> Self
+pub struct ai6::directorates::m::reports::TearlineFiling
+pub ai6::directorates::m::reports::TearlineFiling::classification: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::reports::TearlineFiling::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::TearlineFiling::text: alloc::string::String
+pub trait ai6::directorates::m::reports::ReportReader
+pub fn ai6::directorates::m::reports::ReportReader::read_in(&self, &str) -> bool
+pub fn ai6::directorates::m::reports::ReportReader::reads_scope(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
+pub fn ai6::directorates::m::reports::ReportReader::subjects(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::reports::new_report_id() -> alloc::string::String
+pub fn ai6::directorates::m::reports::remark(&dyn ai6::directorates::m::reports::ReportReader, &mut ai6::directorates::registry::reports::Report, ai6::directorates::m::reports::ReportMarkings, &ai6::directorates::m::reports::ReportRules<'_>) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::reports::report_json(&ai6::directorates::registry::reports::Report, ai6::directorates::m::reports::ReportSight, core::option::Option<&ai6::directorates::registry::reports::ReportSource>) -> serde_json::value::Value
+pub fn ai6::directorates::m::reports::settings(&dyn ai6::directorates::m::config::ConfigProvider) -> core::result::Result<ai6::directorates::m::reports::ReportSettings, ai6::directorates::m::roster::RosterError>
+pub fn ai6::directorates::m::reports::sight(&dyn ai6::directorates::m::reports::ReportReader, &ai6::directorates::registry::reports::Report, &ai6::directorates::m::reports::ReportRules<'_>) -> ai6::directorates::m::reports::ReportSight
 pub mod ai6::directorates::m::review
 #[non_exhaustive] pub enum ai6::directorates::m::review::BriefAuthority
 pub ai6::directorates::m::review::BriefAuthority::Outside
@@ -2163,12 +2220,14 @@ pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::For
 #[non_exhaustive] pub struct ai6::directorates::m::roster::RosterSettings
 pub ai6::directorates::m::roster::RosterSettings::max_compartment_rules: ai6::bounds::Limit
 pub ai6::directorates::m::roster::RosterSettings::max_operation_depth: ai6::bounds::Limit
+pub ai6::directorates::m::roster::RosterSettings::reports: ai6::directorates::m::reports::ReportSettings
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
+pub fn ai6::directorates::m::roster::RosterSettings::with_reports(self, ai6::directorates::m::reports::ReportSettings) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::RouteRef
@@ -5218,8 +5277,38 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::ReportStore
+pub fn ai6::directorates::registry::backend::ReportStore::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::backend::ReportStore::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::ReportStore::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::ReportStore::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::ReportStore::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::backend::ReportStore::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::backend::ReportStore::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::backend::ReportStore::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::backend::ReportStore::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::store::FileRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::store::FileRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
 pub trait ai6::directorates::registry::backend::SealedStore
 pub fn ai6::directorates::registry::backend::SealedStore::publish_sealing_key(&self, &ai6::directorates::registry::sealed::StationSealingKey) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::SealedStore::remove_sealed(&self, &str) -> core::io::error::Result<bool>
@@ -6054,6 +6143,7 @@ pub ai6::directorates::registry::limits::RegistryLimits::logbook: ai6::directora
 pub ai6::directorates::registry::limits::RegistryLimits::memories: ai6::directorates::registry::limits::MemoryLimits
 pub ai6::directorates::registry::limits::RegistryLimits::proposals: ai6::directorates::registry::limits::ProposalLimits
 pub ai6::directorates::registry::limits::RegistryLimits::quarantine: ai6::directorates::registry::limits::QuarantineLimits
+pub ai6::directorates::registry::limits::RegistryLimits::reports: ai6::directorates::registry::limits::ReportLimits
 pub ai6::directorates::registry::limits::RegistryLimits::sessions: ai6::directorates::registry::limits::SessionLimits
 pub ai6::directorates::registry::limits::RegistryLimits::sleepers: ai6::directorates::registry::limits::SleeperLimits
 pub ai6::directorates::registry::limits::RegistryLimits::sources: ai6::directorates::registry::limits::SourceLimits
@@ -6066,6 +6156,19 @@ impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&self) -> ai6::bounds::Limit
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::registry::limits::ReportLimits
+pub ai6::directorates::registry::limits::ReportLimits::keep_closed: ai6::bounds::TimeLimit
+pub ai6::directorates::registry::limits::ReportLimits::links: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::name_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::page: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::per_operation: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::per_session: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::record_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::reports: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::text_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::ReportLimits::window: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::registry::limits::ReportLimits
+pub fn ai6::directorates::registry::limits::ReportLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::SessionLimits
 pub ai6::directorates::registry::limits::SessionLimits::amendment_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::SessionLimits::deliverables: ai6::bounds::Limit
@@ -6579,6 +6682,205 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+pub mod ai6::directorates::registry::reports
+#[non_exhaustive] pub enum ai6::directorates::registry::reports::Reliability
+pub ai6::directorates::registry::reports::Reliability::A
+pub ai6::directorates::registry::reports::Reliability::B
+pub ai6::directorates::registry::reports::Reliability::C
+pub ai6::directorates::registry::reports::Reliability::D
+pub ai6::directorates::registry::reports::Reliability::E
+pub ai6::directorates::registry::reports::Reliability::F
+impl ai6::directorates::registry::reports::Reliability
+pub fn ai6::directorates::registry::reports::Reliability::as_str(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::reports::Reliability
+pub fn ai6::directorates::registry::reports::Reliability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::reports::Reliability
+pub type ai6::directorates::registry::reports::Reliability::Err = alloc::string::String
+pub fn ai6::directorates::registry::reports::Reliability::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub enum ai6::directorates::registry::reports::ReportFiler
+pub ai6::directorates::registry::reports::ReportFiler::Agent
+pub ai6::directorates::registry::reports::ReportFiler::Agent::agent: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Agent::mission: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Agent::session: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Person
+pub ai6::directorates::registry::reports::ReportFiler::Person::person: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Probe
+pub ai6::directorates::registry::reports::ReportFiler::Probe::probe: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Review
+pub ai6::directorates::registry::reports::ReportFiler::Review::mission: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Source
+pub ai6::directorates::registry::reports::ReportFiler::Source::item: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Source::source: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Watch
+pub ai6::directorates::registry::reports::ReportFiler::Watch::agent: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Watch::scope: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Watch::session: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::Watchdog
+impl ai6::directorates::registry::reports::ReportFiler
+pub fn ai6::directorates::registry::reports::ReportFiler::is_person(&self) -> bool
+pub fn ai6::directorates::registry::reports::ReportFiler::session(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::registry::reports::ReportFiler::source_key(&self) -> alloc::string::String
+#[non_exhaustive] pub enum ai6::directorates::registry::reports::ReportLinkKind
+pub ai6::directorates::registry::reports::ReportLinkKind::Decision
+pub ai6::directorates::registry::reports::ReportLinkKind::Evidence
+pub ai6::directorates::registry::reports::ReportLinkKind::Mission
+pub ai6::directorates::registry::reports::ReportLinkKind::Report
+impl ai6::directorates::registry::reports::ReportLinkKind
+pub fn ai6::directorates::registry::reports::ReportLinkKind::as_str(self) -> &'static str
+impl core::str::traits::FromStr for ai6::directorates::registry::reports::ReportLinkKind
+pub type ai6::directorates::registry::reports::ReportLinkKind::Err = alloc::string::String
+pub fn ai6::directorates::registry::reports::ReportLinkKind::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub enum ai6::directorates::registry::reports::ReportScope
+pub ai6::directorates::registry::reports::ReportScope::M
+pub ai6::directorates::registry::reports::ReportScope::Operation(alloc::string::String)
+pub ai6::directorates::registry::reports::ReportScope::Station(alloc::string::String)
+impl ai6::directorates::registry::reports::ReportScope
+pub fn ai6::directorates::registry::reports::ReportScope::operation(&self) -> core::option::Option<&str>
+impl core::fmt::Display for ai6::directorates::registry::reports::ReportScope
+pub fn ai6::directorates::registry::reports::ReportScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::reports::ReportScope
+pub type ai6::directorates::registry::reports::ReportScope::Err = alloc::string::String
+pub fn ai6::directorates::registry::reports::ReportScope::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for ai6::directorates::registry::reports::ReportScope
+pub fn ai6::directorates::registry::reports::ReportScope::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::registry::reports::ReportScope
+pub fn ai6::directorates::registry::reports::ReportScope::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[non_exhaustive] pub enum ai6::directorates::registry::reports::ReportState
+pub ai6::directorates::registry::reports::ReportState::Assessed
+pub ai6::directorates::registry::reports::ReportState::Closed
+pub ai6::directorates::registry::reports::ReportState::Open
+impl ai6::directorates::registry::reports::ReportState
+pub fn ai6::directorates::registry::reports::ReportState::as_str(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::reports::ReportState
+pub fn ai6::directorates::registry::reports::ReportState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::reports::ReportState
+pub type ai6::directorates::registry::reports::ReportState::Err = alloc::string::String
+pub fn ai6::directorates::registry::reports::ReportState::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::Report
+pub ai6::directorates::registry::reports::Report::assessment: core::option::Option<ai6::directorates::registry::reports::ReportAssessment>
+pub ai6::directorates::registry::reports::Report::classification: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::Report::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::reports::Report::created: f64
+pub ai6::directorates::registry::reports::Report::credibility: core::option::Option<u8>
+pub ai6::directorates::registry::reports::Report::deadline: core::option::Option<f64>
+pub ai6::directorates::registry::reports::Report::filer: ai6::directorates::registry::reports::ReportFiler
+pub ai6::directorates::registry::reports::Report::from: core::option::Option<f64>
+pub ai6::directorates::registry::reports::Report::handling: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::Report::id: alloc::string::String
+pub ai6::directorates::registry::reports::Report::kind: alloc::string::String
+pub ai6::directorates::registry::reports::Report::links: alloc::vec::Vec<ai6::directorates::registry::reports::ReportLink>
+pub ai6::directorates::registry::reports::Report::priority: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::Report::resolution: core::option::Option<ai6::directorates::registry::reports::ReportResolution>
+pub ai6::directorates::registry::reports::Report::scope: ai6::directorates::registry::reports::ReportScope
+pub ai6::directorates::registry::reports::Report::severity: ai6::directorates::registry::logbook::Severity
+pub ai6::directorates::registry::reports::Report::state: ai6::directorates::registry::reports::ReportState
+pub ai6::directorates::registry::reports::Report::sub_source: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::Report::tearline: core::option::Option<ai6::directorates::registry::reports::Tearline>
+pub ai6::directorates::registry::reports::Report::text: alloc::string::String
+pub ai6::directorates::registry::reports::Report::title: alloc::string::String
+pub ai6::directorates::registry::reports::Report::updated: f64
+impl ai6::directorates::registry::reports::Report
+pub fn ai6::directorates::registry::reports::Report::about_mission(&self, &str) -> bool
+pub fn ai6::directorates::registry::reports::Report::believed(self, u8) -> Self
+pub fn ai6::directorates::registry::reports::Report::classified(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Report::due(self, f64) -> Self
+pub fn ai6::directorates::registry::reports::Report::handled(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Report::in_compartments(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Report::information_from(self, f64) -> Self
+pub fn ai6::directorates::registry::reports::Report::linked(self, ai6::directorates::registry::reports::ReportLink) -> Self
+pub fn ai6::directorates::registry::reports::Report::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::reports::ReportScope, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::logbook::Severity, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::reports::ReportFiler, f64) -> Self
+pub fn ai6::directorates::registry::reports::Report::prioritised(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Report::untrusted(&self) -> bool
+pub fn ai6::directorates::registry::reports::Report::validate(&self, &ai6::directorates::registry::limits::ReportLimits) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::reports::Report::via(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Report::with_tearline(self, ai6::directorates::registry::reports::Tearline) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportAssessment
+pub ai6::directorates::registry::reports::ReportAssessment::at: f64
+pub ai6::directorates::registry::reports::ReportAssessment::by: alloc::string::String
+pub ai6::directorates::registry::reports::ReportAssessment::comment: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::ReportAssessment::verdict: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportClearance
+pub ai6::directorates::registry::reports::ReportClearance::at: f64
+pub ai6::directorates::registry::reports::ReportClearance::by: alloc::string::String
+pub ai6::directorates::registry::reports::ReportClearance::classification: alloc::string::String
+pub ai6::directorates::registry::reports::ReportClearance::subject: alloc::string::String
+impl ai6::directorates::registry::reports::ReportClearance
+pub fn ai6::directorates::registry::reports::ReportClearance::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::reports::ReportClearance::validate(&self, &ai6::directorates::registry::limits::ReportLimits) -> core::io::error::Result<()>
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportFilter
+pub ai6::directorates::registry::reports::ReportFilter::kind: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::ReportFilter::limit: core::option::Option<usize>
+pub ai6::directorates::registry::reports::ReportFilter::mission: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::ReportFilter::priorities: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::reports::ReportFilter::scope: core::option::Option<ai6::directorates::registry::reports::ReportScope>
+pub ai6::directorates::registry::reports::ReportFilter::state: core::option::Option<ai6::directorates::registry::reports::ReportState>
+impl ai6::directorates::registry::reports::ReportFilter
+pub fn ai6::directorates::registry::reports::ReportFilter::about_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::all() -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::at_most(self, usize) -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::in_scope(self, ai6::directorates::registry::reports::ReportScope) -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::in_state(self, ai6::directorates::registry::reports::ReportState) -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::of_kind(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::ordered_by(self, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::default::Default for ai6::directorates::registry::reports::ReportFilter
+pub fn ai6::directorates::registry::reports::ReportFilter::default() -> Self
+pub struct ai6::directorates::registry::reports::ReportLink
+pub ai6::directorates::registry::reports::ReportLink::id: alloc::string::String
+pub ai6::directorates::registry::reports::ReportLink::kind: ai6::directorates::registry::reports::ReportLinkKind
+impl ai6::directorates::registry::reports::ReportLink
+pub fn ai6::directorates::registry::reports::ReportLink::mission(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::ReportLink::new(ai6::directorates::registry::reports::ReportLinkKind, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportResolution
+pub ai6::directorates::registry::reports::ReportResolution::at: f64
+pub ai6::directorates::registry::reports::ReportResolution::by: alloc::string::String
+pub ai6::directorates::registry::reports::ReportResolution::note: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportSource
+pub ai6::directorates::registry::reports::ReportSource::key: alloc::string::String
+pub ai6::directorates::registry::reports::ReportSource::rated: f64
+pub ai6::directorates::registry::reports::ReportSource::reliability: ai6::directorates::registry::reports::Reliability
+impl ai6::directorates::registry::reports::ReportSource
+pub fn ai6::directorates::registry::reports::ReportSource::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::ReportSource::rated_at(self, ai6::directorates::registry::reports::Reliability, f64) -> Self
+pub fn ai6::directorates::registry::reports::ReportSource::validate(&self, &ai6::directorates::registry::limits::ReportLimits) -> core::io::error::Result<()>
+#[non_exhaustive] pub struct ai6::directorates::registry::reports::Tearline
+pub ai6::directorates::registry::reports::Tearline::classification: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::Tearline::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::reports::Tearline::text: alloc::string::String
+impl ai6::directorates::registry::reports::Tearline
+pub fn ai6::directorates::registry::reports::Tearline::classified(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Tearline::in_compartments(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::reports::Tearline::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub trait ai6::directorates::registry::reports::ReportStore
+pub fn ai6::directorates::registry::reports::ReportStore::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::reports::ReportStore::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::reports::ReportStore::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::reports::ReportStore::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::reports::ReportStore::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::reports::ReportStore::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::reports::ReportStore::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::reports::ReportStore::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::reports::ReportStore::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::store::FileRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::store::FileRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
+pub type ai6::directorates::registry::reports::ReportChange<'a> = &'a mut dyn core::ops::function::FnMut(&mut ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
 pub mod ai6::directorates::registry::reviews
 #[non_exhaustive] pub enum ai6::directorates::registry::reviews::ReviewStatus
 pub ai6::directorates::registry::reviews::ReviewStatus::Passed
@@ -7167,6 +7469,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
@@ -7443,6 +7755,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::store::FileRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::store::FileRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
@@ -11325,6 +11647,16 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::store::FileRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::store::FileRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::store::FileRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
@@ -12256,6 +12588,7 @@ pub ai6::RegistryLimits::logbook: ai6::directorates::registry::limits::LogbookLi
 pub ai6::RegistryLimits::memories: ai6::directorates::registry::limits::MemoryLimits
 pub ai6::RegistryLimits::proposals: ai6::directorates::registry::limits::ProposalLimits
 pub ai6::RegistryLimits::quarantine: ai6::directorates::registry::limits::QuarantineLimits
+pub ai6::RegistryLimits::reports: ai6::directorates::registry::limits::ReportLimits
 pub ai6::RegistryLimits::sessions: ai6::directorates::registry::limits::SessionLimits
 pub ai6::RegistryLimits::sleepers: ai6::directorates::registry::limits::SleeperLimits
 pub ai6::RegistryLimits::sources: ai6::directorates::registry::limits::SourceLimits
@@ -12433,12 +12766,14 @@ pub fn ai6::directorates::registry::holds::RosterHold::validate(&self, &ai6::dir
 #[non_exhaustive] pub struct ai6::RosterSettings
 pub ai6::RosterSettings::max_compartment_rules: ai6::bounds::Limit
 pub ai6::RosterSettings::max_operation_depth: ai6::bounds::Limit
+pub ai6::RosterSettings::reports: ai6::directorates::m::reports::ReportSettings
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::roster::RosterSettings::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_compartment_rules(self, ai6::bounds::Limit) -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::with_max_operation_depth(self, ai6::bounds::Limit) -> Self
+pub fn ai6::directorates::m::roster::RosterSettings::with_reports(self, ai6::directorates::m::reports::ReportSettings) -> Self
 impl core::default::Default for ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::RouteCard
@@ -13103,6 +13438,16 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::reports::ReportStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::sql::SqlRegistry::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_clearance(&self, &ai6::directorates::registry::reports::ReportClearance) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::put_report_source(&self, &ai6::directorates::registry::reports::ReportSource) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_clearances(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::ReportClearance>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::report_source(&self, &str) -> core::io::error::Result<ai6::directorates::registry::reports::ReportSource>
+pub fn ai6::directorates::registry::sql::SqlRegistry::reports(&self, &ai6::directorates::registry::reports::ReportFilter) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_report_clearance(&self, &str) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
@@ -14393,8 +14738,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>
