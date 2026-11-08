@@ -8956,6 +8956,7 @@ pub use ai6::station::identity::Built
 pub use ai6::station::identity::CaPolicy
 pub use ai6::station::identity::Digest
 pub use ai6::station::identity::Identity
+pub use ai6::station::identity::NonDefault
 pub use ai6::station::identity::PeerId
 pub use ai6::station::identity::PeerIdentity
 pub use ai6::station::identity::Pins
@@ -8965,7 +8966,6 @@ pub use ai6::station::identity::TrustStore
 pub use ai6::station::identity::TrustStoreExt
 pub use ai6::station::identity::WaitingEntry
 pub use ai6::station::identity::WaitingLimits
-pub use ai6::station::identity::Weakening
 #[non_exhaustive] pub enum ai6::station::identity::StationIdentityError
 pub ai6::station::identity::StationIdentityError::Peers(coqui_peer::error::Error)
 pub ai6::station::identity::StationIdentityError::Tls(coqui_peer_tls::error::PeerError)
