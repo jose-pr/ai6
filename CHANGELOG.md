@@ -30,9 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   backends), scoped to an Operation, a Station or M, with its filer and sub-source, links to Missions,
   Reports, decisions and evidence, a state, credibility `1` to `6` (`1` only with a corroborating
   link), a source reliability `A` to `F` (`F` when new), a priority and deadline, and markings: a
-  classification and handling mark from `[registry.limits.reports]`, compartments and a tearline.
+  classification and handling mark from the `roster` record's `[roster.reports]` lists, compartments
+  and a tearline.
   Reading the content needs the scope's read, being read in to each compartment and a clearance at
-  or above the classification (`clearances`), for people and Agents alike; a link shows only the ID
+  or above the classification (clearance records in the Registry, granted and revoked live through
+  `/v1/reports/clearances` and `ai6ctl reports clearance`, each audited), for people and Agents
+  alike; a link shows only the ID
   and markings. Every Agent's Session has `file_report`, `reports` and `read_report`, rate limited per
   Session and per scope; the Head of Station's round report is also a Station Report. People file,
   list, show and remark them through `/v1/reports` and `GET /v1/missions/{id}/reports`, and with

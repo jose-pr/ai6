@@ -793,10 +793,13 @@ impl RosterBuilder {
 #[non_exhaustive] #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RosterSettings {
     pub max_operation_depth: Limit,   // levels, a root the first; default 64; 0 refused
+    pub max_compartment_rules: Limit, // read-in and cover pairs per compartment; default 10 000
+    pub reports: ReportSettings,      // [roster.reports]: the Report lists (Reports, below)
 }
 impl RosterSettings {   // Default: the defaults above
     pub fn new() -> Self;
     #[must_use] pub fn with_max_operation_depth(self, depth: Limit) -> Self;
+    #[must_use] pub fn with_reports(self, reports: ReportSettings) -> Self;
     pub fn validate(&self) -> Result<(), RosterError>;
     pub fn weakenings(&self) -> Vec<String>;  // "roster.max_operation_depth none is looser than the default 64"
 }
@@ -2831,12 +2834,16 @@ impl Report { pub fn new(id, scope, kind, severity, title, text, filer, at) -> S
     /* linked, via, information_from, believed, classified, handled, in_compartments, with_tearline,
        prioritised, due */ pub fn untrusted(&self) -> bool /* all but a person's */;
     pub fn about_mission(&self, id) -> bool;
-    pub fn validate(&self, &ReportLimits) -> io::Result<()>; } // InvalidInput: bounds, a marking or
-    // priority not in its list, credibility 1 with no Report or Evidence link
-#[non_exhaustive] #[derive(Default)] pub struct ReportFilter { pub scope, pub state, pub kind, pub mission, pub limit }
-    // all(), in_scope, about_mission, in_state, of_kind, at_most
+    pub fn validate(&self, &ReportLimits) -> io::Result<()>; } // InvalidInput: bounds, a tearline
+    // compartment not the Report's, credibility 1 with no Report or Evidence link. The lists are
+    // ReportSettings::check, not the Registry's
+#[non_exhaustive] #[derive(Default)] pub struct ReportFilter { pub scope, pub state, pub kind, pub mission, pub limit,
+    pub priorities: Vec<String> /* the default list */ } // all(), in_scope, about_mission, in_state, of_kind,
+    // at_most, ordered_by(priorities): pass the deployment's ReportSettings::priorities
 #[non_exhaustive] pub enum Reliability { A, B, C, D, E, F }   // Ord: A first; as_str, FromStr
 #[non_exhaustive] pub struct ReportSource { pub key, pub reliability: Reliability, pub rated: f64 } // new(key): F
+#[non_exhaustive] pub struct ReportClearance { pub subject /* person:ID, group:NAME, agent:CODENAME */,
+    pub classification, pub by, pub at: f64 }  // new(subject, classification, by, at), validate(&ReportLimits)
 pub type ReportChange<'a> = &'a mut dyn FnMut(&mut Report) -> io::Result<()>;
 pub trait ReportStore {  // part of RegistryBackend; reports/SCOPE/ID.json, report-sources/; ai6_reports,
                          // ai6_report_links, ai6_report_sources
@@ -2851,37 +2858,47 @@ pub trait ReportStore {  // part of RegistryBackend; reports/SCOPE/ID.json, repo
         // filer and `created` (InvalidInput otherwise); NotFound
     fn report_source(&self, key) -> io::Result<ReportSource>; // F when nobody rated it
     fn put_report_source(&self, &ReportSource) -> io::Result<()>;
+    fn report_clearances(&self) -> io::Result<Vec<ReportClearance>>; // by subject; report-clearances/,
+                                                                    // ai6_report_clearances
+    fn put_report_clearance(&self, &ReportClearance) -> io::Result<()>; // replaces the subject's
+    fn revoke_report_clearance(&self, subject) -> io::Result<bool>;     // false: none held
 }
 pub struct ReportLimits { pub record_bytes, reports, text_bytes, name_bytes /* also the title */, links,
     page, per_session /* 20 */, per_operation /* 200 */: Limit, pub window: Seconds /* 3600 */,
-    pub keep_closed: TimeLimit /* none */, pub classifications /* unclassified, restricted,
-    confidential: lowest first */, handlings /* operation, compartments, peers */, priorities
-    /* critical, high, normal, low */: Vec<String>, pub clearances: BTreeMap<String, String>
-    /* person:ID, group:NAME or agent:CODENAME -> a classification; none: the lowest */ }
-impl ReportLimits { pub fn rank(&self, Option<&str>) -> Option<usize> /* unset is 0 */;
-    pub fn clearance<'a>(&self, subjects) -> usize; } // the highest that matches, else 0
+    pub keep_closed: TimeLimit /* none */ }   // [registry.limits.reports]: sizes, counts and rates only
 
 // ai6::directorates::m::reports
+#[non_exhaustive] pub struct ReportSettings { pub classifications /* unclassified, restricted,
+    confidential: lowest first */, pub handlings /* operation, compartments, peers */,
+    pub priorities /* critical, high, normal, low */: Vec<String> } // ToValue, FromValue, Schema, Form;
+    // the `roster` record's [roster.reports] (RosterSettings::reports, with_reports)
+impl ReportSettings { pub fn rank(&self, Option<&str>) -> Option<usize> /* unset is 0 */;
+    pub fn check(&self, &Report) -> Result<(), String>; } // lists, and a tearline no higher than its Report
+pub fn settings(&dyn ConfigProvider) -> Result<ReportSettings, RosterError>; // now; defaults with no record
+pub struct ReportRules<'a> { pub settings: &'a ReportSettings, pub clearances: &'a [ReportClearance] }
+impl ReportRules<'_> { pub fn new(settings, clearances) -> Self; pub fn clearance(&self, subjects: &[String]) -> usize; }
+    // the highest rank a clearance names any subject at, else 0
 pub trait ReportReader {   // answered from what is granted now
     fn reads_scope(&self, &ReportScope) -> bool;  // mission.read on an Operation (a compartment's
                                                   // crossing audited first); station.read
     fn read_in(&self, compartment) -> bool;       // CompiledCompartments::person_read_in / field_read_in
-    fn subjects(&self) -> Vec<String>;            // what `clearances` is looked up by
+    fn subjects(&self) -> Vec<String>;            // what ReportClearance::subject is matched against
 }
 #[non_exhaustive] pub enum ReportSight { Content, Tearline, Markings }
-pub fn sight(&dyn ReportReader, &Report, &ReportLimits) -> ReportSight;
+pub fn sight(&dyn ReportReader, &Report, &ReportRules<'_>) -> ReportSight;
     // Content: the scope's read, read in to EACH compartment, cleared for the classification.
     // Tearline: the scope's read and cleared for the tearline's marking. Else Markings, also for
     // anything that only links to it. Nobody is exempt, a chief included.
 pub fn report_json(&Report, ReportSight, Option<&ReportSource>) -> Value;
     // always id, scope, classification, handling, compartments, sight; never title or text below Content
 pub struct ReportMarkings { pub classification, pub handling, pub compartments, pub tearline: Option<TearlineFiling> }
-pub fn remark(&dyn ReportReader, &mut Report, ReportMarkings, &ReportLimits) -> Result<(), String>;
+pub fn remark(&dyn ReportReader, &mut Report, ReportMarkings, &ReportRules<'_>) -> Result<(), String>;
     // the reader sees Content before and after, so lowering needs someone read in
 pub struct ReportFiling { pub title, pub text, pub kind, pub severity, pub priority, pub deadline,
     pub information_from, pub sub_source, pub classification, pub handling, pub compartments,
     pub tearline: Option<TearlineFiling>, pub links: Vec<LinkFiling> } // serde, unknown keys refused
-impl ReportFiling { pub fn into_report(self, scope, filer, links, at, &ReportLimits) -> Result<Report, String>; }
+impl ReportFiling { pub fn into_report(self, scope, filer, links, at, &ReportLimits, &ReportSettings)
+    -> Result<Report, String>; }
 pub fn new_report_id() -> String;   // "report-" + 32 hex
 ```
 
@@ -2891,7 +2908,10 @@ its Mission; a Head of Station round's goes to the logbook, check-in and channel
 Operation's content marks the Session `product:<operation>`. Universal Exports serves `POST`, `GET
 /v1/reports`, `GET /v1/reports/{id}` (`403` with the markings below Content), `PUT
 /v1/reports/{id}/markings` and `GET /v1/missions/{id}/reports`; filing needs `mission.create`, or
-`station.configure` on `station:ID` or `config:reports`.
+`station.configure` on `station:ID` or `config:reports`. `GET /v1/reports/clearances` (`access.read`)
+and `PUT`, `DELETE /v1/reports/clearances/{subject}` (`access.manage`, both on `config:reports`)
+list, grant and revoke clearances, each audited (`report.clearance.grant`, `.revoke`) before it is
+made. The Station and the gateway read the settings and the clearances at every call.
 
 ## Promotion and clearance grants (`ai6::directorates::m::promotion`, `ai6::directorates::registry::clearance`)
 

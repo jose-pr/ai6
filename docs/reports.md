@@ -22,9 +22,9 @@ assessment and resolution fields are empty.
 | `links` | Missions, other Reports, decisions (green ink requests) and evidence |
 | `state` | `open`, `assessed` or `closed`, with `assessment` (the assessor's verdict and comment, apart from the filed text) and `resolution` |
 | `credibility` | `1` (confirmed by other sources) to `6` (cannot be judged); unset until assessed, and `1` is refused without a link to the corroborating Report or evidence |
-| `classification`, `handling`, `compartments` | The markings; see below |
+| `classification`, `handling`, `compartments` | The markings, from the lists in [Settings](#settings) |
 | `tearline` | A sanitised text with its own, lower, markings |
-| `priority`, `deadline` | From the priorities list (`critical`, `high`, `normal`, `low`), proposed by the filer; a deadline in Unix seconds |
+| `priority`, `deadline` | From the priorities list ([Settings](#settings)), proposed by the filer; a deadline in Unix seconds |
 
 A Report's **source** is its filer (`agent:007`, `person:ana`, `source:NAME`, `probe:NAME`,
 `review` or `watchdog`), and each source has a record of its **reliability**, `A` (completely
@@ -51,7 +51,8 @@ Reading a Report's content takes all three:
    groups, accounts, Operations, Missions and Agents. Reading in and out is the compartment's own,
    audited like any change to it, and holds from the next call. A compartment that does not exist
    reads nobody in.
-3. **A clearance at or above its classification**, from `clearances` below. A Report with no
+3. **A clearance at or above its classification**, from the [clearances](#clearances) in the
+   Registry. A Report with no
    classification is at the lowest.
 
 The rule is the same for a person and for an Agent's Session, and nobody is exempt. A reader
@@ -113,14 +114,52 @@ ai6ctl reports list --mission coqui-41
 ai6ctl reports show report-0f3c...
 ```
 
+## Clearances
+
+Who reads which classification is kept in the Registry: one record per subject, `person:ID`,
+`group:NAME` or `agent:CODENAME`, naming the highest classification it reads. A reader counts the
+highest of the records that name them; anyone no record names reads only the lowest
+classification. Every read looks them up again, so a grant or a revoke holds from the next
+request, with nothing restarted.
+
+A clearance hands someone more than their access, so changing one takes `access.manage` on
+`config:reports`, as reading a person into a compartment takes `access.manage`; listing them takes
+`access.read` there. Each grant and revoke is written to the audit log
+(`report.clearance.grant`, target `SUBJECT CLASSIFICATION`; `report.clearance.revoke`, target
+`SUBJECT`; resource `config:reports`) before it is made, and a failed write refuses it.
+
+| Route | Answers |
+| --- | --- |
+| `GET /v1/reports/clearances` | `{"clearances": [{"subject", "classification", "by", "at"}], "classifications"}` |
+| `PUT /v1/reports/clearances/{subject}` | `{"classification"}`, one of the deployment's; replaces the subject's |
+| `DELETE /v1/reports/clearances/{subject}` | `{"revoked": bool}` |
+
+```text
+ai6ctl reports clearance list
+ai6ctl reports clearance grant group:security confidential
+ai6ctl reports clearance revoke group:security
+```
+
+The file Registry keeps them in `report-clearances/`, SQL in `ai6_report_clearances`.
+
 ## Settings
 
-`[registry.limits.reports]` in `ai6.cfg`, read by the Stations and the gateway alike. A clearance
-names `person:ID`, `group:NAME` or `agent:CODENAME`; the highest that matches a reader counts, and
-a reader no entry names reads only the lowest classification.
+The lists a Report is marked and prioritised from are deployment policy, kept by the
+configuration provider in the `roster` record's `reports` table, and read again at every call.
+Without the table, the defaults below apply.
 
 ```toml
-[registry.limits.reports]
-classifications = ["unclassified", "restricted", "confidential"]
-clearances = { "group:security" = "confidential", "agent:007" = "restricted" }
+# operations.toml, or the roster record of a SQL provider
+[roster.reports]
+classifications = ["unclassified", "restricted", "confidential"]   # lowest first
+handlings = ["operation", "compartments", "peers"]                 # narrowest first
+priorities = ["critical", "high", "normal", "low"]                 # most urgent first
 ```
+
+A Report filed or remarked with a value outside these lists is refused. One already stored with a
+classification since removed from the list is shown to nobody but by its ID and markings.
+
+Sizes, counts and rates are Registry limits, in `[registry.limits.reports]` of `ai6.cfg`, read by
+the Stations and the gateway alike when they start ([Configuration](configuration.md)):
+`record_bytes`, `reports`, `text_bytes`, `name_bytes`, `links`, `page`, `per_session`,
+`per_operation`, `window` and `keep_closed`.

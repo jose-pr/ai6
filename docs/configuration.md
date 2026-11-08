@@ -454,10 +454,6 @@ global one.
 | `per_operation` | 200 | **Agent Reports per scope in the window.** Reports Agents together may file against one scope in the window. |
 | `window` | 3,600 | **Rate window.** Seconds the two counts above look back over. |
 | `keep_closed` | none | **Keep a closed Report for.** Seconds a closed Report is kept; `null` keeps it for good. |
-| `classifications` | `unclassified`, `restricted`, `confidential` | **Classifications, lowest first.** A Report carries one of these or none, which is the lowest; reading it needs a clearance at or above it. |
-| `handlings` | `operation`, `compartments`, `peers` | **Handling marks, narrowest first.** How far a Report may go. |
-| `priorities` | `critical`, `high`, `normal`, `low` | **Priorities, most urgent first.** A Report's proposed or assessed urgency; one without comes last. |
-| `clearances` | none | **Clearance per person, group or Agent.** The classification each reader may read up to, by subject (`person:ID`, `group:NAME` or `agent:CODENAME`); the highest of those that match counts, and a reader no entry names, or one naming a classification not in the list, reads the lowest. |
 <!-- schema:registry.limits.reports:end -->
 
 `[registry.limits.sessions]`
