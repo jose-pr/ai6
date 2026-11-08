@@ -7,6 +7,8 @@
 //! fails the write with `InvalidData` (or `InvalidInput` for a request), as without
 //! settings.
 
+use std::collections::BTreeMap;
+
 use guatiao::{FromValue, Schema, ToValue};
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
@@ -91,6 +93,10 @@ pub struct RegistryLimits {
     #[schema(title = "Quarantines and their incidents")]
     #[map(default)]
     pub quarantine: QuarantineLimits,
+    /// `[registry.limits.reports]`: Reports.
+    #[schema(title = "Reports")]
+    #[map(default)]
+    pub reports: ReportLimits,
     /// `[registry.limits.sessions]`: Session records.
     #[schema(title = "Session records")]
     #[map(default)]
@@ -564,6 +570,120 @@ impl Default for HoldLimits {
             record_bytes: Limit::at(16 * KIB),
             holds: Limit::at(10_000),
             text_bytes: Limit::at(2_048),
+        }
+    }
+}
+
+/// `[registry.limits.reports]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct ReportLimits {
+    /// Bytes of one Report record.
+    #[schema(title = "Largest Report", format = "bytes")]
+    #[map(default = ReportLimits::default().record_bytes)]
+    pub record_bytes: Limit,
+    /// Reports kept.
+    #[schema(title = "Reports kept")]
+    #[map(default = ReportLimits::default().reports)]
+    pub reports: Limit,
+    /// Bytes of a Report's text.
+    #[schema(title = "Longest Report text", format = "bytes")]
+    #[map(default = ReportLimits::default().text_bytes)]
+    pub text_bytes: Limit,
+    /// Bytes of a Report's kind and title, and of each name on it: filer, links, compartments.
+    #[schema(title = "Longest title or name", format = "bytes")]
+    #[map(default = ReportLimits::default().name_bytes)]
+    pub name_bytes: Limit,
+    /// Links on one Report.
+    #[schema(title = "Links on a Report")]
+    #[map(default = ReportLimits::default().links)]
+    pub links: Limit,
+    /// Reports one list returns.
+    #[schema(title = "Reports in one list")]
+    #[map(default = ReportLimits::default().page)]
+    pub page: Limit,
+    /// Reports one Agent Session may file in the window.
+    #[schema(title = "Reports per Session in the window")]
+    #[map(default = ReportLimits::default().per_session)]
+    pub per_session: Limit,
+    /// Reports Agents together may file against one scope in the window.
+    #[schema(title = "Agent Reports per scope in the window")]
+    #[map(default = ReportLimits::default().per_operation)]
+    pub per_operation: Limit,
+    /// Seconds the two counts above look back over.
+    #[schema(title = "Rate window")]
+    #[map(default = ReportLimits::default().window)]
+    pub window: Seconds,
+    /// Seconds a closed Report is kept; `null` keeps it for good.
+    #[schema(title = "Keep a closed Report for")]
+    #[map(default = ReportLimits::default().keep_closed)]
+    pub keep_closed: TimeLimit,
+    /// A Report carries one of these or none, which is the lowest; reading it needs a clearance
+    /// at or above it.
+    #[schema(title = "Classifications, lowest first")]
+    #[map(default = ReportLimits::default().classifications)]
+    pub classifications: Vec<String>,
+    /// How far a Report may go.
+    #[schema(title = "Handling marks, narrowest first")]
+    #[map(default = ReportLimits::default().handlings)]
+    pub handlings: Vec<String>,
+    /// A Report's proposed or assessed urgency; one without comes last.
+    #[schema(title = "Priorities, most urgent first")]
+    #[map(default = ReportLimits::default().priorities)]
+    pub priorities: Vec<String>,
+    /// The classification each reader may read up to, by subject (`person:ID`, `group:NAME` or
+    /// `agent:CODENAME`); the highest of those that match counts, and a reader no entry names,
+    /// or one naming a classification not in the list, reads the lowest.
+    #[schema(title = "Clearance per person, group or Agent")]
+    #[map(default = ReportLimits::default().clearances)]
+    pub clearances: BTreeMap<String, String>,
+}
+
+impl ReportLimits {
+    /// Where `classification` stands in `classifications`, lowest `0`; unset is the lowest, and
+    /// one not in the list is `None`.
+    pub fn rank(&self, classification: Option<&str>) -> Option<usize> {
+        match classification {
+            None => Some(0),
+            Some(name) => self.classifications.iter().position(|each| each == name),
+        }
+    }
+
+    /// The highest classification rank any of `subjects` is cleared for, `0` for none.
+    pub fn clearance<'a>(&self, subjects: impl IntoIterator<Item = &'a str>) -> usize {
+        subjects
+            .into_iter()
+            .filter_map(|subject| self.clearances.get(subject))
+            .filter_map(|classification| self.rank(Some(classification)))
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+impl Default for ReportLimits {
+    fn default() -> Self {
+        Self {
+            record_bytes: Limit::at(64 * KIB),
+            reports: Limit::at(100_000),
+            text_bytes: Limit::at(16 * KIB),
+            name_bytes: Limit::at(256),
+            links: Limit::at(64),
+            page: Limit::at(1_000),
+            per_session: Limit::at(20),
+            per_operation: Limit::at(200),
+            window: Seconds::new(3_600),
+            keep_closed: TimeLimit::UNBOUNDED,
+            classifications: ["unclassified", "restricted", "confidential"]
+                .map(str::to_owned)
+                .to_vec(),
+            handlings: ["operation", "compartments", "peers"]
+                .map(str::to_owned)
+                .to_vec(),
+            priorities: ["critical", "high", "normal", "low"]
+                .map(str::to_owned)
+                .to_vec(),
+            clearances: BTreeMap::new(),
         }
     }
 }

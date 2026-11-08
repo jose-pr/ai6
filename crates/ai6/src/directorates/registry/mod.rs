@@ -24,6 +24,7 @@ pub mod mission_ids;
 pub mod mission_issues;
 pub mod products;
 pub mod quarantine;
+pub mod reports;
 pub mod reviews;
 pub mod sealed;
 pub mod sessions;

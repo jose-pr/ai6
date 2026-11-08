@@ -505,6 +505,43 @@ CREATE TABLE IF NOT EXISTS ai6_mission_reviews (
     PRIMARY KEY (mission_id, gate)
 );
 
+-- Reports: one JSON record each, with what a list filters and orders by beside it. session_id is
+-- the Agent Session that filed it and source_key the source whose reliability orders it; priority
+-- is empty, and deadline and credibility null, while unset.
+CREATE TABLE IF NOT EXISTS ai6_reports (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    state TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    deadline REAL,
+    credibility INTEGER,
+    created REAL NOT NULL,
+    updated REAL NOT NULL,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai6_reports_scope ON ai6_reports (scope, created);
+
+-- The Missions, Reports, decisions and evidence a Report is tied to, to find a Mission's Reports.
+CREATE TABLE IF NOT EXISTS ai6_report_links (
+    report_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target TEXT NOT NULL,
+    PRIMARY KEY (report_id, kind, target)
+);
+CREATE INDEX IF NOT EXISTS ai6_report_links_target ON ai6_report_links (kind, target);
+
+-- Each rated source of Reports; one with no row is reliability F.
+CREATE TABLE IF NOT EXISTS ai6_report_sources (
+    source_key TEXT PRIMARY KEY,
+    reliability TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+
 -- The issues a Mission is linked to, as one JSON list per Mission.
 CREATE TABLE IF NOT EXISTS ai6_mission_issues (
     mission_id TEXT PRIMARY KEY,

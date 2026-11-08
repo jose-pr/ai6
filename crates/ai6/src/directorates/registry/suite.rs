@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::backend::RegistryBackend;
+use super::limits::RegistryLimits;
 use super::sessions::{NewSession, SessionError, SessionRecord, SessionUpdate};
 use super::store::{Brief, FileRegistry, Lease};
 
@@ -115,6 +116,9 @@ clocked_sessions!(super::sql::SqlRegistry);
 pub(crate) trait Store {
     /// A new handle on the Registry, as another Station would open it.
     fn handle(&self) -> Arc<dyn TestRegistry>;
+
+    /// As [`handle`](Self::handle), applying `limits`.
+    fn handle_with(&self, limits: RegistryLimits) -> Arc<dyn TestRegistry>;
 }
 
 /// A file Registry in a temporary directory.
@@ -129,6 +133,10 @@ impl FileStore {
 impl Store for FileStore {
     fn handle(&self) -> Arc<dyn TestRegistry> {
         Arc::new(FileRegistry::open(self.0.path()))
+    }
+
+    fn handle_with(&self, limits: RegistryLimits) -> Arc<dyn TestRegistry> {
+        Arc::new(FileRegistry::open(self.0.path()).with_limits(limits))
     }
 }
 
@@ -151,6 +159,14 @@ impl SqliteStore {
 impl Store for SqliteStore {
     fn handle(&self) -> Arc<dyn TestRegistry> {
         Arc::new(super::sql::SqlRegistry::open(&self.location()).expect("a SQLite Registry"))
+    }
+
+    fn handle_with(&self, limits: RegistryLimits) -> Arc<dyn TestRegistry> {
+        let options = super::sql::SqlOptions::default().with_limits(limits);
+        Arc::new(
+            super::sql::SqlRegistry::open_with(&self.location(), &options)
+                .expect("a SQLite Registry"),
+        )
     }
 }
 
@@ -215,6 +231,14 @@ impl PostgresStore {
 impl Store for PostgresStore {
     fn handle(&self) -> Arc<dyn TestRegistry> {
         Arc::new(super::sql::SqlRegistry::open(&self.location()).expect("a PostgreSQL Registry"))
+    }
+
+    fn handle_with(&self, limits: RegistryLimits) -> Arc<dyn TestRegistry> {
+        let options = super::sql::SqlOptions::default().with_limits(limits);
+        Arc::new(
+            super::sql::SqlRegistry::open_with(&self.location(), &options)
+                .expect("a PostgreSQL Registry"),
+        )
     }
 }
 
