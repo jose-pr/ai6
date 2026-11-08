@@ -30,6 +30,30 @@ pub(crate) enum ReportsCommand {
         /// Its ID.
         id: String,
     },
+    /// Who is cleared for which classification: list, grant or revoke (access.read, and
+    /// access.manage to change, on config:reports). A change holds from the next request.
+    Clearance {
+        #[command(subcommand)]
+        command: ClearanceCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ClearanceCommand {
+    /// List each subject and the classification it reads up to.
+    List,
+    /// Clear a subject up to a classification, replacing what it had.
+    Grant {
+        /// person:ID, group:NAME or agent:CODENAME.
+        subject: String,
+        /// One of the deployment's classifications.
+        classification: String,
+    },
+    /// Take a subject's clearance away.
+    Revoke {
+        /// person:ID, group:NAME or agent:CODENAME.
+        subject: String,
+    },
 }
 
 /// What `ai6ctl reports file` takes.
@@ -198,6 +222,9 @@ pub(crate) async fn run(
             }
             print_listed(&exchange(client, token, Method::GET, url, None, None).await?);
         }
+        ReportsCommand::Clearance { command } => {
+            run_clearance(client, server, token, command).await?;
+        }
         ReportsCommand::Show { id } => {
             let report = exchange(
                 client,
@@ -225,6 +252,73 @@ pub(crate) async fn run(
             }
             println!();
             println!("{}", plain(report["text"].as_str().unwrap_or_default()));
+        }
+    }
+    Ok(())
+}
+
+async fn run_clearance(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    command: ClearanceCommand,
+) -> Result<(), String> {
+    match command {
+        ClearanceCommand::List => {
+            let listed = exchange(
+                client,
+                token,
+                Method::GET,
+                address(server, &["reports", "clearances"])?,
+                None,
+                None,
+            )
+            .await?;
+            println!("SUBJECT\tCLASSIFICATION\tBY");
+            for clearance in listed["clearances"].as_array().into_iter().flatten() {
+                println!(
+                    "{}\t{}\t{}",
+                    text(&clearance["subject"]),
+                    text(&clearance["classification"]),
+                    text(&clearance["by"]),
+                );
+            }
+        }
+        ClearanceCommand::Grant {
+            subject,
+            classification,
+        } => {
+            let granted = exchange(
+                client,
+                token,
+                Method::PUT,
+                address(server, &["reports", "clearances", &subject])?,
+                None,
+                Some(json!({"classification": classification})),
+            )
+            .await?;
+            println!(
+                "granted\t{}\t{}",
+                text(&granted["subject"]),
+                text(&granted["classification"])
+            );
+        }
+        ClearanceCommand::Revoke { subject } => {
+            let revoked = exchange(
+                client,
+                token,
+                Method::DELETE,
+                address(server, &["reports", "clearances", &subject])?,
+                None,
+                None,
+            )
+            .await?;
+            let word = if revoked["revoked"] == true {
+                "revoked"
+            } else {
+                "none held"
+            };
+            println!("{word}\t{}", plain(&subject));
         }
     }
     Ok(())

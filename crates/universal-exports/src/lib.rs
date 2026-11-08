@@ -1534,6 +1534,11 @@ impl Gateway {
             )
             .route("/v1/missions/{id}/reports", get(reports::of_mission))
             .route("/v1/reports", get(reports::list).post(reports::file))
+            .route("/v1/reports/clearances", get(reports::clearances))
+            .route(
+                "/v1/reports/clearances/{subject}",
+                axum::routing::put(reports::grant).delete(reports::revoke),
+            )
             .route("/v1/reports/{id}", get(reports::show))
             .route(
                 "/v1/reports/{id}/markings",

@@ -4,6 +4,10 @@
 //! watch's order; `GET /v1/reports/{id}` shows one; `PUT /v1/reports/{id}/markings` changes its
 //! markings; `GET /v1/missions/{id}/reports` lists the Reports tied to a Mission.
 //!
+//! `GET /v1/reports/clearances` lists who is cleared for which classification (`access.read`
+//! on `config:reports`); `PUT` and `DELETE /v1/reports/clearances/{subject}` grant and revoke one
+//! (`access.manage` there), each written to the audit log before it is made.
+//!
 //! Who sees what is `ai6::directorates::m::reports`, asked at every call: the scope's read
 //! (`mission.read` on an Operation, from the access policy or a compartment, the crossing
 //! audited; `station.read` on `station:ID`; `station.read` on `config:reports` for M's scope),
@@ -15,10 +19,13 @@
 use std::sync::Arc;
 
 use ai6::directorates::m::reports::{
-    ReportFiling, ReportMarkings, ReportReader, ReportSight, remark, report_json, sight,
+    self, ReportFiling, ReportMarkings, ReportReader, ReportRules, ReportSettings, ReportSight,
+    remark, report_json, sight,
 };
 use ai6::directorates::registry::backend::*;
-use ai6::directorates::registry::reports::{ReportFiler, ReportFilter, ReportScope, ReportState};
+use ai6::directorates::registry::reports::{
+    ReportClearance, ReportFiler, ReportFilter, ReportScope, ReportState,
+};
 use ai6::{Authorizer, Person};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -29,7 +36,10 @@ use serde_json::{Value, json};
 use crate::compartments::CompartmentAccess;
 use crate::memories::{Refused, refused};
 use crate::tree::{OperationTree, resource_request};
-use crate::{ApiError, Gateway, bearer, operation_tree, resolve_user, unix_timestamp};
+use crate::{
+    ApiError, Gateway, authorize_resource_action, bearer, operation_tree, resolve_user,
+    unix_timestamp,
+};
 
 /// The resource M's own Reports are read and filed at.
 pub(crate) const M_RESOURCE: &str = "config:reports";
@@ -48,6 +58,10 @@ struct PersonReader {
     person: Person,
     access: Arc<CompartmentAccess>,
     tree: OperationTree,
+    /// The deployment's lists, read for this request.
+    settings: ReportSettings,
+    /// Every clearance, read for this request.
+    clearances: Vec<ReportClearance>,
 }
 
 impl PersonReader {
@@ -65,6 +79,10 @@ impl PersonReader {
     fn files_in(&self, scope: &ReportScope) -> bool {
         let (resource, _, file) = actions_of(scope);
         self.holds(file, resource)
+    }
+
+    fn rules(&self) -> ReportRules<'_> {
+        ReportRules::new(&self.settings, &self.clearances)
     }
 }
 
@@ -92,12 +110,37 @@ impl ReportReader for PersonReader {
     }
 }
 
+/// The deployment's lists and every clearance, as they are now; nothing is kept between
+/// requests, so a change holds from the next one.
+async fn rules_now(gateway: &Gateway) -> Result<(ReportSettings, Vec<ReportClearance>), Refused> {
+    let source = gateway.roster.clone();
+    let registry = registry_of(gateway)?;
+    blocking(move || {
+        let unreadable = |_| {
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The report settings or clearances cannot be read now.",
+            )
+        };
+        let settings = match &source {
+            Some(source) => reports::settings(source.as_ref()).map_err(|_| unreadable(()))?,
+            None => ReportSettings::default(),
+        };
+        let clearances = registry.report_clearances().map_err(|_| unreadable(()))?;
+        Ok((settings, clearances))
+    })
+    .await
+}
+
 async fn reader_of(gateway: &Gateway, headers: &HeaderMap) -> Result<PersonReader, Refused> {
     let person = resolve_user(gateway, bearer(headers)?).await?;
+    let (settings, clearances) = rules_now(gateway).await?;
     Ok(PersonReader {
         person,
         access: gateway.authorizer()?,
         tree: operation_tree(gateway).await?,
+        settings,
+        clearances,
     })
 }
 
@@ -130,7 +173,7 @@ fn shown(
     reader: &PersonReader,
     report: &ai6::directorates::registry::reports::Report,
 ) -> Value {
-    let seen = sight(reader, report, &registry.limits().reports);
+    let seen = sight(reader, report, &reader.rules());
     let source = (seen == ReportSight::Content)
         .then(|| registry.report_source(&report.filer.source_key()).ok())
         .flatten();
@@ -175,7 +218,7 @@ async fn list_reports(
     let reader = reader_of(gateway, headers).await?;
     let registry = registry_of(gateway)?;
     blocking(move || {
-        let mut filter = ReportFilter::all();
+        let mut filter = ReportFilter::all().ordered_by(reader.settings.priorities.clone());
         match (&listing.scope, &listing.mission) {
             (None, None) => {
                 return Err(refused(
@@ -316,7 +359,14 @@ pub(crate) async fn file(
             person: reader.person.id.clone(),
         };
         let report = filing
-            .into_report(scope, filer, [], at, &registry.limits().reports)
+            .into_report(
+                scope,
+                filer,
+                [],
+                at,
+                &registry.limits().reports,
+                &reader.settings,
+            )
             .map_err(|reason| refused(StatusCode::BAD_REQUEST, reason))?;
         registry
             .file_report(&report)
@@ -355,10 +405,9 @@ pub(crate) async fn mark(
         if !reader.reads_scope(&report.scope) {
             return Err(missing());
         }
-        let limits = registry.limits().reports.clone();
         let mut refusal = None;
         let changed = registry.change_report(&id, &mut |stored| {
-            remark(&reader, stored, markings.clone(), &limits).map_err(|reason| {
+            remark(&reader, stored, markings.clone(), &reader.rules()).map_err(|reason| {
                 refusal = Some(reason.clone());
                 std::io::Error::new(std::io::ErrorKind::PermissionDenied, reason)
             })?;
@@ -378,6 +427,144 @@ pub(crate) async fn mark(
         }
     })
     .await
+}
+
+/// What grants and revokes a clearance, and what lists them: a clearance hands a person or an
+/// Agent more than their access, so it takes what handing out access takes.
+const CLEARANCE_MANAGE: &str = "access.manage";
+const CLEARANCE_READ: &str = "access.read";
+
+/// Writes a clearance change to the audit log; a failed write refuses the change.
+async fn audit_clearance(
+    gateway: &Gateway,
+    person: &Person,
+    action: &str,
+    target: String,
+) -> Result<(), Refused> {
+    let registry = registry_of(gateway)?;
+    let record = ai6::AuditRecord {
+        id: format!("clearance-{}", uuid::Uuid::new_v4().simple()),
+        actor: person.id.clone(),
+        action: action.to_owned(),
+        operation: String::new(),
+        resource: Some(M_RESOURCE.to_owned()),
+        target,
+        at: unix_timestamp()?,
+    };
+    blocking(move || {
+        registry.record_audit(&record).map_err(|_| {
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Nothing was changed: it could not be audited.",
+            )
+        })
+    })
+    .await
+}
+
+/// `GET /v1/reports/clearances`: `{"clearances": [...], "classifications": [...]}`.
+pub(crate) async fn clearances(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, Refused> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    authorize_resource_action(&gateway, person, M_RESOURCE.to_owned(), CLEARANCE_READ).await?;
+    let (settings, clearances) = rules_now(&gateway).await?;
+    Ok(Json(json!({
+        "clearances": clearances,
+        "classifications": settings.classifications,
+    })))
+}
+
+/// The body of a grant.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Grant {
+    classification: String,
+}
+
+/// `PUT /v1/reports/clearances/{subject}`: `{"classification"}`, replacing the subject's.
+pub(crate) async fn grant(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(subject): Path<String>,
+    Json(grant): Json<Grant>,
+) -> Result<Json<Value>, Refused> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    authorize_resource_action(
+        &gateway,
+        person.clone(),
+        M_RESOURCE.to_owned(),
+        CLEARANCE_MANAGE,
+    )
+    .await?;
+    let registry = registry_of(&gateway)?;
+    let (settings, _) = rules_now(&gateway).await?;
+    if !settings.classifications.contains(&grant.classification) {
+        return Err(refused(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "{:?} is not one of the classifications: {}",
+                grant.classification,
+                settings.classifications.join(", ")
+            ),
+        ));
+    }
+    let clearance = ReportClearance::new(
+        subject.clone(),
+        grant.classification.clone(),
+        format!("person:{}", person.id),
+        unix_timestamp()?,
+    );
+    clearance
+        .validate(&registry.limits().reports)
+        .map_err(|error| refused(StatusCode::BAD_REQUEST, error.to_string()))?;
+    audit_clearance(
+        &gateway,
+        &person,
+        "report.clearance.grant",
+        format!("{subject} {}", grant.classification),
+    )
+    .await?;
+    let stored = clearance.clone();
+    blocking(move || {
+        registry
+            .put_report_clearance(&stored)
+            .map_err(|_| Refused::from(ApiError::internal()))
+    })
+    .await?;
+    Ok(Json(json!(clearance)))
+}
+
+/// `DELETE /v1/reports/clearances/{subject}`: `{"revoked": bool}`; it holds from the next call.
+pub(crate) async fn revoke(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(subject): Path<String>,
+) -> Result<Json<Value>, Refused> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    authorize_resource_action(
+        &gateway,
+        person.clone(),
+        M_RESOURCE.to_owned(),
+        CLEARANCE_MANAGE,
+    )
+    .await?;
+    let registry = registry_of(&gateway)?;
+    audit_clearance(
+        &gateway,
+        &person,
+        "report.clearance.revoke",
+        subject.clone(),
+    )
+    .await?;
+    let revoked = blocking(move || {
+        registry
+            .revoke_report_clearance(&subject)
+            .map_err(|_| Refused::from(ApiError::internal()))
+    })
+    .await?;
+    Ok(Json(json!({ "revoked": revoked })))
 }
 
 #[cfg(test)]

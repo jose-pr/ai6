@@ -300,5 +300,34 @@ async fn a_person_files_lists_and_shows_a_report() {
     .await;
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("priority"));
+    // Clearances are Registry records, changed live through the gateway.
+    let granted = printed(
+        &run(vec![
+            "reports",
+            "clearance",
+            "grant",
+            "group:security",
+            "confidential",
+        ])
+        .await,
+    );
+    assert!(granted.starts_with("granted"), "{granted}");
+    let held = FileRegistry::open(directory.path())
+        .report_clearances()
+        .unwrap();
+    assert_eq!(held[0].subject, "group:security");
+    let listed = printed(&run(vec!["reports", "clearance", "list"]).await);
+    assert!(
+        listed.contains("group:security") && listed.contains("confidential"),
+        "{listed}"
+    );
+    let revoked = printed(&run(vec!["reports", "clearance", "revoke", "group:security"]).await);
+    assert!(revoked.starts_with("revoked"), "{revoked}");
+    assert!(
+        FileRegistry::open(directory.path())
+            .report_clearances()
+            .unwrap()
+            .is_empty()
+    );
     let _ = shutdown.send(());
 }

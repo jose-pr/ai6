@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 
 use crate::controls::tests::{Served, served_with_roster};
 
-/// `operator-007` reads and files in G; `viewer-007` only reads G. Neither is a chief.
+/// `operator-007` reads and files in G and manages clearances; `viewer-007` only reads G.
+/// Neither is a chief.
 const ROLES: &str = r#"
     [role.viewer]
     actions = ["mission.read"]
@@ -26,6 +27,14 @@ const ROLES: &str = r#"
     subject = "person:operator-007"
     scope = "operation:G"
     role = "filer"
+
+    [role.security]
+    actions = ["access.manage", "access.read"]
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "config:reports"
+    role = "security"
 "#;
 
 struct Fixture {
@@ -321,4 +330,92 @@ async fn a_compartment_and_a_classification_hold_back_the_content_and_a_link_sho
         )
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_clearance_granted_through_the_gateway_holds_at_once_and_so_does_its_revoke() {
+    let fixture = fixture().await;
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    let classified = fixture
+        .file(json!({
+            "title": "A supplier is compromised",
+            "text": "the vendor signs with a stolen key",
+            "classification": "restricted",
+        }))
+        .await;
+    let path = format!("/v1/reports/{classified}");
+    let (status, _) = fixture.call(&viewer, Method::GET, &path, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "nobody is cleared yet");
+
+    // Granting is a security change: the viewer holds no access.manage on config:reports.
+    let grant = "/v1/reports/clearances/person:viewer-007";
+    let restricted = json!({"classification": "restricted"});
+    let (status, _) = fixture
+        .call(&viewer, Method::PUT, grant, Some(restricted.clone()))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            grant,
+            Some(json!({"classification": "cosmic"})),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "not one of the classifications"
+    );
+    let (status, granted) = fixture
+        .call(&operator, Method::PUT, grant, Some(restricted))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    assert_eq!(granted["by"], "person:operator-007");
+
+    // The next request reads it, with nothing restarted.
+    let (status, shown) = fixture.call(&viewer, Method::GET, &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{shown}");
+    assert_eq!(shown["text"], "the vendor signs with a stolen key");
+    let (status, listed) = fixture
+        .call(&operator, Method::GET, "/v1/reports/clearances", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["clearances"][0]["subject"], "person:viewer-007");
+    assert_eq!(listed["clearances"][0]["classification"], "restricted");
+
+    // Revoked, the next request is refused.
+    let (status, revoked) = fixture.call(&operator, Method::DELETE, grant, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(revoked["revoked"], true);
+    let (status, _) = fixture.call(&viewer, Method::GET, &path, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Each change is in the audit log, by whom, of what.
+    let audits: Vec<(String, String, String)> = fixture
+        .served
+        .registry
+        .list_audit(200)
+        .unwrap()
+        .into_iter()
+        .filter(|record| record.action.starts_with("report.clearance."))
+        .map(|record| (record.action, record.actor, record.target))
+        .collect();
+    assert_eq!(audits.len(), 2, "{audits:?}");
+    for expected in [
+        ("report.clearance.grant", "person:viewer-007 restricted"),
+        ("report.clearance.revoke", "person:viewer-007"),
+    ] {
+        assert!(
+            audits
+                .iter()
+                .any(|(action, actor, target)| action == expected.0
+                    && actor == "operator-007"
+                    && target == expected.1),
+            "{expected:?} in {audits:?}"
+        );
+    }
 }
