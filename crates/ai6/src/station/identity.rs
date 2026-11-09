@@ -15,7 +15,7 @@ pub use coqui_peer_tls::{
     Built, CaPolicy, Identity, NonDefault, PeerId, PeerIdentity, Pins, Policy, Trust, TrustStore,
     TrustStoreExt,
 };
-use coqui_peer_tls::{PeerError, client_config_with, server_config_with};
+use coqui_peer_tls::{ClientAuth, ClientBuilder, PeerError, ServerBuilder};
 use rustls::{ClientConfig, ServerConfig};
 
 use crate::directorates::registry::sealed::StationSealingKey;
@@ -89,7 +89,7 @@ pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>
 ///
 /// Returns an error when the directories cannot be created.
 pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError> {
-    Ok(TrustStore::open(state_dir)?.with_limits(policy.waiting))
+    Ok(TrustStore::builder(state_dir).limits(policy.waiting).build()?)
 }
 
 /// Trust exactly the peers in `store`: a peer that is not accepted is refused, and recorded as
@@ -111,12 +111,11 @@ pub fn client_config(
     policy: &Policy,
 ) -> Result<Built<ClientConfig>, StationIdentityError> {
     let trust = Trust::Pinned(Pins::fixed([*server]));
-    Ok(client_config_with(
-        identity,
-        &trust,
-        &[STATION_ALPN],
-        policy,
-    )?)
+    Ok(ClientBuilder::new(trust)
+        .identity(identity)
+        .alpn([STATION_ALPN])
+        .policy(policy.clone())
+        .build()?)
 }
 
 /// The server side of a Station connection: requires a client certificate that `trust`
@@ -131,12 +130,10 @@ pub fn server_config(
     trust: &Trust,
     policy: &Policy,
 ) -> Result<Built<ServerConfig>, StationIdentityError> {
-    Ok(server_config_with(
-        identity,
-        trust,
-        &[STATION_ALPN],
-        policy,
-    )?)
+    Ok(ServerBuilder::new(identity, ClientAuth::Required(trust.clone()))
+        .alpn([STATION_ALPN])
+        .policy(policy.clone())
+        .build()?)
 }
 
 /// What a Station's identity signs about its sealing key. A TLS 1.3 handshake's signed text starts
