@@ -919,7 +919,7 @@ fn put_path(definition: &mut Value, path: &str, value: Value) -> Result<(), Stri
 }
 
 fn remove_path(definition: &mut Value, path: &str) -> bool {
-    let (parents, last) = path.rsplit_once('.').map_or(("", path), |split| split);
+    let (parents, last) = path.rsplit_once('.').unwrap_or(("", path));
     let mut table = definition;
     if !parents.is_empty() {
         for segment in parents.split('.') {

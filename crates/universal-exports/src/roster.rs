@@ -229,10 +229,12 @@ fn loosened(
         }
     }
     let before = ai6::directorates::m::config::record_weakenings(record, &current);
-    Ok(ai6::directorates::m::config::record_weakenings(record, &after)
-        .into_iter()
-        .filter(|line| !before.contains(line))
-        .collect())
+    Ok(
+        ai6::directorates::m::config::record_weakenings(record, &after)
+            .into_iter()
+            .filter(|line| !before.contains(line))
+            .collect(),
+    )
 }
 
 fn checked_key(key: &str, bytes: ai6::Limit) -> Result<(), ApiError> {
@@ -1277,7 +1279,7 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::GET,
-            "roster/theaters",
+            "roster/compartments",
             None,
         )
         .await;
@@ -1323,7 +1325,7 @@ mod tests {
             &served,
             &served.viewer,
             reqwest::Method::GET,
-            "roster/theaters/schema",
+            "roster/compartments/schema",
             None,
         )
         .await;
@@ -1920,7 +1922,7 @@ mod tests {
 
         for body in [
             json!({"records": []}),
-            json!({"records": [{"kind": "tls", "key": "settings", "definition": {}}]}),
+            json!({"records": [{"kind": "access", "key": "settings", "definition": {}}]}),
             json!({"station": "x", "records": [{"kind": "agent", "key": "007", "definition": {}}]}),
             json!({"records": [
                 {"kind": "agent", "key": "007", "definition": {}},
@@ -1985,7 +1987,14 @@ mod tests {
                 .as_array()
                 .is_some_and(|weakened| !weakened.is_empty())
         );
-        assert!(station.load("").unwrap().roster.assistant().allow_elevated);
+        assert!(
+            station
+                .load("")
+                .unwrap()
+                .roster
+                .assistant()
+                .allow_elevated()
+        );
     }
 
     #[cfg(feature = "cli")]
@@ -2080,8 +2089,8 @@ mod tests {
                 .load("")
                 .unwrap()
                 .roster
-                .agent(Some("G"), "007")
-                .is_ok()
+                .agent_ids()
+                .any(|id| id == "007")
         );
 
         let forced = call(
