@@ -1590,6 +1590,21 @@ class MissionBoard extends ChangeNotifier
   bool get canManageRoster =>
       !demo && (userSession?.roster.contains('roster.manage') ?? false);
 
+  /// Whether the person may list the records of the roster route kind [kind]: a configuration
+  /// family (`watches`) by `config.read` on it, any other kind by `roster.read`.
+  bool canReadRecords(String kind) => rosterConfigKinds.contains(kind)
+      ? demo || (userSession?.config[kind]?.contains('config.read') ?? false)
+      : canReadRoster;
+
+  /// Whether the person may edit the records of [kind].
+  bool canManageRecords(String kind) => rosterConfigKinds.contains(kind)
+      ? !demo && (userSession?.config[kind]?.contains('config.manage') ?? false)
+      : canManageRoster;
+
+  /// Whether the person may list any record the Roster page shows.
+  bool get canReadAnyRecords =>
+      canReadRoster || rosterConfigKinds.any((kind) => canReadRecords(kind));
+
   /// The person's actions on the global access policy and the accounts (`access.read`,
   /// `access.manage`, `account.manage`).
   List<String> get globalActions => userSession?.globalActions ?? const [];
@@ -3942,6 +3957,7 @@ class UserSessionSummary {
     required this.operations,
     this.stations = const [],
     this.roster = const [],
+    this.config = const {},
     this.globalActions = const [],
     this.moneypenny = false,
   });
@@ -3956,6 +3972,10 @@ class UserSessionSummary {
 
   /// The person's actions on the roster every Station reads (`roster.read`, `roster.manage`).
   final List<String> roster;
+
+  /// The person's actions on each configuration family the Roster page edits beyond the
+  /// roster (`config.read`, `config.manage`), by route kind; a family with none is absent.
+  final Map<String, List<String>> config;
 
   /// The person's actions on the global access policy and the accounts.
   final List<String> globalActions;
@@ -3984,6 +4004,11 @@ class UserSessionSummary {
             )
             .toList(growable: false),
         roster: (json['roster'] as List<dynamic>? ?? const []).cast<String>(),
+        config: {
+          for (final MapEntry(:key, :value)
+              in (json['config'] as Map<String, dynamic>? ?? const {}).entries)
+            key: (value as List<dynamic>).cast<String>(),
+        },
         globalActions: (json['global_actions'] as List<dynamic>? ?? const [])
             .cast<String>(),
         moneypenny: json['moneypenny'] as bool? ?? false,
@@ -4946,7 +4971,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         board.classAuthorizationOperations.isNotEmpty)
       OoPage.greenInk,
     if (board.proposalOperations.isNotEmpty) OoPage.briefings,
-    if (board.canReadRoster) OoPage.roster,
+    if (board.canReadAnyRecords) OoPage.roster,
     if (board.poolOperations.isNotEmpty) OoPage.pools,
     if (board.timelineOperations.isNotEmpty) OoPage.timeline,
     if (board.demo || board.canReadAudit) OoPage.audit,

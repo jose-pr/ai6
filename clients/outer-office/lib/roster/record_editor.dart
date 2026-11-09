@@ -54,6 +54,7 @@ const _tables = {
   'roles': 'role',
   'covers': 'cover',
   'reviews': 'review',
+  'watches': 'watch',
 };
 
 /// The kinds of record a form may name, and a person's word for one of each.
@@ -64,6 +65,7 @@ const _recordNames = {
   'covers': 'Cover policy',
   'reviews': 'Review policy',
   'assistant': "Moneypenny's settings",
+  'watches': 'Watch',
 };
 
 const _recordFormat = 'record:';
@@ -503,10 +505,11 @@ mixin RecordActions<T extends StatefulWidget> on State<T> {
   /// The roster revision the last accepted change moved to, until it is dismissed.
   String? savedRevision;
 
-  bool get canChangeRecords => recordBoard.canManageRoster && _takesEdits;
+  bool get canChangeRecords =>
+      recordBoard.canManageRecords(recordKind) && _takesEdits;
 
   Future<void> checkRecordsTakeEdits() async {
-    if (!recordBoard.canManageRoster) return;
+    if (!recordBoard.canManageRecords(recordKind)) return;
     try {
       final records = await recordBoard.loadRoster(recordKind);
       if (mounted) setState(() => _takesEdits = records.writable);

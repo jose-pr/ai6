@@ -147,7 +147,12 @@ const _kinds = {
   'covers': 'Cover policies',
   'reviews': 'Review policies',
   _assistantKind: "Moneypenny's settings",
+  'watches': 'Watches',
 };
+
+/// The kinds the gateway gates by `config.read` and `config.manage` on `config:<family>`
+/// rather than by the roster's actions.
+const rosterConfigKinds = {'watches'};
 
 /// The kind picker's value for every kind: a route without `kind`.
 const _allKinds = '\u0000all';
@@ -163,6 +168,7 @@ const _routeKinds = {
   'cover': 'covers',
   'review': 'reviews',
   'assistant': _assistantKind,
+  'watch': 'watches',
 };
 
 /// The roster every Station reads: Operations, Agents, roles, cover policies and Moneypenny's
@@ -252,7 +258,7 @@ class _RosterPageState extends State<RosterPage> {
 
   Future<void> _loadAll() async {
     setState(() => _loading = true);
-    final kinds = _kinds.keys.toList();
+    final kinds = _readable.keys.toList();
     final read = await Future.wait([
       for (final kind in kinds)
         widget.board
@@ -272,6 +278,12 @@ class _RosterPageState extends State<RosterPage> {
     });
   }
 
+  /// The kinds the person may read, in order.
+  Map<String, String> get _readable => {
+    for (final MapEntry(:key, :value) in _kinds.entries)
+      if (widget.board.canReadRecords(key)) key: value,
+  };
+
   /// The kind picker: All records first, the default, then each kind.
   Widget _picker() => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 260),
@@ -280,7 +292,7 @@ class _RosterPageState extends State<RosterPage> {
       value: _showAll ? _allKinds : _kind,
       items: [
         const DropdownMenuItem(value: _allKinds, child: Text('All records')),
-        for (final MapEntry(:key, :value) in _kinds.entries)
+        for (final MapEntry(:key, :value) in _readable.entries)
           DropdownMenuItem(value: key, child: Text(value)),
       ],
       onChanged: (kind) {
@@ -521,7 +533,7 @@ class _RosterPageState extends State<RosterPage> {
         if (key == null || record.key == key) record,
     ];
     final canEdit =
-        widget.board.canManageRoster && (records?.writable ?? false);
+        widget.board.canManageRecords(_kind) && (records?.writable ?? false);
     // Moneypenny's settings are one record: once it exists it is edited, not added.
     final canAdd =
         canEdit &&

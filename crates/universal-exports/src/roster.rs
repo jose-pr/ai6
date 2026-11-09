@@ -10,10 +10,10 @@
 
 use ai6::{AssistantSettings, AuditRecord, ConfigRecord, Person, RosterErrorKind};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::access_admin::token;
@@ -97,7 +97,29 @@ struct Changed {
     changed: String,
 }
 
-fn kind_of(kind: &str) -> Result<ConfigRecord, ApiError> {
+/// A kind of record the routes serve, and what a person needs to read or change it.
+#[derive(Clone)]
+struct Family {
+    record: ConfigRecord,
+    /// The resource the actions are held on.
+    resource: String,
+    read: &'static str,
+    manage: &'static str,
+}
+
+/// The route kinds gated by `config.read` and `config.manage` on `config:<family>`, and the
+/// family each names.
+pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 1] = [("watches", ConfigRecord::Watch)];
+
+fn family_of(kind: &str) -> Result<Family, ApiError> {
+    if let Some((_, record)) = CONFIG_KINDS.iter().find(|(name, _)| *name == kind) {
+        return Ok(Family {
+            record: *record,
+            resource: format!("config:{}", record.name()),
+            read: "config.read",
+            manage: "config.manage",
+        });
+    }
     let name = match kind {
         "operations" => "operation",
         "agents" => "agent",
@@ -108,7 +130,36 @@ fn kind_of(kind: &str) -> Result<ConfigRecord, ApiError> {
         "roster" => "roster",
         _ => return Err(ApiError::not_found()),
     };
-    ConfigRecord::from_name(name).ok_or_else(ApiError::not_found)
+    Ok(Family {
+        record: ConfigRecord::from_name(name).ok_or_else(ApiError::not_found)?,
+        resource: ROSTER_RESOURCE.to_owned(),
+        read: "roster.read",
+        manage: "roster.manage",
+    })
+}
+
+/// The audit target of a record: `watch operation:G`, or with a Station's own `loadout 007 (station:x)`.
+fn target_of(record: ConfigRecord, scope: &ai6::ConfigScope, key: &str) -> String {
+    match scope {
+        ai6::ConfigScope::Global => format!("{} {key}", record.name()),
+        scope => format!("{} {key} ({scope})", record.name()),
+    }
+}
+
+/// The Station a request names, for a family that may have records of its own per Station.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct Scoped {
+    station: Option<String>,
+}
+
+fn scope_of(record: ConfigRecord, scoped: &Scoped) -> Result<ai6::ConfigScope, ApiError> {
+    match scoped.station.as_deref() {
+        None => Ok(ai6::ConfigScope::Global),
+        Some(id) if record.station_scoped() && ai6::ConfigScope::is_plain(id) => {
+            Ok(ai6::ConfigScope::Station(id.to_owned()))
+        }
+        Some(_) => Err(ApiError::bad_request()),
+    }
 }
 
 fn checked_key(key: &str, bytes: ai6::Limit) -> Result<(), ApiError> {
@@ -149,6 +200,7 @@ pub(crate) fn bounded(text: &str, bytes: ai6::Limit) -> String {
 async fn audit(
     gateway: &Gateway,
     person: &Person,
+    resource: &str,
     action: &str,
     target: &str,
 ) -> Result<(), ApiError> {
@@ -158,7 +210,7 @@ async fn audit(
         actor: person.id.clone(),
         action: action.to_owned(),
         operation: String::new(),
-        resource: Some(ROSTER_RESOURCE.to_owned()),
+        resource: Some(resource.to_owned()),
         target: bounded(target, gateway.config.unex().text.roster_target_bytes),
         at: unix_timestamp()?,
     };
@@ -173,19 +225,21 @@ pub(crate) async fn records(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     Path(kind): Path<String>,
+    Query(scoped): Query<Scoped>,
 ) -> Result<Json<RosterRecords>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
-    let record = kind_of(&kind)?;
-    authorize_resource_action(&gateway, person, ROSTER_RESOURCE.to_owned(), "roster.read").await?;
+    let family = family_of(&kind)?;
+    let scope = scope_of(family.record, &scoped)?;
+    authorize_resource_action(&gateway, person, family.resource, family.read).await?;
     let source = source(&gateway)?;
-    let definitions =
-        tokio::task::spawn_blocking(move || source.definitions(record, &ai6::ConfigScope::Global))
-            .await
-            .map_err(|_| ApiError::internal())?
-            .map_err(|error| match error.kind() {
-                RosterErrorKind::ReadOnly => ApiError::from(GatewayError::Conflict),
-                _ => ApiError::unavailable(),
-            })?;
+    let record = family.record;
+    let definitions = tokio::task::spawn_blocking(move || source.definitions(record, &scope))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|error| match error.kind() {
+            RosterErrorKind::ReadOnly => ApiError::from(GatewayError::Conflict),
+            _ => ApiError::unavailable(),
+        })?;
     Ok(Json(RosterRecords {
         kind,
         revision: definitions.revision.get().to_string(),
@@ -210,9 +264,9 @@ pub(crate) async fn form(
     Path(kind): Path<String>,
 ) -> Result<Json<ai6::RecordForm>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
-    let record = kind_of(&kind)?;
-    authorize_resource_action(&gateway, person, ROSTER_RESOURCE.to_owned(), "roster.read").await?;
-    match record.form() {
+    let family = family_of(&kind)?;
+    authorize_resource_action(&gateway, person, family.resource, family.read).await?;
+    match family.record.form() {
         Ok(Some(form)) => Ok(Json(form)),
         Ok(None) => Err(ApiError::not_found()),
         Err(_) => Err(ApiError::internal()),
@@ -232,29 +286,22 @@ fn expected_revision(headers: &HeaderMap) -> Option<String> {
 fn store(
     source: &dyn ai6::ConfigProvider,
     record: ConfigRecord,
+    scope: &ai6::ConfigScope,
     key: &str,
     expected: Option<&str>,
     definition: &serde_json::Value,
 ) -> Result<Result<ai6::ConfigRevision, Changed>, ai6::RosterError> {
     let Some(expected) = expected else {
-        return source
-            .put(record, &ai6::ConfigScope::Global, key, definition)
-            .map(Ok);
+        return source.put(record, scope, key, definition).map(Ok);
     };
-    let stored = stored_record(source, record, key)?;
+    let stored = stored_record(source, record, scope, key)?;
     let now = token(stored.as_ref());
     if now != expected {
         return Ok(Err(Changed { changed: now }));
     }
-    match source.put_if(
-        record,
-        &ai6::ConfigScope::Global,
-        key,
-        stored.as_ref(),
-        definition,
-    ) {
+    match source.put_if(record, scope, key, stored.as_ref(), definition) {
         Err(error) if error.kind() == RosterErrorKind::Conflict => {
-            let now = stored_record(source, record, key)?;
+            let now = stored_record(source, record, scope, key)?;
             Ok(Err(Changed {
                 changed: token(now.as_ref()),
             }))
@@ -266,10 +313,11 @@ fn store(
 fn stored_record(
     source: &dyn ai6::ConfigProvider,
     record: ConfigRecord,
+    scope: &ai6::ConfigScope,
     key: &str,
 ) -> Result<Option<serde_json::Value>, ai6::RosterError> {
     Ok(source
-        .definitions(record, &ai6::ConfigScope::Global)?
+        .definitions(record, scope)?
         .records
         .into_iter()
         .find(|(stored, _)| stored == key)
@@ -285,12 +333,14 @@ pub(crate) async fn put_record_keyed_schema(
     state: State<Gateway>,
     headers: HeaderMap,
     Path(kind): Path<String>,
+    scoped: Query<Scoped>,
     definition: Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     put_record(
         state,
         headers,
         Path((kind, "schema".to_owned())),
+        scoped,
         definition,
     )
     .await
@@ -301,8 +351,9 @@ pub(crate) async fn remove_record_keyed_schema(
     state: State<Gateway>,
     headers: HeaderMap,
     Path(kind): Path<String>,
+    scoped: Query<Scoped>,
 ) -> Result<Response, ApiError> {
-    remove_record(state, headers, Path((kind, "schema".to_owned()))).await
+    remove_record(state, headers, Path((kind, "schema".to_owned())), scoped).await
 }
 
 /// `GET /v1/user/roster/operation/{id}/effective`: needs `roster.read`.
@@ -343,6 +394,7 @@ pub(crate) async fn effective(
 async fn settle(
     gateway: &Gateway,
     person: &Person,
+    resource: &str,
     target: String,
     outcome: Result<Option<ai6::ConfigRevision>, ai6::RosterError>,
     accepted: &str,
@@ -350,7 +402,7 @@ async fn settle(
 ) -> Result<Response, ApiError> {
     match outcome {
         Ok(Some(revision)) => {
-            audit(gateway, person, accepted, &target).await?;
+            audit(gateway, person, resource, accepted, &target).await?;
             Ok(Json(RosterChange {
                 revision: revision.get().to_string(),
                 weakened,
@@ -364,6 +416,7 @@ async fn settle(
                 audit(
                     gateway,
                     person,
+                    resource,
                     "roster.refused",
                     &format!("{target}: {reason}"),
                 )
@@ -389,10 +442,13 @@ pub(crate) async fn put_record(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     Path((kind, key)): Path<(String, String)>,
+    Query(scoped): Query<Scoped>,
     Json(definition): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
-    let record = kind_of(&kind)?;
+    let family = family_of(&kind)?;
+    let record = family.record;
+    let scope = scope_of(record, &scoped)?;
     checked_key(&key, gateway.config.unex().text.roster_key_bytes)?;
     if !definition.is_object() {
         return Err(ApiError::bad_request());
@@ -400,12 +456,12 @@ pub(crate) async fn put_record(
     authorize_resource_action(
         &gateway,
         person.clone(),
-        ROSTER_RESOURCE.to_owned(),
-        "roster.manage",
+        family.resource.clone(),
+        family.manage,
     )
     .await?;
     let source = source(&gateway)?;
-    let target = format!("{} {key}", record.name());
+    let target = target_of(record, &scope, &key);
     let expected = expected_revision(&headers);
     let outcome = tokio::task::spawn_blocking(move || {
         // What an `assistant` record changes is told against the settings in force just
@@ -418,6 +474,7 @@ pub(crate) async fn put_record(
         let revision = match store(
             source.as_ref(),
             record,
+            &scope,
             &key,
             expected.as_deref(),
             &definition,
@@ -441,6 +498,7 @@ pub(crate) async fn put_record(
     settle(
         &gateway,
         &person,
+        &family.resource,
         target,
         outcome,
         "roster.update",
@@ -456,30 +514,31 @@ pub(crate) async fn remove_record(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     Path((kind, key)): Path<(String, String)>,
+    Query(scoped): Query<Scoped>,
 ) -> Result<Response, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
-    let record = kind_of(&kind)?;
+    let family = family_of(&kind)?;
+    let record = family.record;
+    let scope = scope_of(record, &scoped)?;
     checked_key(&key, gateway.config.unex().text.roster_key_bytes)?;
     authorize_resource_action(
         &gateway,
         person.clone(),
-        ROSTER_RESOURCE.to_owned(),
-        "roster.manage",
+        family.resource.clone(),
+        family.manage,
     )
     .await?;
     let source = source(&gateway)?;
-    let target = format!("{} {key}", record.name());
+    let target = target_of(record, &scope, &key);
     let expected = expected_revision(&headers);
     let outcome = tokio::task::spawn_blocking(move || {
         if let Some(expected) = expected {
-            let now = token(stored_record(source.as_ref(), record, &key)?.as_ref());
+            let now = token(stored_record(source.as_ref(), record, &scope, &key)?.as_ref());
             if now != expected {
                 return Ok(Err(Changed { changed: now }));
             }
         }
-        source
-            .remove(record, &ai6::ConfigScope::Global, &key)
-            .map(Ok)
+        source.remove(record, &scope, &key).map(Ok)
     })
     .await
     .map_err(|_| ApiError::internal())?;
@@ -491,6 +550,7 @@ pub(crate) async fn remove_record(
     settle(
         &gateway,
         &person,
+        &family.resource,
         target,
         outcome,
         "roster.remove",
@@ -1102,5 +1162,203 @@ mod tests {
             source.load("").unwrap().roster.assistant(),
             &ai6::AssistantSettings::default()
         );
+    }
+
+    const CONFIG_ROLES: &str = r#"
+        [role.config-readers]
+        actions = ["config.read"]
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "config:watch"
+        role = "config-readers"
+
+        [role.config-managers]
+        actions = ["config.read", "config.manage"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "config:watch"
+        role = "config-managers"
+    "#;
+
+    async fn with_header(
+        served: &Served,
+        token: &str,
+        method: reqwest::Method,
+        path: &str,
+        revision: &str,
+    ) -> reqwest::Response {
+        reqwest::Client::new()
+            .request(method, format!("{}/v1/user/{path}", served.base))
+            .bearer_auth(token)
+            .header("if-match", format!("\"{revision}\""))
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[cfg(feature = "cli")]
+    #[tokio::test]
+    async fn a_watch_is_listed_set_and_removed_under_its_own_action_and_audited() {
+        use ai6::{ConfigProvider, ConfigRecord, SqlProvider};
+
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
+        let global = ai6::ConfigScope::Global;
+        source
+            .put(
+                ConfigRecord::Operation,
+                &global,
+                "G",
+                &json!({"roster": ["007"]}),
+            )
+            .unwrap();
+        source
+            .put(
+                ConfigRecord::Agent,
+                &global,
+                "007",
+                &json!({"handler": "mock-agent", "clearance": "00"}),
+            )
+            .unwrap();
+        // A Station reads the same database through a handle of its own.
+        let station = SqlProvider::open(&location).unwrap();
+        let served = served_with_roster(CONFIG_ROLES, Some(source.clone())).await;
+
+        for (token, held) in [
+            (&served.operator, json!(["config.read", "config.manage"])),
+            (&served.viewer, json!(["config.read"])),
+        ] {
+            let profile: serde_json::Value =
+                call(&served, token, reqwest::Method::GET, "profile", None)
+                    .await
+                    .json()
+                    .await
+                    .unwrap();
+            assert_eq!(profile["config"]["watches"], held);
+        }
+
+        let form = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "roster/watches/schema",
+            None,
+        )
+        .await;
+        assert_eq!(form.status(), StatusCode::OK);
+        let form: serde_json::Value = form.json().await.unwrap();
+        assert!(form["schema"]["properties"]["agent"].is_object(), "{form}");
+        assert_eq!(form["key"]["title"], "Scope");
+
+        let before = station.revision("").unwrap();
+        let denied = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::PUT,
+            "roster/watches/operation:G",
+            Some(json!({"agent": "007"})),
+        )
+        .await;
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let other_family = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "roster/agents",
+            None,
+        )
+        .await;
+        assert_eq!(
+            other_family.status(),
+            StatusCode::FORBIDDEN,
+            "config.manage on config:watch opens no other family"
+        );
+        assert_eq!(station.revision("").unwrap(), before);
+
+        let set = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/watches/operation:G",
+            Some(json!({"agent": "007", "max_turns_per_hour": 4})),
+        )
+        .await;
+        assert_eq!(set.status(), StatusCode::OK);
+        let set: serde_json::Value = set.json().await.unwrap();
+        assert_ne!(station.revision("").unwrap(), before);
+        assert_eq!(
+            set["revision"],
+            station.revision("").unwrap().get().to_string()
+        );
+        let held = station.load("").unwrap();
+        let watch = &held.roster.watches()["operation:G"];
+        assert_eq!(watch.settings.agent, "007");
+        assert_eq!(watch.settings.max_turns_per_hour, ai6::Limit::at(4));
+
+        let listed: serde_json::Value = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "roster/watches",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(listed["kind"], "watches");
+        assert_eq!(listed["writable"], true);
+        assert_eq!(listed["records"][0]["key"], "operation:G");
+        let revision = listed["records"][0]["revision"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let updates = audits(&served, "roster.update");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].resource.as_deref(), Some("config:watch"));
+        assert_eq!(updates[0].target, "watch operation:G");
+
+        let refused = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/watches/operation:G",
+            Some(json!({"agent": "no-such-agent"})),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(audits(&served, "roster.refused").len(), 1);
+        assert_eq!(
+            station.load("").unwrap().roster.watches()["operation:G"]
+                .settings
+                .agent,
+            "007"
+        );
+
+        let stale = with_header(
+            &served,
+            &served.operator,
+            reqwest::Method::DELETE,
+            "roster/watches/operation:G",
+            "0",
+        )
+        .await;
+        assert_eq!(stale.status(), StatusCode::CONFLICT);
+        let removed = with_header(
+            &served,
+            &served.operator,
+            reqwest::Method::DELETE,
+            "roster/watches/operation:G",
+            &revision,
+        )
+        .await;
+        assert_eq!(removed.status(), StatusCode::OK);
+        assert!(station.load("").unwrap().roster.watches().is_empty());
+        let removals = audits(&served, "roster.remove");
+        assert_eq!(removals[0].resource.as_deref(), Some("config:watch"));
+        assert_eq!(removals[0].target, "watch operation:G");
     }
 }

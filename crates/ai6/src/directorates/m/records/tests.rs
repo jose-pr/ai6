@@ -709,6 +709,7 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("roster", ConfigRecord::Roster),
         ("compartments", ConfigRecord::Compartment),
         ("reviews", ConfigRecord::Review),
+        ("watches", ConfigRecord::Watch),
     ]
     .into_iter()
     .map(|(kind, record)| {

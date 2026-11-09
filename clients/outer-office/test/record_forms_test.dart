@@ -99,6 +99,9 @@ class FakeRoster {
 MissionBoard _signedIn(
   FakeRoster roster, {
   List<String> actions = const ['roster.read', 'roster.manage'],
+  Map<String, List<String>> config = const {
+    'watches': ['config.read', 'config.manage'],
+  },
 }) {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -126,6 +129,7 @@ MissionBoard _signedIn(
       ),
     ],
     roster: actions,
+    config: config,
   );
   board.stationBoard = StationBoardSummary.fromJson({
     'headquarters_station': 'station-a',
@@ -208,6 +212,7 @@ const _kinds = {
   'roles': ('Agent roles', 'purpose', 'Runs cases'),
   'covers': ('Cover policies', 'description', 'Named'),
   'assistant': ("Moneypenny's settings", 'personal_repo', '/srv/{person}.git'),
+  'watches': ('Watches', 'agent', 'M-00'),
 };
 
 void main() {
@@ -549,6 +554,40 @@ void main() {
         expect(find.text('No records of this kind.'), findsOneWidget);
       });
     }
+
+    testWidgets('a person without config.read is not offered Watches, and one '
+        'with it alone edits none', (tester) async {
+      final roster = FakeRoster(
+        records: {
+          'watches/operation:G': {'agent': 'M-00'},
+        },
+      );
+      final board = _signedIn(roster, config: const {});
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.byType(DropdownButton<String>).first);
+      await tester.pumpAndSettle();
+      expect(find.text('Watches'), findsNothing);
+      expect(
+        roster.requests.where(
+          (request) => request.url.path.endsWith('/watches'),
+        ),
+        isEmpty,
+      );
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+
+      final reader = _signedIn(
+        roster,
+        config: const {
+          'watches': ['config.read'],
+        },
+      );
+      await _open(tester, reader, 'Roster');
+      await _rosterKind(tester, 'Watches');
+      expect(find.text('operation:G'), findsOneWidget);
+      expect(find.text('Add'), findsNothing);
+      expect(find.byTooltip('Edit operation:G'), findsNothing);
+    });
 
     testWidgets('a refusal shows on the field it names', (tester) async {
       final roster = FakeRoster(

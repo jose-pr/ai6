@@ -5421,5 +5421,149 @@
       "title": "Policy name",
       "description": "What Operations, roles and briefs choose this policy by. It cannot be changed later."
     }
+  },
+  "watches": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "title": "Agent",
+          "description": "The Agent that keeps the watch, by codename: its handler, model, effort, route and pool account run the watch's Session."
+        },
+        "operation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Cables in Operation",
+          "description": "For M's or a Station's watch, the Operation its Cables are sent and received in, under that Operation's Cable grants; without one, no Cable wakes it. An Operation's watch is in its own Operation, which this may only repeat.",
+          "x-advanced": true
+        },
+        "wake_every": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Woken at least every",
+          "description": "Seconds after its last wake that the watch is woken with nothing else to tell it; `none` wakes it only on events.",
+          "default": 3600.0
+        },
+        "max_turns_per_hour": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Turns an hour",
+          "description": "Turns the watch takes in any hour, each wake one turn; past it, events wait for the hour to make room.",
+          "default": 30
+        },
+        "max_events_per_turn": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Events one turn is given",
+          "description": "Events one turn is given; the rest wait for the next turn.",
+          "default": 50
+        },
+        "max_waiting_events": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Events waiting",
+          "description": "Events waiting for a turn; past it the oldest are dropped, and the watch's logbook says how many.",
+          "default": 500
+        },
+        "turn_timeout": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Longest turn",
+          "description": "Seconds one turn may run before the Station interrupts it.",
+          "default": 1800.0
+        },
+        "lease": {
+          "type": "number",
+          "minimum": 0,
+          "format": "seconds",
+          "title": "Held without renewing for",
+          "description": "Seconds the Station running the watch holds it without renewing before another Station may take it over.",
+          "x-advanced": true,
+          "default": 60.0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "agent"
+      ]
+    },
+    "form": {},
+    "key": {
+      "title": "Scope",
+      "description": "What the watch keeps: m, operation:<codename> or station:<id>. It cannot be changed later."
+    }
   }
 }

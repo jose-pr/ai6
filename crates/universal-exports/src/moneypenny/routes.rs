@@ -61,7 +61,15 @@ const AGENT_TABS: &[&str] = &["agents", "roles"];
 const GREEN_INK_TABS: &[&str] = &["inbox", "classes"];
 const BRIEFING_TABS: &[&str] = &["proposals", "held"];
 const ACCESS_TABS: &[&str] = &["roles", "rules", "accounts", "check"];
-const ROSTER_KINDS: &[&str] = &["operation", "agent", "role", "cover", "assistant"];
+const ROSTER_KINDS: &[&str] = &[
+    "operation",
+    "agent",
+    "role",
+    "cover",
+    "review",
+    "assistant",
+    "watch",
+];
 const MEMORY_SCOPES: &[&str] = &["global"];
 
 /// What a field holds.

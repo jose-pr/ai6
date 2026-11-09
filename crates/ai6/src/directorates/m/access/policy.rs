@@ -202,7 +202,8 @@ pub fn load_policy(
 /// are never written again once the record exists. A verdict on a Mission's outcome is theirs who
 /// check the work, not theirs who run it: `mission.verify` is on `controller` and `auditor`.
 pub fn seeded_policy() -> AccessPolicy {
-    const READ: [&str; 10] = [
+    const READ: [&str; 11] = [
+        "config.read",
         "mission.read",
         "mission.status",
         "product.read",
@@ -227,7 +228,8 @@ pub fn seeded_policy() -> AccessPolicy {
         "issue.update",
         "issue.create",
     ];
-    const ADMINISTER: [&str; 11] = [
+    const ADMINISTER: [&str; 12] = [
+        "config.manage",
         "memory.write",
         "mission.review",
         "compartment.manage",

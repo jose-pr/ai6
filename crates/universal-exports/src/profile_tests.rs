@@ -104,11 +104,13 @@ async fn every_action_of_the_catalog_is_reachable_through_the_profile() {
 /// reports those of an Operation and a Station, and the rest are held on what they act on.
 #[test]
 fn every_action_is_in_a_catalog_the_profile_reads_or_acts_elsewhere() {
-    const ELSEWHERE: [&str; 6] = [
+    const ELSEWHERE: [&str; 8] = [
         "account.manage",
         "assistant.memory.admin",
         "compartment.manage",
         "compartment.read",
+        "config.manage",
+        "config.read",
         "roster.manage",
         "roster.read",
     ];

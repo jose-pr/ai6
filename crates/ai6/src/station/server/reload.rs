@@ -670,6 +670,103 @@ mod tests {
         }
     }
 
+    /// A watch put into the shared database, as the gateway puts one, is the watch a running
+    /// Station keeps from its next poll.
+    fn a_watch_set_in_a_shared_sql_roster_reaches_a_running_station(location: &str) {
+        use crate::directorates::m::config::{ConfigRecord, ConfigScope, SqlProvider};
+        use serde_json::json;
+
+        let admin = SqlProvider::open(location).unwrap();
+        let global = ConfigScope::Global;
+        admin
+            .put(
+                ConfigRecord::Operation,
+                &global,
+                "G",
+                &json!({"roster": ["007"]}),
+            )
+            .unwrap();
+        admin
+            .put(
+                ConfigRecord::Agent,
+                &global,
+                "007",
+                &json!({"handler": "mock-agent", "clearance": "00"}),
+            )
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", "");
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(SqlProvider::open(location).unwrap()),
+            false,
+        );
+        let scope = "operation:G";
+        assert!(state.current().roster.watches().get(scope).is_none());
+        assert!(!poll(&state), "nothing changed");
+
+        let set = admin
+            .put(
+                ConfigRecord::Watch,
+                &global,
+                scope,
+                &json!({"agent": "007", "max_turns_per_hour": 4}),
+            )
+            .unwrap();
+        assert!(poll(&state), "the next poll takes the watch up");
+        let current = state.current();
+        let watch = current.roster.watches().get(scope).expect("the watch");
+        assert_eq!(watch.settings.agent, "007");
+        assert_eq!(watch.settings.max_turns_per_hour, crate::Limit::at(4));
+        assert_eq!(state.config.status().revision, Some(set.get().to_string()));
+        assert!(state.config.status().needs_restart.is_empty());
+
+        let changed = admin
+            .put(
+                ConfigRecord::Watch,
+                &global,
+                scope,
+                &json!({"agent": "007", "max_turns_per_hour": 9}),
+            )
+            .unwrap();
+        assert!(poll(&state));
+        assert_eq!(
+            state.current().roster.watches()[scope]
+                .settings
+                .max_turns_per_hour,
+            crate::Limit::at(9)
+        );
+        assert_eq!(
+            state.config.status().revision,
+            Some(changed.get().to_string())
+        );
+
+        admin.remove(ConfigRecord::Watch, &global, scope).unwrap();
+        assert!(poll(&state));
+        assert!(state.current().roster.watches().get(scope).is_none());
+    }
+
+    #[test]
+    #[cfg(any(feature = "sqlite", feature = "postgres"))]
+    fn a_watch_set_in_the_shared_database_reaches_a_running_station_without_a_restart() {
+        #[cfg(feature = "sqlite")]
+        {
+            let store = crate::directorates::registry::suite::SqliteStore::new();
+            a_watch_set_in_a_shared_sql_roster_reaches_a_running_station(&store.location());
+        }
+        #[cfg(feature = "postgres")]
+        match crate::directorates::registry::suite::PostgresStore::new() {
+            Some(store) => {
+                a_watch_set_in_a_shared_sql_roster_reaches_a_running_station(&store.location())
+            }
+            None => eprintln!(
+                "skipped the PostgreSQL run: {} is not set",
+                crate::directorates::registry::suite::POSTGRES_URL_ENV
+            ),
+        }
+    }
+
     #[test]
     fn restart_only_families_and_files_are_reported_as_needing_a_restart() {
         let root = tempfile::tempdir().unwrap();

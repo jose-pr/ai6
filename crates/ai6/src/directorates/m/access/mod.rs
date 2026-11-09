@@ -60,7 +60,9 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// person's own memory needs no action, and nobody changes another's. `access.read` and
 /// `access.manage` read and change a policy, at `config:access` (the global one) or
 /// `operation:<id>` (that Operation's); `account.manage` manages accounts at
-/// `config:accounts`. `compartment.read` and `compartment.manage` act on `compartment:<id>`;
+/// `config:accounts`. `config.read` and `config.manage` list and change one configuration
+/// family's records at `config:<family>` (`config:watch`). `compartment.read` and
+/// `compartment.manage` act on `compartment:<id>`;
 /// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered. `memory.write`
 /// changes the memory of `operation:<id>`, or of everyone at `config:memory`.
 /// `session.context` reads what an agent was given and did in a Session: on `operation:<id>` a
@@ -81,6 +83,8 @@ pub const ACTIONS: &[&str] = &[
     "compartment.cover",
     "compartment.manage",
     "compartment.read",
+    "config.manage",
+    "config.read",
     "issue.comment",
     "issue.create",
     "issue.link",

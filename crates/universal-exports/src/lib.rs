@@ -3204,6 +3204,9 @@ struct UserProfile {
     stations: Vec<UserStationAccess>,
     /// The actions the person holds on the roster (`config:roster`).
     roster: Vec<String>,
+    /// For each configuration family the roster routes serve beyond the roster (`watches`), the
+    /// actions the person holds on `config:<family>`; a family with none is absent.
+    config: BTreeMap<String, Vec<String>>,
     /// The actions the person holds on the global access policy (`access.read`, `access.manage`),
     /// the accounts (`account.manage`), other people's memory (`assistant.memory.admin`) and the
     /// global memory (`memory.write`).
@@ -3881,134 +3884,157 @@ async fn user_profile(
     observe_tree(&gateway, &tree);
     // The profile says what could be read and reads nothing.
     let authorizer = gateway.probing_authorizer()?;
-    let (operations, stations, roster, global_actions) = tokio::task::spawn_blocking(move || {
-        let mut operation_ids: BTreeSet<String> = tree.operations().map(str::to_owned).collect();
-        let mut stations = Vec::new();
-        for station in &station_records {
-            let station_id = station.station().to_owned();
-            let mut actions = Vec::new();
-            for &action in ai6::STATION_ACTIONS {
+    let (operations, stations, roster, config, global_actions) =
+        tokio::task::spawn_blocking(move || {
+            let mut operation_ids: BTreeSet<String> =
+                tree.operations().map(str::to_owned).collect();
+            let mut stations = Vec::new();
+            for station in &station_records {
+                let station_id = station.station().to_owned();
+                let mut actions = Vec::new();
+                for &action in ai6::STATION_ACTIONS {
+                    let allowed = authorizer
+                        .authorize(AuthorizationRequest {
+                            person: authorization_person.clone(),
+                            action: action.to_owned(),
+                            resource: format!("station:{station_id}"),
+                            ancestors: Vec::new(),
+                        })
+                        .map_err(|_| ApiError::internal())?
+                        .allowed;
+                    if allowed {
+                        actions.push(action.to_owned());
+                    }
+                }
+                if !actions.is_empty() {
+                    stations.push(UserStationAccess {
+                        station_id,
+                        actions,
+                    });
+                }
+                let Some(values) = station
+                    .info()
+                    .get("operations")
+                    .and_then(serde_json::Value::as_array)
+                else {
+                    continue;
+                };
+                for value in values {
+                    if let Some(value) = value.as_str()
+                        && let Ok(operation_id) = OperationId::new(value.to_owned())
+                    {
+                        operation_ids.insert(operation_id.to_string());
+                    }
+                }
+            }
+            let mut operations = Vec::new();
+            for operation_id in operation_ids {
+                let mut actions = Vec::new();
+                for &action in ai6::OPERATION_ACTIONS {
+                    let allowed = authorizer
+                        .authorize(operation_request(
+                            authorization_person.clone(),
+                            action,
+                            &operation_id,
+                            &tree,
+                        ))
+                        .map_err(|_| ApiError::internal())?
+                        .allowed;
+                    if allowed {
+                        actions.push(action.to_owned());
+                    }
+                }
+                let compartments: Vec<String> = authorizer
+                    .compiled()
+                    .map(|compiled| {
+                        compiled
+                            .person_compartments(&authorization_person, &operation_id)
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !actions.is_empty() {
+                    operations.push(UserOperationAccess {
+                        operation_id,
+                        parent: None,
+                        actions,
+                        compartments,
+                    });
+                }
+            }
+            // An ancestor is named only when the person may read its Missions.
+            let readable: BTreeSet<String> = operations
+                .iter()
+                .filter(|access| access.actions.iter().any(|action| action == "mission.read"))
+                .map(|access| access.operation_id.clone())
+                .collect();
+            for access in &mut operations {
+                access.parent =
+                    tree.visible_parent(&access.operation_id, |id| readable.contains(id));
+            }
+            stations.sort_by(|left, right| left.station_id.cmp(&right.station_id));
+            let mut roster = Vec::new();
+            for action in ["roster.read", "roster.manage", "audit.read"] {
                 let allowed = authorizer
                     .authorize(AuthorizationRequest {
                         person: authorization_person.clone(),
                         action: action.to_owned(),
-                        resource: format!("station:{station_id}"),
+                        resource: roster::ROSTER_RESOURCE.to_owned(),
                         ancestors: Vec::new(),
                     })
                     .map_err(|_| ApiError::internal())?
                     .allowed;
                 if allowed {
-                    actions.push(action.to_owned());
+                    roster.push(action.to_owned());
                 }
             }
-            if !actions.is_empty() {
-                stations.push(UserStationAccess {
-                    station_id,
-                    actions,
-                });
-            }
-            let Some(values) = station
-                .info()
-                .get("operations")
-                .and_then(serde_json::Value::as_array)
-            else {
-                continue;
-            };
-            for value in values {
-                if let Some(value) = value.as_str()
-                    && let Ok(operation_id) = OperationId::new(value.to_owned())
-                {
-                    operation_ids.insert(operation_id.to_string());
+            let mut config: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for (kind, record) in roster::CONFIG_KINDS {
+                for action in ["config.read", "config.manage"] {
+                    let allowed = authorizer
+                        .authorize(AuthorizationRequest {
+                            person: authorization_person.clone(),
+                            action: action.to_owned(),
+                            resource: format!("config:{}", record.name()),
+                            ancestors: Vec::new(),
+                        })
+                        .map_err(|_| ApiError::internal())?
+                        .allowed;
+                    if allowed {
+                        config
+                            .entry(kind.to_owned())
+                            .or_default()
+                            .push(action.to_owned());
+                    }
                 }
             }
-        }
-        let mut operations = Vec::new();
-        for operation_id in operation_ids {
-            let mut actions = Vec::new();
-            for &action in ai6::OPERATION_ACTIONS {
+            let mut global_actions = Vec::new();
+            for (action, resource) in [
+                ("access.read", ai6::CONFIG_ACCESS),
+                ("access.manage", ai6::CONFIG_ACCESS),
+                ("account.manage", ai6::CONFIG_ACCOUNTS),
+                ("assistant.memory.admin", "config:assistant"),
+                ("compartment.manage", "compartment:*"),
+                ("memory.write", "config:memory"),
+            ] {
                 let allowed = authorizer
-                    .authorize(operation_request(
-                        authorization_person.clone(),
-                        action,
-                        &operation_id,
-                        &tree,
-                    ))
+                    .authorize(AuthorizationRequest {
+                        person: authorization_person.clone(),
+                        action: action.to_owned(),
+                        resource: resource.to_owned(),
+                        ancestors: Vec::new(),
+                    })
                     .map_err(|_| ApiError::internal())?
                     .allowed;
                 if allowed {
-                    actions.push(action.to_owned());
+                    global_actions.push(action.to_owned());
                 }
             }
-            let compartments: Vec<String> = authorizer
-                .compiled()
-                .map(|compiled| {
-                    compiled
-                        .person_compartments(&authorization_person, &operation_id)
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            if !actions.is_empty() {
-                operations.push(UserOperationAccess {
-                    operation_id,
-                    parent: None,
-                    actions,
-                    compartments,
-                });
-            }
-        }
-        // An ancestor is named only when the person may read its Missions.
-        let readable: BTreeSet<String> = operations
-            .iter()
-            .filter(|access| access.actions.iter().any(|action| action == "mission.read"))
-            .map(|access| access.operation_id.clone())
-            .collect();
-        for access in &mut operations {
-            access.parent = tree.visible_parent(&access.operation_id, |id| readable.contains(id));
-        }
-        stations.sort_by(|left, right| left.station_id.cmp(&right.station_id));
-        let mut roster = Vec::new();
-        for action in ["roster.read", "roster.manage", "audit.read"] {
-            let allowed = authorizer
-                .authorize(AuthorizationRequest {
-                    person: authorization_person.clone(),
-                    action: action.to_owned(),
-                    resource: roster::ROSTER_RESOURCE.to_owned(),
-                    ancestors: Vec::new(),
-                })
-                .map_err(|_| ApiError::internal())?
-                .allowed;
-            if allowed {
-                roster.push(action.to_owned());
-            }
-        }
-        let mut global_actions = Vec::new();
-        for (action, resource) in [
-            ("access.read", ai6::CONFIG_ACCESS),
-            ("access.manage", ai6::CONFIG_ACCESS),
-            ("account.manage", ai6::CONFIG_ACCOUNTS),
-            ("assistant.memory.admin", "config:assistant"),
-            ("compartment.manage", "compartment:*"),
-            ("memory.write", "config:memory"),
-        ] {
-            let allowed = authorizer
-                .authorize(AuthorizationRequest {
-                    person: authorization_person.clone(),
-                    action: action.to_owned(),
-                    resource: resource.to_owned(),
-                    ancestors: Vec::new(),
-                })
-                .map_err(|_| ApiError::internal())?
-                .allowed;
-            if allowed {
-                global_actions.push(action.to_owned());
-            }
-        }
-        Ok::<_, ApiError>((operations, stations, roster, global_actions))
-    })
-    .await
-    .map_err(|_| ApiError::internal())??;
+            Ok::<_, ApiError>((operations, stations, roster, config, global_actions))
+        })
+        .await
+        .map_err(|_| ApiError::internal())??;
     Ok(Json(UserProfile {
         person_id: person.id,
         name: person.name,
@@ -4018,6 +4044,7 @@ async fn user_profile(
         operations,
         stations,
         roster,
+        config,
         global_actions,
         moneypenny: gateway.assistant.is_some(),
     }))
