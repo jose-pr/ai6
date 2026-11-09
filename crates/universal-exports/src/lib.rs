@@ -4983,6 +4983,10 @@ pub struct MissionAttempt {
     /// When a probe was asked for, as Unix seconds, until the Station has run it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
+    /// What an Operation's watch at `desk` clearance advises for the verifying attempt, which a
+    /// person confirms by deciding it the same way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<ai6::MissionVerdict>,
     /// The last message its Agent ended a turn with, as data. Only one Mission's detail has it:
     /// each can be as long as `[registry.limits.sessions] final_report_bytes`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5008,6 +5012,7 @@ impl MissionAttempt {
                 .collect(),
             evidence: record.evidence.clone(),
             probe_requested: record.probe_requested,
+            recommendation: record.recommendation.clone(),
             final_report: None,
             attempt: record.attempt,
             session_id: record.session_id.clone(),

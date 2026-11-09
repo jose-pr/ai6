@@ -10,9 +10,9 @@ use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::sessions::{
     FinalReport, MissionVerdict, NewSession, SessionError, SessionRecord, SessionStore,
-    SessionUpdate, apply_fenced, apply_probe_request, apply_verdict, latest, lose, merged_exposure,
-    opened, parse_session, same_run, session_json, take, validate_final_report,
-    validate_new_session, validate_session_id, validate_verdict,
+    SessionUpdate, apply_fenced, apply_probe_request, apply_recommendation, apply_verdict, latest,
+    lose, merged_exposure, opened, parse_session, same_run, session_json, take,
+    validate_final_report, validate_new_session, validate_session_id, validate_verdict,
 };
 use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
@@ -298,6 +298,26 @@ impl SessionStore for SqlRegistry {
             )
             .ok_or(SessionError::NotFound)?;
             apply_verdict(&mut record, verdict.clone())?;
+            put_session(tx, &record, revision, &self.limits.sessions)?;
+            Ok(record)
+        })
+    }
+
+    fn record_recommendation(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        recommendation: &MissionVerdict,
+    ) -> Result<SessionRecord, SessionError> {
+        validate_verdict(recommendation, &self.limits.sessions)?;
+        self.write(|tx, revision| {
+            let mut record = latest(
+                records(tx, Some(mission_id), &self.limits.sessions)?
+                    .into_iter()
+                    .filter(|record| record.operation.as_deref() == Some(operation)),
+            )
+            .ok_or(SessionError::NotFound)?;
+            apply_recommendation(&mut record, recommendation.clone())?;
             put_session(tx, &record, revision, &self.limits.sessions)?;
             Ok(record)
         })

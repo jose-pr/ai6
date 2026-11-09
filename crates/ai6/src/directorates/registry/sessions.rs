@@ -239,6 +239,10 @@ pub struct SessionRecord {
     /// has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
+    /// What a watch held at `desk` clearance advises for a verifying attempt; it settles
+    /// nothing, and a person's decision confirms it or overrides it. The latest stands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<MissionVerdict>,
 }
 
 /// What a probe found of one deliverable.
@@ -949,6 +953,7 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
         deliverables: Vec::new(),
         evidence: Vec::new(),
         probe_requested: None,
+        recommendation: None,
     }
 }
 
@@ -1154,6 +1159,22 @@ pub(super) fn apply_verdict(
     Ok(())
 }
 
+/// Puts `recommendation` on the attempt; only one being verified takes it.
+pub(super) fn apply_recommendation(
+    record: &mut SessionRecord,
+    recommendation: MissionVerdict,
+) -> Result<(), SessionError> {
+    let state = record
+        .result
+        .as_ref()
+        .map_or("unrecorded", |result| result.state.as_str());
+    if state != "verifying" || record.status.is_closed() {
+        return Err(SessionError::Unsettled(state.to_owned()));
+    }
+    record.recommendation = Some(recommendation);
+    Ok(())
+}
+
 /// Marks `record` as asked to be probed; only an attempt being verified takes the request.
 pub(super) fn apply_probe_request(record: &mut SessionRecord, at: f64) -> Result<(), SessionError> {
     let state = record
@@ -1309,6 +1330,20 @@ pub trait SessionStore {
         verdict: &MissionVerdict,
     ) -> Result<SessionRecord, SessionError>;
 
+    /// Records what a watch held at `desk` clearance advises for the latest attempt at a Mission
+    /// of `operation`, replacing any it has. It settles nothing and needs no lease.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the Operation has no attempt at the Mission; `Unsettled` when the latest
+    /// is not being verified; `Io` for a recommendation out of bounds or a Registry failure.
+    fn record_recommendation(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        recommendation: &MissionVerdict,
+    ) -> Result<SessionRecord, SessionError>;
+
     /// Asks for the latest attempt at a Mission of `operation` to have its deliverables probed;
     /// the Station that holds it does so on its next pass and clears the request. It needs no
     /// lease: a person's word, not a holder's write.
@@ -1424,6 +1459,23 @@ impl SessionStore for FileRegistry {
         }))
         .ok_or(SessionError::NotFound)?;
         apply_verdict(&mut record, verdict.clone())?;
+        self.write_session(&self.session_path(&record.session_id), &record)?;
+        Ok(record)
+    }
+
+    fn record_recommendation(
+        &self,
+        operation: &str,
+        mission_id: &str,
+        recommendation: &MissionVerdict,
+    ) -> Result<SessionRecord, SessionError> {
+        validate_verdict(recommendation, &self.limits.sessions)?;
+        let _lock = self.lock()?;
+        let mut record = latest(self.sessions_locked()?.into_iter().filter(|record| {
+            record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
+        }))
+        .ok_or(SessionError::NotFound)?;
+        apply_recommendation(&mut record, recommendation.clone())?;
         self.write_session(&self.session_path(&record.session_id), &record)?;
         Ok(record)
     }

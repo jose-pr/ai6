@@ -971,6 +971,9 @@ struct BoardAttempt {
     /// When a probe was asked for, until the Station ran it.
     #[serde(default)]
     probe_requested: Option<f64>,
+    /// What an Operation's watch at `desk` clearance advises, for a person to confirm.
+    #[serde(default)]
+    recommendation: Option<BoardVerdict>,
 }
 
 /// What one probe found of one deliverable.
@@ -2131,6 +2134,16 @@ async fn mission_detail(
 /// What a Mission was to deliver and what the Station's probes found of it; with `since`, only
 /// the findings made then or later.
 fn print_verification(attempt: &BoardAttempt, since: Option<f64>) {
+    if since.is_none()
+        && let Some(advice) = &attempt.recommendation
+    {
+        println!(
+            "RECOMMENDED\t{}\t{}\t{}",
+            plain(&advice.verdict),
+            plain(&advice.by),
+            plain(advice.note.as_deref().unwrap_or(""))
+        );
+    }
     if since.is_none() && !attempt.deliverables.is_empty() {
         println!("DELIVERABLES");
         for deliverable in &attempt.deliverables {

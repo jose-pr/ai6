@@ -8,6 +8,7 @@
 //! same action asks the Station to probe what it was to deliver (`probe`) and decides it (`verify`:
 //! done, redispatch as the next attempt, or failed), each with its reason.
 
+use ai6::directorates::registry::decisions::{self, VerifyingDecision};
 use ai6::{
     AuditRecord, MissionVerdict, OutcomeVerdict, SessionError, SessionRecord, TimelineEvent,
 };
@@ -161,16 +162,11 @@ pub(crate) async fn verify(
     Path((operation_id, mission_id)): Path<(String, String)>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<Json<GivenDecision>, Refused> {
-    let word = match request.decision.as_str() {
-        "done" => OutcomeVerdict::Confirmed,
-        "failed" => OutcomeVerdict::FailedVerification,
-        "redispatch" => OutcomeVerdict::Redispatch,
-        _ => {
-            return Err(memories::refused(
-                StatusCode::BAD_REQUEST,
-                "a decision is done, redispatch or failed".to_owned(),
-            ));
-        }
+    let Some(word) = VerifyingDecision::verdict_named(&request.decision) else {
+        return Err(memories::refused(
+            StatusCode::BAD_REQUEST,
+            "a decision is done, redispatch or failed".to_owned(),
+        ));
     };
     if request.reason.trim().is_empty()
         || (request.amendment.is_some() && word != OutcomeVerdict::Redispatch)
@@ -187,39 +183,20 @@ pub(crate) async fn verify(
     ensure_operation_registered(&registry, &operation).await?;
     let uid = named_mission(&gateway, &mission_id).await?.mission_id;
     let at = unix_timestamp()?;
-    let verdict = MissionVerdict::new(word, person.id.clone(), at, Some(request.reason))
-        .with_amendment(request.amendment);
-    let audit = AuditRecord {
-        id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
-        action: "mission.verify".to_owned(),
-        operation: operation.to_string(),
-        resource: Some(format!("mission:{uid}")),
-        target: format!("{uid} {}", request.decision),
-        at,
-    };
-    let (key, recorded) = (operation.to_string(), verdict.clone());
-    let store = registry.clone();
+    let verdict = MissionVerdict::new(word, person.id.clone(), at, Some(request.reason.clone()))
+        .with_amendment(request.amendment.clone());
+    let key = operation.to_string();
+    let (reason, amendment, by) = (request.reason, request.amendment, person.id);
     let record = tokio::task::spawn_blocking(move || {
-        check_verifying(&store.latest_session(&uid)?, &key)?;
-        // Audited first: a decision that cannot be audited is not given.
-        store.record_audit(&audit)?;
-        store.record_verdict(&key, &uid, &recorded)
+        decisions::decide(
+            registry.as_ref(),
+            &VerifyingDecision::new(&key, &uid, word, &reason, &by, at)
+                .with_amendment(amendment.as_deref()),
+        )
     })
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(refused_by)?;
-    let event = TimelineEvent::new(
-        "verify",
-        request.decision.clone(),
-        operation.to_string(),
-        at,
-    )
-    .mission(record.mission_id.clone())
-    .session(record.session_id.clone())
-    .actor(person.id);
-    // A timeline entry that fails is left out; the audit record and the decision stand.
-    let _ = tokio::task::spawn_blocking(move || registry.record_event(&event)).await;
     Ok(Json(GivenDecision {
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
@@ -273,7 +250,7 @@ pub(crate) async fn probe(
     };
     let key = operation.to_string();
     let record = tokio::task::spawn_blocking(move || {
-        check_verifying(&registry.latest_session(&uid)?, &key)?;
+        decisions::check_verifying(&registry.latest_session(&uid)?, &key)?;
         registry.record_audit(&audit)?;
         registry.request_probe(&key, &uid, at)
     })
@@ -287,25 +264,6 @@ pub(crate) async fn probe(
         session_id: record.session_id,
         requested_at: at,
     }))
-}
-
-/// Why `latest`, the latest attempt at a Mission, is not one `operation` may decide or probe: it
-/// is not the Operation's, or not verifying.
-fn check_verifying(latest: &Option<SessionRecord>, operation: &str) -> Result<(), SessionError> {
-    match latest {
-        Some(record) if record.operation.as_deref() == Some(operation) => {
-            let state = record
-                .result
-                .as_ref()
-                .map_or("unrecorded", |result| result.state.as_str());
-            if state == "verifying" && !record.status.is_closed() {
-                Ok(())
-            } else {
-                Err(SessionError::Unsettled(state.to_owned()))
-            }
-        }
-        _ => Err(SessionError::NotFound),
-    }
 }
 
 /// Why `latest`, the latest attempt at a Mission, cannot take a verdict in `operation`.

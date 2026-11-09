@@ -16,6 +16,7 @@ pub mod bona_fides;
 pub mod cables;
 pub mod clearance;
 pub mod contexts;
+pub mod decisions;
 pub mod holds;
 pub mod limits;
 pub mod logbook;
