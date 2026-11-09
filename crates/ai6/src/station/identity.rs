@@ -325,7 +325,15 @@ mod tests {
         let server_identity = Identity::generate().unwrap();
         let client_identity = Identity::generate().unwrap();
         let server = server_config(&server_identity, &trust_peers(peers.clone()), &policy).unwrap();
-        assert!(server.non_defaults.is_empty());
+        // Modern differs from the default only in the versions it offers.
+        assert_eq!(
+            server
+                .non_defaults
+                .iter()
+                .map(|setting| setting.setting.as_str())
+                .collect::<Vec<_>>(),
+            ["tls_versions"]
+        );
         let client =
             client_config(&client_identity, &server_identity.fingerprint(), &policy).unwrap();
         let refused = handshake(server.config, client.config).await;
@@ -415,7 +423,17 @@ mod tests {
         let mut policy = Policy::modern();
         policy.check_validity = false;
         let built = server_config(&identity, &Trust::AnyWithKeyProof, &policy).unwrap();
-        assert_eq!(built.non_defaults.len(), 1);
+        assert!(
+            built
+                .non_defaults
+                .iter()
+                .any(|setting| setting.setting == "check_validity")
+        );
+        assert_eq!(
+            built.non_defaults.len(),
+            2,
+            "the versions and the validity check"
+        );
     }
 
     /// Runs one handshake over loopback. On success: the fingerprint each side saw of the
