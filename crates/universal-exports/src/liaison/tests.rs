@@ -1170,14 +1170,20 @@ fn a_cable_to_a_peer_leaves_as_a2a_and_its_answer_comes_back_as_a_reply_cable() 
         ),
         "a peer no send grant names is refused"
     );
-    let audit = world.registry.audit_records().unwrap();
-    assert!(
-        audit
+    // The outbound record follows the reply Cable, since it says whether one was made.
+    wait_until("the outbound audit record", || {
+        world
+            .registry
+            .audit_records()
+            .unwrap()
             .iter()
-            .any(|record| record.action == "liaison.outbound"
-                && record.target.contains(sent.id())
-                && record.target.contains("answered"))
-    );
+            .any(|record| {
+                record.action == "liaison.outbound"
+                    && record.target.contains(sent.id())
+                    && record.target.contains("answered")
+            })
+    });
+    let audit = world.registry.audit_records().unwrap();
     for record in &audit {
         assert!(
             !record.target.contains("hello") && !record.target.contains("echo:"),
