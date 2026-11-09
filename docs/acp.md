@@ -36,6 +36,9 @@ args = ["-y", "@agentclientprotocol/claude-agent-acp@0.99.1"]
 env = { CLAUDE_CODE_EXECUTABLE = "/usr/local/bin/claude" }
 ```
 
+Every key below is the Agent's to set: the `acp` handler exists to run the program an Agent names. (Other
+handlers keep the program they run for the `station` record's `[providers.<id>]`.)
+
 AI6 installs no adapter. These exist and are pinned by you:
 
 | Agent | `command` and `args` |

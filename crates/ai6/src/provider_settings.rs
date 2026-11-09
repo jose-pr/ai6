@@ -76,3 +76,60 @@ pub fn settings_from_text<T: FromValue>(text: &str) -> Result<T, String> {
     let table: toml::Table = toml::from_str(text).map_err(|error| error.to_string())?;
     T::from_value(&table_value(&table)?).map_err(|error| error.to_string())
 }
+
+/// The `x-section` that marks a configuration field an Agent's `handler_settings` may set; every
+/// other field belongs to the Station.
+pub const AGENT_SECTION: &str = "agent";
+
+/// Refuses a key of an Agent's `handler_settings` that `schema` (a provider's configuration
+/// schema as JSON) does not mark [`AGENT_SECTION`], naming the provider and the key: which program
+/// or path a Station runs is the Station record's to set, not the roster's.
+///
+/// # Errors
+///
+/// A message naming the provider and the key.
+pub fn check_agent_settings(
+    provider: &str,
+    schema: &serde_json::Value,
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let properties = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object);
+    for key in settings.keys() {
+        let section = properties
+            .and_then(|properties| properties.get(key))
+            .map(|property| {
+                property
+                    .get("x-section")
+                    .and_then(serde_json::Value::as_str)
+            });
+        match section {
+            Some(Some(AGENT_SECTION)) => {}
+            Some(_) => {
+                return Err(format!(
+                    "provider {provider:?}: setting {key:?} is a Station setting; set it in the \
+                     station record's [providers.{provider}], not in an Agent's handler_settings"
+                ));
+            }
+            None => {
+                let known: Vec<&str> = properties
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, property)| {
+                        property
+                            .get("x-section")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(AGENT_SECTION)
+                    })
+                    .map(|(name, _)| name.as_str())
+                    .collect();
+                return Err(format!(
+                    "provider {provider:?}: unknown setting {key:?} (an Agent may set {})",
+                    known.join(", ")
+                ));
+            }
+        }
+    }
+    Ok(())
+}

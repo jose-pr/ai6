@@ -68,21 +68,26 @@ pub struct AntigravityConfig {
     /// agy permission rules (`command(git)`, `read_url(*)`) added to the allow list, or the names
     /// of tools added to what a Mission's Session is offered (`search_web`). Answer-only and
     /// assistant Sessions ignore them.
+    #[schema(section = "agent")]
     #[map(default)]
     pub allowed_tools: Vec<String>,
     /// agy permission rules added to the deny list, or the names of tools taken out of what a
     /// Mission's Session is offered; a deny rule beats an allow rule.
+    #[schema(section = "agent")]
     #[map(default)]
     pub denied_tools: Vec<String>,
     /// Further `settings.json` keys for this Session's `--settings` (`modelProvider`), never those
     /// that decide what a Session may do.
+    #[schema(section = "agent")]
     #[map(with = ::ai6::guatiao_serde::adapt::object, default)]
     pub settings: serde_json::Map<String, Value>,
     /// Lets agy update itself while a Session starts; off by default, so that a Session runs the
     /// CLI its fixtures were recorded from until an operator updates it.
+    #[schema(section = "agent")]
     #[map(default)]
     pub auto_update: bool,
     /// What marks a failed turn as a quota limit, found in its error without regard to case.
+    #[schema(section = "agent")]
     #[map(default = limit_phrases())]
     pub limit_phrases: Vec<String>,
 }

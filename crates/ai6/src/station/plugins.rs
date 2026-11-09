@@ -508,6 +508,10 @@ impl Plugins {
             provider: provider.to_owned(),
             reason,
         };
+        if let Some(schema) = self.config_schema(provider) {
+            crate::provider_settings::check_agent_settings(provider, &schema, settings)
+                .map_err(|reason| invalid(format!("handler_settings: {reason}")))?;
+        }
         let config = self
             .checked(provider, crate::provider_settings::settings_value(settings))
             .map_err(|reason| invalid(format!("handler_settings: {reason}")))?;

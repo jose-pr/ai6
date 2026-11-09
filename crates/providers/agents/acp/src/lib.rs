@@ -34,78 +34,102 @@ use serde_json::{Map, Value, json};
 pub struct AcpSettings {
     /// The program that speaks ACP on its standard input and output; an Agent sets it, and
     /// without one the handler starts no Session.
+    #[schema(section = "agent")]
     pub command: Option<String>,
     /// Its arguments.
+    #[schema(section = "agent")]
     #[map(default)]
     pub args: Vec<String>,
     /// Environment added under the Session's own (the Session wins).
+    #[schema(section = "agent")]
     #[map(default)]
     pub env: BTreeMap<String, String>,
     /// A table passed beside AI6's launch data as `session/new._meta` (an adapter's options).
+    #[schema(section = "agent")]
     #[map(with = ::ai6::guatiao_serde::adapt::object, default)]
     pub meta: Map<String, Value>,
     /// The config option id for the model; default: the option of category `model`, else `model`.
+    #[schema(section = "agent")]
     pub model_option: Option<String>,
     /// The config option id for the effort; default: the option of category `thought_level`,
     /// else `effort`.
+    #[schema(section = "agent")]
     pub effort_option: Option<String>,
     /// The ACP version spoken; only `v1`.
+    #[schema(section = "agent")]
     #[map(default = String::from("v1"))]
     pub protocol: String,
     /// How long `initialize` may take, in milliseconds.
+    #[schema(section = "agent")]
     #[map(default = 20_000)]
     pub initialize_timeout_ms: u64,
     /// How long a request other than a prompt may take.
+    #[schema(section = "agent")]
     #[map(default = 30_000)]
     pub request_timeout_ms: u64,
     /// How long the first prompt of a façade may take to start.
+    #[schema(section = "agent")]
     #[map(default = 60_000)]
     pub start_timeout_ms: u64,
     /// How long close waits for the agent before its process is ended.
+    #[schema(section = "agent")]
     #[map(default = 2_000)]
     pub close_grace_ms: u64,
     /// How many of the agent's last non-protocol output lines are kept to explain its death.
+    #[schema(section = "agent")]
     #[map(default = 20)]
     pub diagnostic_lines: usize,
     /// How long, in milliseconds, the report of a lost agent waits for its exit status.
+    #[schema(section = "agent")]
     #[map(default = 1_000)]
     pub exit_wait_ms: i64,
     /// How often, in milliseconds, a silent agent's output is checked for a stop request.
+    #[schema(section = "agent")]
     #[map(default = 200)]
     pub poll_ms: i64,
     /// Starts a `desk` Session with whatever tools the agent has: AI6 does not choose an ACP
     /// agent's tools, so it cannot keep commands from one, and without this the Session is
     /// refused. Reported as a weakening.
+    #[schema(section = "agent")]
     #[map(default)]
     pub unconfined_desk: bool,
     /// What marks a failed turn as a provider's usage or rate limit, found in its error without
     /// regard to case: such a Session stops as limited rather than failed, so its route or account
     /// is passed over until the limit is likely over.
+    #[schema(section = "agent")]
     #[map(default = limit_phrases())]
     pub limit_phrases: Vec<String>,
     /// UTF-8 bytes of agent text gathered before they are delivered mid-message.
+    #[schema(section = "agent")]
     #[map(default = DEFAULT_TEXT_FLUSH_BYTES)]
     pub text_flush_bytes: usize,
     /// The tool calls whose kind is kept, by which a later message about one that does not say
     /// its kind is judged; past it the oldest is forgotten, and such a message is of unknown kind.
+    #[schema(section = "agent")]
     #[map(default = DEFAULT_MAX_TOOL_KINDS)]
     pub max_tool_kinds: usize,
     /// What asking the agent for its models, before any Session, keeps of its answer: options.
+    #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().options)]
     pub describe_options: usize,
     /// Values kept of each option.
+    #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().values)]
     pub describe_values: usize,
     /// Modes kept.
+    #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().modes)]
     pub describe_modes: usize,
     /// Sessions kept of the agent's list, across its pages.
+    #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().sessions)]
     pub describe_sessions: usize,
     /// UTF-8 bytes past which an identifier is dropped and other text cut.
+    #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().text)]
     pub describe_text_bytes: usize,
     /// Pages of the agent's session list asked for.
+    #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().pages)]
     pub describe_pages: usize,
 }

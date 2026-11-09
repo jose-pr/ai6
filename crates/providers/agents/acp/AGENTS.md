@@ -8,6 +8,7 @@ Client Protocol SDK (`agent-client-protocol`), `futures`, `serde`, `serde_json` 
 Contains no `unsafe` code. Also builds the test binary `ai6-acp-fake-agent`.
 
 ```rust
+// Every field is schema section `agent`: an Agent's `handler_settings` may set them all.
 // The provider's Guatiao `config` (Schema, FromValue, ToValue; unknown keys refused): the `station`
 // record's `[providers.acp]` and an Agent's `handler_settings`.
 pub struct AcpSettings {

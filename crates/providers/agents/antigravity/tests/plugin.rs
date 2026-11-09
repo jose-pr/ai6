@@ -71,3 +71,26 @@ fn the_built_library_reads_its_limits_from_its_configuration() {
     assert!(!builds_with(serde_json::json!({ "tail_lines": "many" })));
     assert!(!builds_with(serde_json::json!({ "no_such_limit": 1 })));
 }
+
+/// An Agent's `handler_settings` may not choose the program a Station runs; the station record's
+/// `[providers.antigravity]` may.
+#[test]
+fn an_agent_cannot_set_the_executable_but_the_station_record_can() {
+    let plugins = plugins();
+    let settings = serde_json::json!({"executable": "elsewhere"});
+    let error = plugins
+        .handler_with("antigravity", settings.as_object().unwrap())
+        .err()
+        .expect("an Agent's executable is refused")
+        .to_string();
+    assert!(
+        error.contains("\"antigravity\"")
+            && error.contains("\"executable\"")
+            && error.contains("Station setting"),
+        "{error}"
+    );
+    let station = ai6::provider_settings::settings_value(settings.as_object().unwrap()).unwrap();
+    plugins
+        .handler("antigravity", Some(&station))
+        .expect("the station record may set the executable");
+}

@@ -9048,8 +9048,10 @@ queue = 1
     #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone, Default)]
     #[map(crate = crate::guatiao, deny_unknown_fields)]
     pub(super) struct MockDeniedConfig {
+        #[schema(section = "agent")]
         #[map(default)]
         allowed_tools: Vec<String>,
+        #[schema(section = "agent")]
         command: Option<String>,
     }
 

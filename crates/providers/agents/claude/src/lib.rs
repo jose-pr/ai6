@@ -68,9 +68,11 @@ pub struct ClaudeConfig {
     /// Claude Code permission rules added to the allow list of a Mission's tools. A rule for a
     /// tool the list keeps out (`WebFetch(domain:example.com)`, or `Bash` at `desk`) offers that
     /// tool and lifts its default denial. Each rule starts with a letter.
+    #[schema(section = "agent")]
     #[map(default)]
     pub allowed_tools: Vec<String>,
     /// Permission rules added to the deny list; a deny rule beats an allow rule.
+    #[schema(section = "agent")]
     #[map(default)]
     pub denied_tools: Vec<String>,
 }

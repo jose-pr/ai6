@@ -18,7 +18,9 @@ under the `strict` profile ([Stations](stations.md#provider-libraries-pins-and-p
 
 The `acp` handler (`ai6-agent-acp`) runs any agent that speaks the Agent Client Protocol: the
 Claude and Codex adapters, `gemini --acp`, or your own. An Agent configures it with a
-`handler_settings` table (`command`, `args`, `env`, `meta`, option ids and timeouts); any
+`handler_settings` table (`command`, `args`, `env`, `meta`, option ids and timeouts); an Agent may set only
+the keys its handler marks as the Agent's (the Codex handler has none), and any other key of the handler's
+configuration, such as `executable`, is refused as a Station setting; any
 handler's settings reach its provider as values of the type the provider declares, whose schema
 refuses a key it does not know, naming the provider and the key. See [the Agent Client Protocol](acp.md).
 
@@ -146,7 +148,9 @@ not, and a harness can read its own environment, the model credential among them
 matches the command Claude writes, not the program it runs. Where that matters, isolate the work
 with a [container Theater](theaters.md); no list of tools does it.
 
-An Agent's `handler_settings` change the list:
+An Agent's `handler_settings` change the list. They take `allowed_tools` and `denied_tools` and nothing
+else: `executable`, the program a Station runs, is the Station's, set in the `station` record's
+`[providers.claude]`, and an Agent that names it is refused:
 
 ```toml
 [agent.007.handler_settings]
@@ -217,7 +221,8 @@ file tools, and a command can read it, as a command can read the harness's envir
   directories to write, skills or a network is refused by name. A model reads an MCP tool's schema
   from agy's data directory with `read_file` before calling it, so she keeps that tool.
 
-`handler_settings` takes `allowed_tools` and `denied_tools` as above, each entry an agy [permission
+`handler_settings` takes `allowed_tools`, `denied_tools`, `settings`, `auto_update` and `limit_phrases`, and
+not `executable`, which only the `station` record's `[providers.antigravity]` sets. The tool lists are as above, each entry an agy [permission
 rule](https://antigravity.google/docs/permissions?tab=cli) (`command(git status)`) or a tool's name
 (`search_web`), weakenings reported the same way, and `settings`, further `settings.json` keys for the
 Session (`modelProvider`), never those that decide what it may do.

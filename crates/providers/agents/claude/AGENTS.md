@@ -27,7 +27,9 @@ milliseconds.
 | `allowed_tools` | empty | Permission rules added to the allow list; an Agent sets them in `handler_settings` |
 | `denied_tools` | empty | Rules added to the deny list; a deny rule beats an allow rule |
 
-A Station sets them in `[providers.claude]` of its `station` record. `allowed_tools` and `denied_tools`
+Only `allowed_tools` and `denied_tools` (schema section `agent`) may be set in an Agent's
+`handler_settings`; every other key, `executable` among them, is refused there as a Station setting.
+A Station sets them all in `[providers.claude]` of its `station` record. `allowed_tools` and `denied_tools`
 are lists of Claude Code permission rules; an unknown key is refused by the configuration schema,
 naming `claude` and the key, and a rule that does not start with a letter makes the build fail
 with `GUATIAO_ERR_BAD_VALUE`.

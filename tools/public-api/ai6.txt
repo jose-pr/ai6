@@ -9025,6 +9025,8 @@ pub fn ai6::directorates::section_00::records::file_safe(&str) -> bool
 pub fn ai6::directorates::section_00::records::find_file(&std::path::Path, usize, &dyn core::ops::function::Fn(&str) -> bool) -> core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::section_00::records::home(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
 pub mod ai6::provider_settings
+pub const ai6::provider_settings::AGENT_SECTION: &str
+pub fn ai6::provider_settings::check_agent_settings(&str, &serde_json::value::Value, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::provider_settings::check_settings(&str, &guatiao::value::value::Value, &guatiao::value::value::Value) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::provider_settings::settings_from_text<T: guatiao::value::convert::FromValue>(&str) -> core::result::Result<T, alloc::string::String>
 pub fn ai6::provider_settings::settings_of<T: guatiao::value::convert::FromValue>(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<T, alloc::string::String>

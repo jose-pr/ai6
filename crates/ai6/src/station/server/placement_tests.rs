@@ -19,9 +19,12 @@ use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentSta
 #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone, Default)]
 #[map(crate = crate::guatiao, deny_unknown_fields)]
 pub(super) struct MockProgramConfig {
+    #[schema(section = "agent")]
     program: Option<String>,
+    #[schema(section = "agent")]
     #[map(default)]
     models_ms: u64,
+    #[schema(section = "agent")]
     #[map(default)]
     key: String,
 }

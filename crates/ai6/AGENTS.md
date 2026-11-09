@@ -6257,6 +6257,8 @@ beside its provider's `[providers.<id>]` table: both are keys of the provider's 
 pub fn settings_value(&serde_json::Map<String, serde_json::Value>) -> Result<guatiao::Value, String>;  // handler_settings, Theater access
 pub fn table_value(&toml::Table) -> Result<guatiao::Value, String>;                                  // an Operation's sources
 pub fn check_settings(provider: &str, schema: &guatiao::Value, settings: &guatiao::Value) -> Result<(), String>;
+pub const AGENT_SECTION: &str;   // "agent": the x-section of a config field an Agent's handler_settings may set
+pub fn check_agent_settings(provider: &str, schema: &serde_json::Value, settings: &serde_json::Map<..>) -> Result<(), String>;  // other keys: "a Station setting"
 pub fn settings_of<T: FromValue>(&serde_json::Map<..>) -> Result<T, String>;
 pub fn settings_from_text<T: FromValue>(&str) -> Result<T, String>;                                  // a provider's own tests
 ```
