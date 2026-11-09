@@ -253,19 +253,25 @@ class Checker:
         return name in self.trees[parent]
 
     def check_crates(self) -> None:
-        """The deps commit the lock names holds what Cargo.lock names, and nothing else."""
+        """The deps commit the lock names holds what Cargo.lock names, and no archive or pack file.
+
+        A scanner refuses archives, compressed data, packs, executables and keys, and a `.git` path
+        cannot be cloned whole; none belongs on the branch, in `crates/` or beside it.
+        """
         deps = self.find("app", "deps")
         if len(deps) != 1:
             return
-        tree = crates.read_ref(ROOT, deps[0].version)
-        if tree is None:
-            self.error(f"deps at {deps[0].version} has no crates/, or is not here", deps[0].line)
+        scan = crates.scan_ref(ROOT, deps[0].version)
+        if scan is None:
+            self.error(f"deps at {deps[0].version} is not here", deps[0].line)
             return
-        for problem in crates.problems(crates.read_lock(ROOT / "Cargo.lock"), tree):
+        for problem in crates.problems(crates.read_lock(ROOT / "Cargo.lock"), scan.tree):
             self.error(
                 f"deps at {deps[0].version}: {problem}; python3 tools/sdk/crates.py refresh DEPS_DIR",
                 deps[0].line,
             )
+        for flagged in scan.flagged:
+            self.error(f"deps at {deps[0].version}: {flagged}; the branch holds no such file", deps[0].line)
 
     def check_docs(self) -> None:
         requirements = (ROOT / "tools/sdk/docs-requirements.txt").read_text(encoding="utf-8")

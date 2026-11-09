@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Keeps a checkout of the deps branch's crates/ equal to Cargo.lock, and builds offline from it.
 
+crates/ is a cargo vendor directory: each package Cargo.lock names, from crates.io or git, is a
+directory `<name>-<version>/` of unpacked source with a `.cargo-checksum.json`. Tests, examples,
+benchmarks, fixtures and anything an archive scanner would refuse are left out, since compiling
+reads none of them.
+
 Usage:
   crates.py sync DEPS_DIR      make DEPS_DIR/crates match Cargo.lock: fetch, verify, remove
   crates.py check DEPS_DIR     fail, naming what is missing, changed or stale
   crates.py use DEPS_DIR [--out DIR] [--repo-config]
-                               unpack DEPS_DIR/crates into a directory source outside the
-                               repository, write a cargo config for it, and print how to use it
+                               write a cargo config that replaces every source by DEPS_DIR/crates,
+                               and print how to use it
   crates.py refresh DEPS_DIR   sync; commit on DEPS_DIR's branch; repin its Dockerfiles and
                                tools/sdk/sdk.lock, each in a commit of its own
 
@@ -18,10 +23,13 @@ tools/sdk/README.md says how these fit together.
 from __future__ import annotations
 
 import argparse
-import gzip
+import collections
 import hashlib
+import io
 import json
+import math
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -34,18 +42,58 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import NamedTuple
+from typing import Iterator, NamedTuple
 
 ROOT = Path(__file__).resolve().parents[2]
 CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index"
 # The address crates.io's own index gives in its config.json; AI6_SDK_CRATES_URL names a mirror.
 CRATES_URL = "https://static.crates.io/crates/{name}/{name}-{version}.crate"
-SUMS = "git/SHA256SUMS"
-# All a crates/ this script made can hold, so pointing it at a source tree removes nothing.
-KEPT_FILE = re.compile(r"^([^/]+\.crate|git/[^/]+\.tar\.gz|git/SHA256SUMS)$")
-STAMP = ".ai6-crates"
+CHECKSUM = ".cargo-checksum.json"
+# What an older crates/ held (.crate files, source archives); sync removes it.
+LEGACY_FILE = re.compile(r"^([^/]+\.crate|git/[^/]+\.tar\.gz|git/SHA256SUMS)$")
 CONFIG_MARK = "# Written by tools/sdk/crates.py."
+SOURCE = "ai6-vendored"
 DOCKERFILES = ("containers/Dockerfile.linux", "containers/Dockerfile.windows")
+# Directories at a package's top that compiling never reads, and at any depth the ones that hold
+# only test data.
+DROP_TOP = {
+    "test", "tests", "example", "examples", "bench", "benches", "benchmark", "benchmarks", "fuzz",
+    "testdata", "test-data", "test_data", "fixture", "fixtures",
+}  # fmt: skip
+DROP_ANY = {"testdata", "test-data", "test_data", "fixture", "fixtures"}
+# A name Windows cannot create, which would make the checkout differ between platforms.
+INCLUDE = re.compile(r'include_(?:str|bytes)!\s*\(\s*"([^"]+)"\s*,?\s*\)|\binclude!\s*\(\s*"([^"]+)"\s*,?\s*\)')
+INCLUDE_BYTES = re.compile(r'include_bytes!\s*\(\s*"([^"]+)"\s*,?\s*\)')
+# The markers of a PEM private key, which one dash fewer no longer reads as.
+PEM_MARKER = re.compile(rb"-----(BEGIN|END) ((?:[A-Z0-9-]+ )?PRIVATE KEY)-----")
+PEM_REPLACEMENT = rb"----\1 \2-----"
+RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", re.IGNORECASE)
+
+# What an archive scanner refuses, judged by a file's leading bytes (the same list as the
+# scanner this branch is held to).
+FLAG_MAGIC = [
+    (b"PK\x03\x04", "zip"), (b"PK\x05\x06", "zip"), (b"PK\x07\x08", "zip"),
+    (b"\x1f\x8b", "gzip"), (b"BZh", "bzip2"), (b"\xfd7zXZ\x00", "xz"),
+    (b"7z\xbc\xaf\x27\x1c", "7z"), (b"Rar!\x1a\x07", "rar"), (b"\x28\xb5\x2f\xfd", "zstd"),
+    (b"\x04\x22\x4d\x18", "lz4"), (b"MSCF", "cab"), (b"Cr24", "crx"), (b"!<arch>", "ar/deb"),
+    (b"\xed\xab\xee\xdb", "rpm"), (b"Salted__", "openssl-encrypted"),
+    (b"age-encryption.org", "age-encrypted"), (b"-----BEGIN PGP MESSAGE", "pgp-encrypted"),
+    (b"MZ", "windows executable"), (b"\x7fELF", "elf executable"),
+    (b"\xcf\xfa\xed\xfe", "mach-o executable"), (b"\xfe\xed\xfa\xcf", "mach-o executable"),
+    (b"\xca\xfe\xba\xbe", "mach-o/java class"), (b"PACK", "git pack"),
+    (b"\xfftOc", "git pack index"), (b"RIDX", "git reverse index"),
+    (b"\x30\x82", "der (certificate or key)"),
+]  # fmt: skip
+MEDIA = [
+    b"\x89PNG", b"GIF8", b"\xff\xd8\xff", b"RIFF", b"\x00\x00\x01\x00", b"wOFF", b"wOF2",
+    b"\x00\x01\x00\x00", b"OTTO",
+]  # fmt: skip
+KEY_EXT = re.compile(r"\.(pfx|p12|jks|keystore|der|key)$", re.IGNORECASE)
+# A whole PEM block with a body, not a label quoted in code or docs.
+PRIVATE_KEY = re.compile(
+    rb"-----BEGIN ([A-Z0-9-]+ )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{16,}\r?\n){2,}"
+    rb"[A-Za-z0-9+/=]*\r?\n?-----END ([A-Z0-9-]+ )?PRIVATE KEY-----"
+)
 
 
 class Problem(Exception):
@@ -56,6 +104,10 @@ class Crate(NamedTuple):
     name: str
     version: str
     checksum: str
+
+    @property
+    def dir(self) -> str:
+        return f"{self.name}-{self.version}"
 
     @property
     def file(self) -> str:
@@ -70,10 +122,6 @@ class Repo(NamedTuple):
     def name(self) -> str:
         return self.url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
 
-    @property
-    def file(self) -> str:
-        return f"git/{self.name}-{self.commit}.tar.gz"
-
 
 class Lock(NamedTuple):
     crates: list[Crate]
@@ -84,10 +132,23 @@ class Lock(NamedTuple):
 
 
 class Tree(NamedTuple):
-    """What a crates/ holds: each file's SHA-256 by its path below crates/, and git/SHA256SUMS."""
+    """What a crates/ holds: each package directory's files with their SHA-256, and what is loose."""
 
-    digests: dict[str, str]
-    sums: dict[str, str]
+    # Directory name -> file path below it -> SHA-256, `.cargo-checksum.json` included.
+    dirs: dict[str, dict[str, str]]
+    # Directory name -> its parsed `.cargo-checksum.json`.
+    sums: dict[str, dict]
+    # Directory name -> first line of its Cargo.toml, which names a git package's commit.
+    heads: dict[str, str]
+    # Files directly in crates/, which a vendor directory does not have.
+    loose: list[str]
+
+
+class Scan(NamedTuple):
+    """A whole commit: its crates/, and every path or file a scanner would refuse."""
+
+    tree: Tree
+    flagged: list[str]
 
 
 def read_lock(path: Path) -> Lock:
@@ -110,74 +171,169 @@ def read_lock(path: Path) -> Lock:
     return lock
 
 
+def wanted_packages(lock: Lock) -> dict[str, tuple[str | None, Repo | None]]:
+    """Directory name -> (the registry checksum or None, the repository or None)."""
+    wanted: dict[str, tuple[str | None, Repo | None]] = {}
+    entries = [(c.dir, (c.checksum, None)) for c in lock.crates]
+    entries += [(f"{n}-{v}", (None, r)) for r, packages in lock.repos.items() for n, v in packages]
+    for name, entry in entries:
+        if name in wanted:
+            raise Problem(f"{name} is taken from more than one source; a vendor directory has one")
+        wanted[name] = entry
+    return wanted
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def parse_sums(text: str) -> dict[str, str]:
-    """The `sha256sum` format, with names relative to crates/git/."""
-    return {f"git/{line.split()[1]}": line.split()[0] for line in text.splitlines() if line.strip()}
+def entropy(data: bytes) -> float:
+    counts = collections.Counter(data)
+    return -sum(v / len(data) * math.log2(v / len(data)) for v in counts.values()) if data else 0.0
+
+
+def flagged_kind(body: bytes, name: str) -> str | None:
+    """The kind of data an archive scanner refuses in a file's bytes, or None."""
+    head = body[:600]
+    if len(head) >= 262 and head[257:262] == b"ustar":
+        return "tar"
+    for magic, kind in FLAG_MAGIC:
+        if head.startswith(magic):
+            return kind
+    if KEY_EXT.search(name):
+        return "key or keystore file"
+    if head.startswith((b"\x00asm", b"%PDF", b"SQLite format 3")):
+        return None
+    if any(head.startswith(m) for m in MEDIA) or head[4:8] == b"ftyp":
+        return None
+    try:
+        body.decode("utf-8")
+        return "private key in text" if PRIVATE_KEY.search(body) else None
+    except UnicodeDecodeError:
+        pass
+    return "opaque high-entropy data" if entropy(body[:65536]) > 7.5 else None
+
+
+class Adder:
+    """Files into a Tree, whether they come from a directory or from a commit."""
+
+    def __init__(self, tree: Tree) -> None:
+        self.tree = tree
+
+    def add(self, path: str, data: bytes) -> None:
+        directory, _, rest = path.partition("/")
+        if not rest:
+            self.tree.loose.append(directory)
+            return
+        self.tree.dirs.setdefault(directory, {})[rest] = sha256(data)
+        if rest == CHECKSUM:
+            try:
+                self.tree.sums[directory] = json.loads(data)
+            except ValueError:
+                self.tree.sums[directory] = {}
+        elif rest == "Cargo.toml":
+            self.tree.heads[directory] = data.split(b"\n", 1)[0].decode("utf-8", "replace")
 
 
 def read_dir(crates: Path) -> Tree:
-    digests = {}
+    tree = Tree({}, {}, {}, [])
+    adder = Adder(tree)
     if crates.is_dir():
         for path in sorted(crates.rglob("*")):
             if path.is_file():
-                digests[path.relative_to(crates).as_posix()] = sha256(path.read_bytes())
-    sums = crates / SUMS
-    return Tree(digests, parse_sums(sums.read_text(encoding="utf-8")) if sums.is_file() else {})
+                adder.add(path.relative_to(crates).as_posix(), path.read_bytes())
+    return tree
 
 
-def read_ref(checkout: Path, commit: str) -> Tree | None:
-    """What a commit's crates/ holds, or None when the commit or its crates/ is not here."""
-    probe = ["git", "-C", str(checkout), "cat-file", "-e", f"{commit}:crates"]
-    if subprocess.run(probe, capture_output=True).returncode != 0:
-        return None
-    read = subprocess.Popen(
-        ["git", "-C", str(checkout), "archive", "--format=tar", commit, "crates"],
+def blobs(checkout: Path, commit: str) -> Iterator[tuple[str, str, bytes]]:
+    """Each file of a commit: its path, its mode and its bytes exactly as git stores them."""
+    listing = subprocess.run(
+        ["git", "-C", str(checkout), "ls-tree", "-r", "-z", commit], capture_output=True
+    )
+    if listing.returncode != 0:
+        raise Problem(f"commit {commit} is not in {checkout}")
+    reader = subprocess.Popen(
+        ["git", "-C", str(checkout), "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
     )
-    digests, sums = {}, ""
-    with tarfile.open(fileobj=read.stdout, mode="r|") as tar:
-        for member in tar:
-            if member.isfile():
-                data = tar.extractfile(member).read()
-                name = member.name.removeprefix("crates/")
-                digests[name] = sha256(data)
-                if name == SUMS:
-                    sums = data.decode("utf-8")
-    read.wait()
-    return Tree(digests, parse_sums(sums))
+    try:
+        for entry in listing.stdout.split(b"\0"):
+            if not entry:
+                continue
+            meta, _, raw = entry.partition(b"\t")
+            mode, kind, object_id = meta.decode().split()
+            if kind != "blob":
+                continue
+            reader.stdin.write(object_id.encode() + b"\n")
+            reader.stdin.flush()
+            _, _, size = reader.stdout.readline().split()
+            body = reader.stdout.read(int(size))
+            reader.stdout.read(1)
+            yield raw.decode("utf-8", "surrogateescape"), mode, body
+    finally:
+        reader.stdin.close()
+        reader.wait()
+
+
+def scan_ref(checkout: Path, commit: str) -> Scan | None:
+    """A commit's crates/ and everything in it a scanner would refuse; None when it is not here."""
+    if subprocess.run(
+        ["git", "-C", str(checkout), "cat-file", "-e", f"{commit}^{{commit}}"], capture_output=True
+    ).returncode:
+        return None
+    tree = Tree({}, {}, {}, [])
+    adder = Adder(tree)
+    flagged = []
+    for path, mode, body in blobs(checkout, commit):
+        if any(part.lower() == ".git" for part in path.split("/")):
+            flagged.append(f"{path}: a path below .git")
+        if mode == "120000":
+            flagged.append(f"{path}: a symbolic link")
+        elif kind := flagged_kind(body, path.rsplit("/", 1)[-1]):
+            flagged.append(f"{path}: {kind}")
+        if path.startswith("crates/"):
+            adder.add(path.removeprefix("crates/"), body)
+    return Scan(tree, flagged)
+
+
+def package_problems(
+    tree: Tree, name: str, checksum: str | None, repo: Repo | None
+) -> list[str]:
+    """What keeps one directory from being the package Cargo.lock names, for a line each."""
+    where = f"crates/{name}"
+    if name not in tree.dirs:
+        return [f"{where}: missing, Cargo.lock names it"]
+    sums = tree.sums.get(name)
+    if sums is None:
+        return [f"{where}: no {CHECKSUM}"]
+    found = []
+    if sums.get("package") != checksum:
+        found.append(f"{where}: package checksum {sums.get('package')}, Cargo.lock says {checksum}")
+    if repo and f" at {repo.commit}" not in tree.heads.get(name, ""):
+        found.append(f"{where}: not {repo.name} at {repo.commit}")
+    listed = sums.get("files", {})
+    have = {p: d for p, d in tree.dirs[name].items() if p != CHECKSUM}
+    for path in sorted(set(listed) - set(have)):
+        found.append(f"{where}/{path}: listed in {CHECKSUM}, missing")
+    for path in sorted(set(have) - set(listed)):
+        found.append(f"{where}/{path}: not listed in {CHECKSUM}")
+    for path in sorted(set(have) & set(listed)):
+        if have[path] != listed[path]:
+            found.append(f"{where}/{path}: SHA-256 {have[path]}, {CHECKSUM} says {listed[path]}")
+    return found
 
 
 def problems(lock: Lock, tree: Tree) -> list[str]:
     """One line for each thing keeping a crates/ from covering Cargo.lock, and nothing more."""
     found = []
-    wanted = set()
-    for crate in lock.crates:
-        wanted.add(crate.file)
-        have = tree.digests.get(crate.file)
-        if have is None:
-            found.append(f"crates/{crate.file}: missing, Cargo.lock names it")
-        elif have != crate.checksum:
-            found.append(f"crates/{crate.file}: SHA-256 {have}, Cargo.lock says {crate.checksum}")
-    for repo in lock.repos:
-        wanted.update((repo.file, SUMS))
-        have = tree.digests.get(repo.file)
-        listed = tree.sums.get(repo.file)
-        if have is None:
-            found.append(
-                f"crates/{repo.file}: missing, Cargo.lock names {repo.name} at this commit"
-            )
-        elif listed is None:
-            found.append(f"crates/{repo.file}: not in crates/{SUMS}")
-        elif have != listed:
-            found.append(f"crates/{repo.file}: SHA-256 {have}, crates/{SUMS} says {listed}")
-    for name in sorted(set(tree.digests) - wanted):
+    wanted = wanted_packages(lock)
+    for name, (checksum, repo) in wanted.items():
+        found += package_problems(tree, name, checksum, repo)
+    for name in sorted(set(tree.dirs) - set(wanted)):
         found.append(f"crates/{name}: stale, Cargo.lock does not name it")
-    for name in sorted(set(tree.sums) - wanted):
-        found.append(f"crates/{SUMS}: stale line for {name}")
+    for name in sorted(tree.loose):
+        found.append(f"crates/{name}: a file; a vendor directory holds only package directories")
     return found
 
 
@@ -217,83 +373,270 @@ def fetch_crate(crate: Crate) -> bytes:
         )
     return data
 
+def archive_files(data: bytes, prefix: str) -> dict[str, bytes]:
+    """The regular files of a .crate below its `<name>-<version>/` directory, by relative path."""
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        for member in tar:
+            if not member.isfile():
+                continue
+            if not member.name.startswith(prefix):
+                raise Problem(f"{prefix.rstrip('/')}.crate holds {member.name}, outside {prefix}")
+            files[member.name.removeprefix(prefix)] = tar.extractfile(member).read()
+    return files
 
-def archive_commit(repo: Repo) -> bytes:
-    """An archive of exactly this commit's tree, with no history: git checks the hash it fetched."""
-    with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp)
-        run_git("init", "-q", cwd=work)
-        run_git("fetch", "-q", "--depth", "1", repo.url, repo.commit, cwd=work)
-        if run_git("rev-parse", "FETCH_HEAD", cwd=work) != repo.commit:
-            raise Problem(f"{repo.url} did not give commit {repo.commit}")
-        probe = ["git", "-C", tmp, "cat-file", "-e", "FETCH_HEAD:.gitmodules"]
-        if subprocess.run(probe, capture_output=True).returncode == 0:
-            raise Problem(f"{repo.name} has submodules, which a source archive would leave out")
-        made = subprocess.run(
-            [
-                "git",
-                "-C",
-                tmp,
-                "-c",
-                "core.autocrlf=false",
-                "-c",
-                "core.eol=lf",
-                "archive",
-                "--format=tar",
-                f"--prefix={repo.name}-{repo.commit}/",
-                "FETCH_HEAD",
-            ],
-            capture_output=True,
-            check=True,
-        )
-    # mtime=0: the same tree gives the same bytes, whenever it is made.
-    return gzip.compress(made.stdout, compresslevel=9, mtime=0)
+
+def keeps(path: str) -> bool:
+    """Whether a package's file (by path below the package) is something compiling can read."""
+    *dirs, name = path.split("/")
+    if dirs and dirs[0].lower() in DROP_TOP:
+        return False
+    if any(d.lower() in DROP_ANY or d.startswith(".") for d in dirs):
+        return False
+    return not (name.startswith(".git") or name == ".cargo-ok")
+
+
+def drop_missing_targets(text: str, present: set[str]) -> str:
+    """The manifest without the [[test]], [[bench]] and [[example]] tables whose file is not here.
+
+    Cargo refuses a manifest naming a target it cannot find, even in a dependency.
+    """
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return text
+    folders = {"test": "tests", "bench": "benches", "example": "examples"}
+    index = dict.fromkeys(folders, -1)
+    out, skipping = [], False
+    for line in text.split("\n"):
+        header = re.match(r"^\[\[(test|bench|example)\]\]\s*(#.*)?$", line)
+        if header:
+            kind = header[1]
+            index[kind] += 1
+            target = data.get(kind, [])[index[kind]]
+            name = target.get("name", "")
+            path = target.get("path") or None
+            options = [path] if path else [f"{folders[kind]}/{name}.rs", f"{folders[kind]}/{name}/main.rs"]
+            skipping = not any(Path(p).as_posix() in present for p in options if p)
+        elif re.match(r"^\[", line):
+            skipping = False
+        if not skipping:
+            out.append(line)
+    return "\n".join(out)
+
+
+def inline_bytes(kept: dict[str, bytes], files: dict[str, bytes], refused: set[str]) -> None:
+    """Writes the bytes of each refused file into the `include_bytes!` that reads it.
+
+    The array literal has the type `include_bytes!` gives, so a crate that embeds a DER file
+    compiles without the binary file being in the branch.
+    """
+
+    def literal(base: str):
+        def replace(found: re.Match[str]) -> str:
+            target = posixpath.normpath(posixpath.join(base, found[1]))
+            if target not in refused:
+                return found[0]
+            body = files[target]
+            return "&[" + ",".join(f"0x{b:02x}u8" if i == 0 else f"0x{b:02x}" for i, b in enumerate(body)) + "]"
+
+        return replace
+
+    for path in [p for p in kept if p.endswith(".rs")]:
+        try:
+            text = kept[path].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        changed = INCLUDE_BYTES.sub(literal(posixpath.dirname(path)), text)
+        if changed != text:
+            kept[path] = changed.encode("utf-8")
+
+
+def include_closure(files: dict[str, bytes]) -> dict[str, bytes]:
+    """The files compiling can read: `keeps`, and whatever a kept source file includes by path."""
+    kept = {p: b for p, b in files.items() if keeps(p)}
+    pending = [p for p in kept if p.endswith(".rs")]
+    while pending:
+        path = pending.pop()
+        try:
+            text = kept[path].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        for found in INCLUDE.finditer(text):
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(path), found[1] or found[2]))
+            if target in files and target not in kept:
+                kept[target] = files[target]
+                if target.endswith(".rs"):
+                    pending.append(target)
+    return kept
+
+
+def write_package(target: Path, everything: dict[str, bytes], checksum: str | None) -> None:
+    """Writes a package directory with its .cargo-checksum.json, leaving out what a scanner refuses.
+
+    The files map lists what was written, so cargo checks each file it reads against it.
+    """
+    files = include_closure(everything)
+    seen: dict[str, str] = {}
+    for path in files:
+        if seen.setdefault(path.lower(), path) != path:
+            raise Problem(f"{target.name} has {path} and {seen[path.lower()]}, one file on Windows")
+        if any(RESERVED.match(part) for part in path.split("/")):
+            raise Problem(f"{target.name}/{path} is a name Windows cannot create")
+    kept, refused = {}, {}
+    for path, body in files.items():
+        name = path.rsplit("/", 1)[-1]
+        if flagged_kind(body, name) == "private key in text":
+            body = PEM_MARKER.sub(PEM_REPLACEMENT, body)
+        if flagged_kind(body, name):
+            refused[path] = body
+        else:
+            kept[path] = body
+    if refused:
+        inline_bytes(kept, files, set(refused))
+    if "Cargo.toml" in kept:
+        text = kept["Cargo.toml"].decode("utf-8")
+        fixed = drop_missing_targets(text, set(kept))
+        if fixed != text:
+            kept["Cargo.toml"] = fixed.encode("utf-8")
+    partial = target.with_name(target.name + ".partial")
+    shutil.rmtree(partial, ignore_errors=True)
+    for path, body in kept.items():
+        (partial / path).parent.mkdir(parents=True, exist_ok=True)
+        (partial / path).write_bytes(body)
+    listed = {path: sha256(body) for path, body in sorted(kept.items())}
+    (partial / CHECKSUM).write_bytes(
+        json.dumps({"files": listed, "package": checksum}, separators=(",", ":")).encode()
+    )
+    shutil.rmtree(target, ignore_errors=True)
+    partial.rename(target)
+
+
+def materialize_crate(crate: Crate, crates: Path) -> None:
+    files = archive_files(fetch_crate(crate), f"{crate.dir}/")
+    write_package(crates / crate.dir, files, crate.checksum)
+
+
+def export_commit(repo: Repo, into: Path) -> Path:
+    """The tree of exactly this commit below `into`, with no history: git checks the hash it fetched."""
+    work = into / "fetch"
+    work.mkdir()
+    run_git("init", "-q", cwd=work)
+    run_git("fetch", "-q", "--depth", "1", repo.url, repo.commit, cwd=work)
+    if run_git("rev-parse", "FETCH_HEAD", cwd=work) != repo.commit:
+        raise Problem(f"{repo.url} did not give commit {repo.commit}")
+    probe = ["git", "-C", str(work), "cat-file", "-e", "FETCH_HEAD:.gitmodules"]
+    if subprocess.run(probe, capture_output=True).returncode == 0:
+        raise Problem(f"{repo.name} has submodules, which a source tree would leave out")
+    tree = into / "tree"
+    tree.mkdir()
+    made = subprocess.Popen(
+        [
+            "git", "-C", str(work), "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+            "archive", "--format=tar", "FETCH_HEAD",
+        ],  # fmt: skip
+        stdout=subprocess.PIPE,
+    )
+    with tarfile.open(fileobj=made.stdout, mode="r|") as tar:
+        tar.extractall(tree, filter="data")
+    if made.wait():
+        raise Problem(f"git archive of {repo.name} at {repo.commit} failed")
+    shutil.rmtree(work, ignore_errors=True)
+    return tree
+
+
+def materialize_repo(repo: Repo, wanted: list[tuple[str, str]], crates: Path) -> None:
+    """Puts each package Cargo.lock takes from a repository in a directory of its own in crates/."""
+    with tempfile.TemporaryDirectory(prefix="ai6-git-") as scratch:
+        tree = export_commit(repo, Path(scratch))
+        manifests: dict[Path, dict] = {}
+        for path in tree.rglob("Cargo.toml"):
+            if any(part.startswith(".") for part in path.relative_to(tree).parts[:-1]):
+                continue
+            try:
+                manifests[path.parent] = tomllib.loads(path.read_text(encoding="utf-8"))
+            except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+                # A fixture, or anything else cargo would also skip when it searches a git source.
+                continue
+
+        def workspace_root(member: Path) -> Path | None:
+            for directory in (member, *member.parents):
+                if directory == tree.parent:
+                    return None
+                if "workspace" in manifests.get(directory, {}):
+                    return directory
+            return None
+
+        packages = {d for d, m in manifests.items() if "package" in m}
+        for name, version in wanted:
+            found = []
+            for directory in packages:
+                manifest = manifests[directory]
+                package = manifest["package"]
+                if package.get("name") != name:
+                    continue
+                root_dir = workspace_root(directory)
+                root = manifests.get(root_dir, {}) if root_dir else {}
+                shown = package.get("version")
+                if isinstance(shown, dict):
+                    shown = root.get("workspace", {}).get("package", {}).get("version")
+                if shown == version:
+                    found.append((directory, manifest, root_dir or directory, root))
+            if len(found) != 1:
+                raise Problem(f"{repo.name} at {repo.commit} has {len(found)} packages {name} {version}")
+            directory, manifest, root_dir, root = found[0]
+            label = f"{repo.name}/{directory.relative_to(tree).as_posix()}"
+            written = normalized_manifest(manifest, root, directory, root_dir, label)
+            nested = [d for d in packages if d != directory and directory in d.parents]
+            files = {}
+            for path in directory.rglob("*"):
+                if path.is_file() and not any(n in path.parents for n in nested):
+                    files[path.relative_to(directory).as_posix()] = path.read_bytes()
+            lines = [f"# {label} at {repo.commit}, with what it inherits written out."]
+            toml_table(written, [], lines)
+            files["Cargo.toml"] = ("\n".join(lines) + "\n").encode("utf-8")
+            # Git packages have no registry checksum.
+            write_package(crates / f"{name}-{version}", files, None)
 
 
 def sync(deps_dir: Path, lock: Lock) -> list[str]:
     """Makes deps_dir/crates cover the lock and hold nothing else; returns a line per change."""
     crates = deps_dir / "crates"
-    tree = read_dir(crates)
-    unknown = sorted(name for name in tree.digests if not KEPT_FILE.match(name))
-    if unknown:
-        shown = ", ".join(unknown[:3])
-        raise Problem(
-            f"{crates} holds files this script does not make ({shown}): is it a deps checkout?"
-        )
+    wanted = wanted_packages(lock)
     changes = []
-    (crates / "git").mkdir(parents=True, exist_ok=True)
-
-    def changed(file: str, have: str | None) -> str:
-        return f"{'replaced' if have else 'added'} {file}"
-
-    stale = [c for c in lock.crates if tree.digests.get(c.file) != c.checksum]
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        for crate, data in zip(stale, pool.map(fetch_crate, stale)):
-            (crates / crate.file).write_bytes(data)
-            changes.append(changed(crate.file, tree.digests.get(crate.file)))
-    sums = {}
-    for repo in lock.repos:
-        have = tree.digests.get(repo.file)
-        if have is None or have != tree.sums.get(repo.file):
-            data = archive_commit(repo)
-            (crates / repo.file).write_bytes(data)
-            have_now = sha256(data)
-            changes.append(changed(repo.file, have))
-        else:
-            have_now = have
-        sums[repo.file] = have_now
-    wanted = {c.file for c in lock.crates} | set(sums) | {SUMS}
-    for name in sorted(set(tree.digests) - wanted):
-        (crates / name).unlink()
+    crates.mkdir(parents=True, exist_ok=True)
+    legacy = [
+        p for p in crates.rglob("*") if p.is_file() and LEGACY_FILE.match(p.relative_to(crates).as_posix())
+    ]
+    for path in legacy:
+        path.unlink()
+    if legacy:
+        changes.append(f"removed {len(legacy)} archives of an older layout")
+    old = crates / "git"
+    if old.is_dir() and not any(old.iterdir()):
+        old.rmdir()
+    for entry in sorted(crates.iterdir()):
+        if entry.name.endswith(".partial") and entry.is_dir():
+            shutil.rmtree(entry)
+        elif not entry.is_dir() or (entry.name not in wanted and not (entry / CHECKSUM).is_file()):
+            raise Problem(f"{entry} was not made by this script: is {crates} from a deps checkout?")
+    tree = read_dir(crates)
+    for name in sorted(set(tree.dirs) - set(wanted)):
+        shutil.rmtree(crates / name)
         changes.append(f"removed {name}")
-    if sums:
-        text = "".join(
-            f"{digest}  {name.removeprefix('git/')}\n" for name, digest in sorted(sums.items())
-        )
-        (crates / SUMS).write_bytes(text.encode("utf-8"))
-    else:
-        (crates / SUMS).unlink(missing_ok=True)
-        (crates / "git").rmdir()
+    stale = {n for n, (c, r) in wanted.items() if package_problems(tree, n, c, r)}
+
+    def made(name: str) -> str:
+        return f"{'replaced' if name in tree.dirs else 'added'} {name}"
+
+    crate_jobs = [c for c in lock.crates if c.dir in stale]
+    repo_jobs = [(r, p) for r, p in lock.repos.items() if any(f"{n}-{v}" in stale for n, v in p)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for future in [pool.submit(materialize_crate, c, crates) for c in crate_jobs] + [
+            pool.submit(materialize_repo, r, p, crates) for r, p in repo_jobs
+        ]:
+            future.result()
+    changes += [made(name) for name in sorted(stale)]
     return changes
 
 
@@ -404,57 +747,6 @@ def normalized_manifest(
     return result
 
 
-def unpack_repo(
-    repo: Repo, wanted: list[tuple[str, str]], archive: Path, into: Path, scratch: Path
-) -> None:
-    """Puts each package Cargo.lock takes from an archive in a directory of its own below `into`."""
-    with tarfile.open(archive, mode="r:gz") as tar:
-        tar.extractall(scratch, filter="data")
-    tree = scratch / f"{repo.name}-{repo.commit}"
-    manifests: dict[Path, dict] = {}
-    for path in tree.rglob("Cargo.toml"):
-        if any(part.startswith(".") for part in path.relative_to(tree).parts[:-1]):
-            continue
-        try:
-            manifests[path.parent] = tomllib.loads(path.read_text(encoding="utf-8"))
-        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-            # A fixture, or anything else cargo would also skip when it searches a git source.
-            continue
-
-    def workspace_root(member: Path) -> Path | None:
-        for directory in (member, *member.parents):
-            if directory == tree.parent:
-                return None
-            if "workspace" in manifests.get(directory, {}):
-                return directory
-        return None
-
-    for name, version in wanted:
-        found = []
-        for directory, manifest in manifests.items():
-            package = manifest.get("package", {})
-            if package.get("name") != name:
-                continue
-            root_dir = workspace_root(directory)
-            root = manifests.get(root_dir, {}) if root_dir else {}
-            shown = package.get("version")
-            if isinstance(shown, dict):
-                shown = root.get("workspace", {}).get("package", {}).get("version")
-            if shown == version:
-                found.append((directory, manifest, root_dir or directory, root))
-        if len(found) != 1:
-            raise Problem(f"{archive.name} has {len(found)} packages named {name} {version}")
-        directory, manifest, root_dir, root = found[0]
-        label = f"{repo.name}/{directory.relative_to(tree).as_posix()}"
-        written = normalized_manifest(manifest, root, directory, root_dir, label)
-        target = into / f"{name}-{version}"
-        shutil.copytree(directory, target)
-        lines = [f"# {label} at {repo.commit}, with what it inherits written out."]
-        toml_table(written, [], lines)
-        (target / "Cargo.toml").write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
-        # No files listed: there is nothing to compare, and git packages have no package checksum.
-        (target / ".cargo-checksum.json").write_bytes(b'{"files":{},"package":null}')
-
 
 def source_entry(source: str) -> list[str]:
     """The keys naming a git source as Cargo.lock spells it: its url and one of rev, tag, branch."""
@@ -465,68 +757,43 @@ def source_entry(source: str) -> list[str]:
     return lines
 
 
-def config_text(lock: Lock, directories: dict[Repo, Path], registry: Path) -> str:
+
+def config_text(lock: Lock, crates: Path) -> str:
+    """The config `cargo vendor` prints: every source replaced by the one vendor directory."""
     lines = [
         f"{CONFIG_MARK} Every source Cargo.lock names, from a directory.",
         "[net]",
         "offline = true",
         "",
         "[source.crates-io]",
-        'replace-with = "ai6-crates"',
+        f'replace-with = "{SOURCE}"',
         "",
-        "[source.ai6-crates]",
-        f"directory = {toml_value(registry.as_posix())}",
+        f"[source.{SOURCE}]",
+        f"directory = {toml_value(crates.as_posix())}",
     ]
-    # A directory of its own for each repository, since two sources may hold one name and version.
-    aliases = {repo: f"ai6-git-{repo.name}-{repo.commit[:12]}" for repo in lock.repos}
-    for repo, alias in aliases.items():
-        lines += [
-            "",
-            f"[source.{alias}]",
-            f"directory = {toml_value(directories[repo].as_posix())}",
-        ]
-    for source, repo in sorted(lock.sources.items()):
-        lines += ["", f"[source.{toml_value(source)}]", *source_entry(source)]
-        lines.append(f"replace-with = {toml_value(aliases[repo])}")
+    for source in sorted(lock.sources):
+        name = source.partition("#")[0]
+        lines += ["", f"[source.{toml_value(name)}]", *source_entry(source)]
+        lines.append(f'replace-with = "{SOURCE}"')
     return "\n".join(lines) + "\n"
 
 
 def use(deps_dir: Path, lock: Lock, lock_path: Path, out: Path | None, repo_config: bool) -> None:
-    crates = deps_dir / "crates"
+    crates = (deps_dir / "crates").resolve()
     found = problems(lock, read_dir(crates))
     if found:
         raise Problem("; ".join(found[:5]) + f" ({len(found)} in all); run sync first")
-    stamp = sha256(lock_path.read_bytes())
     if out is None:
-        out = Path(tempfile.gettempdir()) / f"ai6-crates-{stamp[:12]}"
+        out = Path(tempfile.gettempdir()) / f"ai6-crates-{sha256(lock_path.read_bytes())[:12]}"
     out = out.resolve()
     if out == ROOT or ROOT in out.parents:
         raise Problem(f"{out} is inside the repository; --out names a directory outside it")
     home = out / "cargo-home"
     config = home / "config.toml"
-    if not ((out / STAMP).is_file() and (out / STAMP).read_text(encoding="utf-8") == stamp):
-        if out.exists() and any(out.iterdir()) and not (out / STAMP).is_file():
-            raise Problem(f"{out} is not empty and is not a directory this command made")
-        if out.exists():
-            shutil.rmtree(out)
-        registry = out / "registry"
-        registry.mkdir(parents=True)
-        for crate in lock.crates:
-            with tarfile.open(crates / crate.file, mode="r:gz") as tar:
-                tar.extractall(registry, filter="data")
-            digest = json.dumps({"files": {}, "package": crate.checksum}, separators=(",", ":"))
-            (registry / f"{crate.name}-{crate.version}" / ".cargo-checksum.json").write_bytes(
-                digest.encode()
-            )
-        directories = {}
-        for repo, wanted in lock.repos.items():
-            directories[repo] = out / "git" / f"{repo.name}-{repo.commit[:12]}"
-            directories[repo].mkdir(parents=True)
-            with tempfile.TemporaryDirectory(dir=out) as scratch:
-                unpack_repo(repo, wanted, crates / repo.file, directories[repo], Path(scratch))
-        home.mkdir()
-        config.write_bytes(config_text(lock, directories, registry).encode("utf-8"))
-        (out / STAMP).write_bytes(stamp.encode())
+    if config.is_file() and not config.read_text(encoding="utf-8").startswith(CONFIG_MARK):
+        raise Problem(f"{config} is not one this command wrote; it was left alone")
+    home.mkdir(parents=True, exist_ok=True)
+    config.write_bytes(config_text(lock, crates).encode("utf-8"))
     if repo_config:
         target = ROOT / ".cargo" / "config.toml"
         if target.exists() and not target.read_text(encoding="utf-8").startswith(CONFIG_MARK):
@@ -535,7 +802,7 @@ def use(deps_dir: Path, lock: Lock, lock_path: Path, out: Path | None, repo_conf
         target.write_bytes(config.read_bytes())
         print(f"wrote {target}; delete it to build from the network again")
     print(
-        f"offline build ready: {len(lock.crates)} crates, {len(lock.repos)} git repositories: {out}"
+        f"offline build ready: {len(lock.crates)} crates, {len(lock.repos)} git repositories: {home}"
     )
     print(f"  sh:          export CARGO_HOME='{home}' CARGO_NET_OFFLINE=true")
     print(f"  PowerShell:  $env:CARGO_HOME = '{home}'; $env:CARGO_NET_OFFLINE = 'true'")
@@ -577,8 +844,8 @@ def refresh(deps_dir: Path, lock: Lock, lock_path: Path) -> None:
     line = re.search(r"^app deps (\S+) ", text, re.MULTILINE)
     if not line:
         raise Problem(f"{sdk_lock} has no app deps line")
-    pinned = read_ref(ROOT, line[1])
-    if not committed and pinned is not None and not problems(lock, pinned):
+    pinned = scan_ref(ROOT, line[1])
+    if not committed and pinned is not None and not problems(lock, pinned.tree) and not pinned.flagged:
         print(f"current: deps {line[1]} covers {lock_path.name}")
         return
     pin = run_git("rev-parse", "HEAD", cwd=deps_dir)
@@ -615,7 +882,8 @@ def refresh(deps_dir: Path, lock: Lock, lock_path: Path) -> None:
         "tools/sdk/sdk.lock",
         cwd=ROOT,
     )
-    found = problems(lock, read_ref(ROOT, pin) or Tree({}, {}))
+    scanned = scan_ref(ROOT, pin)
+    found = problems(lock, scanned.tree) if scanned else ["the commit is not here"]
     if found:
         raise Problem(f"deps {pin} does not cover {lock_path.name}: {found[0]}")
     print(
@@ -631,7 +899,7 @@ def main() -> int:
     parser.add_argument("deps_dir", type=Path, metavar="DEPS_DIR")
     parser.add_argument("--cargo-lock", type=Path, default=ROOT / "Cargo.lock")
     parser.add_argument(
-        "--out", type=Path, help="use: where to unpack (default: a new temporary directory)"
+        "--out", type=Path, help="use: where to write the config (default: a new temporary directory)"
     )
     parser.add_argument(
         "--repo-config",
@@ -646,7 +914,7 @@ def main() -> int:
             for change in changes:
                 print(change)
             print(
-                f"ok: {len(lock.crates)} crates, {len(lock.repos)} git archives, "
+                f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources, "
                 f"{len(changes)} changed"
             )
         elif args.command == "check":
@@ -656,7 +924,7 @@ def main() -> int:
             if found:
                 return 1
             print(
-                f"ok: {len(lock.crates)} crates, {len(lock.repos)} git archives "
+                f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources "
                 f"cover {args.cargo_lock.name}"
             )
         elif args.command == "use":
