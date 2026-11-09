@@ -14,6 +14,7 @@ import 'transcripts.dart' show TranscriptReads;
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
 import 'assistant_controller.dart';
+import 'chat_popout.dart' show ChatWindowBlocked;
 
 /// Where Moneypenny's chat is, as the person chose it.
 enum ChatLayout {
@@ -28,7 +29,7 @@ enum ChatLayout {
   /// [docked] below [OoBreakpoints.compact].
   expanded,
 
-  /// In her own native window (desktop only).
+  /// In her own window: a native one on the desktop, a browser window on the web.
   popped;
 
   static ChatLayout? byName(Object? name) {
@@ -176,6 +177,7 @@ class MoneypennyChat extends ChangeNotifier {
     required this.controller,
     this.preferences,
     this.openWindow,
+    this.windowOutlivesPage = true,
     this.settings = const ChatSettings(),
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
@@ -212,8 +214,22 @@ class MoneypennyChat extends ChangeNotifier {
   final AssistantController controller;
   final ChatPreferences? preferences;
 
-  /// Opens her own window; without it (the web) she cannot pop out.
+  /// Opens her own window; without it she cannot pop out.
   final ChatWindowOpener? openWindow;
+
+  /// Whether her window stays when the page is reloaded: a native window does, a browser's
+  /// pop-out goes with the page, so a reload brings her back into it.
+  final bool windowOutlivesPage;
+
+  /// Why her window did not open, until the person dismisses it.
+  String? get windowNotice => _windowNotice;
+  String? _windowNotice;
+
+  void dismissWindowNotice() {
+    if (_windowNotice == null) return;
+    _windowNotice = null;
+    notifyListeners();
+  }
 
   bool get canPopOut => openWindow != null;
 
@@ -311,7 +327,9 @@ class MoneypennyChat extends ChangeNotifier {
     _width = settings.clamp(saved.width ?? settings.width);
     if (!_changedBeforeRestore) {
       var layout = saved.layout;
-      if (layout == ChatLayout.popped && !canPopOut) layout = ChatLayout.docked;
+      if (layout == ChatLayout.popped && (!canPopOut || !windowOutlivesPage)) {
+        layout = ChatLayout.docked;
+      }
       if (layout != ChatLayout.collapsed) _lastOpen = layout;
       if (narrow && layout != ChatLayout.popped) layout = ChatLayout.collapsed;
       _layout = layout;
@@ -378,6 +396,7 @@ class MoneypennyChat extends ChangeNotifier {
       _set(ChatLayout.docked);
     } else {
       if (_layout == ChatLayout.collapsed) _remember();
+      _windowNotice = null;
       _set(ChatLayout.popped);
     }
   }
@@ -465,7 +484,12 @@ class MoneypennyChat extends ChangeNotifier {
   void syncWindow(BuildContext context) {
     final opener = openWindow;
     if (_layout == ChatLayout.popped && _window == null && opener != null) {
-      _window = opener(context, this, _windowClosed);
+      try {
+        _window = opener(context, this, _windowClosed);
+      } on ChatWindowBlocked {
+        _windowNotice = ChatWindowBlocked.message;
+        _set(ChatLayout.docked);
+      }
     } else if (_layout != ChatLayout.popped && _window != null) {
       final window = _window!;
       _window = null;

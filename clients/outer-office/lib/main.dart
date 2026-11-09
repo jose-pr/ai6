@@ -21,6 +21,8 @@ import 'agents/scorecard.dart';
 import 'pools/models_section.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/chat_layout.dart';
+import 'assistant/chat_popout.dart';
+import 'assistant/chat_popout_app.dart';
 import 'assistant/chat_region.dart';
 import 'assistant/chat_window.dart';
 import 'assistant/demo_conversation.dart';
@@ -133,6 +135,13 @@ Future<void> _startWeb() async {
     // Browser storage unavailable: the defaults stand.
   }
 
+  final popups = browserPopups();
+  if (popups != null && startedAsPopout(Uri.base)) {
+    runApp(
+      ChatPopoutApp(board: board, chatSettings: config.chat, popups: popups),
+    );
+    return;
+  }
   runApp(
     OuterOfficeApp(
       board: board,
@@ -4674,41 +4683,24 @@ class _AccessGateState extends State<_AccessGate> {
     }
     if (_chat case final chat? when chat.controller.token == token) return chat;
     _drop();
-    final preferences = ChatPreferences(SharedPreferences.getInstance());
-    // The preview's sample conversation is nobody's to go back to.
-    final person = board.demo ? null : board.userSession?.personId;
-    return _chat = MoneypennyChat(
-      controller: AssistantController(
-        token: token,
-        connect: board.demo
-            ? DemoAssistantChannel.new
-            : board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
-        connectTimeout: widget.chatSettings.connectTimeout,
-        retryDelay: widget.chatSettings.retryDelay,
-        retryMaxDelay: widget.chatSettings.retryMaxDelay,
-        lastConversation: person == null
-            ? null
-            : preferences.readConversation(person),
-        onConversation: person == null
-            ? null
-            : (id) => unawaited(
-                preferences
-                    .writeConversation(person, id)
-                    .catchError((Object _) {}),
-              ),
-      ),
-      label: board.demo ? demoConversationLabel : null,
-      preferences: preferences,
-      settings: widget.chatSettings,
-      proposalWait: board.limits.controls.confirming,
-      pageActions: board.demo ? null : board,
-      transcripts: board.demo ? null : board,
-      imageInput: board.demo ? null : platformImageInput(),
-      imageLoader: board.demo ? null : board.conversationImage,
+    final popups = widget.desktopWindows ? null : browserPopups();
+    return _chat = moneypennyChatFor(
+      board,
+      widget.chatSettings,
       openWindow: widget.desktopWindows
           ? (context, chat, onClosed) =>
                 _openChatWindow(context, chat, onClosed, board)
-          : null,
+          : popups == null
+          ? null
+          : popupChatWindowOpener(
+              popups,
+              appearance: board,
+              appearanceNow: () => {
+                'theme': board.themeId,
+                'backdrop': board.backdrop,
+              },
+            ),
+      windowOutlivesPage: widget.desktopWindows,
     );
   }
 
@@ -4743,6 +4735,55 @@ class _AccessGateState extends State<_AccessGate> {
         onDismissNotice: widget.router.dismissNotice,
       );
     },
+  );
+}
+
+/// The person's conversation with Moneypenny on [board]'s sign-in. The app remembers the
+/// layout and the last conversation in the browser's or the device's storage; a pop-out is
+/// given [conversation] instead and remembers nothing.
+MoneypennyChat moneypennyChatFor(
+  MissionBoard board,
+  ChatSettings settings, {
+  ChatWindowOpener? openWindow,
+  bool windowOutlivesPage = true,
+  Future<String?>? conversation,
+  bool remember = true,
+}) {
+  final preferences = remember
+      ? ChatPreferences(SharedPreferences.getInstance())
+      : null;
+  // The preview's sample conversation is nobody's to go back to.
+  final person = board.demo ? null : board.userSession?.personId;
+  return MoneypennyChat(
+    controller: AssistantController(
+      token: board.demo ? 'demo' : board.accessToken!,
+      connect: board.demo
+          ? DemoAssistantChannel.new
+          : board.assistantChannel ?? () => connectAssistant(board.apiOrigin),
+      connectTimeout: settings.connectTimeout,
+      retryDelay: settings.retryDelay,
+      retryMaxDelay: settings.retryMaxDelay,
+      lastConversation:
+          conversation ??
+          (person == null ? null : preferences?.readConversation(person)),
+      onConversation: person == null || preferences == null
+          ? null
+          : (id) => unawaited(
+              preferences
+                  .writeConversation(person, id)
+                  .catchError((Object _) {}),
+            ),
+    ),
+    label: board.demo ? demoConversationLabel : null,
+    preferences: preferences,
+    settings: settings,
+    proposalWait: board.limits.controls.confirming,
+    pageActions: board.demo ? null : board,
+    transcripts: board.demo ? null : board,
+    imageInput: board.demo ? null : platformImageInput(),
+    imageLoader: board.demo ? null : board.conversationImage,
+    openWindow: openWindow,
+    windowOutlivesPage: windowOutlivesPage,
   );
 }
 

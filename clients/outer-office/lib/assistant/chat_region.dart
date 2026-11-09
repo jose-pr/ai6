@@ -327,6 +327,8 @@ class ChatPanel extends StatelessWidget {
     required this.placement,
     this.pageLabel,
     this.inWindow = false,
+    this.onBringBack,
+    this.onHide,
     super.key,
   });
 
@@ -336,6 +338,11 @@ class ChatPanel extends StatelessWidget {
   /// The page "Back to …" returns to, where [placement] is centre.
   final String? pageLabel;
   final bool inWindow;
+
+  /// What Bring back and Hide do in a window that is a second copy of the app (the browser's
+  /// pop-out); by default they act on [chat].
+  final VoidCallback? onBringBack;
+  final VoidCallback? onHide;
 
   @override
   Widget build(BuildContext context) {
@@ -401,9 +408,21 @@ class ChatPanel extends StatelessWidget {
       ),
       _ => panel,
     };
+    final noticed = ListenableBuilder(
+      listenable: chat,
+      builder: (context, _) => chat.windowNotice == null
+          ? body
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _WindowNotice(chat: chat),
+                Expanded(child: body),
+              ],
+            ),
+    );
     return _FocusWhenConnected(
       chat: chat,
-      child: placement.modal ? FocusScope(child: body) : body,
+      child: placement.modal ? FocusScope(child: noticed) : noticed,
     );
   }
 
@@ -420,7 +439,7 @@ class ChatPanel extends StatelessWidget {
         button(
           withShortcut('Bring back', ChatShortcut.popOut),
           Icons.input,
-          chat.togglePopOut,
+          onBringBack ?? chat.togglePopOut,
         )
       else ...[
         if (placement == ChatPlacement.centre)
@@ -446,9 +465,50 @@ class ChatPanel extends StatelessWidget {
         button(
           withShortcut('Hide Moneypenny', ChatShortcut.toggle),
           Icons.close,
-          chat.collapse,
+          onHide ?? chat.collapse,
         ),
     ];
+  }
+}
+
+/// Says why her window did not open, on the warning note the rest of the app uses.
+class _WindowNotice extends StatelessWidget {
+  const _WindowNotice({required this.chat});
+
+  final MoneypennyChat chat;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    return Semantics(
+      liveRegion: true,
+      child: Material(
+        color: Color.alphaBlend(
+          tokens.warning.withValues(alpha: 0.14),
+          tokens.raised,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+          child: Row(
+            children: [
+              Icon(Icons.warning_amber, color: tokens.warning, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  chat.windowNotice ?? '',
+                  style: TextStyle(color: tokens.text),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Dismiss',
+                onPressed: chat.dismissWindowNotice,
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
