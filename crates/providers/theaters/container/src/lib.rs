@@ -19,12 +19,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ai6::directorates::q::transport::kit::{ProcessInput, run_process};
 use ai6::guatiao::library::ProviderError;
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
-use ai6::{
-    Capabilities, MadeTheater, MadeTheaters, Output, TheaterProvider, TheaterProviderConfig,
-    TheaterRequest,
-};
+use ai6::{Capabilities, MadeTheater, MadeTheaters, Output, TheaterProvider, TheaterRequest};
 
-use settings::Settings;
+pub use settings::Settings;
 
 /// The label that names the template a container was made from.
 pub const TEMPLATE_LABEL: &str = "ai6.theater";
@@ -69,7 +66,7 @@ impl Engine for Process {
     TheaterProvider,
     id = "ephemeral-container",
     name = "ephemeral container",
-    config = TheaterProviderConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct ContainerTheaters {
@@ -77,11 +74,12 @@ pub struct ContainerTheaters {
     settings: Settings,
 }
 
-impl TryFrom<TheaterProviderConfig> for ContainerTheaters {
+impl TryFrom<Settings> for ContainerTheaters {
     type Error = ProviderError;
 
-    fn try_from(config: TheaterProviderConfig) -> Result<Self, Self::Error> {
-        let settings = Settings::parse(&config.settings_toml)
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        let settings = settings
+            .checked()
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         Ok(Self {
             engine: Arc::new(Process {
@@ -96,13 +94,10 @@ impl TryFrom<TheaterProviderConfig> for ContainerTheaters {
 }
 
 impl ContainerTheaters {
-    /// A provider whose engine command line is run by `engine`, with the template settings
-    /// `settings_toml`.
-    pub fn with_engine(
-        engine: Arc<dyn Engine>,
-        settings_toml: &str,
-    ) -> Result<Self, ProviderError> {
-        let settings = Settings::parse(settings_toml)
+    /// A provider whose engine command line is run by `engine`, with the template `settings`.
+    pub fn with_engine(engine: Arc<dyn Engine>, settings: Settings) -> Result<Self, ProviderError> {
+        let settings = settings
+            .checked()
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         Ok(Self { engine, settings })
     }
@@ -145,11 +140,11 @@ impl ContainerTheaters {
         mission: String,
         created_at: u64,
     ) -> Result<MadeTheater, ProviderError> {
-        let mut transport = toml::Table::new();
-        transport.insert("container".to_owned(), container_name(name).into());
-        transport.insert("engine".to_owned(), self.settings.engine().into());
+        let mut transport = std::collections::BTreeMap::new();
+        transport.insert("container".to_owned(), container_name(name));
+        transport.insert("engine".to_owned(), self.settings.engine());
         if let Some(user) = &self.settings.user {
-            transport.insert("user".to_owned(), user.clone().into());
+            transport.insert("user".to_owned(), user.clone());
         }
         Ok(MadeTheater {
             name: name.to_owned(),
@@ -157,8 +152,10 @@ impl ContainerTheaters {
             mission,
             created_at,
             transport: "container".to_owned(),
-            settings_toml: toml::to_string(&transport)
-                .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error.to_string()))?,
+            settings: transport
+                .into_iter()
+                .map(|(key, value)| (key, value.into()))
+                .collect(),
         })
     }
 }
@@ -390,7 +387,13 @@ mod tests {
     fn provider(engine: &Arc<Fake>) -> ContainerTheaters {
         ContainerTheaters::with_engine(
             engine.clone(),
-            "image = \"fedora:44\"\nengine = \"podman\"\nrun_args = [\"--network\", \"none\"]\n",
+            ai6::provider_settings::settings_from_text(
+                r#"image = "fedora:44"
+engine = "podman"
+run_args = ["--network", "none"]
+"#,
+            )
+            .unwrap(),
         )
         .unwrap()
     }
@@ -411,8 +414,8 @@ mod tests {
         let made = create(&provider, "scratch-m1", "m1");
         assert_eq!(made.transport, "container");
         assert_eq!(
-            made.settings_toml,
-            "container = \"ai6-scratch-m1\"\nengine = \"podman\"\n"
+            serde_json::Value::Object(made.settings.clone()),
+            serde_json::json!({"container": "ai6-scratch-m1", "engine": "podman"})
         );
         let run = engine.commands.lock().unwrap()[1].clone();
         assert_eq!(

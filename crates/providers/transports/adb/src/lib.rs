@@ -23,11 +23,11 @@ use ai6::directorates::q::transport::kit::{self, ProcessInput, Shell, command_li
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
 use ai6::{
-    Capabilities, ForwardInfo, ForwardSpec, Output, ReadSpec, RunSpec, Transport, TransportConfig,
-    TransportForward, WriteSpec,
+    Capabilities, ForwardInfo, ForwardSpec, Output, ReadSpec, RunSpec, Transport, TransportForward,
+    WriteSpec,
 };
 
-use settings::Settings;
+pub use settings::Settings;
 
 /// Runs the `adb` command line. The real one starts the executable; a test stands in for the
 /// device with its own.
@@ -61,7 +61,7 @@ impl Runner for Process {
     Transport,
     id = "adb",
     name = "adb",
-    config = TransportConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct Adb {
@@ -69,11 +69,12 @@ pub struct Adb {
     probed: Mutex<Option<Capabilities>>,
 }
 
-impl TryFrom<TransportConfig> for Adb {
+impl TryFrom<Settings> for Adb {
     type Error = ProviderError;
 
-    fn try_from(config: TransportConfig) -> Result<Self, Self::Error> {
-        let settings = Settings::parse(&config.settings_toml)
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        let settings = settings
+            .checked()
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         Ok(Self::with_runner(Arc::new(Process {
             executable: settings.executable(),

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ai6::directorates::q::transport::contract::{self, Host};
 use ai6::guatiao::Bytes;
-use ai6::{ForwardSpec, ReadSpec, RunSpec, TransportClient, TransportConfig, WriteSpec};
+use ai6::{ForwardSpec, ReadSpec, RunSpec, TransportClient, WriteSpec};
 use ai6_transport_adb::Adb;
 
 fn device() -> Option<Adb> {
@@ -21,9 +21,10 @@ fn device() -> Option<Adb> {
     let executable = std::env::var("AI6_TEST_ADB").unwrap_or_else(|_| "adb".to_owned());
     let settings = format!("serial = {serial:?}\nexecutable = {executable:?}\n");
     Some(
-        Adb::try_from(TransportConfig {
-            settings_toml: settings,
-        })
+        Adb::try_from(
+            ai6::provider_settings::settings_from_text::<ai6_transport_adb::Settings>(&settings)
+                .unwrap(),
+        )
         .unwrap(),
     )
 }
@@ -52,13 +53,14 @@ fn the_adb_transport_works_on_a_real_android_device() {
     );
 
     // The contract every transport passes, on the device's own shell.
-    let transport = Adb::try_from(TransportConfig {
-        settings_toml: format!(
+    let transport = Adb::try_from(
+        ai6::provider_settings::settings_from_text::<ai6_transport_adb::Settings>(&format!(
             "serial = {:?}\nexecutable = {:?}\n",
             std::env::var("AI6_TEST_ADB_SERIAL").unwrap(),
             std::env::var("AI6_TEST_ADB").unwrap_or_else(|_| "adb".to_owned())
-        ),
-    })
+        ))
+        .unwrap(),
+    )
     .unwrap();
     contract::check(
         Box::new(transport),

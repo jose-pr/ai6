@@ -7,7 +7,7 @@
 
 use ai6::directorates::q::transport::contract::{self, Host};
 use ai6::guatiao::Bytes;
-use ai6::{ReadSpec, RunSpec, TransportClient, TransportConfig, WriteSpec};
+use ai6::{ReadSpec, RunSpec, TransportClient, WriteSpec};
 use ai6_transport_container::Container;
 
 fn container() -> Option<Container> {
@@ -17,9 +17,12 @@ fn container() -> Option<Container> {
     };
     let engine = std::env::var("AI6_TEST_ENGINE").unwrap_or_else(|_| "docker".to_owned());
     Some(
-        Container::try_from(TransportConfig {
-            settings_toml: format!("container = {name:?}\nengine = {engine:?}\n"),
-        })
+        Container::try_from(
+            ai6::provider_settings::settings_from_text::<ai6_transport_container::Settings>(
+                &format!("container = {name:?}\nengine = {engine:?}\n"),
+            )
+            .unwrap(),
+        )
         .unwrap(),
     )
 }

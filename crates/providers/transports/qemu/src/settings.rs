@@ -1,23 +1,25 @@
-use serde::Deserialize;
+use ai6::guatiao::{FromValue, Schema, ToValue};
 
 /// A Theater's QEMU guest-agent settings. Unknown keys are refused.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Settings {
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
+pub struct Settings {
     /// `host:port` of the guest agent's TCP chardev (`-chardev socket,host=...,port=...`).
-    #[serde(default)]
     pub address: Option<String>,
     /// Path of the guest agent's Unix socket chardev (`-chardev socket,path=...`); Unix only.
-    #[serde(default)]
     pub socket: Option<String>,
     /// Seconds to wait for one reply from the agent; 30 when absent.
-    #[serde(default)]
     pub reply_timeout_secs: Option<u64>,
 }
 
 impl Settings {
-    pub(crate) fn parse(text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(text).map_err(|error| error.to_string())?;
+    /// Refuses settings no provider could use; a key the schema does not declare never gets here.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the setting.
+    pub fn checked(self) -> Result<Self, String> {
+        let settings = self;
         match (&settings.address, &settings.socket) {
             (Some(_), Some(_)) | (None, None) => {
                 return Err("set exactly one of `address` and `socket`".to_owned());
@@ -47,6 +49,13 @@ impl Settings {
 
     pub(crate) fn reply_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.reply_timeout_secs.unwrap_or(30))
+    }
+}
+
+#[cfg(test)]
+impl Settings {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
+        ai6::provider_settings::settings_from_text::<Self>(text)?.checked()
     }
 }
 

@@ -1,25 +1,27 @@
-use serde::Deserialize;
+use ai6::guatiao::{FromValue, Schema, ToValue};
 
 /// A Theater's adb settings. Unknown keys are refused.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Settings {
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
+pub struct Settings {
     /// The device, as `adb devices` lists it. When absent adb picks the only device, and
     /// refuses if there are several.
-    #[serde(default)]
     pub serial: Option<String>,
     /// The adb executable; `adb` when absent.
-    #[serde(default)]
     pub executable: Option<String>,
     /// Milliseconds the output readers get to finish once a command has ended; a descendant
     /// that outlives it can hold a pipe open indefinitely. Default 1000.
-    #[serde(default)]
     pub reader_grace_ms: Option<u64>,
 }
 
 impl Settings {
-    pub(crate) fn parse(text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(text).map_err(|error| error.to_string())?;
+    /// Refuses settings no provider could use; a key the schema does not declare never gets here.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the setting.
+    pub fn checked(self) -> Result<Self, String> {
+        let settings = self;
         // A leading '-' would be read by adb as an option.
         for (name, value) in [
             ("serial", &settings.serial),
@@ -45,6 +47,13 @@ impl Settings {
 
     pub(crate) fn executable(&self) -> String {
         self.executable.clone().unwrap_or_else(|| "adb".to_owned())
+    }
+}
+
+#[cfg(test)]
+impl Settings {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
+        ai6::provider_settings::settings_from_text::<Self>(text)?.checked()
     }
 }
 

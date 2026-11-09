@@ -1,27 +1,29 @@
-use serde::Deserialize;
+use ai6::guatiao::{FromValue, Schema, ToValue};
 
 /// A Theater's container settings. Unknown keys are refused.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Settings {
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
+pub struct Settings {
     /// The running container, by name or ID.
     pub container: String,
     /// The engine's command line client: `docker` when absent; `podman` works the same.
-    #[serde(default)]
     pub engine: Option<String>,
     /// The user to run commands as inside the container (`-u`); the container's own when
     /// absent.
-    #[serde(default)]
     pub user: Option<String>,
     /// Milliseconds the output readers get to finish once a command has ended; a descendant
     /// that outlives it can hold a pipe open indefinitely. Default 1000.
-    #[serde(default)]
     pub reader_grace_ms: Option<u64>,
 }
 
 impl Settings {
-    pub(crate) fn parse(text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(text).map_err(|error| error.to_string())?;
+    /// Refuses settings no provider could use; a key the schema does not declare never gets here.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the setting.
+    pub fn checked(self) -> Result<Self, String> {
+        let settings = self;
         // A leading '-' would be read by the engine as an option.
         for (name, value) in [
             ("container", Some(&settings.container)),
@@ -48,6 +50,13 @@ impl Settings {
 
     pub(crate) fn engine(&self) -> String {
         self.engine.clone().unwrap_or_else(|| "docker".to_owned())
+    }
+}
+
+#[cfg(test)]
+impl Settings {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
+        ai6::provider_settings::settings_from_text::<Self>(text)?.checked()
     }
 }
 

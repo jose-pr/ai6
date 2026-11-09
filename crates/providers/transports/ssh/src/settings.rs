@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use ai6::guatiao::{FromValue, Schema, ToValue};
 
 const DEFAULT_PORT: u16 = 22;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -10,37 +10,34 @@ const DEFAULT_KEEPALIVE_SECS: u64 = 30;
 const DEFAULT_KEEPALIVE_MAX: usize = 3;
 
 /// A Theater's SSH settings, as the Station serializes `SshAccess`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Settings {
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
+pub struct Settings {
     pub host: String,
-    #[serde(default)]
     pub user: Option<String>,
-    #[serde(default)]
     pub port: Option<u16>,
-    #[serde(default)]
     pub identity: Option<String>,
-    #[serde(default)]
     pub host_key: Option<String>,
-    #[serde(default)]
+    #[map(default)]
     pub trust_on_first_use: bool,
-    #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     /// Milliseconds output and the end of the channel are awaited after a command has exited;
     /// a descendant that outlives it can keep the channel open indefinitely. Default 1000.
-    #[serde(default)]
     pub exit_grace_ms: Option<u64>,
     /// Seconds between keepalive probes of an idle connection; `0` sends none. Default 30.
-    #[serde(default)]
     pub keepalive_secs: Option<u64>,
     /// Unanswered keepalive probes before the connection is dropped. Default 3.
-    #[serde(default)]
     pub keepalive_max: Option<usize>,
 }
 
 impl Settings {
-    pub(crate) fn parse(text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(text).map_err(|error| error.to_string())?;
+    /// Refuses settings no provider could use; a key the schema does not declare never gets here.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the setting.
+    pub fn checked(self) -> Result<Self, String> {
+        let settings = self;
         if settings.host.is_empty() || settings.host.starts_with('-') {
             return Err("host must be a non-empty name or address".to_owned());
         }
@@ -130,6 +127,13 @@ fn expand_home(path: &str) -> PathBuf {
     match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         Some(rest) => home_dir().map_or_else(|| PathBuf::from(path), |home| home.join(rest)),
         None => PathBuf::from(path),
+    }
+}
+
+#[cfg(test)]
+impl Settings {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
+        ai6::provider_settings::settings_from_text::<Self>(text)?.checked()
     }
 }
 

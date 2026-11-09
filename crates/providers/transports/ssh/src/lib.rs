@@ -27,12 +27,12 @@ use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
 use ai6::{
     Capabilities, ForwardSpec, ReadSpec, RunSpec, Spec, TerminalSession, Transport,
-    TransportConfig, TransportForward, WriteSpec,
+    TransportForward, WriteSpec,
 };
 use tokio::runtime::{Builder, Runtime};
 
 use session::Link;
-use settings::Settings;
+pub use settings::Settings;
 
 /// The `ssh` transport: one host, reached with a key file.
 #[derive(ai6::guatiao::Provider)]
@@ -40,7 +40,7 @@ use settings::Settings;
     Transport,
     id = "ssh",
     name = "ssh",
-    config = TransportConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct Ssh {
@@ -49,11 +49,12 @@ pub struct Ssh {
     probed: Mutex<Option<Capabilities>>,
 }
 
-impl TryFrom<TransportConfig> for Ssh {
+impl TryFrom<Settings> for Ssh {
     type Error = ProviderError;
 
-    fn try_from(config: TransportConfig) -> Result<Self, Self::Error> {
-        let settings = Settings::parse(&config.settings_toml)
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        let settings = settings
+            .checked()
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)

@@ -8,10 +8,7 @@ use std::process::Command;
 
 use ai6::directorates::q::provision::{self, ProvisionSpec, Requirements, StepStatus};
 use ai6::station::plugins::Plugins;
-use ai6::{
-    RunSpec, Theater, TheaterAccess, TheaterMaker, TheaterProviderConfig, TheaterRequest,
-    TransportAccess,
-};
+use ai6::{RunSpec, Theater, TheaterAccess, TheaterMaker, TheaterRequest, TransportAccess};
 use ai6_theater_container::{ContainerTheaters, container_name};
 
 #[test]
@@ -22,11 +19,14 @@ fn a_container_theater_is_made_fitted_out_used_and_gone_afterwards() {
     };
     let engine = std::env::var("AI6_TEST_ENGINE").unwrap_or_else(|_| "docker".to_owned());
     let maker = TheaterMaker::new(Box::new(
-        ContainerTheaters::try_from(TheaterProviderConfig {
-            settings_toml: format!(
-                "image = {image:?}\nengine = {engine:?}\nrun_args = [\"--network\", \"none\"]\n"
-            ),
-        })
+        ContainerTheaters::try_from(
+            ai6::provider_settings::settings_from_text::<ai6_theater_container::Settings>(
+                &format!(
+                    "image = {image:?}\nengine = {engine:?}\nrun_args = [\"--network\", \"none\"]\n"
+                ),
+            )
+            .unwrap(),
+        )
         .unwrap(),
     ));
     let template = format!("ai6-test-{}", std::process::id());
@@ -44,18 +44,7 @@ fn a_container_theater_is_made_fitted_out_used_and_gone_afterwards() {
     // Q fits it out over the transport the provider named, loaded as a Station loads it
     // (the `container` transport library is built beside this test as a dev-dependency).
     let mut access = TransportAccess::new(made.transport.clone());
-    access.config = match toml::from_str::<toml::Table>(&made.settings_toml) {
-        Ok(table) => table
-            .into_iter()
-            .map(|(key, value)| {
-                (
-                    key,
-                    serde_json::Value::String(value.as_str().unwrap().to_owned()),
-                )
-            })
-            .collect(),
-        Err(error) => panic!("{error}"),
-    };
+    access.config = made.settings.clone();
     let deps = std::env::current_exe()
         .unwrap()
         .parent()

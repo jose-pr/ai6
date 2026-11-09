@@ -7,19 +7,15 @@ use std::time::{Duration, Instant};
 
 use ai6::directorates::q::transport::contract::{self, Host};
 use ai6::guatiao::{FromValue, ToValue};
-use ai6::{
-    Capabilities, ExitInfo, ForwardSpec, READ_TIMED_OUT, RunSpec, Spec, TransportClient,
-    TransportConfig,
-};
+use ai6::{Capabilities, ExitInfo, ForwardSpec, READ_TIMED_OUT, RunSpec, Spec, TransportClient};
 use ai6_transport_ssh::Ssh;
 
 mod support;
 use support::{FakeSsh, shell_available};
 
-fn transport(settings: String) -> Result<Ssh, ai6::guatiao::library::ProviderError> {
-    Ssh::try_from(TransportConfig {
-        settings_toml: settings,
-    })
+fn transport(settings: String) -> Result<Ssh, String> {
+    ai6::provider_settings::settings_from_text::<ai6_transport_ssh::Settings>(&settings)
+        .and_then(|settings| Ssh::try_from(settings).map_err(|error| error.to_string()))
 }
 
 fn client(settings: String) -> TransportClient {

@@ -11,10 +11,7 @@ use std::time::{Duration, Instant};
 
 use ai6::directorates::q::transport::contract::{self, Host};
 use ai6::guatiao::{Bytes, FromValue, ToValue};
-use ai6::{
-    ExitInfo, ForwardSpec, ReadSpec, RunSpec, Spec, Transport, TransportClient, TransportConfig,
-    WriteSpec,
-};
+use ai6::{ExitInfo, ForwardSpec, ReadSpec, RunSpec, Spec, Transport, TransportClient, WriteSpec};
 use ai6_transport_ssh::Ssh;
 use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, PrivateKey};
@@ -198,9 +195,12 @@ echo started
     }
 
     fn ssh(&self, pin: Option<&str>, extra: &str) -> Ssh {
-        Ssh::try_from(TransportConfig {
-            settings_toml: self.settings(pin, extra),
-        })
+        Ssh::try_from(
+            ai6::provider_settings::settings_from_text::<ai6_transport_ssh::Settings>(
+                &self.settings(pin, extra),
+            )
+            .unwrap(),
+        )
         .unwrap()
     }
 }

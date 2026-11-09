@@ -1,38 +1,37 @@
-use serde::Deserialize;
+use ai6::guatiao::{FromValue, Schema, ToValue};
 
 /// A template's container settings. Unknown keys are refused.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Settings {
+#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
+pub struct Settings {
     /// The image each container is made from.
     pub image: String,
     /// The engine's command line client: `docker` when absent; `podman` works the same.
-    #[serde(default)]
     pub engine: Option<String>,
     /// The user the `container` transport runs commands as; the image's own when absent.
-    #[serde(default)]
     pub user: Option<String>,
     /// What the container runs to stay up; `["sleep", "infinity"]` when absent.
-    #[serde(default)]
     pub command: Option<Vec<String>>,
     /// More options for the engine's `run`, such as `["--network", "none"]` or a volume.
-    #[serde(default)]
+    #[map(default)]
     pub run_args: Vec<String>,
     /// Milliseconds one engine command may run; pulling an image can take a while. Default
     /// 600000. `0` waits for the command.
-    #[serde(default)]
     pub engine_timeout_ms: Option<u64>,
     /// Bytes of an engine command's output kept. Default 1048576 (1 MiB).
-    #[serde(default)]
     pub engine_output_bytes: Option<u64>,
     /// Milliseconds the output readers get to finish once a command has ended. Default 1000.
-    #[serde(default)]
     pub reader_grace_ms: Option<u64>,
 }
 
 impl Settings {
-    pub(crate) fn parse(text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(text).map_err(|error| error.to_string())?;
+    /// Refuses settings no provider could use; a key the schema does not declare never gets here.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the setting.
+    pub fn checked(self) -> Result<Self, String> {
+        let settings = self;
         // A leading '-' would be read by the engine as an option.
         for (name, value) in [
             ("image", Some(&settings.image)),
@@ -86,6 +85,13 @@ impl Settings {
         self.command
             .clone()
             .unwrap_or_else(|| vec!["sleep".to_owned(), "infinity".to_owned()])
+    }
+}
+
+#[cfg(test)]
+impl Settings {
+    pub(crate) fn parse(text: &str) -> Result<Self, String> {
+        ai6::provider_settings::settings_from_text::<Self>(text)?.checked()
     }
 }
 

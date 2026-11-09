@@ -22,12 +22,12 @@ use std::time::{Duration, Instant};
 use ai6::directorates::q::transport::kit::{self, Shell, command_line};
 use ai6::guatiao::library::ProviderError;
 use ai6::guatiao::{Bytes, FromValue, Status, ToValue, Value};
-use ai6::{Capabilities, Output, ReadSpec, RunSpec, Transport, TransportConfig, WriteSpec};
+use ai6::{Capabilities, Output, ReadSpec, RunSpec, Transport, WriteSpec};
 use data_encoding::BASE64;
 use serde_json::json;
 
 use agent::{Agent, Endpoint};
-use settings::Settings;
+pub use settings::Settings;
 
 const POLL_START: Duration = Duration::from_millis(10);
 const POLL_MAX: Duration = Duration::from_millis(250);
@@ -38,7 +38,7 @@ const POLL_MAX: Duration = Duration::from_millis(250);
     Transport,
     id = "qemu",
     name = "qemu",
-    config = TransportConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct Qemu {
@@ -46,11 +46,12 @@ pub struct Qemu {
     probed: Mutex<Option<Capabilities>>,
 }
 
-impl TryFrom<TransportConfig> for Qemu {
+impl TryFrom<Settings> for Qemu {
     type Error = ProviderError;
 
-    fn try_from(config: TransportConfig) -> Result<Self, Self::Error> {
-        let settings = Settings::parse(&config.settings_toml)
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        let settings = settings
+            .checked()
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         let endpoint = match (&settings.address, &settings.socket) {
             (Some(address), None) => Endpoint::Tcp(address.clone()),

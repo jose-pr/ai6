@@ -39,7 +39,7 @@ pub const CREATED_LABEL: &str = "ai6.created";     // Unix seconds
 pub fn container_name(name: &str) -> String;        // "ai6-<name>"
 pub trait Engine: Send + Sync { fn run(&self, args: &[String]) -> Result<Output, ProviderError>; }
 impl ContainerTheaters {
-    pub fn with_engine(engine: Arc<dyn Engine>, settings_toml: &str) -> Result<Self, ProviderError>;
+    pub fn with_engine(engine: Arc<dyn Engine>, settings: Settings) -> Result<Self, ProviderError>;
 }
 ```
 

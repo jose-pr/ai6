@@ -1,9 +1,8 @@
 //! Loads the built provider library through the Station's plugin host, so the models cross
 //! the real Guatiao boundary, and checks that the host validates its settings.
 
-use ai6::guatiao::ToValue;
+use ai6::TheaterMaker;
 use ai6::station::plugins::{PluginBuildError, Plugins};
-use ai6::{TheaterMaker, TheaterProviderConfig};
 
 /// The cdylib is built into the directory that holds this test binary.
 fn plugins() -> Plugins {
@@ -16,11 +15,8 @@ fn plugins() -> Plugins {
 }
 
 fn config(settings: &str) -> ai6::guatiao::Value {
-    TheaterProviderConfig {
-        settings_toml: settings.to_owned(),
-    }
-    .to_value()
-    .unwrap()
+    let table: toml::Table = toml::from_str(settings).unwrap();
+    ai6::provider_settings::table_value(&table).unwrap()
 }
 
 #[test]

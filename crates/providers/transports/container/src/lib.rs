@@ -22,9 +22,9 @@ use std::time::Duration;
 use ai6::directorates::q::transport::kit::{self, ProcessInput, Shell, run_process};
 use ai6::guatiao::library::ProviderError;
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
-use ai6::{Capabilities, Output, ReadSpec, RunSpec, Transport, TransportConfig, WriteSpec};
+use ai6::{Capabilities, Output, ReadSpec, RunSpec, Transport, WriteSpec};
 
-use settings::Settings;
+pub use settings::Settings;
 
 /// Runs the engine's command line. The real one starts the executable; a test stands in for
 /// the engine with its own.
@@ -55,7 +55,7 @@ impl Runner for Process {
     Transport,
     id = "container",
     name = "container",
-    config = TransportConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct Container {
@@ -65,11 +65,12 @@ pub struct Container {
     probed: Mutex<Option<Capabilities>>,
 }
 
-impl TryFrom<TransportConfig> for Container {
+impl TryFrom<Settings> for Container {
     type Error = ProviderError;
 
-    fn try_from(config: TransportConfig) -> Result<Self, Self::Error> {
-        let settings = Settings::parse(&config.settings_toml)
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        let settings = settings
+            .checked()
             .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?;
         Ok(Self::with_runner(
             Arc::new(Process {

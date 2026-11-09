@@ -12,8 +12,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use ai6::TransportConfig;
-use ai6::guatiao::{ToValue, Value};
+use ai6::guatiao::Value;
 use russh::keys::ssh_key::{LineEnding, PublicKey};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::server::{Auth, ChannelOpenHandle, Msg, Server as _, Session, VerifiedPublicKey};
@@ -205,8 +204,11 @@ impl FakeSsh {
     }
 
     /// The same, as the value the plugin host hands a transport.
-    pub fn config(&self, settings_toml: String) -> Value {
-        TransportConfig { settings_toml }.to_value().unwrap()
+    pub fn config(&self, text: String) -> Value {
+        {
+            let table: toml::Table = toml::from_str(&text).unwrap();
+            ai6::provider_settings::table_value(&table).unwrap()
+        }
     }
 }
 

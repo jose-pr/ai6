@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ai6::directorates::q::transport::contract::{self, Host};
-use ai6::{RunSpec, Transport, TransportClient, TransportConfig};
+use ai6::{RunSpec, Transport, TransportClient};
 use ai6_transport_qemu::Qemu;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
@@ -61,9 +61,12 @@ impl FakeAgent {
 
     fn client(&self) -> TransportClient {
         TransportClient::new(Box::new(
-            Qemu::try_from(TransportConfig {
-                settings_toml: self.settings(),
-            })
+            Qemu::try_from(
+                ai6::provider_settings::settings_from_text::<ai6_transport_qemu::Settings>(
+                    &self.settings(),
+                )
+                .unwrap(),
+            )
             .unwrap(),
         ))
     }
@@ -198,9 +201,12 @@ fn the_qemu_transport_passes_the_contract_suite() {
     let scratch = tempfile::tempdir().unwrap();
     contract::check(
         Box::new(
-            Qemu::try_from(TransportConfig {
-                settings_toml: agent.settings(),
-            })
+            Qemu::try_from(
+                ai6::provider_settings::settings_from_text::<ai6_transport_qemu::Settings>(
+                    &agent.settings(),
+                )
+                .unwrap(),
+            )
             .unwrap(),
         ),
         &Host {
@@ -288,9 +294,12 @@ fn an_unreachable_agent_is_an_error_naming_the_address() {
     let closed = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = closed.local_addr().unwrap().port();
     drop(closed);
-    let qemu = Qemu::try_from(TransportConfig {
-        settings_toml: format!("address = \"127.0.0.1:{port}\"\n"),
-    })
+    let qemu = Qemu::try_from(
+        ai6::provider_settings::settings_from_text::<ai6_transport_qemu::Settings>(&format!(
+            "address = \"127.0.0.1:{port}\"\n"
+        ))
+        .unwrap(),
+    )
     .unwrap();
     let error = qemu.probe().expect_err("nothing listens");
     assert!(ai6::describe(&error).contains(&port.to_string()));
@@ -304,10 +313,9 @@ fn settings_are_validated_when_the_transport_is_built() {
         "address = \"h:1\"\nunknown = 1\n",
     ] {
         assert!(
-            Qemu::try_from(TransportConfig {
-                settings_toml: bad.to_owned()
-            })
-            .is_err(),
+            ai6::provider_settings::settings_from_text::<ai6_transport_qemu::Settings>(bad)
+                .and_then(|settings| Qemu::try_from(settings).map_err(|error| error.to_string()))
+                .is_err(),
             "{bad}"
         );
     }

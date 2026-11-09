@@ -13,8 +13,8 @@ unsafe code.
 
 ## Configuration
 
-A Theater's `access = { ssh = { … } }` becomes this provider's settings (TOML text in a
-`TransportConfig`); unknown keys are refused. `Ssh::try_from(TransportConfig)` builds it
+A Theater's `access = { ssh = { … } }` becomes this provider's settings (a
+`Settings`, its Guatiao `config`); unknown keys are refused. `Ssh::try_from(Settings)` builds it
 without contacting the host.
 
 | Key | Default | Meaning |
