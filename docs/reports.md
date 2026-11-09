@@ -100,6 +100,7 @@ or on `config:reports`.
 | `GET /v1/reports?scope=S` or `?mission=ID` | `{"reports": [...]}` most urgent first, with `state`, `kind` and `limit` to narrow |
 | `GET /v1/reports/{id}` | The Report, or its tearline; `403` with `report` (its ID and markings) when that is all the person may see; `404` for a scope they may not read |
 | `PUT /v1/reports/{id}/markings` | `{"classification", "handling", "compartments", "tearline"}`, replacing all four |
+| `PUT /v1/reports/{id}/assessment` | `{"assessment", "reason", "of"?, "wait_seconds"?}`: decides an open Source item (`mission`, `duplicate`, `no_action`, `later`); needs `mission.control` on its Operation and reading its content. `404` for a Report that is no item of a scope the person reads, `409` for one already decided |
 | `GET /v1/missions/{id}/reports` | The Reports tied to a Mission the person reads, each as far as they may see it |
 
 Each answer has `sight`: `content`, `tearline` or `markings`.
@@ -112,7 +113,29 @@ ai6ctl reports file operation:coqui --title "A key leaked" --text "..." --compar
 ai6ctl reports list --scope operation:coqui [--state open]
 ai6ctl reports list --mission coqui-41
 ai6ctl reports show report-0f3c...
+ai6ctl reports assess report-0f3c... duplicate --of coqui-41 --reason "the same fault"
 ```
+
+## What files them
+
+| Producer | Kind | Filed against, linked to |
+| --- | --- | --- |
+| An Agent's `file_report` | its own | its Operation, linked to its Mission |
+| A Source's item | `source-item` | its Operation; the filer is `source:INSTANCE` and the item. One Report per item: a changed item updates it |
+| Deliverables read back (a probe) | `evidence` | the Mission's Operation, linked to the Mission; a warning when anything is not found. Filer `probe:deliverables` |
+| Vetting holding a brief | `vetting-hold` | the brief's Operation, linked to the Mission it would be. Filer `probe:vetting` |
+| The Chief of Staff's review holding a brief | `review-hold` | as above; the filer is the review of that Mission |
+| M's scorecard proposing a hold or a preference | `scorecard` | the Operation, linked (`decision`) to its green ink request. Filer `probe:scorecard` |
+| The Head of Station | the finding's | its Station |
+| A person | their own | the scope they name |
+
+A producer files beside the record it already keeps (the evidence on the attempt, the hold on the
+brief, the green ink request), not in place of it, and files again for the same thing as an
+update: a probe run twice, or a hold seen on every pass, is one Report. A Report that cannot be
+stored is logged and never stops the check.
+
+A Source item's Report keeps the item as last polled and the decision on it, and the Operation's
+watch (or a person) decides it: [Items are Reports](missions.md#items-are-reports).
 
 ## Clearances
 

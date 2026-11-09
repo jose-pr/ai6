@@ -11,9 +11,9 @@ own record in the Registry, which names its scope where a Mission's Session reco
 Mission.
 
 The Operation's watch decides the Missions that wait in `verifying`
-([Missions](missions.md#verifying)); Sources reporting to it, and the Chief of Station taking over
-the [Head of Station](stations.md#head-of-station) rounds, come in later releases. This page
-describes the Session they all run in.
+([Missions](missions.md#verifying)) and what the Operation's [Sources](#source-items) report; the
+Chief of Station taking over the [Head of Station](stations.md#head-of-station) rounds comes in a
+later release. This page describes the Session they all run in.
 
 ## Scopes and where a watch runs
 
@@ -155,3 +155,27 @@ A Cable to the Operation (its coordinating role) goes to its watch alone when th
 and reaches it as a message ([Agents](agents.md#cables)); it creates no Mission. Only the
 Operation's own 00 Agents see it when there is no watch. A watch that leaves a Mission
 `verifying` leaves it for a person, shown on the board.
+
+## Source items
+
+A Source never starts work. A tracker or CI item the Operation's Sources poll is filed as a
+[Report](reports.md) of kind `source-item`, and the Operation's watch is told by a Cable from
+`source:INSTANCE` that carries the Report's ID, the item's id, link, title and labels, and whether
+it is `new`, `changed` or `due`. The Cable is untrusted text like any other. The watch needs the
+Cable grant to receive in its Operation; without one the Report is still filed and waits open.
+
+The watch has three tools for them, beside its Mission tools:
+
+| Tool | What it does |
+| --- | --- |
+| `source_items` | The Operation's open items, the longest waiting first, as data |
+| `source_item` | One item: its title, text, labels, link and any earlier decision, as data |
+| `assess_report` | Decides it: `mission`, `duplicate` (with `of`), `no_action`, or `later` (with `wait_seconds`), each with a reason |
+
+A decision is audited, kept on the Report apart from the item's words, and put on the Operation's
+timeline. `mission` queues the item as a brief on the next pass of the Station that polls the
+Source; the brief is vetted and placed as any is, and the Mission is linked to the item. A watch at
+`desk` clearance decides nothing: a person does. An Operation with no watch Agent holds its items
+open for a person, who decides them with `ai6ctl reports assess` or `PUT /v1/reports/{id}/assessment`
+(`mission.control`). Telling the watch is a notice, not the record: if the Cable cannot be sent the
+item stays open and `source_items` lists it. See [Items are Reports](missions.md#items-are-reports).

@@ -694,6 +694,7 @@ pub struct Operation {
     pub green_ink: GreenInkPolicy,                // strict unless configured; see Green ink
     pub vetting: VettingPolicy,                   // every check on unless configured; see Vetting
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
+    pub intake: SourceIntake,                     // [operation.ID] intake: Watch (default, items are Reports the watch decides) or Direct (each item queued as a brief); Direct is a reported non-default
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
     pub overlays: Vec<String>,                    // [overlay.<name>] names its Sessions get after the loadout's; each once
@@ -2811,7 +2812,8 @@ touches a running Session.
 ## Reports (`ai6::directorates::registry::reports`, `ai6::directorates::m::reports`)
 
 One record of something observed, in a scope, never deleted before `keep_closed`. Filing creates no
-Mission, brief or placement. Assessment and closing are not implemented: a Report is filed `open`.
+Mission, brief or placement. General assessment and closing are not implemented: a Report is filed
+`open`; only a Source item's four assessments are (`source_items`, below).
 
 ```rust
 // ai6::directorates::registry::reports
@@ -2828,6 +2830,7 @@ pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, 
 #[non_exhaustive] pub struct ReportAssessment { pub verdict, pub by, pub at: f64, pub comment: Option<String> }
 #[non_exhaustive] pub struct ReportResolution { pub by, pub at: f64, pub note: Option<String> }
 #[non_exhaustive] pub struct Report { pub id, pub scope: ReportScope, pub kind, pub severity: Severity,
+    // pub item: Option<SourceItem> (the item a `source-item` Report was made from; from_item(item)),
     pub title, pub text, pub filer: ReportFiler, pub links: Vec<ReportLink>, pub sub_source: Option<String>,
     pub from: Option<f64>, pub credibility: Option<u8> /* 1..=6, unset until assessed */,
     pub classification: Option<String>, pub handling: Option<String>, pub compartments: Vec<String>,
@@ -3365,9 +3368,14 @@ prints the decision (a deny when stdin cannot be read or deciding fails) and alw
 A Source is a Guatiao kind (`ai6_source`) for a tracker or CI system. All models are
 Guatiao values; the kind grows by appending methods with defaults.
 
+With `[operation.ID] intake = "watch"` (the default) a polled item is not queued: it is a Report
+(`registry::source_items`, below) and the Operation's watch is told by Cable. `ingest_source_item`
+is then called only for an item decided `mission` (and, afterwards, to follow its changes), by the
+Station that polls the Source; `intake = "direct"` calls it for every item, as it always did.
+
 ```rust
 pub struct SourceConfig { pub settings_toml: String }  // the Operation's `sources.<provider>` table as TOML
-pub struct SourceItem {
+pub struct SourceItem {    // also serde Serialize/Deserialize: a Report keeps the item as last polled
     pub id: String,            // provider-local, stable across polls, e.g. "owner/repo#12"
     pub title: String,         // untrusted
     pub body: String,          // untrusted
@@ -5456,6 +5464,49 @@ of waiting events when the hour's `max_turns_per_hour` has room. The harness run
 Mission has that ID), resumed with the record's provider Session, or started fresh with the
 logbook when the resume is refused or fails before it answers. A Station's watch gets
 `station_report` and `file_report` on its Cable endpoint. Stopping closes every watch's harness.
+
+## Source items (`ai6::directorates::registry::source_items`)
+
+One Report of kind `ITEM_KIND` (`source-item`) per Source item, in the Operation's scope, filer
+`ReportFiler::Source { source: instance, item }`, `Report::item` the item as last polled (words
+cut to `[registry.limits.reports] text_bytes`). Its ID is `report_id(operation, instance, item)`.
+
+```rust
+pub const ITEM_KIND: &str = "source-item";
+pub fn report_id(operation: &str, instance: &str, item: &str) -> String;     // "src-" + 32 hex
+pub enum Offered { Filed(Report), Changed { report: Report, reopened: bool }, Unchanged(Report) }
+pub fn offer(store: &dyn RegistryBackend, operation, instance, item: &SourceItem, now: f64) -> io::Result<Offered>;
+    // files, or updates in place when the item differs; a closed or `later` Report reopens (audited
+    // `source.item.reopen`)
+pub enum ItemVerdict { Mission, Duplicate { of }, NoAction, Later { until } }   // word(): mission|duplicate|no_action|later
+impl ItemVerdict { pub fn parse(word, of: Option<&str>, wait_seconds: Option<u64>, now: f64) -> Result<Self, String>; }
+pub struct ItemDecision<'a> { operation, report, verdict, reason, by, at }       // new(..)
+pub fn decide_item(store, &ItemDecision) -> io::Result<Report>;
+    // only an open item; audited first (`source.item.decide`, resource `operation:ID`, target `REPORT WORD`), assessment kept
+    // on the Report, timeline kind `report`. mission/later -> Assessed; duplicate/no_action -> Closed with a resolution
+pub fn item_report(store, operation, id) -> io::Result<Report>;                  // NotFound when it is not that Operation's item
+pub fn reopen_due(store, operation, now) -> io::Result<Vec<Report>>;             // `later` items whose time came
+pub fn awaiting_queue(store, operation) -> io::Result<Vec<Report>>;              // decided `mission`, tied to no Mission yet
+pub fn is_mission(&Report) -> bool;
+```
+
+`CableRelay::notice(&CablePrincipal /* "source:INSTANCE" */, operation, agent, body, key)` sends a Cable
+from the Station itself to one Agent (the Operation's watch): no send grant, the receiver's Receive
+grant on the Operation scope and inbound mode apply; the same `key` is the same Cable. `SourceDesk`
+(Headquarters) polls, files the Reports, tells the watch (`change` `new`, `changed` or `due`, with the
+Report ID, item, link, title, labels), queues what was decided `mission` (`settle_items`: ingest, link the
+issue, tie the Report to the Mission) and reopens due `later` items. An Operation with no watch Agent gets
+no notice and its items wait open. The watch's Cable endpoint has `source_items`, `source_item(report)` and
+`assess_report(report, assessment, reason, of?, wait_seconds?)`, which decides as `watch:operation:CODENAME`
+and refuses at `desk` clearance; a person decides with `PUT /v1/reports/{id}/assessment` or `ai6ctl reports
+assess`. Check-in field `intake_non_default` lists Operations with `intake = "direct"`.
+
+Other producers file Reports beside the record each keeps (`observations`, Station-internal, one
+Report per thing, updated in place, never stopping the check): probe evidence (kind `evidence`, filer
+`probe:deliverables`, linked to the Mission), a brief held by vetting (`vetting-hold`, `probe:vetting`) or by
+the Chief of Staff's review (`review-hold`, `ReportFiler::Review`), both linked to the Mission the brief
+would be, and M's scorecard proposal (`scorecard`, `probe:scorecard`, linked `decision` to its green ink
+request). The Head of Station's findings were already Reports.
 
 An Operation's watch is its 00 Agent in charge: `Roster` refuses an `operation:` watch whose Agent's
 configured clearance is not `00`. Its `verifying` event carries the attempt (brief and final report,

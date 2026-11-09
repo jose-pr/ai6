@@ -902,8 +902,13 @@ back through the tracker the work came from. An Operation names its tracker inst
 `sources.<name>` in `operations.toml` ([settings](operations.md#sources)).
 
 ```text
-tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.post ─► comment on the item
+tracker ─► Source.poll ─► Report ─► Cable to the watch ─► its decision ─► brief (new/) ─► Mission
+                                                                         ─► Tracker.post ─► comment on the item
 ```
+
+A polled item is not work yet. It becomes a [Report](reports.md) in its Operation, and the
+Operation's [watch](watches.md#source-items) is told by Cable; **nothing becomes a Mission until
+the watch, or a person, decides it** ([Items are Reports](#items-are-reports)).
 
 - **Where it runs.** Only the Station holding the Headquarters lease polls, every
   `interval_secs` per source (default 60, at least 10: the `station` record's `[sources]
@@ -915,6 +920,8 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
 - **Brief identity.** An item's Mission ID comes from its Operation, instance and item
   ([the table above](#mission-and-session-identities)), and polling it again finds the same
   one. If the item changes while its brief is still in `new/`, the brief is updated in place.
+  With `intake = "direct"` the brief is made as soon as the item is polled; otherwise once the
+  item is decided `mission`.
   Once a Station has claimed it, polling leaves it alone, so a Mission is never duplicated. A
   finished item can only come back as the same Mission's next attempt ([reopening](#reopening-a-settled-item)).
 - **Untrusted text.** The brief's title is generated. The tracker's own title, labels and
@@ -939,6 +946,42 @@ tracker ─► Source.poll ─► brief (new/) ─► Mission ─► Tracker.pos
   that fails is retried a few times, then dropped.
 - **Limits.** Review comments on a pull request are not forwarded to the Mission's
   Session. Jira issues are not transitioned when a Mission starts, only when it ends.
+
+### Items are Reports
+
+Each polled item is one [Report](reports.md) of kind `source-item` in its Operation, filed by
+`source:INSTANCE`: the item's title and text (untrusted, like all of a Source's words), its link
+and labels, and the item as last polled. Its ID is fixed by the Operation, the instance and the
+item, so **one Report per item**, however often it changes.
+
+| Poll finds | The Report | The watch |
+| --- | --- | --- |
+| a new item | filed, open | told by Cable (`change: new`) |
+| a changed item | updated in place; open again if it was closed or deferred | told again (`change: changed`) |
+| the same item | left alone | not told |
+
+The Operation's watch Agent is told by a Cable from `source:INSTANCE` (it needs the Cable grant
+to receive in its Operation, as for any Cable to the Operation), reads the item with `source_item`
+and decides it with `assess_report`; a person decides it with `ai6ctl reports assess` or
+`PUT /v1/reports/{id}/assessment` (`mission.control` on the Operation). Each decision is audited
+(`source.item.decide`), kept on the Report with the reason apart from the item's words, and on the
+timeline:
+
+| Decision | Effect |
+| --- | --- |
+| `mission` | The item is work. The Station that polls the Source queues it as a brief on its next pass, vetted by the Chief of Staff and placed as any brief is, and links the Mission to the item and the Report. |
+| `duplicate` | Closed, naming the Mission, Report or item it repeats. No brief. |
+| `no_action` | Closed with the reason. No brief. |
+| `later` | Kept until the time given; then it is open again and the watch is told (`change: due`). |
+
+Only an open item is decided; a decided item is not decided again. When a decided-`mission` item
+changes, the queued brief follows it as it always has, and a settled one reopens as
+[described below](#reopening-a-settled-item). An Operation with **no watch Agent** holds its
+items open for a person: nothing becomes a Mission by itself.
+
+`[operation.G] intake = "direct"` keeps the older path, each item queued as a brief at once with
+no one deciding; it is a non-default, listed at start (`ai6: Operation "G": intake = "direct"
+…`) and at check-in (`intake_non_default`). The default is `watch`.
 
 ### Reopening a settled item
 

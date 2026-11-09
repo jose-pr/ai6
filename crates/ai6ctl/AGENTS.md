@@ -107,6 +107,12 @@ origin leaves the public roots alone.
   [--operation <ID>]` posts `.../verify` and prints `MISSION attempt N: DECISION by PERSON`; `--reason` is
   required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation watch at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
   repeatable.
+- `ai6ctl reports file|list|show|clearance` use the gateway's `/v1/reports` routes (see its page);
+  `ai6ctl reports assess <REPORT> <mission|duplicate|no_action|later> --reason <TEXT> [--of <WHAT>]
+  [--wait-seconds <N>]` (`mission.control` on the Operation, and reading the item) puts `.../assessment`
+  and prints `ID STATE VERDICT`. It decides an open Source item the Operation's watch has not (a
+  Operation with no watch holds its items for this); `--of` is required for a duplicate and
+  `--wait-seconds` for later; a refusal prints the gateway's words and exits `1`.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
   gateway's words and exits `1`. The Operation is looked up when not given.
