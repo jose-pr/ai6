@@ -1,0 +1,1029 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+import 'dart:convert';
+import 'dart:ffi';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
+
+import 'bindings.g.dart';
+import 'errors.dart';
+import 'library.dart' as native;
+import 'value_common.dart';
+
+export 'value_common.dart';
+
+class _Unset {
+  const _Unset();
+}
+
+const _Unset _unset = _Unset();
+
+/// What a [Ref] walks from: a root node and the allocator to build into.
+abstract class ValueOwner {
+  /// The root `guatiao_value`. Throws when it is no longer usable.
+  Pointer<guatiao_value> get rootNode;
+
+  /// The allocator new content is built through. Throws for a root this
+  /// binding only borrows.
+  Pointer<guatiao_alloc> get allocator;
+}
+
+/// A root this binding reads but does not own. See [Ref.borrowed] and
+/// [Ref.borrowedFrom].
+///
+/// With a [keep] it holds that owner and refuses access once it is closed;
+/// with a [find] it asks for the node again on every access, so a tree that
+/// changed since is read as it is now, or not at all.
+/// What a reveal through [owner] counts against: the value a borrowed view
+/// keeps, whose change or close would free the bytes being read, else
+/// [owner] itself.
+Object _revealedAgainst(ValueOwner owner) {
+  var at = owner;
+  while (at is _BorrowedRoot) {
+    final kept = at.keep;
+    if (kept == null) break;
+    at = kept;
+  }
+  return at;
+}
+
+/// What a call lending or borrowing through [owner] marks: the value a
+/// borrowed view keeps, else [owner] itself, as a reveal counts.
+Object markedOwnerOf(ValueOwner owner) => _revealedAgainst(owner);
+
+class _BorrowedRoot implements ValueOwner {
+  _BorrowedRoot(this._root, {this.keep, this.find});
+
+  final Pointer<guatiao_value> _root;
+  final ValueOwner? keep;
+  final Pointer<guatiao_value> Function()? find;
+
+  @override
+  Pointer<guatiao_value> get rootNode {
+    // Throws when the owner is closed.
+    keep?.rootNode;
+    final again = find;
+    return again == null ? _root : again();
+  }
+
+  @override
+  Pointer<guatiao_alloc> get allocator =>
+      throw StateError('a borrowed value is read-only');
+}
+
+/// Throws unless the tree [ref] belongs to may be changed through it.
+void _writable(Ref ref) {
+  if (ref.owner is _BorrowedRoot) {
+    throw StateError('a borrowed value is read-only');
+  }
+  checkUnrevealed(ref.owner);
+}
+
+// ---- reading, with no library needed ---------------------------------
+//
+// Every reader below reimplements one of `guatiao.h`'s `static inline`
+// helpers, which have no symbol in any library.
+
+// **No top-level state on this path.** In an `isolateGroupBound` callback a
+// top-level `final` here has read as 0 after an earlier callback read it as
+// 72, and a reader striding by it then returns the first entry every time.
+// So a stride comes from a struct pointer's own `+` and an offset from
+// `sizeOf` written inline. `test/read_path_test.dart` holds the line.
+
+/// `guatiao_entry.value`: the entry's key is a `guatiao_string`, and the
+/// value follows it. Pinned by the crate's own layout checks.
+Pointer<guatiao_value> _entryValue(Pointer<guatiao_entry> entry) =>
+    (entry.cast<Uint8>() + sizeOf<guatiao_string>()).cast<guatiao_value>();
+
+Uint8List _stringBytes(guatiao_string s) {
+  if (s.len == 0 || s.ptr == nullptr) return Uint8List(0);
+  return Uint8List.fromList(s.ptr.asTypedList(s.len));
+}
+
+Uint8List _bufferBytes(guatiao_buffer b) {
+  if (b.len == 0 || b.ptr == nullptr) return Uint8List(0);
+  return Uint8List.fromList(b.ptr.asTypedList(b.len));
+}
+
+bool _bytesEqual(Uint8List a, Uint8List b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+int _tagOf(Pointer<guatiao_value> node) =>
+    node == nullptr ? Tag.absent.code : node.ref.tag;
+
+Uint8List _numberText(Pointer<guatiao_value> node) {
+  if (node == nullptr || node.ref.tag != Tag.number.code) return Uint8List(0);
+  return _stringBytes(node.ref.payload.number);
+}
+
+Pointer<guatiao_value> _listAt(Pointer<guatiao_value> node, int index) {
+  if (node == nullptr || node.ref.tag != Tag.list.code) return nullptr;
+  final list = node.ref.payload.list;
+  if (list.ptr == nullptr) return nullptr;
+  var i = index;
+  if (i < 0) i += list.len;
+  if (i < 0 || i >= list.len) return nullptr;
+  return list.ptr + i;
+}
+
+Pointer<guatiao_entry> _entryAt(guatiao_map map, int index) => map.ptr + index;
+
+/// The value stored under `key`, compared over bytes: a key is UTF-8 with
+/// no terminator and may hold a NUL of its own.
+Pointer<guatiao_value> _mapFind(Pointer<guatiao_value> node, Uint8List key) {
+  if (node == nullptr || node.ref.tag != Tag.map.code) return nullptr;
+  final map = node.ref.payload.map;
+  if (map.ptr == nullptr) return nullptr;
+  for (var i = 0; i < map.len; i++) {
+    final entry = _entryAt(map, i);
+    if (_bytesEqual(_stringBytes(entry.ref.key), key)) {
+      return _entryValue(entry);
+    }
+  }
+  return nullptr;
+}
+
+Pointer<guatiao_value> _walk(Pointer<guatiao_value> root, List<Object> path) {
+  var node = root;
+  for (final part in path) {
+    node = part is int
+        ? _listAt(node, part)
+        : _mapFind(node, _utf8Bytes(part as String));
+    if (node == nullptr) return nullptr;
+  }
+  return node;
+}
+
+Uint8List _utf8Bytes(String text) => Uint8List.fromList(utf8.encode(text));
+
+Object _numberToDart(Uint8List text, Numbers numbers) =>
+    numberFromText(String.fromCharCodes(text), numbers);
+
+Object? _nodeToDart(Pointer<guatiao_value> node, Numbers numbers) {
+  if (node == nullptr) return absent;
+  switch (Tag.fromCode(node.ref.tag)) {
+    case Tag.absent:
+    case null: // a tag this binding does not know: skip, as the header asks
+      return absent;
+    case Tag.nullValue:
+      return null;
+    case Tag.boolean:
+      return node.ref.payload.b;
+    case Tag.number:
+      return _numberToDart(_stringBytes(node.ref.payload.number), numbers);
+    case Tag.string:
+      return utf8.decode(_stringBytes(node.ref.payload.text));
+    case Tag.bytes:
+      return _bufferBytes(node.ref.payload.bytes);
+    case Tag.list:
+      final list = node.ref.payload.list;
+      return <Object?>[
+        for (var i = 0; i < list.len; i++)
+          _nodeToDart(_listAt(node, i), numbers),
+      ];
+    case Tag.map:
+      final map = node.ref.payload.map;
+      final out = <String, Object?>{};
+      for (var i = 0; i < map.len; i++) {
+        final entry = _entryAt(map, i);
+        final key = utf8.decode(_stringBytes(entry.ref.key));
+        out[key] = _nodeToDart(_entryValue(entry), numbers);
+      }
+      return out;
+  }
+}
+
+/// Reads `node` as plain Dart, then frees its tree and the box it sits in.
+///
+/// For an answer a native call filled into a `calloc`-allocated root that
+/// nothing else will ever address.
+Object? takeValue(
+  Pointer<guatiao_value> node, {
+  Numbers numbers = Numbers.auto,
+}) {
+  try {
+    return _nodeToDart(node, numbers);
+  } finally {
+    native.core().bindings.guatiao_value_free(node);
+    calloc.free(node);
+  }
+}
+
+// ---- writing, through the loaded library ------------------------------
+
+/// A `guatiao_str` over a copy of `data`, valid until `arena` is released.
+Pointer<guatiao_str> strView(Arena arena, List<int> data) {
+  final out = arena<guatiao_str>();
+  if (data.isEmpty) {
+    out.ref
+      ..ptr = nullptr
+      ..len = 0;
+    return out;
+  }
+  final buffer = arena<Uint8>(data.length);
+  buffer.asTypedList(data.length).setAll(0, data);
+  out.ref
+    ..ptr = buffer
+    ..len = data.length;
+  return out;
+}
+
+/// A `guatiao_str` over a copy of `text`'s UTF-8 bytes.
+Pointer<guatiao_str> strOf(Arena arena, String text) =>
+    strView(arena, utf8.encode(text));
+
+Pointer<guatiao_bytes> _bytesView(Arena arena, List<int> data) {
+  final out = arena<guatiao_bytes>();
+  if (data.isEmpty) {
+    out.ref
+      ..ptr = nullptr
+      ..len = 0;
+    return out;
+  }
+  final buffer = arena<Uint8>(data.length);
+  buffer.asTypedList(data.length).setAll(0, data);
+  out.ref
+    ..ptr = buffer
+    ..len = data.length;
+  return out;
+}
+
+String _textForNumber(Object value) {
+  if (value is double) {
+    if (!value.isFinite) {
+      throw ArgumentError.value(value, 'value', 'is not a finite number');
+    }
+    return value.toString();
+  }
+  return value.toString();
+}
+
+/// Writes `obj` into `raw`, which must be absent- or null-tagged.
+void _writeDart(
+  Pointer<guatiao_value> raw,
+  Object? obj,
+  Pointer<guatiao_alloc> alloc,
+) {
+  final bindings = native.core().bindings;
+  if (obj == null) {
+    checkStatus(bindings.guatiao_value_null(raw));
+    return;
+  }
+  if (obj is Absent) {
+    checkStatus(bindings.guatiao_value_absent(raw));
+    return;
+  }
+  if (obj is Ref) {
+    checkStatus(bindings.guatiao_value_clone(alloc, obj.requireNode(), raw));
+    return;
+  }
+  if (obj is bool) {
+    checkStatus(bindings.guatiao_value_bool(obj, raw));
+    return;
+  }
+  if (obj is int || obj is double || obj is BigInt) {
+    final text = _textForNumber(obj);
+    using((arena) {
+      checkStatus(
+        bindings.guatiao_value_number(alloc, strOf(arena, text).ref, raw),
+      );
+    });
+    return;
+  }
+  if (obj is String) {
+    using((arena) {
+      checkStatus(
+        bindings.guatiao_value_string(alloc, strOf(arena, obj).ref, raw),
+      );
+    });
+    return;
+  }
+  if (obj is TypedData) {
+    final data = obj is Uint8List
+        ? obj
+        : Uint8List.view(obj.buffer, obj.offsetInBytes, obj.lengthInBytes);
+    using((arena) {
+      checkStatus(
+        bindings.guatiao_value_bytes(alloc, _bytesView(arena, data).ref, raw),
+      );
+    });
+    return;
+  }
+  if (obj is List) {
+    checkStatus(bindings.guatiao_value_list(alloc, raw));
+    for (final item in obj) {
+      _buildInto(
+        alloc,
+        item,
+        (tmp) => checkStatus(bindings.guatiao_list_push(alloc, raw, tmp)),
+      );
+    }
+    return;
+  }
+  if (obj is Map) {
+    checkStatus(bindings.guatiao_value_map(alloc, raw));
+    for (final entry in obj.entries) {
+      final key = entry.key;
+      if (key is! String) {
+        throw ArgumentError.value(key, 'key', 'a map key must be a String');
+      }
+      _buildInto(
+        alloc,
+        entry.value,
+        (tmp) => using(
+          (arena) => checkStatus(
+            bindings.guatiao_map_set(alloc, raw, strOf(arena, key).ref, tmp),
+          ),
+        ),
+      );
+    }
+    return;
+  }
+  throw ArgumentError.value(
+    obj,
+    'value',
+    'cannot be converted to a guatiao value',
+  );
+}
+
+/// Builds `obj` into `raw` (absent- or null-tagged) through `alloc`, as
+/// [Value.fromDart] does. For the kind runtime; not exported.
+void writeDartInto(
+  Pointer<guatiao_value> raw,
+  Object? obj,
+  Pointer<guatiao_alloc> alloc,
+) => _writeDart(raw, obj, alloc);
+
+/// `value`'s tree moved into a new `calloc`ed root the caller owns, and
+/// `value` left absent: what a slot taking a tree is handed. Throws
+/// [StateError] inside a reveal of `value`, whose bytes the slot may free.
+/// For the kind runtime; not exported.
+Pointer<guatiao_value> moveOutOf(Value value) {
+  checkUnrevealed(value);
+  final root = value.rootNode;
+  final size = sizeOf<guatiao_value>();
+  final out = calloc<guatiao_value>();
+  out
+      .cast<Uint8>()
+      .asTypedList(size)
+      .setAll(0, root.cast<Uint8>().asTypedList(size));
+  // An all-zero node is absent and owns nothing.
+  root.cast<Uint8>().asTypedList(size).fillRange(0, size, 0);
+  return out;
+}
+
+/// Builds `obj` into a scratch node and hands it to `consume`, which
+/// moves it somewhere that owns it.
+///
+/// `guatiao_map_set` and `guatiao_list_push` leave a moved node
+/// null-tagged, so the unconditional free afterwards releases only what a
+/// failure left behind.
+void _buildInto(
+  Pointer<guatiao_alloc> alloc,
+  Object? obj,
+  void Function(Pointer<guatiao_value>) consume,
+) {
+  final bindings = native.core().bindings;
+  final tmp = calloc<guatiao_value>();
+  try {
+    _writeDart(tmp, obj, alloc);
+    consume(tmp);
+  } finally {
+    bindings.guatiao_value_free(tmp);
+    calloc.free(tmp);
+  }
+}
+
+// ---- the tree ---------------------------------------------------------
+
+/// A node inside a [Value]'s tree: the owning value plus a path of keys
+/// and indices.
+///
+/// Every access walks the path again. Nothing here caches an address,
+/// because a sibling write can reallocate the array a cached one points
+/// into.
+class Ref {
+  Ref(ValueOwner owner, [List<Object> path = const []])
+    : this._(owner, List<Object>.unmodifiable(path));
+
+  Ref._(this._ownerOrNull, this.path);
+
+  /// A read-only view of a tree this binding does not own, rooted at
+  /// [root]: a value an engine hands a callback, or one a registry lends.
+  ///
+  /// The caller keeps that memory alive and unchanged for as long as the
+  /// view is read. Writing through it throws, and nothing frees it.
+  /// Reading one touches no library and no top-level state, so it is safe
+  /// inside an `isolateGroupBound` callback.
+  factory Ref.borrowed(Pointer<guatiao_value> root) => Ref(_BorrowedRoot(root));
+
+  /// A read-only view of a node inside [source]'s tree, which [find]
+  /// locates and which is found again on every access.
+  ///
+  /// It holds [source] alive and throws [StateError] once [source] is
+  /// closed, rather than reading memory that was freed. [find] answers
+  /// `nullptr` when the node is no longer there, and the view then reads as
+  /// absent. Writing through it throws.
+  factory Ref.borrowedFrom(
+    Ref source,
+    Pointer<guatiao_value> Function() find,
+  ) => Ref(_BorrowedRoot(nullptr, keep: source.owner, find: find));
+
+  final ValueOwner? _ownerOrNull;
+
+  /// The keys and indices from the owning value's root to this node.
+  final List<Object> path;
+
+  ValueOwner get owner => _ownerOrNull ?? this as ValueOwner;
+
+  /// This node, or `nullptr` when the path no longer leads anywhere.
+  Pointer<guatiao_value> node() => _walk(owner.rootNode, path);
+
+  /// This node, or a [StateError] naming the path that found nothing.
+  Pointer<guatiao_value> requireNode() {
+    final found = node();
+    if (found == nullptr) {
+      throw StateError('no value at $path');
+    }
+    return found;
+  }
+
+  /// Which arm of this node's payload is live.
+  Tag get tag => Tag.fromCode(_tagOf(node())) ?? Tag.absent;
+
+  /// Whether any part of this node's tree lives in the wiping allocator:
+  /// a secret, which [toString] does not show.
+  bool get isSensitive {
+    final found = node();
+    return found != nullptr &&
+        native.core().bindings.guatiao_value_is_sensitive(found);
+  }
+
+  /// Calls [use] with this string's, number's or bytes' bytes where they
+  /// live, in the tree's own memory, no copy made.
+  ///
+  /// The [RevealedBytes] are read only during [use], and throw after it;
+  /// until it returns, changing or freeing the tree (`close`, `wipe`, a
+  /// store, handing it to a kind's slot or lending it to one) throws
+  /// [StateError], so nothing reads memory that was freed or moved. Copying out of them (`utf8.decode`, `List.of`) makes a copy
+  /// Dart keeps and nothing can wipe. Throws [StateError] for any other
+  /// node.
+  R reveal<R>(R Function(RevealedBytes bytes) use) {
+    final found = requireNode();
+    final payload = found.ref.payload;
+    final (Pointer<Uint8> at, int len) = switch (Tag.fromCode(found.ref.tag)) {
+      Tag.string || Tag.number => (payload.text.ptr, payload.text.len),
+      Tag.bytes => (payload.bytes.ptr, payload.bytes.len),
+      _ => throw StateError('only a string, a number or bytes can be revealed'),
+    };
+    final view = len == 0 ? Uint8List(0) : at.asTypedList(len);
+    return revealBytes(_revealedAgainst(owner), view, use);
+  }
+
+  bool get isAbsent => tag == Tag.absent;
+
+  bool get isNull => tag == Tag.nullValue;
+
+  /// This node as a `bool`, or `fallback` when it is not one.
+  bool boolOr(bool fallback) {
+    final found = node();
+    if (found == nullptr || found.ref.tag != Tag.boolean.code) return fallback;
+    return found.ref.payload.b;
+  }
+
+  /// This node as an `int`, or `fallback`.
+  ///
+  /// A wrong kind, a fractional or exponent spelling, and a value outside
+  /// a signed 64-bit range all fall back; nothing is ever truncated.
+  int intOr(int fallback) {
+    final text = _numberText(node());
+    if (text.isEmpty || text.length >= 48) return fallback;
+    return intFromText(String.fromCharCodes(text)) ?? fallback;
+  }
+
+  /// This node as a `double`, or `fallback`.
+  double doubleOr(double fallback) {
+    final text = _numberText(node());
+    if (text.isEmpty || text.length >= 344) return fallback;
+    return double.tryParse(String.fromCharCodes(text)) ?? fallback;
+  }
+
+  /// This node as a `String`, or `fallback` when it is not a string.
+  String stringOr(String fallback) {
+    final found = node();
+    if (found == nullptr || found.ref.tag != Tag.string.code) return fallback;
+    return utf8.decode(_stringBytes(found.ref.payload.text));
+  }
+
+  /// This whole node as plain Dart: `null`, `bool`, a number, `String`,
+  /// `Uint8List`, `List` or `Map<String, Object?>`, with [absent] for a
+  /// node that is not there.
+  Object? toDart({Numbers numbers = Numbers.auto}) =>
+      _nodeToDart(node(), numbers);
+
+  /// This node as a map, or a [StateError] when it is not one.
+  MapRef asMap() {
+    if (tag != Tag.map) throw StateError('value is not a map');
+    return MapRef(owner, path);
+  }
+
+  /// This node as a list, or a [StateError] when it is not one.
+  ListRef asList() {
+    if (tag != Tag.list) throw StateError('value is not a list');
+    return ListRef(owner, path);
+  }
+
+  /// This node in the wire encoding: a tag byte per node, LEB128 lengths,
+  /// a number as its own text, a map in its order. [Value.fromWire] in any
+  /// language reads the same tree back.
+  Uint8List toWire() {
+    final source = requireNode();
+    final core = native.core();
+    final out = calloc<guatiao_value>();
+    try {
+      checkStatus(core.bindings.guatiao_wire_encode(core.alloc, source, out));
+      return _bufferBytes(out.ref.payload.bytes);
+    } finally {
+      core.bindings.guatiao_value_free(out);
+      calloc.free(out);
+    }
+  }
+
+  /// A deep, independent copy of this node, as its own [Value].
+  Value clone() {
+    final source = requireNode();
+    final alloc = owner is _BorrowedRoot
+        ? native.core().alloc
+        : owner.allocator;
+    return Value._build(
+      alloc,
+      (out) => native.core().bindings.guatiao_value_clone(alloc, source, out),
+    );
+  }
+
+  @override
+  String toString() => 'Ref($path)';
+}
+
+/// A [Ref] whose node is a map: the map protocol over it.
+class MapRef extends Ref {
+  MapRef(super.owner, [super.path]);
+
+  int get length {
+    final found = node();
+    if (found == nullptr || found.ref.tag != Tag.map.code) return 0;
+    return found.ref.payload.map.len;
+  }
+
+  bool get isEmpty => length == 0;
+
+  bool get isNotEmpty => length != 0;
+
+  bool containsKey(String key) => _mapFind(node(), _utf8Bytes(key)) != nullptr;
+
+  /// The value under `key`, or `null` when there is no such entry.
+  Ref? operator [](String key) {
+    if (!containsKey(key)) return null;
+    return Ref(owner, [...path, key]);
+  }
+
+  /// Stores `value` under `key`, replacing any entry in place.
+  void operator []=(String key, Object? value) {
+    _writable(this);
+    final alloc = owner.allocator;
+    final target = requireNode();
+    _buildInto(
+      alloc,
+      value,
+      (tmp) => using(
+        (arena) => checkStatus(
+          native.core().bindings.guatiao_map_set(
+            alloc,
+            target,
+            strOf(arena, key).ref,
+            tmp,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Drops the entry under `key`, if there is one.
+  void remove(String key) {
+    _writable(this);
+    final target = requireNode();
+    using(
+      (arena) => checkStatus(
+        native.core().bindings.guatiao_map_discard(
+          target,
+          strOf(arena, key).ref,
+        ),
+      ),
+    );
+  }
+
+  /// Every key, in insertion order.
+  List<String> get keys {
+    final found = requireNode();
+    if (found.ref.tag != Tag.map.code) throw StateError('value is not a map');
+    final map = found.ref.payload.map;
+    return <String>[
+      for (var i = 0; i < map.len; i++)
+        utf8.decode(_stringBytes(_entryAt(map, i).ref.key)),
+    ];
+  }
+
+  /// Every entry, as a key beside a [Ref] onto its value.
+  Iterable<MapEntry<String, Ref>> get entries sync* {
+    for (final key in keys) {
+      yield MapEntry(key, Ref(owner, [...path, key]));
+    }
+  }
+
+  void clear() {
+    _writable(this);
+    checkStatus(native.core().bindings.guatiao_map_clear(requireNode()));
+  }
+
+  /// Copies every entry of `src`, replacing collisions in place.
+  void copyFrom(Ref src) {
+    _writable(this);
+    final alloc = owner.allocator;
+    checkStatus(
+      native.core().bindings.guatiao_map_copy_from(
+        alloc,
+        requireNode(),
+        src.requireNode(),
+      ),
+    );
+  }
+
+  @override
+  String toString() => 'MapRef($path)';
+}
+
+/// A [Ref] whose node is a list: the list protocol over it.
+///
+/// `guatiao_list` exports append, discard-by-index and clear, and no
+/// native "set" or "insert" at a position. [operator []=] and [insert]
+/// are built from what exists -- clone every element, clear, push the new
+/// order back -- so they are O(n); [add] and [removeAt] go through their
+/// own export.
+class ListRef extends Ref {
+  ListRef(super.owner, [super.path]);
+
+  int get length {
+    final found = node();
+    if (found == nullptr || found.ref.tag != Tag.list.code) return 0;
+    return found.ref.payload.list.len;
+  }
+
+  bool get isEmpty => length == 0;
+
+  bool get isNotEmpty => length != 0;
+
+  int _checkedIndex(int index) {
+    final found = requireNode();
+    if (found.ref.tag != Tag.list.code) throw StateError('value is not a list');
+    final len = found.ref.payload.list.len;
+    final i = index < 0 ? index + len : index;
+    if (i < 0 || i >= len) {
+      throw RangeError.index(index, this, 'index', null, len);
+    }
+    return i;
+  }
+
+  Ref operator [](int index) => Ref(owner, [...path, _checkedIndex(index)]);
+
+  void operator []=(int index, Object? value) {
+    _writable(this);
+    final bindings = native.core().bindings;
+    final elements = _clonedElements();
+    try {
+      final i = index < 0 ? index + elements.length : index;
+      if (i < 0 || i >= elements.length) {
+        throw RangeError.index(index, this, 'index', null, elements.length);
+      }
+      final replacement = calloc<guatiao_value>();
+      try {
+        _writeDart(replacement, value, owner.allocator);
+      } catch (_) {
+        bindings.guatiao_value_free(replacement);
+        calloc.free(replacement);
+        rethrow;
+      }
+      final old = elements[i];
+      elements[i] = replacement;
+      bindings.guatiao_value_free(old);
+      calloc.free(old);
+      _rebuild(elements);
+    } finally {
+      _releaseAll(elements);
+    }
+  }
+
+  /// A [Ref] onto every element, in order.
+  List<Ref> get refs => <Ref>[
+    for (var i = 0; i < length; i++) Ref(owner, [...path, i]),
+  ];
+
+  void add(Object? value) {
+    _writable(this);
+    final alloc = owner.allocator;
+    final target = requireNode();
+    _buildInto(
+      alloc,
+      value,
+      (tmp) => checkStatus(
+        native.core().bindings.guatiao_list_push(alloc, target, tmp),
+      ),
+    );
+  }
+
+  void insert(int index, Object? value) {
+    _writable(this);
+    final elements = _clonedElements();
+    try {
+      final length = elements.length;
+      var i = index < 0 ? length + index : index;
+      if (i < 0) i = 0;
+      if (i > length) i = length;
+      final replacement = calloc<guatiao_value>();
+      try {
+        _writeDart(replacement, value, owner.allocator);
+      } catch (_) {
+        native.core().bindings.guatiao_value_free(replacement);
+        calloc.free(replacement);
+        rethrow;
+      }
+      elements.insert(i, replacement);
+      _rebuild(elements);
+    } finally {
+      _releaseAll(elements);
+    }
+  }
+
+  void removeAt(int index) {
+    _writable(this);
+    final i = _checkedIndex(index);
+    checkStatus(native.core().bindings.guatiao_list_discard(requireNode(), i));
+  }
+
+  void clear() {
+    _writable(this);
+    checkStatus(native.core().bindings.guatiao_list_clear(requireNode()));
+  }
+
+  /// Every element, deep-copied into its own scratch node. The caller
+  /// owns each one until [_rebuild] moves it back in.
+  List<Pointer<guatiao_value>> _clonedElements() {
+    final bindings = native.core().bindings;
+    final alloc = owner.allocator;
+    final found = requireNode();
+    if (found.ref.tag != Tag.list.code) throw StateError('value is not a list');
+    final out = <Pointer<guatiao_value>>[];
+    try {
+      for (var i = 0; i < found.ref.payload.list.len; i++) {
+        final tmp = calloc<guatiao_value>();
+        out.add(tmp);
+        checkStatus(
+          bindings.guatiao_value_clone(alloc, _listAt(found, i), tmp),
+        );
+      }
+    } catch (_) {
+      _releaseAll(out);
+      out.clear();
+      rethrow;
+    }
+    return out;
+  }
+
+  void _rebuild(List<Pointer<guatiao_value>> elements) {
+    final bindings = native.core().bindings;
+    final alloc = owner.allocator;
+    checkStatus(bindings.guatiao_list_clear(requireNode()));
+    for (final tmp in elements) {
+      checkStatus(bindings.guatiao_list_push(alloc, requireNode(), tmp));
+    }
+  }
+
+  /// Frees whatever the scratch nodes still own -- nothing, once
+  /// [_rebuild] has moved them and left each null-tagged.
+  void _releaseAll(List<Pointer<guatiao_value>> elements) {
+    final bindings = native.core().bindings;
+    for (final tmp in elements) {
+      bindings.guatiao_value_free(tmp);
+      calloc.free(tmp);
+    }
+  }
+
+  @override
+  String toString() => 'ListRef($path)';
+}
+
+/// Owns a root `guatiao_value` and the tree under it.
+///
+/// [close] is the release and the package requires it. A [NativeFinalizer]
+/// is attached as a backstop, so a dropped value still releases its tree;
+/// it cannot also reclaim the 40-byte root box, because a finalizer runs
+/// one native function and those two frees must be ordered.
+class Value extends Ref implements ValueOwner, Finalizable {
+  Value._(this._raw, this._allocator)
+    : _finalizer = NativeFinalizer(native.core().valueFreeFinalizer),
+      super._(null, const []) {
+    _finalizer.attach(this, _raw.cast<Void>(), detach: this);
+  }
+
+  /// `Value(obj)` converts as [Value.fromDart] does; `Value()` is absent.
+  factory Value([Object? obj = _unset]) {
+    if (obj is _Unset) return Value.absent();
+    return Value.fromDart(obj);
+  }
+
+  /// A secret: [obj] converted as [Value.fromDart] does, built in the
+  /// wiping allocator, so every block it frees, as it grows and when it is
+  /// closed, is overwritten with zeros first. [obj] itself is Dart's.
+  factory Value.sensitive(Object? obj) =>
+      Value.fromDart(obj, alloc: native.core().wipingAlloc);
+
+  /// Converts plain Dart into a new value.
+  ///
+  /// `null` becomes null, [absent] becomes absent, `bool` a boolean,
+  /// `int`/`double`/`BigInt` a number (a non-finite `double` is refused),
+  /// `String` a string, a `TypedData` bytes, a `List` a list, a `Map` with
+  /// `String` keys a map, and a [Ref] or [Value] a deep copy.
+  factory Value.fromDart(Object? obj, {Pointer<guatiao_alloc>? alloc}) {
+    final allocator = alloc ?? native.core().alloc;
+    final raw = calloc<guatiao_value>();
+    try {
+      _writeDart(raw, obj, allocator);
+    } catch (_) {
+      native.core().bindings.guatiao_value_free(raw);
+      calloc.free(raw);
+      rethrow;
+    }
+    return Value._(raw, allocator);
+  }
+
+  /// Takes over a root the caller allocated with `calloc` and a native
+  /// call filled in.
+  factory Value.adopt(
+    Pointer<guatiao_value> raw, {
+    Pointer<guatiao_alloc>? alloc,
+  }) => Value._(raw, alloc ?? native.core().alloc);
+
+  /// The value the wire encoding in [data] holds.
+  ///
+  /// Throws [BadValue] for bytes that are not exactly one value: truncated,
+  /// an unknown tag, a length not in its shortest form, text that is not
+  /// UTF-8, a number outside the grammar, a repeated key, anything after
+  /// the value.
+  factory Value.fromWire(List<int> data, {Pointer<guatiao_alloc>? alloc}) {
+    final allocator = alloc ?? native.core().alloc;
+    return using((arena) {
+      final view = _bytesView(arena, data).ref;
+      return _build(
+        allocator,
+        (out) =>
+            native.core().bindings.guatiao_wire_decode(allocator, view, out),
+      );
+    });
+  }
+
+  factory Value.nullValue() => _build(
+    native.core().alloc,
+    (out) => native.core().bindings.guatiao_value_null(out),
+  );
+
+  factory Value.absent() => _build(
+    native.core().alloc,
+    (out) => native.core().bindings.guatiao_value_absent(out),
+  );
+
+  factory Value.boolean(bool value) => _build(
+    native.core().alloc,
+    (out) => native.core().bindings.guatiao_value_bool(value, out),
+  );
+
+  factory Value.map() {
+    final alloc = native.core().alloc;
+    return _build(
+      alloc,
+      (out) => native.core().bindings.guatiao_value_map(alloc, out),
+    );
+  }
+
+  factory Value.list() {
+    final alloc = native.core().alloc;
+    return _build(
+      alloc,
+      (out) => native.core().bindings.guatiao_value_list(alloc, out),
+    );
+  }
+
+  factory Value.string(String text) {
+    final alloc = native.core().alloc;
+    return using((arena) {
+      final view = strOf(arena, text).ref;
+      return _build(
+        alloc,
+        (out) => native.core().bindings.guatiao_value_string(alloc, view, out),
+      );
+    });
+  }
+
+  /// A number from its exact text, verbatim: no `double` detour.
+  factory Value.number(String text) {
+    final alloc = native.core().alloc;
+    return using((arena) {
+      final view = strOf(arena, text).ref;
+      return _build(
+        alloc,
+        (out) => native.core().bindings.guatiao_value_number(alloc, view, out),
+      );
+    });
+  }
+
+  factory Value.bytes(List<int> data) {
+    final alloc = native.core().alloc;
+    return using((arena) {
+      final view = _bytesView(arena, data).ref;
+      return _build(
+        alloc,
+        (out) => native.core().bindings.guatiao_value_bytes(alloc, view, out),
+      );
+    });
+  }
+
+  static Value _build(
+    Pointer<guatiao_alloc> allocator,
+    int Function(Pointer<guatiao_value>) call,
+  ) {
+    final raw = calloc<guatiao_value>();
+    try {
+      checkStatus(call(raw));
+    } catch (_) {
+      native.core().bindings.guatiao_value_free(raw);
+      calloc.free(raw);
+      rethrow;
+    }
+    return Value._(raw, allocator);
+  }
+
+  final Pointer<guatiao_value> _raw;
+  final Pointer<guatiao_alloc> _allocator;
+
+  /// Held per value because `detach` is per finalizer, and a value may
+  /// outlive the library handle it was built through.
+  final NativeFinalizer _finalizer;
+  bool _closed = false;
+
+  /// The root node, for a native call that takes one. Invalid after
+  /// [close].
+  Pointer<guatiao_value> get pointer => rootNode;
+
+  @override
+  Pointer<guatiao_value> get rootNode {
+    if (_closed) throw StateError('this value is closed');
+    return _raw;
+  }
+
+  @override
+  Pointer<guatiao_alloc> get allocator => _allocator;
+
+  bool get isClosed => _closed;
+
+  /// Overwrites with zeros every byte this tree holds, in whatever
+  /// allocator each part lives, then frees it: this value is null
+  /// afterwards. What a secret built outside the wiping allocator needs
+  /// before it goes; one built there is wiped by [close] as well.
+  void wipe() {
+    checkUnrevealed(this);
+    checkStatus(native.core().bindings.guatiao_value_wipe(rootNode));
+  }
+
+  /// Frees the tree and the root box. Idempotent.
+  void close() {
+    if (_closed) return;
+    checkUnrevealed(this);
+    _closed = true;
+    _finalizer.detach(this);
+    native.core().bindings.guatiao_value_free(_raw);
+    calloc.free(_raw);
+  }
+
+  @override
+  String toString() => _closed
+      ? 'Value(closed)'
+      : isSensitive
+      ? 'Value([sensitive])'
+      : 'Value(${toDart()})';
+}

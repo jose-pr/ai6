@@ -1,0 +1,666 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The judgement: whether a form fits its schema, how its fields are
+//! grouped and ordered, and whether one is showing.
+//!
+//! Code rather than data, for the reason the schema's validation is code:
+//! two renderers that each worked these rules out for themselves would
+//! disagree about the same form, and a person would see two screens for
+//! one configuration.
+//!
+//! # Errors never quote a value
+//!
+//! [`FormError`] names paths, section ids and what would have been
+//! accepted, and never the value a condition compares with. That value is
+//! something the referenced field could hold, and a field can be a secret.
+
+#![forbid(unsafe_code)]
+
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::fmt;
+use guatiao::value::convert::TryAsRef;
+
+use crate::flat;
+use guatiao::schema::ValidationError;
+use guatiao::schema::read::{FieldRef, Kind, SchemaRef};
+use guatiao::schema::validate::{validate_text, validate_value};
+use guatiao::schema::vocab as schema_vocab;
+use guatiao::value::error::MAX_DEPTH;
+
+use guatiao::value::types::{List, Map, Tag, Value};
+
+use crate::declare::FormField;
+use crate::read::{FormRef, HintsRef, SectionRef};
+use crate::vocab;
+
+/// Why a form does not fit its schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FormError {
+    /// Something in the form is not the shape the vocabulary gives it.
+    Malformed {
+        /// Where, as a path into the form: `sections`, `sections[1].id`,
+        /// `fields["port"].widget`. Always names a place inside the form:
+        /// a value that is not a map at all is not a form, which
+        /// [`FormRef::new`](crate::FormRef::new) answers with `None`
+        /// before any of this runs.
+        at: String,
+        /// What belongs there, phrased for a person.
+        expected: &'static str,
+    },
+    /// A path names no field the schema declares.
+    UnknownField {
+        /// Where the path was written.
+        at: String,
+        /// The path itself.
+        path: String,
+    },
+    /// Two sections share an id, so a field's `x-section` could not say
+    /// which one it meant.
+    DuplicateSection {
+        /// The id declared twice.
+        id: String,
+    },
+    /// A condition compares a field with a value that field would never
+    /// hold, so the field it guards could never be shown.
+    ConditionRefused {
+        /// Where the condition was written.
+        at: String,
+        /// The field it reads.
+        field: String,
+        /// What that field would accept.
+        expected: String,
+    },
+    /// A field is shown only when a chain of conditions leads back to
+    /// itself, so it could never be shown.
+    CyclicCondition {
+        /// A field on the cycle.
+        path: String,
+    },
+}
+
+impl fmt::Display for FormError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FormError::Malformed { at, expected } => write!(f, "{at} should be {expected}"),
+            FormError::UnknownField { at, path } => {
+                write!(f, "{at} names '{path}', which the schema does not declare")
+            }
+            FormError::DuplicateSection { id } if id.is_empty() => {
+                write!(f, "the default section is declared twice")
+            }
+            FormError::DuplicateSection { id } => write!(f, "section '{id}' is declared twice"),
+            FormError::ConditionRefused {
+                at,
+                field,
+                expected,
+            } => write!(
+                f,
+                "{at} waits for '{field}' to hold a value it never could: it accepts {expected}"
+            ),
+            FormError::CyclicCondition { path } => write!(
+                f,
+                "'{path}' is shown only when a chain of conditions leads back to itself"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for FormError {}
+
+/// A field's own form: what it may be given to, and what it must be.
+///
+/// The member schema is the thing the sub-form's paths are checked
+/// against, which is also what makes "a condition inside a sub-form may
+/// only name that form's own fields" true by construction rather than by
+/// a rule written twice: the condition resolves against the member, so
+/// anything outside it is simply not a field.
+fn check_sub_form(
+    schema: SchemaRef<'_>,
+    path: &str,
+    nested: &Value,
+    at: &str,
+    depth: u32,
+) -> Result<(), FormError> {
+    let here = format!("{at}.{}", vocab::FORM);
+    let Some(field) = flat::resolve(schema, path) else {
+        // The path was resolved before this ran; keeping the branch
+        // rather than unwrapping is what stops a later reordering from
+        // turning it into a panic.
+        return Err(FormError::UnknownField {
+            at: here,
+            path: path.to_string(),
+        });
+    };
+    let Some(members) = member_schema(field) else {
+        return Err(malformed(
+            here,
+            "a form on a field whose kind is an object, a list of objects, \
+             or a map of them -- there is nothing else for its paths to name",
+        ));
+    };
+    let Some(members) = SchemaRef::new(members) else {
+        return Err(malformed(here, "a member schema that is a map"));
+    };
+    let Some(nested) = FormRef::new(nested) else {
+        return Err(malformed(here, "a form"));
+    };
+    check_at(members, nested, depth + 1).map_err(|e| under(e, &here))
+}
+
+/// The schema of what a sub-form would show: an object's own, a list's
+/// element, or an open map's value.
+///
+/// `None` for everything else, including a **variant**: its members
+/// differ by arm, so there is no one schema a sub-form's paths could be
+/// checked against. A variant is shown by its arms, which the form
+/// already reaches with `owner.member` paths.
+pub(crate) fn member_schema<'a>(field: FieldRef<'a>) -> Option<&'a Value> {
+    match field.kind() {
+        Kind::Map(object) => Some(object),
+        Kind::List { items, .. } => is_map(items).then_some(items),
+        Kind::MapOf(_) => TryAsRef::<Map>::try_as_ref(field.as_value())
+            .and_then(|m| m.get(schema_vocab::ADDITIONAL_PROPERTIES))
+            .filter(|v| is_map(v)),
+        _ => None,
+    }
+}
+
+/// Re-roots a refusal raised inside a sub-form, so its `at` says which
+/// field's form it came from.
+fn under(error: FormError, prefix: &str) -> FormError {
+    match error {
+        FormError::Malformed { at, expected } => FormError::Malformed {
+            at: format!("{prefix}.{at}"),
+            expected,
+        },
+        FormError::UnknownField { at, path } => FormError::UnknownField {
+            at: format!("{prefix}.{at}"),
+            path,
+        },
+        FormError::ConditionRefused {
+            at,
+            field,
+            expected,
+        } => FormError::ConditionRefused {
+            at: format!("{prefix}.{at}"),
+            field,
+            expected,
+        },
+        // These two name a path or an id inside the sub-form rather than
+        // a place in the document, and prefixing one would say it is a
+        // path in the outer form, which it is not.
+        other => other,
+    }
+}
+
+fn malformed(at: impl Into<String>, expected: &'static str) -> FormError {
+    FormError::Malformed {
+        at: at.into(),
+        expected,
+    }
+}
+
+/// Whether a unit can describe what this kind holds: a number, or an
+/// untagged union whose one numeric arm the unit then belongs to (a bound
+/// that may be lifted, `64` or `"none"`). With two numeric arms a renderer
+/// could not tell which one the unit names.
+fn counted_in_a_unit(kind: Kind<'_>) -> bool {
+    let numeric = |k: &Kind<'_>| matches!(k, Kind::Int { .. } | Kind::Float { .. });
+    match kind {
+        Kind::Union(_) => kind.alternatives().filter(numeric).count() == 1,
+        other => numeric(&other),
+    }
+}
+
+fn is_map(v: &Value) -> bool {
+    v.tag() == Ok(Tag::GUATIAO_MAP)
+}
+
+/// A key that must be text when it is there at all.
+fn text_if_present(v: &Value, key: &str, at: &str) -> Result<(), FormError> {
+    match TryAsRef::<Map>::try_as_ref(v).and_then(|m| m.get(key)) {
+        Some(x) if TryAsRef::<str>::try_as_ref(x).is_none() => {
+            Err(malformed(format!("{at}.{key}"), "text"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Where a field's hints are, written so a dotted path stays one step.
+fn field_at(path: &str) -> String {
+    format!("{}[\"{path}\"]", vocab::FIELDS)
+}
+
+/// Whether `form` fits `schema`: every path names a declared field, every
+/// section id is declared once, every hint has its shape, every condition
+/// could be met, and no field waits on itself.
+///
+/// A section a schema field names but the form does not declare is **not**
+/// an error: that field joins the default section, which is what the
+/// schema's own `x-section` promises.
+pub fn check(schema: SchemaRef<'_>, form: FormRef<'_>) -> Result<(), FormError> {
+    check_at(schema, form, 0)
+}
+
+/// [`check`], carrying how deep it is.
+///
+/// A field may carry a form of its own, and that form's fields may too,
+/// so this walks two trees a caller supplied -- bounded like every other
+/// walk that does.
+fn check_at(schema: SchemaRef<'_>, form: FormRef<'_>, depth: u32) -> Result<(), FormError> {
+    if depth >= MAX_DEPTH {
+        return Err(malformed(
+            vocab::FIELDS,
+            "a form nested no deeper than the bound",
+        ));
+    }
+    let doc = form.as_value();
+
+    if let Some(sections) = TryAsRef::<Map>::try_as_ref(doc).and_then(|m| m.get(vocab::SECTIONS)) {
+        let items = TryAsRef::<List>::try_as_ref(sections)
+            .map(|list| &list[..])
+            .ok_or_else(|| malformed(vocab::SECTIONS, "a list"))?;
+        let mut seen: Vec<&str> = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            let at = format!("{}[{i}]", vocab::SECTIONS);
+            if !is_map(item) {
+                return Err(malformed(at, "a map"));
+            }
+            let Some(id) = TryAsRef::<Map>::try_as_ref(item)
+                .and_then(|m| m.get(vocab::ID))
+                .and_then(TryAsRef::<str>::try_as_ref)
+            else {
+                return Err(malformed(format!("{at}.{}", vocab::ID), "text"));
+            };
+            text_if_present(item, vocab::TITLE, &at)?;
+            text_if_present(item, vocab::DESCRIPTION, &at)?;
+            if seen.contains(&id) {
+                return Err(FormError::DuplicateSection { id: id.to_string() });
+            }
+            seen.push(id);
+        }
+    }
+
+    if let Some(fields) = TryAsRef::<Map>::try_as_ref(doc).and_then(|m| m.get(vocab::FIELDS)) {
+        let entries = TryAsRef::<Map>::try_as_ref(fields)
+            .map(Map::entries)
+            .ok_or_else(|| malformed(vocab::FIELDS, "a map"))?;
+        for entry in entries {
+            let path = entry.key();
+            if flat::resolve(schema, path).is_none() {
+                return Err(FormError::UnknownField {
+                    at: vocab::FIELDS.to_string(),
+                    path: path.to_string(),
+                });
+            }
+            let at = field_at(path);
+            let hints = entry.value();
+            if !is_map(hints) {
+                return Err(malformed(at, "a map"));
+            }
+            text_if_present(hints, vocab::WIDGET, &at)?;
+            text_if_present(hints, vocab::PLACEHOLDER, &at)?;
+            text_if_present(hints, vocab::UNIT, &at)?;
+            // A unit says what a NUMBER is counted in; on text or a list
+            // it would be shown beside something it cannot describe.
+            if TryAsRef::<Map>::try_as_ref(hints).is_some_and(|m| m.contains_key(vocab::UNIT))
+                && !flat::resolve(schema, path).is_some_and(|f| counted_in_a_unit(f.kind()))
+            {
+                return Err(malformed(
+                    format!("{at}.{}", vocab::UNIT),
+                    "a unit on a number field -- an integer, a real number, or a union with \
+                     exactly one numeric arm",
+                ));
+            }
+            if let Some(condition) =
+                TryAsRef::<Map>::try_as_ref(hints).and_then(|m| m.get(vocab::VISIBLE_WHEN))
+            {
+                check_condition(schema, condition, format!("{at}.{}", vocab::VISIBLE_WHEN))?;
+            }
+            if let Some(nested) =
+                TryAsRef::<Map>::try_as_ref(hints).and_then(|m| m.get(vocab::FORM))
+            {
+                check_sub_form(schema, path, nested, &at, depth)?;
+            }
+        }
+        // After every condition is known to be well formed, so a cycle is
+        // reported as a cycle rather than as the malformed link in it.
+        if let Some(on_cycle) = find_cycle(schema, form) {
+            return Err(FormError::CyclicCondition { path: on_cycle });
+        }
+    }
+    Ok(())
+}
+
+fn check_condition(schema: SchemaRef<'_>, condition: &Value, at: String) -> Result<(), FormError> {
+    let Some(m) = TryAsRef::<Map>::try_as_ref(condition) else {
+        return Err(malformed(at, "a map holding `field` and `equals` or `in`"));
+    };
+    let Some(field) = m.get(vocab::FIELD).and_then(TryAsRef::<str>::try_as_ref) else {
+        return Err(malformed(format!("{at}.{}", vocab::FIELD), "text"));
+    };
+    // EXACTLY ONE spelling. Both would be two answers to "when is this
+    // shown", and a renderer would have to pick one.
+    let (values, here) = match (m.get(vocab::EQUALS), m.get(vocab::IN)) {
+        (Some(equals), None) => (core::slice::from_ref(equals), vocab::EQUALS),
+        (None, Some(any)) => match TryAsRef::<List>::try_as_ref(any) {
+            Some(list) if !list.is_empty() => (&list[..], vocab::IN),
+            Some(_) => {
+                return Err(malformed(
+                    format!("{at}.{}", vocab::IN),
+                    "at least one value -- an empty list is a condition nothing meets",
+                ));
+            }
+            None => return Err(malformed(format!("{at}.{}", vocab::IN), "a list")),
+        },
+        (None, None) => {
+            return Err(malformed(
+                format!("{at}.{}", vocab::EQUALS),
+                "a value to compare with, or a list under `in`",
+            ));
+        }
+        (Some(_), Some(_)) => {
+            return Err(malformed(at, "`equals` or `in`, not both"));
+        }
+    };
+    let Some(referenced) = flat::resolve(schema, field) else {
+        return Err(FormError::UnknownField {
+            at,
+            path: field.to_string(),
+        });
+    };
+
+    // Every value is held to the same rule: something the field could
+    // hold. One impossible value in an `in` list is still a mistake -- it
+    // reads as a case the form handles when it handles nothing.
+    for value in values {
+        // A variant named by its own key is compared with its
+        // DISCRIMINANT, so what must be acceptable is the text form, which
+        // for a variant is exactly the name of an arm.
+        let plain = schema.find(field).is_some() || flat::split(field).is_none();
+        let accepted = match (referenced.kind(), plain) {
+            (Kind::Variant { .. }, true) => match TryAsRef::<str>::try_as_ref(value) {
+                Some(arm) => validate_text(referenced, arm),
+                None => {
+                    return Err(FormError::ConditionRefused {
+                        at: format!("{at}.{here}"),
+                        field: field.to_string(),
+                        expected: "the name of one of its arms".to_string(),
+                    });
+                }
+            },
+            _ => validate_value(referenced, value),
+        };
+        accepted.map_err(|e| FormError::ConditionRefused {
+            at: format!("{at}.{here}"),
+            field: field.to_string(),
+            expected: expected_of(e),
+        })?;
+    }
+    Ok(())
+}
+
+/// What a validation error says would have been accepted.
+fn expected_of(e: ValidationError) -> String {
+    match e {
+        ValidationError::BadValue { expected, .. } => expected,
+        other => other.to_string(),
+    }
+}
+
+/// A field on a cycle among the form's conditions, if there is one: the
+/// first, in the order the form lists its fields, whose chain leads into
+/// one.
+///
+/// Each field has at most one condition, so a chain has one successor per
+/// step and walking it either ends or repeats; the field that repeats is
+/// the one on the cycle. A field whose chain was already walked and ended
+/// is not walked again, so the whole search visits each field once.
+fn find_cycle(schema: SchemaRef<'_>, form: FormRef<'_>) -> Option<String> {
+    let mut next: BTreeMap<&str, &str> = BTreeMap::new();
+    for (key, hints) in form.fields() {
+        if let Some(condition) = hints.visible_when() {
+            // The first declaration wins, as `FormRef::hints` reads it.
+            next.entry(key)
+                .or_insert(form_key(schema, condition.field()));
+        }
+    }
+    let mut cleared: BTreeSet<&str> = BTreeSet::new();
+    for (start, _) in form.fields() {
+        let mut trail: Vec<&str> = Vec::new();
+        let mut on_trail: BTreeSet<&str> = BTreeSet::new();
+        let mut at = start;
+        loop {
+            if cleared.contains(at) {
+                break;
+            }
+            if !on_trail.insert(at) {
+                return Some(at.to_string());
+            }
+            trail.push(at);
+            match next.get(at) {
+                Some(successor) => at = successor,
+                None => break,
+            }
+        }
+        cleared.extend(trail);
+    }
+    None
+}
+
+/// A group of fields a person sees together.
+#[derive(Clone, Debug)]
+pub struct Group<'a> {
+    /// The section declared for this group, or `None` for the default
+    /// group when the form does not declare it.
+    pub section: Option<SectionRef<'a>>,
+    /// The fields, in the order they are shown.
+    pub fields: Vec<Placed<'a>>,
+}
+
+/// One field in a group, with what it is shown with.
+#[derive(Clone, Copy, Debug)]
+pub struct Placed<'a> {
+    /// The field, as the schema declares it.
+    pub field: FieldRef<'a>,
+    /// Its hints from the form. Empty when the form says nothing about it.
+    pub hints: HintsRef<'a>,
+}
+
+/// The schema's fields grouped into sections and put in order.
+///
+/// - **Groups**: the sections the form declares, in its order. The default
+///   section `""` comes first unless the form declares it somewhere else.
+///   A field whose `x-section` the form does not declare joins the default
+///   group. A group with no fields is left out.
+/// - **Within a group**: fields with an explicit `x-order` first, lowest
+///   first; then the rest in the order the schema declares them.
+///
+/// Top-level fields only. The fields an arm of a variant adds are shown
+/// with that variant, and their hints are [`FormRef::hints`] under
+/// `owner.member`.
+///
+/// Visibility is not applied, because it depends on values this does not
+/// have; [`is_visible`] answers it per field.
+pub fn layout<'a>(schema: SchemaRef<'a>, form: FormRef<'a>) -> Vec<Group<'a>> {
+    let mut order: Vec<(&'a str, Option<SectionRef<'a>>)> = Vec::new();
+    if form.section(vocab::DEFAULT_SECTION).is_none() {
+        order.push((vocab::DEFAULT_SECTION, None));
+    }
+    for section in form.sections() {
+        // The first declaration wins; `check` refuses the second.
+        if !order.iter().any(|(id, _)| *id == section.id()) {
+            order.push((section.id(), Some(section)));
+        }
+    }
+    let default_group = order.iter().position(|(id, _)| id.is_empty()).unwrap_or(0);
+
+    let mut groups: Vec<Group<'a>> = order
+        .iter()
+        .map(|(_, section)| Group {
+            section: *section,
+            fields: Vec::new(),
+        })
+        .collect();
+    for field in schema.fields() {
+        let group = order
+            .iter()
+            .position(|(id, _)| *id == field.section())
+            .unwrap_or(default_group);
+        groups[group].fields.push(Placed {
+            field,
+            hints: form.hints(field.key()),
+        });
+    }
+    for group in &mut groups {
+        // Stable, so fields with no order keep the schema's own order.
+        group.fields.sort_by_key(|placed| order_key(placed.field));
+    }
+    groups.retain(|group| !group.fields.is_empty());
+    groups
+}
+
+/// Explicit orders first and ascending, then everything without one.
+fn order_key(field: FieldRef<'_>) -> (bool, i64) {
+    match TryAsRef::<Map>::try_as_ref(field.as_value()).and_then(|m| m.get(vocab::X_ORDER)) {
+        Some(_) => (false, field.order()),
+        None => (true, 0),
+    }
+}
+
+/// Whether the field at `path` is shown, given the `values` a person has
+/// entered so far.
+///
+/// - No condition: shown.
+/// - A condition: shown when the field it reads is **itself shown** and
+///   holds `equals`. A condition on a hidden field is not met, so hiding a
+///   field hides everything that waits on it.
+/// - A field that holds nothing yet reads as its schema `default`, and one
+///   with no default does not meet the condition.
+/// - A variant named by its own key reads as its discriminant.
+/// - A top-level field named by its store spelling (`[a.b]`, `["a.b"]`) is
+///   that field, as [`check`] reads it.
+/// - A cycle is not shown; [`check`] reports it.
+///
+/// **A path the schema does not declare is an error**, the same
+/// [`FormError::UnknownField`] [`check`] gives it — including a path a
+/// condition reads. Answering `true` would show a field that does not
+/// exist, and answering `false` would hide one for a reason the caller
+/// cannot tell from a condition being unmet.
+///
+/// `values` is a map shaped the way the schema's values are: a variant's
+/// value is a map carrying its tag, an arm's field sits inside it.
+pub fn is_visible(
+    schema: SchemaRef<'_>,
+    form: FormRef<'_>,
+    path: &str,
+    values: &Value,
+) -> Result<bool, FormError> {
+    // Each field has at most one condition, so the fields it waits on are
+    // a chain. Walked in a loop rather than by recursion, because a chain
+    // as long as a form's field count is a stack a caller's form controls.
+    let mut conditions = Vec::new();
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut at = form_key(schema, path);
+    let end = loop {
+        if flat::resolve(schema, at).is_none() {
+            return Err(FormError::UnknownField {
+                at: vocab::FIELDS.to_string(),
+                path: at.to_string(),
+            });
+        }
+        if !seen.insert(at) {
+            // Back at a field already on the chain: a cycle is not shown.
+            break false;
+        }
+        let Some(condition) = form.hints(at).visible_when() else {
+            break true;
+        };
+        at = form_key(schema, condition.field());
+        conditions.push(condition);
+    };
+    Ok(end
+        && conditions.iter().all(|condition| {
+            current(schema, values, condition.field())
+                .is_some_and(|held| condition.values().iter().any(|v| held == v))
+        }))
+}
+
+/// What the field at `path` holds now: its value, else its default, and
+/// for a variant named by its own key, the discriminant of either.
+fn current<'a>(schema: SchemaRef<'a>, values: &'a Value, path: &str) -> Option<&'a Value> {
+    // A key that names a field outright is that field, whatever it holds,
+    // and so is its store spelling (`[a.b]`).
+    if let Some(field) = top_level(schema, path) {
+        let held = TryAsRef::<Map>::try_as_ref(values)
+            .and_then(|m| m.get(field.key()))
+            .or_else(|| field.default())?;
+        return match field.kind() {
+            Kind::Variant { tag, .. } if is_map(held) => {
+                TryAsRef::<Map>::try_as_ref(held).and_then(|m| m.get(tag))
+            }
+            _ => Some(held),
+        };
+    }
+    let (owner, member) = flat::split(path)?;
+    let owner = form_key(schema, owner);
+    TryAsRef::<Map>::try_as_ref(values)
+        .and_then(|m| m.get(owner))
+        .filter(|_| declares(schema, values, owner, &member))
+        .and_then(|o| TryAsRef::<Map>::try_as_ref(o).and_then(|m| m.get(&member)))
+        .or_else(|| flat::resolve(schema, path).and_then(|f| f.default()))
+}
+
+/// The top-level field `path` names: by its key, or by a path of one
+/// segment spelling it, as a flat store does (`[a.b]`, `["a.b"]`).
+fn top_level<'a>(schema: SchemaRef<'a>, path: &str) -> Option<FieldRef<'a>> {
+    schema.find(path).or_else(|| {
+        let parsed = crate::path::parse(path).ok()?;
+        let mut segments = parsed.segments();
+        let only = segments.next()?;
+        if segments.next().is_some() {
+            return None;
+        }
+        let name = match only {
+            crate::path::Segment::Field(name) => alloc::borrow::Cow::Borrowed(name),
+            crate::path::Segment::Key(key) => key,
+            crate::path::Segment::Index(at) => alloc::borrow::Cow::Owned(at.to_string()),
+        };
+        schema.find(&name)
+    })
+}
+
+/// `path` as a form files its hints: a top-level field by its key however
+/// `path` spells it, anything else as written.
+fn form_key<'a>(schema: SchemaRef<'a>, path: &'a str) -> &'a str {
+    top_level(schema, path).map_or(path, |field| field.key())
+}
+
+/// Whether the arm `values` currently picks for `owner` declares `member`.
+///
+/// A value left behind by another arm is not what the field holds: an
+/// arm's field exists only while that arm is chosen, so reading one the
+/// current arm never declared would answer a condition with a stale
+/// value from a screen the person has moved off.
+fn declares(schema: SchemaRef<'_>, values: &Value, owner: &str, member: &str) -> bool {
+    let Some(field) = schema.find(owner) else {
+        return false;
+    };
+    let Kind::Variant { tag, .. } = field.kind() else {
+        return false;
+    };
+    let Some(picked) = TryAsRef::<Map>::try_as_ref(values)
+        .and_then(|m| m.get(owner))
+        .and_then(|v| TryAsRef::<Map>::try_as_ref(v).and_then(|m| m.get(tag)))
+        .and_then(TryAsRef::<str>::try_as_ref)
+    else {
+        return false;
+    };
+    field
+        .kind()
+        .arms()
+        .any(|arm| arm.value() == picked && arm.fields().any(|f| f.key() == member))
+}

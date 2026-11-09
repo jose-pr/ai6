@@ -1,0 +1,32 @@
+# coqui-access/providers/access/password/plugin at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+[package]
+name = "coqui-access-password-plugin"
+description = "coqui-access-password as a library a host loads"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[dependencies.coqui-access-password]
+path = ".."
+[dependencies.coqui-access-kit]
+path = "crates/coqui-access-kit"
+features = ["file"]
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+[dependencies.serde_json]
+version = "1"
+[dependencies.toml]
+version = "1"
+[dev-dependencies]
+[dev-dependencies.tempfile]
+version = "3"

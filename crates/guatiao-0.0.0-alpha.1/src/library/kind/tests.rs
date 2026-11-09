@@ -1,0 +1,600 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The kind runtime end to end, through one hand-written kind.
+
+use super::*;
+use core::mem::offset_of;
+
+// A kind written by hand with only these helpers: what the macro
+// will emit, spelled out once.
+
+trait Greeter: Send + Sync {
+    fn greet(&self, name: &str) -> Result<String, ProviderError>;
+    /// An optional slot with a default body: a provider may leave it
+    /// null, and the proxy then runs the default.
+    fn shout(&self) -> i64 {
+        -1
+    }
+}
+
+#[repr(C)]
+struct GreeterVtable {
+    header: KindHeader,
+    greet: Option<unsafe extern "C" fn(*mut c_void, Str, *mut Text, *mut ProviderError) -> Status>,
+    shout: Option<unsafe extern "C" fn(*mut c_void, *mut i64) -> Status>,
+}
+
+const GREET_END: usize = offset_of!(GreeterVtable, greet) + size_of::<usize>();
+const HASH: u32 = fnv1a("greet(&self, name: &str) -> Result<String, ProviderError>");
+
+unsafe extern "C" fn greet_shim<T: Greeter>(
+    ctx: *mut c_void,
+    name: Str,
+    out: *mut Text,
+    err: *mut ProviderError,
+) -> Status {
+    catch(|| {
+        // SAFETY: the table was built for `T` and the descriptor's
+        // `ctx` is a `&T`.
+        let Some(this) = (unsafe { ctx_ref::<T>(ctx) }) else {
+            return Status::GUATIAO_ERR_NULL;
+        };
+        // SAFETY: the proxy passes a readable view.
+        let name = match core::str::from_utf8(name.into()) {
+            Ok(n) => n,
+            Err(e) => return e.into(),
+        };
+        match this.greet(name) {
+            // SAFETY: the proxy passes writable out-pointers.
+            Ok(text) => unsafe { write_out(out, Text::new(&text)) },
+            // SAFETY: as above.
+            Err(e) => unsafe { write_err(err, e) },
+        }
+    })
+}
+
+unsafe extern "C" fn shout_shim<T: Greeter>(ctx: *mut c_void, out: *mut i64) -> Status {
+    catch(|| {
+        // SAFETY: as in `greet_shim`.
+        let Some(this) = (unsafe { ctx_ref::<T>(ctx) }) else {
+            return Status::GUATIAO_ERR_NULL;
+        };
+        // SAFETY: as above.
+        unsafe { write_out(out, this.shout()) }
+    })
+}
+
+impl GreeterVtable {
+    const fn of<T: Greeter>() -> GreeterVtable {
+        GreeterVtable {
+            header: KindHeader::new(size_of::<GreeterVtable>(), HASH),
+            greet: Some(greet_shim::<T>),
+            shout: Some(shout_shim::<T>),
+        }
+    }
+}
+
+impl Kind for dyn Greeter {
+    const NAME: &'static str = "greeter";
+    type Vtable = GreeterVtable;
+    const FLOOR: usize = size_of::<GreeterVtable>();
+    const FLOOR_HASH: u32 = HASH;
+    const REQUIRED: &'static [(&'static str, usize)] = &[("greet", GREET_END)];
+
+    fn as_dyn(remote: &Remote<Self>) -> &Self {
+        remote
+    }
+    fn as_dyn_mut(remote: &mut Remote<Self>) -> &mut Self {
+        remote
+    }
+    fn boxed(remote: Remote<Self>) -> Box<Self> {
+        Box::new(remote)
+    }
+    fn shared(remote: Remote<Self>) -> Arc<Self> {
+        Arc::new(remote)
+    }
+}
+
+impl Greeter for Remote<dyn Greeter> {
+    fn greet(&self, name: &str) -> Result<String, ProviderError> {
+        type Slot = unsafe extern "C" fn(*mut c_void, Str, *mut Text, *mut ProviderError) -> Status;
+        // SAFETY: `greet` is the slot at that offset in the table
+        // validation checked.
+        let f: Slot = unsafe { self.slot(offset_of!(GreeterVtable, greet)) }
+            .expect("validated: a required slot is present and non-null");
+        let mut out = Text::new("");
+        let mut err = ProviderError::none();
+        // SAFETY: the slot's own signature; the locals are writable.
+        let status = unsafe { f(self.ctx(), Str::new(name), &mut out, &mut err) };
+        if status == Status::GUATIAO_OK {
+            Ok(text_ret(out)?.to_string())
+        } else {
+            Err(take_err(err, status))
+        }
+    }
+
+    fn shout(&self) -> i64 {
+        type Slot = unsafe extern "C" fn(*mut c_void, *mut i64) -> Status;
+        // SAFETY: as `greet`; a null slot is the default body.
+        match unsafe { self.slot::<Slot>(offset_of!(GreeterVtable, shout)) } {
+            Some(f) => {
+                let mut out = 0i64;
+                // SAFETY: the slot's own signature.
+                if unsafe { f(self.ctx(), &mut out) } == Status::GUATIAO_OK {
+                    out
+                } else {
+                    -1
+                }
+            }
+            None => -1,
+        }
+    }
+}
+
+struct Hello;
+impl Greeter for Hello {
+    fn greet(&self, name: &str) -> Result<String, ProviderError> {
+        if name.is_empty() {
+            return Err(ProviderError::new(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "nobody to greet",
+            ));
+        }
+        Ok(format!("hello, {name}"))
+    }
+    fn shout(&self) -> i64 {
+        11
+    }
+}
+
+struct Panics;
+impl Greeter for Panics {
+    fn greet(&self, _name: &str) -> Result<String, ProviderError> {
+        panic!("a provider bug");
+    }
+}
+
+static HELLO_TABLE: GreeterVtable = GreeterVtable::of::<Hello>();
+static PANICS_TABLE: GreeterVtable = GreeterVtable::of::<Panics>();
+static HELLO: Hello = Hello;
+static PANICS: Panics = Panics;
+
+fn remote_of(
+    table: &'static GreeterVtable,
+    ctx: *const c_void,
+    size: usize,
+) -> Result<Remote<dyn Greeter>, KindMismatch> {
+    // SAFETY: a table this test built for the kind, with the ctx it
+    // was built for.
+    unsafe {
+        Remote::<dyn Greeter>::from_raw(
+            table as *const GreeterVtable as *const c_void,
+            size,
+            ctx.cast_mut(),
+        )
+    }
+}
+
+/// A text or a map a shim wrote itself is checked before a proxy
+/// hands it out, and a message that is not UTF-8 is dropped.
+#[test]
+fn what_a_shim_writes_itself_is_checked() {
+    let alloc = Alloc::rust();
+    let raw = |bytes: &[u8]| {
+        let (p, l, c, a) = crate::value::types::Buffer::new_in(alloc, bytes)
+            .unwrap()
+            .into_raw_parts();
+        // SAFETY: consistent storage; the bytes are under test.
+        unsafe { Text::from_raw_parts(p, l, c, a) }
+    };
+    assert_eq!(&*text_ret(raw(b"ok")).unwrap(), "ok");
+    let refused = text_ret(raw(b"\xff")).expect_err("not UTF-8");
+    assert_eq!(refused.status, Status::from(ValueError::NotUtf8));
+
+    let written = ProviderError {
+        status: Status::GUATIAO_ERR_BAD_VALUE,
+        message: raw(b"\xfe"),
+    };
+    let taken = take_err(written, Status::GUATIAO_ERR_BAD_VALUE);
+    assert_eq!(
+        taken.status,
+        Status::GUATIAO_ERR_BAD_VALUE,
+        "the status stays"
+    );
+    assert_eq!(taken.message(), "", "the unreadable words go");
+
+    let map: Map = [("k", 1)].into_iter().collect();
+    assert!(map_ret(map, Alloc::rust()).is_ok());
+}
+
+/// The crate's allocator under another address: the same functions,
+/// recorded as a different allocator, as a library's own would be.
+fn elsewhere() -> Alloc {
+    struct Wrapped(crate::value::alloc::Allocator);
+    // SAFETY: a constant never written, whose `ctx` is null and whose
+    // functions are Rust's global allocator.
+    unsafe impl Sync for Wrapped {}
+    static OTHER: Wrapped = Wrapped(crate::value::alloc::rust_alloc());
+    // SAFETY: a complete constant that lives for the process.
+    unsafe { Alloc::from_raw(&OTHER.0) }.expect("complete")
+}
+
+fn records_home(found: Result<Alloc, ValueError>) -> bool {
+    found.is_ok_and(|a| a.as_raw() == Alloc::rust().as_raw())
+}
+
+/// A tree a call returned moves into this side's allocator when any
+/// container in it, a map key included, records another; one wholly in
+/// this side's passes as it is.
+#[test]
+fn a_returned_tree_moves_into_this_sides_allocator() {
+    let (home, away) = (Alloc::rust(), elsewhere());
+    let mut inner = List::new_in(home);
+    inner
+        .push_in(Text::new_in(away, "deep").unwrap(), home)
+        .unwrap();
+    let mut map = Map::new_in(home);
+    map.set_in("list", inner, home).unwrap();
+    let moved = map_ret(map, home).expect("copies");
+    let list: &List = moved
+        .get("list")
+        .and_then(crate::value::convert::TryAsRef::try_as_ref)
+        .unwrap();
+    assert!(records_home(list[0].alloc()), "the deep member moved");
+
+    let mut keyed = Map::new_in(away);
+    keyed.set_in("k", Value::from(1i64), away).unwrap();
+    let moved = value_ret(Value::from(keyed), home).unwrap();
+    assert!(records_home(moved.alloc()));
+    let moved: &Map = crate::value::convert::TryAsRef::try_as_ref(&moved).unwrap();
+    assert!(records_home(moved.iter().next().unwrap().key.alloc()));
+
+    let mut list = List::new_in(away);
+    list.push_in(Value::from(true), away).unwrap();
+    assert!(records_home(list_ret(list, home).unwrap().alloc()));
+
+    let scalar = value_ret(Value::from(7i64), home).unwrap();
+    assert_eq!(scalar, Value::from(7i64));
+
+    let err = take_err(
+        ProviderError {
+            status: Status::GUATIAO_ERR_BAD_VALUE,
+            message: Text::new_in(away, "no").unwrap(),
+        },
+        Status::GUATIAO_ERR_BAD_VALUE,
+    );
+    assert!(records_home(err.message.alloc()));
+    assert_eq!(err.message(), "no");
+}
+
+#[test]
+fn a_call_round_trips_through_a_remote() {
+    let r = remote_of(
+        &HELLO_TABLE,
+        &HELLO as *const Hello as *const c_void,
+        size_of::<GreeterVtable>(),
+    )
+    .expect("a full table validates");
+    assert_eq!(r.greet("ana").unwrap(), "hello, ana");
+    assert_eq!(r.shout(), 11, "the optional slot is filled and called");
+
+    let e = r.greet("").unwrap_err();
+    assert_eq!(e.status, Status::GUATIAO_ERR_BAD_VALUE);
+    assert_eq!(e.message(), "nobody to greet", "the message crosses intact");
+
+    let kept: Box<dyn Greeter> = <dyn Greeter as Kind>::boxed(r.clone());
+    assert_eq!(kept.greet("bo").unwrap(), "hello, bo");
+    let shared: Arc<dyn Greeter> = <dyn Greeter as Kind>::shared(r);
+    assert_eq!(shared.shout(), 11);
+}
+
+#[test]
+fn a_panic_in_the_implementation_is_a_status_and_the_process_lives() {
+    let r = remote_of(
+        &PANICS_TABLE,
+        &PANICS as *const Panics as *const c_void,
+        size_of::<GreeterVtable>(),
+    )
+    .unwrap();
+    let e = r.greet("x").unwrap_err();
+    assert_eq!(e.status, Status::GUATIAO_ERR_INTERNAL);
+    assert_eq!(e.message(), "", "a panic has no words the shim could write");
+}
+
+/// A provider leaving an optional slot null gets the trait's default body.
+#[test]
+fn a_null_optional_slot_runs_the_default_body() {
+    let mut quiet = GreeterVtable::of::<Hello>();
+    quiet.shout = None;
+    let quiet: &'static GreeterVtable = Box::leak(Box::new(quiet));
+    let r = remote_of(
+        quiet,
+        &HELLO as *const Hello as *const c_void,
+        size_of::<GreeterVtable>(),
+    )
+    .expect("an optional slot may be null");
+    assert_eq!(r.greet("ana").unwrap(), "hello, ana");
+    assert_eq!(r.shout(), -1, "the slot is null, so the default runs");
+}
+
+/// A table short of the kind's by one slot, or by a byte, is refused
+/// whether the descriptor or the header says so, naming both sizes.
+#[test]
+fn a_table_short_of_every_slot_is_refused() {
+    let ctx = &HELLO as *const Hello as *const c_void;
+    let full = size_of::<GreeterVtable>();
+    for size in [GREET_END, full - 1] {
+        let refused = remote_of(&HELLO_TABLE, ctx, size).unwrap_err();
+        assert_eq!(refused, KindMismatch::BelowFloor { size, floor: full });
+        let words = refused.to_string();
+        assert!(
+            words.contains(&size.to_string()) && words.contains(&full.to_string()),
+            "{words}"
+        );
+
+        let mut short = GreeterVtable::of::<Hello>();
+        short.header.struct_size = size as u32;
+        let short: &'static GreeterVtable = Box::leak(Box::new(short));
+        assert_eq!(
+            remote_of(short, ctx, full).unwrap_err(),
+            KindMismatch::BelowFloor { size, floor: full },
+            "the header's own size counts too"
+        );
+    }
+    let mut unsized_header = GreeterVtable::of::<Hello>();
+    unsized_header.header.struct_size = 0;
+    let unsized_header: &'static GreeterVtable = Box::leak(Box::new(unsized_header));
+    assert_eq!(
+        remote_of(unsized_header, ctx, full).unwrap_err(),
+        KindMismatch::BelowFloor {
+            size: 0,
+            floor: full
+        },
+        "a header declaring no size is refused, not read as the descriptor's"
+    );
+}
+
+#[test]
+fn each_check_names_itself() {
+    let ctx = &HELLO as *const Hello as *const c_void;
+    assert_eq!(
+        remote_of(&HELLO_TABLE, ctx, GREET_END - 1).unwrap_err(),
+        KindMismatch::BelowFloor {
+            size: GREET_END - 1,
+            floor: size_of::<GreeterVtable>()
+        }
+    );
+
+    let mut forged = GreeterVtable::of::<Hello>();
+    forged.header.floor_hash = HASH ^ 1;
+    let forged: &'static GreeterVtable = Box::leak(Box::new(forged));
+    assert_eq!(
+        remote_of(forged, ctx, size_of::<GreeterVtable>()).unwrap_err(),
+        KindMismatch::HashMismatch {
+            expected: HASH,
+            found: HASH ^ 1
+        }
+    );
+
+    let mut nulled = GreeterVtable::of::<Hello>();
+    nulled.greet = None;
+    let nulled: &'static GreeterVtable = Box::leak(Box::new(nulled));
+    assert_eq!(
+        remote_of(nulled, ctx, size_of::<GreeterVtable>()).unwrap_err(),
+        KindMismatch::NullRequiredSlot("greet")
+    );
+
+    // SAFETY: null is refused before anything is read.
+    assert_eq!(
+        unsafe { Remote::<dyn Greeter>::from_raw(core::ptr::null(), 64, core::ptr::null_mut()) }
+            .unwrap_err(),
+        KindMismatch::NoTable
+    );
+
+    // One byte into a real table: refused before the header is read.
+    let words = [0usize; 8];
+    // SAFETY: refused by its address alone; nothing is read.
+    let misaligned = unsafe { words.as_ptr().cast::<u8>().add(1) }.cast::<c_void>();
+    assert_eq!(
+        // SAFETY: as above.
+        unsafe { Remote::<dyn Greeter>::from_raw(misaligned, 32, core::ptr::null_mut()) }
+            .unwrap_err(),
+        KindMismatch::Misaligned
+    );
+}
+
+/// A descriptor refused where it is read says why, through every door
+/// that reads one by reference.
+#[test]
+fn an_unreadable_descriptor_says_why() {
+    let info: &'static ProviderInfo<'static> = Box::leak(Box::new(ProviderInfo {
+        struct_size: size_of::<ProviderInfo>() as u32,
+        vtable_size: 0,
+        kinds: crate::library::desc::Kinds::empty(),
+        id: Str::new("wild"),
+        display_name: Str::new(""),
+        // In the low 64 KiB: refused before it is read.
+        config: 0x1000 as *const Value,
+        vtable: core::ptr::null(),
+        ctx: core::ptr::null_mut(),
+        meta: crate::value::types::MaybeNull::null(),
+        version: Str::new(""),
+        available: None,
+        tables: KindTables::empty(),
+        create: None,
+        destroy: None,
+        kind_descriptions: Str::new(""),
+    }));
+    assert!(info.view().is_none());
+    let Err(KindMismatch::Unreadable(why)) = info.as_kind::<dyn Greeter>() else {
+        panic!("an unreadable descriptor is refused by name");
+    };
+    assert!(
+        why.starts_with("a provider's configuration schema"),
+        "{why}"
+    );
+    let refused = info
+        .instantiate::<dyn Greeter>(&Value::null())
+        .expect_err("nothing is built from it");
+    assert_eq!(refused.status(), Status::GUATIAO_ERR_BAD_VALUE);
+}
+
+/// A header hash of zero is "unchecked" through `from_raw` alone; a
+/// registry or host never offers such a table as a kind.
+#[test]
+fn a_zero_hash_is_accepted_only_at_the_raw_door() {
+    let mut headerless = GreeterVtable::of::<Hello>();
+    headerless.header.floor_hash = 0;
+    let headerless: &'static GreeterVtable = Box::leak(Box::new(headerless));
+    let ctx = &HELLO as *const Hello as *const c_void;
+    assert!(remote_of(headerless, ctx, size_of::<GreeterVtable>()).is_ok());
+
+    let view = ProviderView {
+        kinds: vec!["greeter".to_string()],
+        id: "x".to_string(),
+        display_name: String::new(),
+        config: None,
+        vtable: core::ptr::null(),
+        vtable_size: 0,
+        ctx: ctx.cast_mut(),
+        meta: None,
+        version: None,
+        available: None,
+        create: None,
+        destroy: None,
+        kind_descriptions: None,
+        hold: Hold::None,
+        tables: vec![(
+            "greeter".to_string(),
+            headerless as *const GreeterVtable as *const c_void,
+            size_of::<GreeterVtable>(),
+        )],
+    };
+    assert_eq!(
+        Remote::<dyn Greeter>::from_view(&view).unwrap_err(),
+        KindMismatch::HashMismatch {
+            expected: HASH,
+            found: 0
+        }
+    );
+
+    // And an untyped `vtable` is never a typed table: no per-kind
+    // entry means no table, whatever `vtable` holds.
+    let untyped = ProviderView {
+        tables: Vec::new(),
+        vtable: &HELLO_TABLE as *const GreeterVtable as *const c_void,
+        vtable_size: size_of::<GreeterVtable>(),
+        ..view.clone()
+    };
+    assert_eq!(
+        Remote::<dyn Greeter>::from_view(&untyped).unwrap_err(),
+        KindMismatch::NoTable
+    );
+}
+
+/// Three providers claiming one kind: one available, one refusing,
+/// one with a short table. `offers` lists the first two in registry
+/// order; `mismatches` holds the third.
+#[cfg(feature = "load")]
+#[test]
+fn a_registry_offers_every_valid_provider_and_reports_the_rest() {
+    use super::super::raw::{LibraryView, Opened};
+    use super::super::registry::Registry;
+    use std::path::Path;
+
+    unsafe extern "C" fn refuses(_ctx: *mut c_void, reason: *mut Str) -> bool {
+        if !reason.is_null() {
+            // SAFETY: the test passes writable storage.
+            unsafe { reason.write(Str::new("not today")) };
+        }
+        false
+    }
+
+    let ctx = (&HELLO as *const Hello).cast_mut().cast::<c_void>();
+    let table = &HELLO_TABLE as *const GreeterVtable as *const c_void;
+    let provider = |id: &str, size: usize, available| ProviderView {
+        kinds: vec!["greeter".to_string()],
+        id: id.to_string(),
+        display_name: String::new(),
+        config: None,
+        vtable: core::ptr::null(),
+        vtable_size: 0,
+        ctx,
+        meta: None,
+        version: None,
+        available,
+        create: None,
+        destroy: None,
+        kind_descriptions: None,
+        hold: Hold::None,
+        tables: vec![("greeter".to_string(), table, size)],
+    };
+
+    let mut registry = Registry::new("kind-tests", "1.0");
+    registry
+        .absorb(
+            Path::new("kinds.so"),
+            "",
+            Opened::Loaded(
+                LibraryView {
+                    id: "kinds".to_string(),
+                    version: "1.0.0".to_string(),
+                    meta: None,
+                    unload: None,
+                    providers: vec![
+                        provider("kinds_short", GREET_END - 1, None),
+                        provider("kinds_refuses", size_of::<GreeterVtable>(), Some(refuses)),
+                        provider("kinds_ok", size_of::<GreeterVtable>(), None),
+                    ],
+                },
+                super::super::raw::Origin::Linked(None),
+            ),
+        )
+        .unwrap();
+
+    let offers: Vec<Offer<dyn Greeter>> = registry.offers::<dyn Greeter>().collect();
+    let ids: Vec<&str> = offers.iter().map(Offer::id).collect();
+    assert_eq!(
+        ids,
+        ["kinds_ok", "kinds_refuses"],
+        "registry order, both offered"
+    );
+    assert_eq!(offers[0].available(), Ok(()));
+    assert_eq!(offers[1].available(), Err("not today"));
+    let default = offers[0].default_instance().expect("a default instance");
+    assert_eq!(default.greet("ana").unwrap(), "hello, ana");
+    assert_eq!(offers[0].library(), Some("kinds"));
+    assert_eq!(offers[0].key(), Some("kinds_ok"));
+
+    let mismatches: Vec<(&str, KindMismatch)> = registry
+        .mismatches::<dyn Greeter>()
+        .map(|(p, why)| (p.id(), why))
+        .collect();
+    assert_eq!(
+        mismatches,
+        [(
+            "kinds_short",
+            KindMismatch::BelowFloor {
+                size: GREET_END - 1,
+                floor: size_of::<GreeterVtable>()
+            }
+        )]
+    );
+
+    let one = registry
+        .offer::<dyn Greeter>("kinds_ok")
+        .expect("filed under that key")
+        .expect("valid");
+    assert_eq!(
+        one.default_instance()
+            .expect("a default instance")
+            .greet("bo")
+            .unwrap(),
+        "hello, bo"
+    );
+    assert!(registry.offer::<dyn Greeter>("nobody").is_none());
+    let kept: Box<dyn Greeter> = one.boxed().expect("a default instance");
+    assert_eq!(kept.shout(), 11);
+}

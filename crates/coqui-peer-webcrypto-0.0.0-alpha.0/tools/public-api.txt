@@ -1,0 +1,184 @@
+pub mod coqui_peer_webcrypto
+pub use coqui_peer_webcrypto::Established
+pub use coqui_peer_webcrypto::KeyMaterial
+pub use coqui_peer_webcrypto::MessageTransport
+pub use coqui_peer_webcrypto::Method
+pub use coqui_peer_webcrypto::NonDefault
+pub use coqui_peer_webcrypto::PeerId
+pub use coqui_peer_webcrypto::Random
+pub use coqui_peer_webcrypto::TrustStore
+pub use coqui_peer_webcrypto::pair
+#[non_exhaustive] pub enum coqui_peer_webcrypto::Error
+pub coqui_peer_webcrypto::Error::BadProof
+pub coqui_peer_webcrypto::Error::Closed
+pub coqui_peer_webcrypto::Error::Io(core::io::error::Error)
+pub coqui_peer_webcrypto::Error::Key
+pub coqui_peer_webcrypto::Error::LimitReached
+pub coqui_peer_webcrypto::Error::Malformed
+pub coqui_peer_webcrypto::Error::Pairing(coqui_peer::pair::PairingError)
+pub coqui_peer_webcrypto::Error::Random
+pub coqui_peer_webcrypto::Error::Record
+pub coqui_peer_webcrypto::Error::State
+pub coqui_peer_webcrypto::Error::TooLong
+pub coqui_peer_webcrypto::Error::Truncated
+pub coqui_peer_webcrypto::Error::Unsupported
+pub coqui_peer_webcrypto::Error::Untrusted
+impl core::convert::From<coqui_peer::pair::PairingError> for coqui_peer_webcrypto::Error
+pub fn coqui_peer_webcrypto::Error::from(coqui_peer::pair::PairingError) -> Self
+impl core::convert::From<core::io::error::Error> for coqui_peer_webcrypto::Error
+pub fn coqui_peer_webcrypto::Error::from(core::io::error::Error) -> Self
+impl core::error::Error for coqui_peer_webcrypto::Error
+pub fn coqui_peer_webcrypto::Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for coqui_peer_webcrypto::Error
+pub fn coqui_peer_webcrypto::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum coqui_peer_webcrypto::Trust
+pub coqui_peer_webcrypto::Trust::Pinned(alloc::collections::btree::set::BTreeSet<coqui_peer::id::PeerId>)
+pub coqui_peer_webcrypto::Trust::Store(coqui_peer::store::TrustStore)
+impl coqui_peer_webcrypto::Trust
+pub fn coqui_peer_webcrypto::Trust::pinned(impl core::iter::traits::collect::IntoIterator<Item = coqui_peer::id::PeerId>) -> Self
+pub struct coqui_peer_webcrypto::FramedStream<S>
+impl<S> coqui_peer_webcrypto::FramedStream<S>
+pub fn coqui_peer_webcrypto::FramedStream<S>::into_inner(self) -> S
+pub const fn coqui_peer_webcrypto::FramedStream<S>::new(S, usize) -> Self
+pub const fn coqui_peer_webcrypto::FramedStream<S>::set_max_message(&mut self, usize)
+impl<S: alloc::io::read::Read + core::io::write::Write> coqui_peer::drive::MessageTransport for coqui_peer_webcrypto::FramedStream<S>
+pub fn coqui_peer_webcrypto::FramedStream<S>::recv(&mut self) -> core::io::error::Result<alloc::vec::Vec<u8>>
+pub fn coqui_peer_webcrypto::FramedStream<S>::send(&mut self, &[u8]) -> core::io::error::Result<()>
+impl<S: coqui_peer::drive::ReadTimeout> coqui_peer::drive::ReadTimeout for coqui_peer_webcrypto::FramedStream<S>
+pub fn coqui_peer_webcrypto::FramedStream<S>::set_read_timeout(&self, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
+impl<S: coqui_peer::drive::WriteTimeout> coqui_peer::drive::WriteTimeout for coqui_peer_webcrypto::FramedStream<S>
+pub fn coqui_peer_webcrypto::FramedStream<S>::set_write_timeout(&self, core::option::Option<core::time::Duration>) -> core::io::error::Result<()>
+pub struct coqui_peer_webcrypto::Identity(_)
+impl coqui_peer_webcrypto::Identity
+pub fn coqui_peer_webcrypto::Identity::from_pkcs8_der(&[u8]) -> core::result::Result<Self, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::from_pkcs8_pem(&str) -> core::result::Result<Self, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::generate() -> core::result::Result<Self, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::generate_with(&coqui_peer::random::Random) -> core::result::Result<Self, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::key_material(&self) -> coqui_peer::key::KeyMaterial
+pub fn coqui_peer_webcrypto::Identity::open_or_create(&std::path::Path) -> core::result::Result<Self, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::peer_id(&self) -> coqui_peer::id::PeerId
+pub fn coqui_peer_webcrypto::Identity::read(&std::path::Path) -> core::result::Result<core::option::Option<Self>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::spki_der(&self) -> &[u8; 91]
+pub fn coqui_peer_webcrypto::Identity::to_pkcs8_pem(&self) -> core::result::Result<zeroize::Zeroizing<alloc::string::String>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Identity::write_new(&self, &std::path::Path) -> core::result::Result<(), coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::Identity
+pub fn coqui_peer_webcrypto::Identity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::Opener
+impl coqui_peer_webcrypto::Opener
+pub fn coqui_peer_webcrypto::Opener::open(&mut self, &[u8]) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Opener::verify_end(&self) -> core::result::Result<(), coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::Opener
+pub fn coqui_peer_webcrypto::Opener::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::PairDial<'t, T>
+impl<T: coqui_peer::drive::MessageTransport> coqui_peer_webcrypto::PairDial<'_, T>
+pub fn coqui_peer_webcrypto::PairDial<'_, T>::finish(self) -> core::result::Result<coqui_peer::pair::Paired, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::PairDial<'_, T>::shown(&self) -> core::option::Option<&coqui_peer::pair::Shown>
+impl<T> core::fmt::Debug for coqui_peer_webcrypto::PairDial<'_, T>
+pub fn coqui_peer_webcrypto::PairDial<'_, T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::PairingHandshake(_)
+impl coqui_peer::method::Handshake for coqui_peer_webcrypto::PairingHandshake
+pub type coqui_peer_webcrypto::PairingHandshake::Error = coqui_peer_webcrypto::Error
+pub type coqui_peer_webcrypto::PairingHandshake::Output = coqui_peer_webcrypto::PairingSession
+pub fn coqui_peer_webcrypto::PairingHandshake::finish(self) -> core::result::Result<coqui_peer::method::Established<coqui_peer_webcrypto::PairingSession>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::PairingHandshake::framing(&self) -> coqui_peer::method::Framing
+pub fn coqui_peer_webcrypto::PairingHandshake::is_complete(&self) -> bool
+pub fn coqui_peer_webcrypto::PairingHandshake::receive(&mut self, &[u8]) -> core::result::Result<(), coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::PairingHandshake::transmit(&mut self) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::PairingHandshake
+pub fn coqui_peer_webcrypto::PairingHandshake::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::PairingMethod(_)
+impl coqui_peer_webcrypto::PairingMethod
+pub fn coqui_peer_webcrypto::PairingMethod::builder(coqui_peer_webcrypto::Identity) -> coqui_peer_webcrypto::PairingMethodBuilder
+pub fn coqui_peer_webcrypto::PairingMethod::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::non_default::NonDefault>
+pub fn coqui_peer_webcrypto::PairingMethod::settings(&self) -> coqui_peer_webcrypto::PairingSettings
+impl coqui_peer::method::Method for coqui_peer_webcrypto::PairingMethod
+pub type coqui_peer_webcrypto::PairingMethod::Handshake = coqui_peer_webcrypto::PairingHandshake
+pub fn coqui_peer_webcrypto::PairingMethod::initiate(&self) -> core::result::Result<coqui_peer_webcrypto::PairingHandshake, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::PairingMethod::name(&self) -> &'static str
+pub fn coqui_peer_webcrypto::PairingMethod::respond(&self, core::option::Option<core::net::socket_addr::SocketAddr>) -> core::result::Result<coqui_peer_webcrypto::PairingHandshake, coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::PairingMethod
+pub fn coqui_peer_webcrypto::PairingMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::PairingMethodBuilder(_)
+impl coqui_peer_webcrypto::PairingMethodBuilder
+pub fn coqui_peer_webcrypto::PairingMethodBuilder::build(self) -> coqui_peer_webcrypto::PairingMethod
+pub fn coqui_peer_webcrypto::PairingMethodBuilder::max_message(self, usize) -> Self
+pub fn coqui_peer_webcrypto::PairingMethodBuilder::random(self, coqui_peer::random::Random) -> Self
+pub fn coqui_peer_webcrypto::PairingMethodBuilder::responders(self, coqui_peer_webcrypto::Trust) -> Self
+pub fn coqui_peer_webcrypto::PairingMethodBuilder::settings(self, coqui_peer_webcrypto::PairingSettings) -> Self
+pub struct coqui_peer_webcrypto::PairingSession
+impl coqui_peer_webcrypto::PairingSession
+pub const fn coqui_peer_webcrypto::PairingSession::id(&self) -> &[u8; 32]
+pub fn coqui_peer_webcrypto::PairingSession::join<T: coqui_peer::drive::MessageTransport>(self, coqui_peer::pair::Pairing, &mut T) -> core::result::Result<coqui_peer_webcrypto::PairDial<'_, T>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::PairingSession::pair_channel(&self) -> core::result::Result<coqui_peer::pair::Channel, coqui_peer_webcrypto::Error>
+pub const fn coqui_peer_webcrypto::PairingSession::peer(&self) -> &coqui_peer::key::KeyMaterial
+pub fn coqui_peer_webcrypto::PairingSession::peer_id(&self) -> coqui_peer::id::PeerId
+pub fn coqui_peer_webcrypto::PairingSession::respond<T: coqui_peer::drive::MessageTransport + coqui_peer::drive::ReadTimeout>(self, &coqui_peer::store::TrustStore, &coqui_peer::pair::desk::PairingDesk, core::option::Option<core::net::socket_addr::SocketAddr>, &mut T) -> core::result::Result<coqui_peer::pair::Paired, coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::PairingSession
+pub fn coqui_peer_webcrypto::PairingSession::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct coqui_peer_webcrypto::PairingSettings
+pub coqui_peer_webcrypto::PairingSettings::max_message: usize
+impl core::default::Default for coqui_peer_webcrypto::PairingSettings
+pub fn coqui_peer_webcrypto::PairingSettings::default() -> Self
+pub struct coqui_peer_webcrypto::Sealer
+impl coqui_peer_webcrypto::Sealer
+pub fn coqui_peer_webcrypto::Sealer::close(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Sealer::seal(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::Sealer
+pub fn coqui_peer_webcrypto::Sealer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::Session
+impl coqui_peer_webcrypto::Session
+pub fn coqui_peer_webcrypto::Session::close(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Session::export(&self, &str, &mut [u8]) -> core::result::Result<(), coqui_peer_webcrypto::Error>
+pub const fn coqui_peer_webcrypto::Session::id(&self) -> &[u8; 32]
+pub fn coqui_peer_webcrypto::Session::open(&mut self, &[u8]) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Session::seal(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<u8>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::Session::split(self) -> (coqui_peer_webcrypto::Sealer, coqui_peer_webcrypto::Opener)
+pub fn coqui_peer_webcrypto::Session::verify_end(&self) -> core::result::Result<(), coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::Session
+pub fn coqui_peer_webcrypto::Session::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::WebCrypto(_)
+impl coqui_peer_webcrypto::WebCrypto
+pub fn coqui_peer_webcrypto::WebCrypto::builder(coqui_peer_webcrypto::Identity) -> coqui_peer_webcrypto::WebCryptoBuilder
+pub fn coqui_peer_webcrypto::WebCrypto::identity(&self) -> &coqui_peer_webcrypto::Identity
+pub fn coqui_peer_webcrypto::WebCrypto::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::non_default::NonDefault>
+pub fn coqui_peer_webcrypto::WebCrypto::settings(&self) -> coqui_peer_webcrypto::WebCryptoSettings
+impl coqui_peer::method::Method for coqui_peer_webcrypto::WebCrypto
+pub type coqui_peer_webcrypto::WebCrypto::Handshake = coqui_peer_webcrypto::WebCryptoHandshake
+pub fn coqui_peer_webcrypto::WebCrypto::initiate(&self) -> core::result::Result<coqui_peer_webcrypto::WebCryptoHandshake, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::WebCrypto::name(&self) -> &'static str
+pub fn coqui_peer_webcrypto::WebCrypto::respond(&self, core::option::Option<core::net::socket_addr::SocketAddr>) -> core::result::Result<coqui_peer_webcrypto::WebCryptoHandshake, coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::WebCrypto
+pub fn coqui_peer_webcrypto::WebCrypto::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_peer_webcrypto::WebCryptoBuilder(_)
+impl coqui_peer_webcrypto::WebCryptoBuilder
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::build(self) -> coqui_peer_webcrypto::WebCrypto
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::initiators(self, coqui_peer_webcrypto::Trust) -> Self
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::max_message(self, usize) -> Self
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::random(self, coqui_peer::random::Random) -> Self
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::responders(self, coqui_peer_webcrypto::Trust) -> Self
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::session_limit(self, u64) -> Self
+pub fn coqui_peer_webcrypto::WebCryptoBuilder::settings(self, coqui_peer_webcrypto::WebCryptoSettings) -> Self
+pub struct coqui_peer_webcrypto::WebCryptoHandshake(_)
+impl coqui_peer_webcrypto::WebCryptoHandshake
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::bind(self, &[u8]) -> core::result::Result<Self, coqui_peer_webcrypto::Error>
+impl coqui_peer::method::Handshake for coqui_peer_webcrypto::WebCryptoHandshake
+pub type coqui_peer_webcrypto::WebCryptoHandshake::Error = coqui_peer_webcrypto::Error
+pub type coqui_peer_webcrypto::WebCryptoHandshake::Output = coqui_peer_webcrypto::Session
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::finish(self) -> core::result::Result<coqui_peer::method::Established<coqui_peer_webcrypto::Session>, coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::framing(&self) -> coqui_peer::method::Framing
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::is_complete(&self) -> bool
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::receive(&mut self, &[u8]) -> core::result::Result<(), coqui_peer_webcrypto::Error>
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::transmit(&mut self) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, coqui_peer_webcrypto::Error>
+impl core::fmt::Debug for coqui_peer_webcrypto::WebCryptoHandshake
+pub fn coqui_peer_webcrypto::WebCryptoHandshake::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct coqui_peer_webcrypto::WebCryptoSettings
+pub coqui_peer_webcrypto::WebCryptoSettings::max_message: usize
+pub coqui_peer_webcrypto::WebCryptoSettings::session_limit: u64
+impl core::default::Default for coqui_peer_webcrypto::WebCryptoSettings
+pub fn coqui_peer_webcrypto::WebCryptoSettings::default() -> Self
+pub const coqui_peer_webcrypto::DEFAULT_MAX_MESSAGE: usize
+pub const coqui_peer_webcrypto::DEFAULT_SESSION_LIMIT: u64
+pub const coqui_peer_webcrypto::METHOD: &str
+pub const coqui_peer_webcrypto::PAIR_EXPORT_LABEL: &str
+pub const coqui_peer_webcrypto::PROFILE: &str
+pub fn coqui_peer_webcrypto::random() -> coqui_peer::random::Random

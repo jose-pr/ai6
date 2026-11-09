@@ -1,0 +1,586 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! A type describing the values it accepts.
+//!
+//! The test that matters most here is the last one: a value the type
+//! writes validates against the schema the same type declares. Those are
+//! two derives reading one declaration, and if they ever disagree, a
+//! provider rejects the exact configuration its own schema asked for.
+
+#![cfg(feature = "derive")]
+extern crate alloc;
+
+use guatiao::schema::read::{Kind, SchemaRef};
+use guatiao::schema::validate::validate_map;
+use guatiao::value::alloc::Alloc;
+use guatiao::value::convert::{TryAsMut, TryAsRef};
+use guatiao::{Bytes, FromValue, Map, Number, Schema, Text, ToValue, Value, ValueError};
+
+fn alloc_and<R>(body: impl FnOnce(Alloc) -> R) -> R {
+    let alloc = Alloc::rust();
+    body(alloc)
+}
+
+#[derive(Debug, PartialEq, Schema, ToValue)]
+struct Tls {
+    /// Whether to check the certificate.
+    verify: bool,
+    ca: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Schema, ToValue)]
+struct Connection {
+    /// Where to connect.
+    ///
+    /// A host name or an address.
+    host: String,
+    port: u16,
+    #[schema(title = "Password", sensitive)]
+    password: Option<String>,
+    #[schema(default = 30i64)]
+    timeout: i64,
+    tags: Vec<String>,
+    ticket: Bytes,
+    tls: Tls,
+    #[map(rename = "max-size")]
+    max_size: u64,
+    #[map(skip)]
+    cache: Vec<String>,
+}
+
+fn sample() -> Connection {
+    Connection {
+        host: "10.0.0.1".into(),
+        port: 5900,
+        password: None,
+        timeout: 30,
+        tags: vec!["prod".into()],
+        ticket: Bytes(vec![1, 2, 3]),
+        tls: Tls {
+            verify: true,
+            ca: None,
+        },
+        max_size: u64::MAX,
+        cache: Vec::new(),
+    }
+}
+
+#[test]
+fn the_schema_lists_the_stored_fields_in_declaration_order() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        let keys: Vec<String> = s.fields().map(|o| o.key().to_string()).collect();
+        assert_eq!(
+            keys,
+            [
+                "host", "port", "password", "timeout", "tags", "ticket", "tls", "max-size"
+            ],
+            "declaration order, the rename applied, and the skipped field absent"
+        );
+    });
+}
+
+/// A Rust width already states its bounds, so the schema does not ask the
+/// author to restate them.
+#[test]
+fn an_integer_kind_carries_the_bounds_of_its_width() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+
+        assert!(matches!(
+            s.find("port").unwrap().kind(),
+            Kind::Int {
+                min: Some(0),
+                max: Some(65535),
+                multiple_of: None
+            }
+        ));
+        // `u64::MAX` has no `i64` to be read as, so the kind's upper bound
+        // is `None`; the document carries its digits and validation
+        // enforces them.
+        assert!(matches!(
+            s.find("max-size").unwrap().kind(),
+            Kind::Int {
+                min: Some(0),
+                max: None,
+                multiple_of: None
+            }
+        ));
+        assert!(matches!(
+            s.find("timeout").unwrap().kind(),
+            Kind::Int {
+                min: Some(i64::MIN),
+                max: Some(i64::MAX),
+                multiple_of: None
+            }
+        ));
+    });
+}
+
+/// `Option<T>` is how a field says it may be left out, and nothing else
+/// says it.
+#[test]
+fn required_comes_from_the_type_not_from_an_attribute() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        assert!(s.find("host").unwrap().is_required());
+        assert!(s.find("tls").unwrap().is_required());
+        assert!(
+            !s.find("password").unwrap().is_required(),
+            "an Option field is the one thing that is not required"
+        );
+    });
+}
+
+/// Help text comes from the doc comment, because that is where a person
+/// already writes it. Writing it twice is how the two drift apart.
+#[test]
+fn a_doc_comment_becomes_the_help_text() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        assert_eq!(
+            s.find("host").unwrap().description(),
+            "Where to connect. A host name or an address.",
+            "every line of the comment, joined"
+        );
+        assert_eq!(
+            s.find("port").unwrap().description(),
+            "",
+            "no comment is no help, not an empty sentence"
+        );
+    });
+}
+
+/// The `#[schema(..)]` keys **this crate owns** reach the field.
+///
+/// The derive also accepts attributes for presentation keys named
+/// elsewhere; those are exercised where their vocabulary lives, in
+/// `guatiao-intake`'s `form_derive.rs`, because a test here would have to
+/// spell a word this crate deliberately does not know.
+#[test]
+fn the_schema_attributes_reach_the_option() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+
+        let password = s.find("password").unwrap();
+        assert_eq!(password.title(), "Password");
+        assert!(password.is_sensitive());
+
+        let timeout = s.find("timeout").unwrap();
+        assert!(!timeout.is_sensitive());
+        let default: i64 = timeout.default().unwrap().try_into().unwrap();
+        assert_eq!(
+            default, 30,
+            "a default is written in Rust and crosses as a value"
+        );
+    });
+}
+
+/// The three kinds a struct needs that a scalar vocabulary does not have.
+#[test]
+fn a_sequence_a_blob_and_a_nested_struct_each_have_a_kind() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+
+        let tags = s.find("tags").unwrap().kind();
+        assert!(matches!(tags, Kind::List { .. }));
+        assert!(
+            matches!(tags.items(), Kind::Str { .. }),
+            "a list says what it holds"
+        );
+
+        assert!(matches!(s.find("ticket").unwrap().kind(), Kind::Bytes));
+
+        let tls = s.find("tls").unwrap().kind();
+        assert!(matches!(tls, Kind::Map(_)));
+        let fields: Vec<String> = tls.fields().map(|f| f.key().to_string()).collect();
+        assert_eq!(fields, ["verify", "ca"], "a nested struct carries its own");
+        assert_eq!(
+            tls.fields().next().unwrap().description(),
+            "Whether to check the certificate.",
+            "and its fields are ordinary fields, doc comments and all"
+        );
+    });
+}
+
+/// **The agreement.** The value a type writes is one its own schema
+/// accepts, checked by the validator rather than by eye. Two derives read
+/// one declaration; if they ever disagree, a provider rejects exactly the
+/// configuration its own schema asked for.
+#[test]
+fn a_value_the_type_writes_validates_against_the_schema_it_declares() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        let value = sample().to_value_in(alloc).unwrap();
+
+        assert_eq!(
+            validate_map(s, &value),
+            Ok(()),
+            "what the type wrote is what its schema asked for"
+        );
+    });
+}
+
+/// And the check is not vacuous: a key the schema does not declare is
+/// refused, which is what proves the test above is asserting something.
+#[test]
+fn a_key_the_schema_does_not_declare_is_refused() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+
+        let mut value = sample().to_value_in(alloc).unwrap();
+        TryAsMut::<Map>::try_as_mut(&mut value)
+            .ok_or(ValueError::WrongKind)
+            .map(|m| m.set("nonesuch", guatiao::Value::from(Text::new("x"))))
+            .unwrap();
+        assert!(validate_map(s, &value).is_err());
+    });
+}
+
+/// A map whose keys are not all text is refused by name, not read as an
+/// empty map that passes.
+#[test]
+fn a_map_with_a_key_that_is_not_text_is_refused() {
+    alloc_and(|alloc| {
+        let declared = Connection::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+
+        let value = sample().to_value_in(alloc).unwrap();
+        let map = Map::try_from(value).expect("a map");
+        let (ptr, len, cap, a) = map.into_raw_parts();
+        let (bptr, blen, bcap, ba) = guatiao::Buffer::new_in(alloc, b"\xff")
+            .unwrap()
+            .into_raw_parts();
+        // SAFETY: an entry is `repr(C)` with its key first; the old key is
+        // freed before a foreign producer's bytes are written over it.
+        let map = unsafe {
+            let slot = ptr.cast::<Text>();
+            core::ptr::drop_in_place(slot);
+            core::ptr::write(slot, Text::from_raw_parts(bptr, blen, bcap, ba));
+            Map::from_raw_parts(ptr, len, cap, a)
+        };
+        let value: guatiao::Value = map.into();
+        let refused = validate_map(s, &value).expect_err("refused");
+        assert!(
+            refused.to_string().contains("keys that are text"),
+            "{refused}"
+        );
+    });
+}
+
+/// A declared default lands in the document as the value itself.
+///
+/// `#[schema(default = <expr>)]` goes out through `ToValue`, so the
+/// default is written in Rust and cannot drift from the type it defaults;
+/// what a consumer reads is the ordinary `default` key JSON Schema
+/// already has.
+#[test]
+fn a_declared_default_lands_in_the_document() {
+    #[derive(Schema, ToValue)]
+    struct Listener {
+        #[schema(default = 5900)]
+        port: u16,
+    }
+
+    alloc_and(|alloc| {
+        let declared = Listener::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        let port = s.find("port").unwrap();
+
+        assert_eq!(
+            TryAsRef::<Map>::try_as_ref(port.as_value())
+                .and_then(|m| m.get(guatiao::schema::vocab::DEFAULT))
+                .and_then(TryAsRef::<Number>::try_as_ref)
+                .map(AsRef::<str>::as_ref),
+            Some("5900"),
+            "the document carries `default: 5900`, not a description of one"
+        );
+        let read: u16 = port.default().unwrap().try_into().unwrap();
+        assert_eq!(read, 5900);
+    });
+}
+
+/// A field with `#[map(default)]` may be left out, and the three derives
+/// agree about it: the schema does not require it and carries the value,
+/// a document without it validates, and the reader fills that same value.
+#[test]
+fn a_defaulted_field_may_be_left_out_and_reads_as_its_default() {
+    use guatiao::FromValue;
+
+    #[derive(Debug, PartialEq, Schema, ToValue, FromValue)]
+    struct Tuner {
+        name: String,
+        #[map(default = 4)]
+        channels: u32,
+        #[map(default)]
+        tags: Vec<String>,
+    }
+
+    #[derive(Debug, PartialEq, ToValue, FromValue)]
+    #[map(tag = "via")]
+    enum Source {
+        Http {
+            url: String,
+            #[map(default = 30)]
+            timeout: u32,
+        },
+    }
+
+    alloc_and(|alloc| {
+        let declared = Tuner::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        assert!(s.find("name").unwrap().is_required());
+        assert!(!s.find("channels").unwrap().is_required());
+        assert!(!s.find("tags").unwrap().is_required());
+        let channels: u32 = s
+            .find("channels")
+            .unwrap()
+            .default()
+            .expect("the schema carries the default the reader uses")
+            .try_into()
+            .unwrap();
+        assert_eq!(channels, 4);
+        let tags = s.find("tags").unwrap().default().expect("and `Default`'s");
+        assert_eq!(
+            TryAsRef::<guatiao::List>::try_as_ref(tags).map(|l| l.iter().count()),
+            Some(0)
+        );
+
+        // A document that leaves both out is one the schema accepts and
+        // the type reads.
+        let mut doc = Map::new();
+        doc.set("name", "one");
+        let doc = guatiao::Value::from(doc);
+        assert_eq!(validate_map(s, &doc), Ok(()));
+        assert_eq!(
+            Tuner::from_value(&doc).unwrap(),
+            Tuner {
+                name: "one".into(),
+                channels: 4,
+                tags: Vec::new(),
+            }
+        );
+
+        // A stored value wins, and is always written.
+        let full = Tuner {
+            name: "two".into(),
+            channels: 2,
+            tags: vec!["a".into()],
+        };
+        let written = full.to_value_in(alloc).unwrap();
+        assert_eq!(validate_map(s, &written), Ok(()));
+        assert_eq!(Tuner::from_value(&written).unwrap(), full);
+
+        // A stored value of the wrong kind is refused under its key, not
+        // replaced by the default.
+        let mut wrong = Map::new();
+        wrong.set("name", "three");
+        wrong.set("channels", "many");
+        let refused = Tuner::from_value(&guatiao::Value::from(wrong)).unwrap_err();
+        assert!(refused.to_string().contains("channels"), "{refused}");
+
+        // A tagged variant's field takes one the same way.
+        let mut http = Map::new();
+        http.set("via", "Http");
+        http.set("url", "http://x");
+        assert_eq!(
+            Source::from_value(&guatiao::Value::from(http)).unwrap(),
+            Source::Http {
+                url: "http://x".into(),
+                timeout: 30,
+            }
+        );
+    });
+}
+
+/// A struct holding a map keyed by text describes an **open object**, and
+/// the three derives agree about it: what it declares, what it writes,
+/// and what it reads back.
+///
+/// The schema's one job is to describe the struct as it is, and a
+/// `BTreeMap<String, T>` is a set of keys nobody declared.
+#[test]
+fn a_map_field_describes_an_open_object() {
+    use alloc::collections::BTreeMap;
+
+    #[derive(Debug, PartialEq, Schema, ToValue, guatiao::FromValue)]
+    struct Agent {
+        name: String,
+        /// The environment it runs with.
+        env: BTreeMap<String, String>,
+    }
+
+    alloc_and(|alloc| {
+        let declared = Agent::schema_in(alloc).unwrap();
+        let s = SchemaRef::new(&declared).unwrap();
+        let env = s.find("env").expect("env is declared");
+        assert!(matches!(env.kind(), Kind::MapOf(_)));
+        assert!(matches!(env.kind().values(), Kind::Str { .. }));
+        assert_eq!(
+            env.description(),
+            "The environment it runs with.",
+            "a doc comment describes the field, whatever its kind"
+        );
+
+        let agent = Agent {
+            name: "one".into(),
+            env: BTreeMap::from([
+                ("PATH".into(), "/bin".into()),
+                ("HOME".into(), "/root".into()),
+            ]),
+        };
+        let written = agent.to_value_in(alloc).expect("it writes");
+
+        // What the type writes validates against what the same type
+        // declares. That is the agreement the derives exist for.
+        let map = TryAsRef::<Map>::try_as_ref(&written).expect("a map");
+        guatiao::schema::validate_value(env, map.get("env").expect("env was written"))
+            .expect("what it writes, it accepts");
+
+        // And a BTreeMap writes its keys sorted, so the value is the same
+        // every time.
+        let env_value = map.get("env").expect("env");
+        let keys: Vec<&str> = TryAsRef::<Map>::try_as_ref(env_value)
+            .expect("a map")
+            .keys()
+            .collect();
+        assert_eq!(keys, ["HOME", "PATH"]);
+
+        let read = <Agent as guatiao::FromValue>::from_value(&written).expect("it reads back");
+        assert_eq!(read, agent);
+    });
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Schema, ToValue, FromValue)]
+enum Mode {
+    Fast,
+    Slow,
+}
+
+#[derive(Debug, PartialEq, Schema, ToValue, FromValue)]
+#[map(tag = "kind")]
+enum Auth {
+    Anonymous,
+    Password { user: String },
+}
+
+#[derive(Debug, PartialEq, Schema, ToValue, FromValue)]
+struct Optional {
+    plain: Option<String>,
+    list: Vec<Option<String>>,
+    env: alloc::collections::BTreeMap<String, Option<u8>>,
+    mode: Option<Mode>,
+    auth: Option<Auth>,
+}
+
+/// `FromValue` reads a stored null as `None` wherever an `Option` sits --
+/// a field, a list element, a map's value, an enum -- so the schema the
+/// same type declares accepts it there too.
+#[test]
+fn an_option_accepts_null_wherever_from_value_reads_one() {
+    let schema = Optional::schema().unwrap();
+    let s = SchemaRef::new(&schema).unwrap();
+    let mut env = alloc::collections::BTreeMap::new();
+    env.insert("A".to_string(), None);
+    env.insert("B".to_string(), Some(7));
+    let typed = Optional {
+        plain: None,
+        list: vec![Some("a".into()), None],
+        env,
+        mode: None,
+        auth: None,
+    };
+    let written = typed.to_value().unwrap();
+    assert_eq!(validate_map(s, &written), Ok(()));
+    assert_eq!(Optional::from_value(&written).unwrap(), typed);
+
+    let mut explicit = written.clone();
+    let m = TryAsMut::<Map>::try_as_mut(&mut explicit).unwrap();
+    for key in ["plain", "mode", "auth"] {
+        m.set(key, Value::null());
+    }
+    assert_eq!(Optional::from_value(&explicit).unwrap(), typed);
+    assert_eq!(validate_map(s, &explicit), Ok(()));
+
+    let mut wrong = written.clone();
+    TryAsMut::<Map>::try_as_mut(&mut wrong)
+        .unwrap()
+        .set("mode", Value::from("medium"));
+    assert!(validate_map(s, &wrong).is_err(), "null, not anything");
+    assert!(s.find("mode").unwrap().is_nullable());
+    assert!(matches!(s.find("mode").unwrap().kind(), Kind::Enum(_)));
+    assert!(matches!(
+        s.find("auth").unwrap().kind(),
+        Kind::Variant { .. }
+    ));
+}
+
+#[derive(Debug, PartialEq, Schema, ToValue, FromValue)]
+struct Widths {
+    big: u64,
+    huge: u128,
+    tiny: i128,
+    small: u8,
+    neg: i8,
+    f: f32,
+}
+
+/// At the edges of every width the schema agrees with `FromValue`: what
+/// one reads, the other accepts, and what one refuses, so does the other.
+#[test]
+fn the_schema_of_a_width_refuses_exactly_what_from_value_refuses() {
+    let schema = Widths::schema().unwrap();
+    let s = SchemaRef::new(&schema).unwrap();
+    let base = Widths {
+        big: 0,
+        huge: 0,
+        tiny: 0,
+        small: 0,
+        neg: 0,
+        f: 0.0,
+    }
+    .to_value()
+    .unwrap();
+    let cases: [(&str, &str, bool); 14] = [
+        ("big", "18446744073709551615", true),
+        ("big", "18446744073709551616", false),
+        ("big", "-1", false),
+        ("huge", "340282366920938463463374607431768211456", false),
+        ("tiny", "-170141183460469231731687303715884105728", true),
+        ("tiny", "-170141183460469231731687303715884105729", false),
+        ("small", "-0", false),
+        ("small", "256", false),
+        ("neg", "-0", true),
+        ("f", "3.4028235e38", true),
+        ("f", "340282356779733661637539395458142568447", true),
+        ("f", "340282356779733661637539395458142568448", false),
+        ("f", "-340282356779733661637539395458142568448", false),
+        ("f", "1e39", false),
+    ];
+    for (key, text, readable) in cases {
+        let mut value = base.clone();
+        TryAsMut::<Map>::try_as_mut(&mut value)
+            .unwrap()
+            .set(key, Number::new(text).unwrap());
+        assert_eq!(
+            Widths::from_value(&value).is_ok(),
+            readable,
+            "{key} = {text}: FromValue"
+        );
+        assert_eq!(
+            validate_map(s, &value).is_ok(),
+            readable,
+            "{key} = {text}: validate_map"
+        );
+    }
+}

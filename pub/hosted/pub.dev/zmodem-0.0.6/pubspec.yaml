@@ -1,0 +1,17 @@
+name: zmodem
+description: A state machine based, bring-your-own-io style implementation of the ZMODEM protocol in pure Dart
+version: 0.0.6
+repository: https://github.com/TerminalStudio/zmodem
+
+environment:
+  sdk: ">=2.18.0 <3.0.0"
+
+# dependencies:
+#   path: ^1.8.0
+
+dev_dependencies:
+  lints: ^2.0.0
+  test: ^1.16.0
+dependencies:
+  async: ^2.9.0
+  convert: ^3.1.1

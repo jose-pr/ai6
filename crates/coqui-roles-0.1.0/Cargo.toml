@@ -1,0 +1,15 @@
+# coqui-access/crates/coqui-roles at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+[package]
+name = "coqui-roles"
+description = "First-match role authorizer with configurable scope kinds, built in code"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"

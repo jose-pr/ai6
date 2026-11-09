@@ -1,0 +1,463 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Checking a value against a schema, and hiding its secrets, from C.
+//!
+//! # Reading a schema needs nothing from here
+//!
+//! A schema **is a value**, written with the keys in
+//! [`crate::schema::vocab`], so a C consumer walks one with the header's
+//! own helpers and never calls into this library to do it. That is the
+//! whole reason the schema is data rather than a set of typed structs.
+//!
+//! What does need code is the judgement: deciding whether a
+//! configuration is one the schema accepts means walking two trees
+//! together and applying rules about bounds, arms and required fields.
+//! Reimplementing that on the far side of a boundary is how two
+//! implementations of the same schema start disagreeing about the same
+//! configuration.
+//!
+//! # The failure crosses as a VALUE
+//!
+//! A status says a configuration was refused; it cannot say which field
+//! or what would have been accepted. So the detail is written through an
+//! optional out-parameter as an ordinary map, which the caller already
+//! knows how to read.
+//!
+//! It carries the field's **key** and what *would* have been accepted,
+//! and deliberately never the value that was refused: a field may be
+//! marked sensitive, and an error that quotes its input is one that
+//! eventually logs a passphrase.
+
+#![allow(non_camel_case_types)]
+
+use core::ptr;
+
+use super::{entry, out};
+use crate::schema::ValidationError;
+use crate::schema::read::SchemaRef;
+use crate::value::alloc::{Alloc, Allocator};
+use crate::value::status::Status;
+use crate::value::types::{List, Map, Str, Text, Value};
+
+/// Whether `config` is a value `schema` accepts.
+///
+/// `out_error` may be null, and receives a map carrying the field's key
+/// and what would have been accepted — never the value that was refused,
+/// because a field may be marked sensitive and an error type that
+/// quotes its input is one that eventually logs a passphrase.
+///
+/// A non-null `out_error` is written the absent marker on entry, so a
+/// call that failed for any other reason — a null pointer, an allocator
+/// that could not build the detail — leaves it ABSENT rather than
+/// untouched.
+///
+/// Either tree nested deeper than `GUATIAO_MAX_DEPTH` is
+/// `GUATIAO_ERR_BAD_VALUE`: this walks two trees a caller did not write,
+/// and an unbounded walk over one is a stack overflow rather than an
+/// error.
+///
+/// # Safety
+///
+/// Every non-null pointer addresses what its type says, and `out_error`
+/// addresses writable storage for one value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn guatiao_schema_validate(
+    schema: *const Value,
+    config: *const Value,
+    alloc: *const Allocator,
+    out_error: *mut Value,
+) -> Status {
+    out!(out_error);
+    entry!(schema, config => {
+        // SAFETY: the caller's contract.
+        let (schema, config) = unsafe { (&*schema, &*config) };
+        let Some(schema) = SchemaRef::new(schema) else {
+            return Status::GUATIAO_ERR_WRONG_KIND;
+        };
+        let Err(e) = crate::schema::validate_map(schema, config) else {
+            return Status::GUATIAO_OK;
+        };
+
+        if !out_error.is_null()
+            // SAFETY: the caller's contract.
+            && let Ok(alloc) = (unsafe { Alloc::from_raw(alloc) })
+            && let Some(detail) = describe_validation(&e, alloc)
+        {
+            // SAFETY: `out_error` is writable by contract.
+            unsafe { ptr::write(out_error, detail) };
+        }
+        Status::GUATIAO_ERR_BAD_VALUE
+    })
+}
+
+/// The validation failure as a value, in the same shape as the merge's.
+pub(crate) fn describe_validation(error: &ValidationError, alloc: Alloc) -> Option<Value> {
+    let mut out = Map::new_in(alloc);
+    match error {
+        ValidationError::UnknownOption { key, known } => {
+            out.try_set("key", Text::new_in(alloc, key).map(Value::from).ok()?)
+                .ok()?;
+            let mut list = List::new_in(alloc);
+            for name in known {
+                list.try_push(Text::new_in(alloc, name).map(Value::from).ok()?)
+                    .ok()?;
+            }
+            out.try_set("known", list).ok()?;
+        }
+        ValidationError::BadValue { key, expected } => {
+            out.try_set("key", Text::new_in(alloc, key).map(Value::from).ok()?)
+                .ok()?;
+            out.try_set(
+                "expected",
+                Text::new_in(alloc, expected).map(Value::from).ok()?,
+            )
+            .ok()?;
+        }
+    }
+    out.try_set(
+        "message",
+        Text::new_in(alloc, &error.to_string())
+            .map(Value::from)
+            .ok()?,
+    )
+    .ok()?;
+    Some(out.into())
+}
+
+// --- hiding secrets ---------------------------------------------------------
+
+/// A copy of `value` with every secret replaced by the string
+/// `placeholder`, written to `out` through `alloc`.
+///
+/// A value is a secret when its field's schema sets `x-sensitive` or
+/// `writeOnly`, at any depth: inside a nested object, in every element of
+/// a list, in the selected arm of a variant. **Where the schema stops
+/// describing the value, the value is hidden**, because nothing says it
+/// is not a secret: a key the schema does not declare, a container where
+/// it names a scalar, a variant naming no arm. Local `$ref`s are followed
+/// first, so a mark on a definition counts.
+///
+/// `GUATIAO_ERR_WRONG_KIND` for a schema that is not a map,
+/// `GUATIAO_ERR_BAD_VALUE` for a placeholder that is not UTF-8 or a tree
+/// nested past `GUATIAO_MAX_DEPTH`, `GUATIAO_ERR_ALLOC` for a null or
+/// unusable allocator. `out` is written ABSENT first.
+///
+/// # Safety
+///
+/// Every non-null pointer addresses what its type says, the view's bytes
+/// are readable, and `out` addresses writable storage for one value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn guatiao_schema_redact(
+    schema: *const Value,
+    value: *const Value,
+    placeholder: Str,
+    alloc: *const Allocator,
+    out: *mut Value,
+) -> Status {
+    out!(out);
+    entry!(schema, value, out => {
+        // SAFETY: the caller's contract.
+        let (schema, value) = unsafe { (&*schema, &*value) };
+        // SAFETY: the caller's contract on `alloc`.
+        let Ok(alloc) = (unsafe { Alloc::from_raw(alloc) }) else {
+            return Status::GUATIAO_ERR_ALLOC;
+        };
+        let placeholder = match core::str::from_utf8(placeholder.into()) {
+            Ok(text) => text,
+            Err(e) => return e.into(),
+        };
+        if SchemaRef::new(schema).is_none() {
+            return Status::GUATIAO_ERR_WRONG_KIND;
+        }
+        let inlined = match crate::schema::inline_refs(schema) {
+            Ok(inlined) => inlined,
+            Err(e) => return e.into(),
+        };
+        let Some(schema) = SchemaRef::new(&inlined) else {
+            return Status::GUATIAO_ERR_WRONG_KIND;
+        };
+        match crate::schema::redact_in(schema, value, placeholder, alloc) {
+            // SAFETY: `out` is writable by contract and holds ABSENT; the
+            // tree, built through `alloc`, moves into it.
+            Ok(copy) => { unsafe { ptr::write(out, copy) }; Status::GUATIAO_OK }
+            Err(e) => e.into(),
+        }
+    })
+}
+
+/// Where `value` differs from `baseline`, or from the schema's defaults
+/// when `baseline` is null, written to `out` as a list through `alloc`.
+///
+/// Each element is a map `{path: [text...], key: text, value: .., default:
+/// ..}`: `path` the key segments from the root, `key` the same as one line
+/// in the path grammar of `guatiao-intake` (`tls.ca`, `peers[0].name`,
+/// `["a.b"]`), `value` what `value` holds there and `default` what the
+/// baseline holds. Either is left out where that side has nothing. The
+/// list is in the order of the path segments, compared as text.
+///
+/// A differing object field, open-map key or field of a variant that kept
+/// its arm is a place of its own. Everything else is **one place, compared
+/// whole**: a number, text, a list, a tuple (a duration), an enumeration,
+/// an untagged union, a variant that changed arm, and a container one side
+/// does not have. A field absent from a side reads as its schema default
+/// when it has one.
+///
+/// A secret (a field the schema marks `x-sensitive` or `writeOnly`, or a
+/// key it does not declare) is compared as it is and reported as
+/// `placeholder` on each side that has a value, so a changed secret is
+/// listed and never shown. Local `$ref`s are followed first.
+///
+/// `GUATIAO_ERR_WRONG_KIND` for a schema that is not a map,
+/// `GUATIAO_ERR_BAD_VALUE` for a placeholder that is not UTF-8 or a tree
+/// nested past `GUATIAO_MAX_DEPTH`, `GUATIAO_ERR_ALLOC` for a null or
+/// unusable allocator. `out` is written ABSENT first.
+///
+/// # Safety
+///
+/// Every non-null pointer addresses what its type says, the view's bytes
+/// are readable, and `out` addresses writable storage for one value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn guatiao_schema_differences(
+    schema: *const Value,
+    value: *const Value,
+    baseline: *const Value,
+    placeholder: Str,
+    alloc: *const Allocator,
+    out: *mut Value,
+) -> Status {
+    out!(out);
+    entry!(schema, value, out => {
+        // SAFETY: the caller's contract.
+        let (schema, value) = unsafe { (&*schema, &*value) };
+        // SAFETY: the caller's contract; null means no baseline.
+        let baseline = unsafe { baseline.as_ref() };
+        // SAFETY: the caller's contract on `alloc`.
+        let Ok(alloc) = (unsafe { Alloc::from_raw(alloc) }) else {
+            return Status::GUATIAO_ERR_ALLOC;
+        };
+        let placeholder = match core::str::from_utf8(placeholder.into()) {
+            Ok(text) => text,
+            Err(e) => return e.into(),
+        };
+        if SchemaRef::new(schema).is_none() {
+            return Status::GUATIAO_ERR_WRONG_KIND;
+        }
+        let inlined = match crate::schema::inline_refs(schema) {
+            Ok(inlined) => inlined,
+            Err(e) => return e.into(),
+        };
+        let Some(schema) = SchemaRef::new(&inlined) else {
+            return Status::GUATIAO_ERR_WRONG_KIND;
+        };
+        match crate::schema::differences_value_in(schema, value, baseline, placeholder, alloc) {
+            // SAFETY: `out` is writable by contract and holds ABSENT; the
+            // tree, built through `alloc`, moves into it.
+            Ok(found) => { unsafe { ptr::write(out, found) }; Status::GUATIAO_OK }
+            Err(e) => e.into(),
+        }
+    })
+}
+
+// --- exporting a type's own schema --------------------------------------
+
+/// The body every arm of [`export_schema`](crate::export_schema) expands
+/// to.
+///
+/// Written once here rather than three times in the macro: an arm that
+/// only chooses a symbol name should not also be a place the unwind
+/// policy or the out-parameter contract could drift.
+///
+/// # Safety
+///
+/// `alloc` is null or addresses a complete allocator vtable that outlives
+/// the tree written through `out`, and `out` addresses writable storage
+/// for one value.
+pub unsafe fn schema_export<T: crate::schema::Schema>(
+    alloc: *const Allocator,
+    out: *mut Value,
+) -> Status {
+    out!(out);
+    entry!(out => {
+        // SAFETY: the caller's contract on `alloc`.
+        let Ok(alloc) = (unsafe { Alloc::from_raw(alloc) }) else {
+            return Status::GUATIAO_ERR_ALLOC;
+        };
+        let Ok(schema) = T::schema_in(alloc) else {
+            return Status::GUATIAO_ERR_ALLOC;
+        };
+        // SAFETY: `out` is writable by contract, and the tree MOVES into
+        // it rather than being copied, so nothing here frees what the
+        // caller now owns.
+        unsafe { ptr::write(out, schema) };
+        Status::GUATIAO_OK
+    })
+}
+
+/// Exports a type's schema as a C symbol.
+///
+/// A schema describes **any** value being passed — a record, a batch of
+/// metadata, a set of capabilities — and not every schema belongs to a
+/// provider or came out of a builder. A library with a type it can
+/// describe says so to a caller that has no Rust, without writing the
+/// wrapper by hand and without pretending to be a provider.
+///
+/// ```ignore
+/// #[derive(guatiao::Schema)]
+/// struct Connection { host: String, port: u16 }
+///
+/// guatiao::export_schema!(Connection, "connection");
+/// ```
+///
+/// emits, in a crate called `acme-net`:
+///
+/// ```c
+/// guatiao_status acme_net_connection_schema(const guatiao_alloc *alloc,
+///                                           guatiao_value *out);
+/// ```
+///
+/// # The symbol carries your crate's name
+///
+/// A C namespace is flat and shared with everything the caller already
+/// links, and `connection_schema` is a name two libraries will both want.
+/// So the default prefix is the **calling crate's** name, read at the
+/// expansion site, with `-` written as `_` the way Cargo already writes it
+/// for a library target.
+///
+/// # Two builds side by side
+///
+/// Loading two versions of one library into a process needs their symbols
+/// to differ, so how much of the version appears is an argument:
+///
+/// ```ignore
+/// guatiao::export_schema!(Connection, "connection", version = major);
+/// // -> acme_net_v1_connection_schema
+/// guatiao::export_schema!(Connection, "connection", version = minor);
+/// // -> acme_net_v1_2_connection_schema
+/// guatiao::export_schema!(Connection, "connection", version = patch);
+/// // -> acme_net_v1_2_3_connection_schema
+/// ```
+///
+/// **`major` is the one to reach for**, because it is what C already
+/// models: a soname is `libfoo.so.<major>`, major versions are presumed
+/// ABI incompatible and minor ones presumed compatible, and the real
+/// filename carries major.minor so builds coexist on disk. A symbol that
+/// changed on every minor bump would break exactly what that convention
+/// protects.
+///
+/// `minor` and `patch` are for when that is not enough — two builds semver
+/// calls compatible that still must not share a symbol, and **anything
+/// below 1.0**, where the major is always 0 and `major` separates nothing.
+/// Cargo treats 0.y as the compatibility unit and C has no equivalent, so
+/// a pre-1.0 library keeping two builds apart wants `minor` at least.
+///
+/// # Any other shape
+///
+/// `symbol` takes an expression, not just a literal, so `concat!` composes
+/// whatever the host expects — including the `@` an ELF consumer may look
+/// up, which no C identifier could hold:
+///
+/// ```ignore
+/// guatiao::export_schema!(
+///     Connection,
+///     symbol = concat!("acme_net@v", env!("CARGO_PKG_VERSION"), "_connection")
+/// );
+/// ```
+///
+/// That is legal in an export table and unusable from a C header, which is
+/// the right trade when the host resolves it by name at run time rather
+/// than linking against it.
+///
+/// # What the caller gets
+///
+/// An **owned** tree, built through the allocator it passed, which it
+/// frees with `guatiao_value_free`. A null `out` is `GUATIAO_ERR_NULL`,
+/// and a null allocator, an unusable one, or a schema that cannot be
+/// built are all `GUATIAO_ERR_ALLOC`. A non-null `out` is written the
+/// absent marker on entry, so a failed call leaves it ABSENT.
+///
+/// # Not the provider path
+///
+/// A provider hands its schema over through `ProviderInfo::config`, a
+/// pointer to a value it keeps alive for as long as it is loaded — no
+/// symbol and no allocator. This is for the other case, and the two do not
+/// overlap.
+#[macro_export]
+macro_rules! export_schema {
+    ($ty:ty, $label:literal) => {
+        $crate::export_schema!(
+            @emit $ty,
+            ::core::concat!(::core::env!("CARGO_CRATE_NAME"), "_", $label, "_schema")
+        );
+    };
+    ($ty:ty, $label:literal, version = major) => {
+        $crate::export_schema!(
+            @emit $ty,
+            ::core::concat!(
+                ::core::env!("CARGO_CRATE_NAME"),
+                "_v",
+                ::core::env!("CARGO_PKG_VERSION_MAJOR"),
+                "_",
+                $label,
+                "_schema"
+            )
+        );
+    };
+    ($ty:ty, $label:literal, version = minor) => {
+        $crate::export_schema!(
+            @emit $ty,
+            ::core::concat!(
+                ::core::env!("CARGO_CRATE_NAME"),
+                "_v",
+                ::core::env!("CARGO_PKG_VERSION_MAJOR"),
+                "_",
+                ::core::env!("CARGO_PKG_VERSION_MINOR"),
+                "_",
+                $label,
+                "_schema"
+            )
+        );
+    };
+    ($ty:ty, $label:literal, version = patch) => {
+        $crate::export_schema!(
+            @emit $ty,
+            ::core::concat!(
+                ::core::env!("CARGO_CRATE_NAME"),
+                "_v",
+                ::core::env!("CARGO_PKG_VERSION_MAJOR"),
+                "_",
+                ::core::env!("CARGO_PKG_VERSION_MINOR"),
+                "_",
+                ::core::env!("CARGO_PKG_VERSION_PATCH"),
+                "_",
+                $label,
+                "_schema"
+            )
+        );
+    };
+    ($ty:ty, symbol = $symbol:expr) => {
+        $crate::export_schema!(@emit $ty, $symbol);
+    };
+    (@emit $ty:ty, $name:expr) => {
+        // An anonymous const, so two invocations in one crate do not
+        // collide on the Rust-side name. The symbol is what matters and
+        // `export_name` sets that independently.
+        const _: () = {
+            /// The schema of a type this library describes.
+            ///
+            /// # Safety
+            ///
+            /// `alloc` is null or a complete allocator vtable outliving
+            /// the tree, and `out` is writable storage for one value.
+            #[unsafe(export_name = $name)]
+            pub unsafe extern "C" fn schema_export(
+                alloc: *const $crate::value::alloc::Allocator,
+                out: *mut $crate::Value,
+            ) -> $crate::Status {
+                // SAFETY: forwarded from this function's own contract.
+                unsafe { $crate::exports::schema::schema_export::<$ty>(alloc, out) }
+            }
+        };
+    };
+}

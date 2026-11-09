@@ -1,0 +1,445 @@
+! This Source Code Form is subject to the terms of the Mozilla Public
+! License, v. 2.0. If a copy of the MPL was not distributed with this
+! file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+!> The registry over the workspace's own libraries: scanning by rule,
+!> the documented answers, keys and ranks, instances, retiring, unloading,
+!> collecting, watched directories and sources, and a closed registry.
+program test_registry
+  use, intrinsic :: iso_c_binding
+  use, intrinsic :: iso_fortran_env, only: int64
+  use harness
+  use guatiao
+  use guatiao_serde
+  use guatiao_loader, only: gt_library_file_names, gt_windows
+  implicit none
+
+  call setup()
+  call scans_by_rule_and_lists_the_providers()
+  call answers_the_documented_fields()
+  call keys_ranks_and_rekeys()
+  call builds_an_instance_and_lends_its_schema()
+  call a_providers_meta_is_a_copy_carrying_its_form()
+  call retires_and_unloads()
+  call follows_a_watched_directory()
+  call a_source_refuses_with_its_own_words()
+  call a_sources_note_is_told_once()
+  call a_closed_registry_refuses_use()
+  call answers_in_the_registrys_allocator()
+  call the_catalog_lists_every_provider_of_a_directory_and_builds_none()
+  call a_catalog_names_why_a_library_has_no_digest()
+  call finish('registry')
+
+contains
+
+  function scanned() result(reg)
+    type(guatiao_registry) :: reg
+    reg = guatiao_open_registry('fortran-registry', '0.1')
+    call reg%scan_dir(library_dir(), rules=['kind=greeter'])
+  end function
+
+  ! The keys of a list of provider maps, space-separated.
+  function keys_of(list) result(text)
+    type(guatiao_value), intent(in) :: list
+    character(:), allocatable :: text
+    type(guatiao_value) :: k
+    integer :: i
+    text = ''
+    do i = 1, list%length()
+      k = list%at(i, 'key')
+      text = text // ' ' // k%string_or('?')
+    end do
+    text = text // ' '
+  end function
+
+  subroutine scans_by_rule_and_lists_the_providers()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: answer, loaded, providers
+    reg = guatiao_open_registry('fortran-registry', '0.1')
+    call reg%scan_dir(library_dir(), rules=['kind=greeter'], answer=answer)
+    loaded = answer%key('loaded')
+    call check(loaded%length() >= 1, 'the scan loads what declares a greeter')
+    call reg%providers('greeter', providers)
+    call check(index(keys_of(providers), ' derived_greeter_hello ') > 0, 'derived_greeter_hello is offered')
+    call reg%providers('', providers)
+    call check(providers%length() >= 2, 'every provider, with no kind named')
+  end subroutine
+
+  subroutine answers_the_documented_fields()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: p, field, why, best
+    character(*), parameter :: names(9) = [character(12) :: 'key', 'id', 'version', 'library', 'display_name', &
+                                           'from', 'kinds', 'has_config', 'vtable_size']
+    integer :: i, st
+    reg = scanned()
+    call reg%provider('derived_greeter_hello', p)
+    do i = 1, size(names)
+      field = p%key(trim(names(i)))
+      call check(.not. field%is_absent(), 'a provider says its ' // trim(names(i)))
+    end do
+    call reg%provider('nonesuch', p, st)
+    call check_status(st, GUATIAO_ERR_NOT_FOUND, 'no such provider')
+    call reg%best('greeter', best)
+    field = best%key('key')
+    call check(len(field%string_or('')) > 0, 'the best greeter has a key')
+    call reg%why_not('codec', why)
+    field = why%key('available')
+    call check(.not. field%bool_or(.true.), 'nothing serves a codec')
+  end subroutine
+
+  subroutine keys_ranks_and_rekeys()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: providers, first
+    logical :: ok
+    integer :: stat
+    character(:), allocatable :: reason
+    reg = guatiao_open_registry('fortran-keys', '0.1')
+    call reg%keyed_by('%id@%version')
+    call reg%scan_dir(library_dir(), rules=['kind=greeter'])
+    call reg%providers('greeter', providers)
+    call check(index(keys_of(providers), '@') > 0, 'keys follow the template')
+    call reg%set_priority('derived_greeter_shouter', 50)
+    call check(reg%priority('derived_greeter_shouter') == 50, 'a rank set is read back')
+    call check(reg%import_search() == GUATIAO_IMPORT_SEARCH_LIBRARY, 'the import search is the library''s')
+    call reg%set_import_search(GUATIAO_IMPORT_SEARCH_PATH)
+    call check(reg%import_search() == GUATIAO_IMPORT_SEARCH_PATH, 'the import search became path')
+    call reg%set_import_search(2, stat)
+    call check(stat == GUATIAO_ERR_BAD_VALUE, 'an unknown import search is refused')
+    call check(reg%import_search() == GUATIAO_IMPORT_SEARCH_PATH, 'a refusal changes nothing')
+    call reg%providers('greeter', providers)
+    first = providers%at(1, 'id')
+    call check_text(first%string_or(''), 'derived_greeter_shouter', 'the highest rank first')
+    ok = .false.
+    call reg%provider_available(trim(adjustl(key_of(providers, 1))), ok, reason)
+    call check(ok, 'a loaded provider can run here')
+  end subroutine
+
+  function key_of(list, i) result(k)
+    type(guatiao_value), intent(in) :: list
+    integer, intent(in) :: i
+    character(:), allocatable :: k
+    type(guatiao_value) :: v
+    v = list%at(i, 'key')
+    k = v%string_or('')
+  end function
+
+  subroutine a_providers_meta_is_a_copy_carrying_its_form()
+    type(guatiao_registry) :: reg, again
+    type(guatiao_value) :: meta, id
+    integer :: st
+    reg = scanned()
+    call reg%provider_meta('derived_greeter_shouter', meta)
+    call reg%close()
+    id = meta%at('form', 'sections', 1, 'id')
+    call check_text(id%string_or(''), 'words', 'the form''s first section')
+    id = meta%at('form', 'sections', 2, 'id')
+    call check_text(id%string_or(''), 'volume', 'and its second')
+    again = scanned()
+    call again%provider_meta('derived_greeter_hello', meta)
+    call check(meta%is_absent(), 'a provider declaring nothing answers absent')
+    call again%provider_meta('nobody', meta, st)
+    call check_status(st, GUATIAO_ERR_NOT_FOUND, 'an unknown key')
+  end subroutine
+
+  subroutine builds_an_instance_and_lends_its_schema()
+    type(guatiao_registry) :: reg
+    type(guatiao_instance) :: inst
+    type(guatiao_value) :: schema, config
+    type(c_ptr) :: table
+    integer(c_size_t) :: size
+    integer :: st
+    reg = scanned()
+    schema = reg%provider_config('derived_greeter_shouter')
+    call check(schema%tag() == GUATIAO_TAG_MAP, 'the schema is lent')
+    call schema%set('x', 1, st)
+    call check_status(st, GUATIAO_STAT_READ_ONLY, 'and read-only')
+    call reg%provider_table('derived_greeter_hello', 'greeter', table, size)
+    call check(c_associated(table) .and. size > 8, 'a greeter table')
+    call reg%provider_table('derived_greeter_hello', 'codec', table, size, st)
+    call check_status(st, GUATIAO_ERR_NOT_FOUND, 'no codec table')
+    call guatiao_parse('{}', GUATIAO_FORMAT_JSON, config)
+    call reg%create('derived_greeter_shouter', config, inst, st)
+    call check_status(st, GUATIAO_ERR_BAD_VALUE, 'a configuration the schema refuses')
+    call guatiao_parse('{"prefix": "hey"}', GUATIAO_FORMAT_JSON, config)
+    call reg%create('derived_greeter_shouter', config, inst, st)
+    call check_status(st, GUATIAO_OK, 'an instance')
+    call check(.not. inst%is_closed(), 'that is open')
+    call inst%close()
+    call check(inst%is_closed(), 'until closed')
+  end subroutine
+
+  subroutine retires_and_unloads()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: providers, collected, libraries
+    integer :: st
+    reg = scanned()
+    call reg%libraries(libraries)
+    call check(libraries%length() >= 1, 'libraries are listed')
+    call reg%retire('derived_greeter')
+    call reg%providers('greeter', providers)
+    call check(index(keys_of(providers), ' derived_greeter_hello ') == 0, 'a retired library offers nothing')
+    call reg%collect(collected)
+    call check(collected%tag() == GUATIAO_TAG_LIST, 'collect answers the keys it closed')
+    call reg%unload('nonesuch', stat=st)
+    call check_status(st, GUATIAO_ERR_NOT_FOUND, 'unloading what is not there')
+    call reg%unload('hello_library', stat=st)
+    call check(st == GUATIAO_OK .or. st == GUATIAO_ERR_UNSUPPORTED .or. st == GUATIAO_ERR_NOT_FOUND, &
+               'a library unloads when it agrees: ' // guatiao_status_name(st))
+  end subroutine
+
+  subroutine follows_a_watched_directory()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: changed, loaded
+    character(:), allocatable :: first, second, bytes
+    integer :: u, code
+    call gt_library_file_names('derived_greeter', first, second)
+    call read_file(library_dir() // '/' // first, bytes)
+    if (len(bytes) == 0 .and. len(second) > 0) then
+      first = second
+      call read_file(library_dir() // '/' // first, bytes)
+    end if
+    call execute_command_line(mkdir('build/watched'), exitstat=code)
+    open (newunit=u, file='build/watched/' // first, access='stream', form='unformatted', status='replace')
+    write (u) bytes
+    close (u)
+    reg = guatiao_open_registry('fortran-watch', '0.1')
+    call reg%watch_dir('build/watched', rules=['kind=greeter'])
+    call reg%refresh(changed)
+    loaded = changed%key('loaded')
+    call check(loaded%length() == 1, 'a refresh loads the file the watched directory holds')
+    call reg%refresh(changed)
+    loaded = changed%key('loaded')
+    call check(loaded%length() == 0, 'and nothing more the second time')
+  end subroutine
+
+  function mkdir(dir) result(command)
+    use guatiao_loader, only: gt_windows
+    character(*), intent(in) :: dir
+    character(:), allocatable :: command
+    integer :: i
+    character(len(dir)) :: native
+    native = dir
+    if (gt_windows) then
+      do i = 1, len(native)
+        ! achar(92), not a literal: flang's preprocessing doubles one.
+        if (native(i:i) == '/') native(i:i) = achar(92)
+      end do
+      command = 'if not exist ' // native // ' mkdir ' // native
+    else
+      command = 'mkdir -p ' // dir
+    end if
+  end function
+
+  subroutine a_source_refuses_with_its_own_words()
+    type(guatiao_registry) :: reg
+    character(:), allocatable :: first, second, msg
+    integer :: st
+    reg = guatiao_open_registry('fortran-source', '0.1')
+    call gt_library_file_names('derived_greeter', first, second)
+    call reg%add_source_file(library_dir() // '/' // first, guatiao_map(), st, msg)
+    call check(st /= GUATIAO_OK, 'a library that is no source is refused')
+    call check(len(msg) > 0, 'with words')
+  end subroutine
+
+  ! The source written in Rust tells its configuration's `note`.
+  subroutine a_sources_note_is_told_once()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: config, greetings, changed, notes, field
+    character(:), allocatable :: first, second
+    logical :: there
+    call gt_library_file_names('source_library', first, second)
+    inquire (file=library_dir() // '/' // first, exist=there)
+    if (.not. there .and. len(second) > 0) first = second
+    greetings = guatiao_map()
+    call greetings%set('hi', 'hello')
+    config = guatiao_map()
+    call config%set('greetings', greetings)
+    call config%set('note', 'the shelf is dusty, says Rust')
+    reg = guatiao_open_registry('fortran-notes', '0.1')
+    call reg%add_source_file(library_dir() // '/' // first, config)
+    call reg%refresh(changed)
+    notes = changed%key('notes')
+    call check(notes%length() == 1, 'the first refresh tells the note')
+    field = notes%at(1, 'source')
+    call check(index(field%string_or(''), first) > 0, 'by its source')
+    field = notes%at(1, 'subject')
+    call check(field%string_or('?') == '', 'about the whole source')
+    field = notes%at(1, 'text')
+    call check(field%string_or('?') == 'the shelf is dusty, says Rust', 'in its words')
+    field = notes%at(1, 'detail', 'said')
+    call check(field%string_or('?') == 'by Rust', 'with its detail')
+    call reg%refresh(changed)
+    call check(.not. changed%has('notes'), 'and not again while it stays')
+  end subroutine
+
+  subroutine a_closed_registry_refuses_use()
+    type(guatiao_registry) :: reg, copy
+    type(guatiao_value) :: providers
+    integer :: st
+    reg = scanned()
+    copy = reg
+    call reg%close()
+    call copy%providers('greeter', providers, st)
+    call check_status(st, GUATIAO_STAT_CLOSED, 'every copy of a closed registry refuses')
+    call reg%close()
+  end subroutine
+
+  subroutine answers_in_the_registrys_allocator()
+    type(counting), pointer :: c
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: providers
+    integer(int64) :: before
+    c => counting_new()
+    reg = guatiao_open_registry('fortran-counting', '0.1', alloc=counting_allocator(c))
+    call reg%scan_dir(library_dir(), rules=['kind=greeter'])
+    before = counting_live(c)
+    call reg%providers('greeter', providers)
+    call check(counting_live(c) > before, 'an answer is built in the registry''s allocator')
+    call providers%close()
+    call check(counting_live(c) == before, 'and freed there')
+    call reg%close()
+  end subroutine
+
+
+  ! The catalog library written in C, built into `folder` under the file
+  ! name a scan finds; '' without a C compiler.
+  function catalog_library(folder) result(file)
+    character(*), intent(in) :: folder
+    character(:), allocatable :: file
+    character(:), allocatable :: first, second
+    call gt_library_file_names('fortran_catalog_library', first, second)
+    file = build_c('catalog_library.c', folder // '/' // first)
+  end function
+
+  ! The catalog entry whose id is `id`, as a view into the list.
+  function entry_of(catalog, id) result(entry)
+    type(guatiao_value), intent(in) :: catalog
+    character(*), intent(in) :: id
+    type(guatiao_value) :: entry, found
+    integer :: i
+    do i = 1, catalog%length()
+      entry = catalog%item(i)
+      found = entry%key('id')
+      if (found%string_or('') == id) return
+    end do
+    call check(.false., 'the catalog lists ' // id)
+  end function
+
+  subroutine the_catalog_lists_every_provider_of_a_directory_and_builds_none()
+    type(guatiao_registry) :: reg
+    type(guatiao_instance) :: inst
+    type(guatiao_value) :: report, loaded, failed, catalog, e, f, config
+    character(:), allocatable :: file, digest, msg
+    integer :: st
+    file = catalog_library('build/catalog_a')
+    if (len(file) == 0) then
+      call skip('the C catalog library: no C compiler built it (set CC)')
+      return
+    end if
+    reg = guatiao_open_registry('catalog-host', '1.0')
+    call reg%scan_dir('build/catalog_a', answer=report)
+    loaded = report%key('loaded')
+    failed = report%key('failed')
+    call check(loaded%length() == 1 .and. failed%length() == 0, 'the library loads')
+    call reg%catalog(catalog)
+    call check(catalog%length() == 4, 'four providers are listed')
+    digest = 'sha256:' // sha256_of(file)
+    call check(len(digest) == 71, 'a digest was computed for the file')
+
+    e = entry_of(catalog, 'catalog_configured')
+    f = e%at('kinds', 1)
+    call check_text(f%string_or(''), 'counter', 'its kind')
+    f = e%key('display_name')
+    call check_text(f%string_or(''), 'Configured, with a form', 'its display name')
+    f = e%key('version')
+    call check_text(f%string_or(''), '2.0', 'its version')
+    f = e%key('library')
+    call check_text(f%string_or(''), 'catalog_library', 'its library')
+    f = e%key('library_version')
+    call check_text(f%string_or(''), '1.0', 'its library version')
+    f = e%key('digest')
+    call check_text(f%string_or(''), digest, 'the digest of the file')
+    f = e%key('available')
+    call check(f%bool_or(.false.), 'it runs here')
+    call check(.not. e%has('reason'), 'and says no reason')
+    f = e%at('config', 'required', 2)
+    call check_text(f%string_or(''), 'port', 'its schema, copied')
+    f = e%at('meta', 'form', 'sections', 1, 'title')
+    call check_text(f%string_or(''), 'Network', 'its form, in its meta')
+
+    e = entry_of(catalog, 'catalog_implied')
+    f = e%key('version')
+    call check_text(f%string_or(''), '1.0', 'the library''s version when it names none')
+    call check(.not. e%has('meta'), 'declaring no meta')
+    f = e%at('config', 'properties', 'token', 'x-sensitive')
+    call check(f%bool_or(.false.), 'a sensitive field')
+
+    e = entry_of(catalog, 'catalog_unavailable')
+    f = e%key('available')
+    call check(.not. f%bool_or(.true.), 'it cannot run')
+    f = e%key('reason')
+    call check_text(f%string_or(''), 'no device here', 'and says why')
+    call check(.not. e%has('config'), 'taking no configuration')
+    f = e%key('has_config')
+    call check(.not. f%bool_or(.true.), 'which has_config says')
+    e = entry_of(catalog, 'catalog_plain')
+    f = e%key('available')
+    call check(f%bool_or(.false.), 'a plain provider runs')
+
+    ! Listing asked the library for nothing: its count says so, and so does
+    ! its refusal of the first instance asked for afterwards.
+    call check(catalog_built(file) == 0, 'nothing was built by listing')
+    call guatiao_parse('{"host": "localhost", "port": 8080}', GUATIAO_FORMAT_JSON, config)
+    call reg%create('catalog_configured', config, inst, st, msg)
+    call check(st /= GUATIAO_OK, 'the first create is refused')
+    call check(index(msg, 'built nothing: the first create this library was asked') > 0, 'saying it was the first')
+    call check(catalog_built(file) == 1, 'and the count is one')
+    call reg%close()
+  end subroutine
+
+  subroutine a_catalog_names_why_a_library_has_no_digest()
+    type(guatiao_registry) :: reg
+    type(guatiao_value) :: catalog, e, f
+    character(:), allocatable :: file, folder, aside, first, second
+    character(24) :: stamp
+    integer :: i, u, code, count
+    ! A folder of its own each run, so nothing a run left behind is in the way.
+    call system_clock(count)
+    write (stamp, '(i0)') count
+    folder = 'build/catalog_b_' // trim(stamp)
+    file = catalog_library(folder)
+    if (len(file) == 0) then
+      call skip('the C catalog library: no C compiler built it (set CC)')
+      return
+    end if
+    reg = guatiao_open_registry('catalog-host', '1.0')
+    call reg%load_file(file)
+    ! Another file at the path, before anything asked: renaming a mapped
+    ! file works on every platform, where overwriting one does not.
+    call gt_library_file_names('fortran_catalog_library', first, second)
+    aside = folder // '/moved_away.bin'
+    if (gt_windows) then
+      call execute_command_line('if exist "' // folder // '/moved_away.bin" del /q "' // folder // '/moved_away.bin"', &
+                                exitstat=code)
+      call execute_command_line('move /y "' // folder // '\' // first // '" "' // folder // '\moved_away.bin" > NUL', &
+                                exitstat=code)
+    else
+      call execute_command_line('rm -f ' // aside, exitstat=code)
+      call execute_command_line('mv ' // folder // '/' // first // ' ' // aside, exitstat=code)
+    end if
+    call check(code == 0, 'the library file was moved aside')
+    if (code /= 0) return
+    open (newunit=u, file=file, access='stream', form='unformatted', status='replace')
+    write (u) 'not the library'
+    close (u)
+    call reg%catalog(catalog)
+    call check(catalog%length() == 4, 'every provider is still listed')
+    do i = 1, catalog%length()
+      e = catalog%item(i)
+      call check(.not. e%has('digest'), 'no digest for a file that changed')
+      f = e%key('digest_error')
+      call check_text(f%string_or(''), 'the file changed since it was loaded', 'and the reason')
+    end do
+  end subroutine
+
+end program test_registry

@@ -1,0 +1,72 @@
+# coqui-peer-webcrypto/. at 95ee8d4a6d4ed461bd53021c92972e79bf10a864, with what it inherits written out.
+test = [{ name = "pair", required-features = ["pin"] }]
+[package]
+name = "coqui-peer-webcrypto"
+version = "0.0.0-alpha.0"
+description = "The WebCrypto method of coqui-peer: mutual P-256 key proof, in a browser or natively, ending in an encrypted session"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
+homepage = "https://boriken-dev.github.io/coqui-peer-webcrypto/"
+keywords = ["webcrypto", "peer", "p256", "handshake", "browser"]
+categories = ["cryptography", "authentication", "network-programming"]
+exclude = [".*", "*.local.*", "/bindings/", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+pin = ["coqui-peer/pin"]
+[dependencies]
+[dependencies.coqui-peer]
+git = "https://github.com/Boriken-Dev/coqui-peer"
+rev = "381e2a8144a228e592dc7d82eeb7db85885422ec"
+[dependencies.guatiao]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+default-features = false
+features = ["derive"]
+[dependencies.p256]
+version = "0.14"
+default-features = false
+features = ["alloc", "ecdsa", "ecdh", "pkcs8"]
+[dependencies.aes-gcm]
+version = "0.11"
+default-features = false
+features = ["aes", "alloc", "zeroize"]
+[dependencies.hkdf]
+version = "0.13"
+default-features = false
+[dependencies.sha2]
+version = "0.11.1"
+default-features = false
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+[dependencies.serde_json]
+version = "1"
+default-features = false
+features = ["std"]
+[dependencies.getrandom]
+version = "0.4"
+default-features = false
+[dependencies.zeroize]
+version = "1"
+default-features = false
+features = ["alloc"]
+[dev-dependencies]
+tempfile = "3"
+[dev-dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+default-features = false
+features = ["json", "toml"]

@@ -1,0 +1,82 @@
+{
+  "name": "guatiao",
+  "version": "0.0.0-alpha.1",
+  "description": "Node.js and TypeScript bindings over the guatiao C ABI",
+  "license": "MPL-2.0",
+  "author": "jose-pr",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Boriken-Dev/guatiao.git",
+    "directory": "bindings/node/guatiao"
+  },
+  "homepage": "https://github.com/Boriken-Dev/guatiao/",
+  "bugs": "https://github.com/Boriken-Dev/guatiao/issues",
+  "keywords": ["ffi", "plugins", "c-abi", "values", "json-schema"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./time": {
+      "types": "./dist/time.d.ts",
+      "import": "./dist/time.js"
+    },
+    "./kinds": {
+      "types": "./dist/kinds.d.ts",
+      "import": "./dist/kinds.js"
+    },
+    "./describe": {
+      "types": "./dist/describe.d.ts",
+      "import": "./dist/describe.js"
+    },
+    "./provide": {
+      "types": "./dist/provide.d.ts",
+      "import": "./dist/provide.js"
+    },
+    "./wire": {
+      "types": "./dist/wire.d.ts",
+      "import": "./dist/wire.js"
+    },
+    "./ffi": {
+      "types": "./dist/ffi.d.ts",
+      "import": "./dist/ffi.js"
+    }
+  },
+  "bin": {
+    "guatiao-kind": "./dist/kind_cli.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.tsbuildinfo",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "koffi": "^3.3.3"
+  },
+  "peerDependencies": {
+    "typescript": ">=7.0.2"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

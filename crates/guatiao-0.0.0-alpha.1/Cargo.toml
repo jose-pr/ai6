@@ -1,0 +1,77 @@
+# guatiao/crates/guatiao at 0350bae7fef4cef2aa46ce73f1ef6be15983d83b, with what it inherits written out.
+test = [{ name = "import_search", harness = false, required-features = ["load"] }]
+[package]
+name = "guatiao"
+links = "guatiao"
+description = "A C-struct value model, a JSON Schema that describes a value, and an envelope for providers -- one contract for passing values between languages"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+publish = true
+license = "MPL-2.0"
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[lib]
+name = "guatiao"
+crate-type = ["rlib", "cdylib"]
+path = "src/lib.rs"
+[features]
+default = []
+derive = ["dep:guatiao-derive"]
+provider = ["derive", "guatiao-derive/provider"]
+c-header = ["dep:cbindgen"]
+load = ["dep:libloading", "dep:object", "dep:sha2", "dep:winapi-util"]
+regex = ["dep:regex"]
+[dependencies]
+[dependencies.guatiao-derive]
+path = "../guatiao-derive"
+version = "=0.0.0-alpha.1"
+optional = true
+[dependencies.libloading]
+version = "0.8"
+optional = true
+[dependencies.regex]
+version = "1"
+optional = true
+[dependencies.sha2]
+version = "0.10"
+optional = true
+default-features = false
+[dependencies.object]
+version = "0.40"
+optional = true
+default-features = false
+features = ["read_core", "pe", "elf", "macho", "std"]
+[target]
+[target."cfg(windows)"]
+[target."cfg(windows)".dependencies]
+[target."cfg(windows)".dependencies.winapi-util]
+version = "0.1"
+optional = true
+[target."cfg(not(miri))"]
+[target."cfg(not(miri))".dev-dependencies]
+[target."cfg(not(miri))".dev-dependencies.hello_library]
+path = "../../examples/hello_library"
+[target."cfg(not(miri))".dev-dependencies.derived_greeter]
+path = "../../examples/derived_greeter"
+[target."cfg(not(miri))".dev-dependencies.source_library]
+path = "../../examples/source_library"
+[build-dependencies]
+[build-dependencies.cbindgen]
+version = "0.29"
+optional = true
+[dev-dependencies]
+libloading = "0.8"
+serde_json = "1"
+[dev-dependencies.greeter_kind]
+path = "../../examples/greeter_kind"
+[lints]
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

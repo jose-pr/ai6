@@ -1,0 +1,34 @@
+# coqui-access/providers/access/ldap at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+[package]
+name = "coqui-access-ldap"
+description = "Authenticate against LDAP or Active Directory and resolve names and groups from it"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[dependencies.coqui-access-kit]
+path = "crates/coqui-access-kit"
+features = ["cache"]
+[dependencies.coqui-peer-tls]
+git = "https://github.com/Boriken-Dev/coqui-peer-tls"
+rev = "e5c1e6df27260ba3b4cec0a1ad5e37a04652e5f4"
+[dependencies.ldap3]
+version = "0.12"
+default-features = false
+features = ["sync", "tls-rustls-ring"]
+[dependencies.rustls]
+version = "0.23"
+default-features = false
+features = ["std", "ring"]
+[dev-dependencies]
+[dev-dependencies.rcgen]
+version = "0.14"
+[dev-dependencies.tempfile]
+version = "3"

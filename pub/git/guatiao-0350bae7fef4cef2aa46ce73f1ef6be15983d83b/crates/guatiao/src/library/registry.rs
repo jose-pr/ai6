@@ -1,0 +1,2032 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! What the host holds: the libraries it has loaded and the providers
+//! they offer.
+//!
+//! # The registry is a VALUE the host owns
+//!
+//! Not a process-global table, and not something a library writes into.
+//! A library is asked what it offers and answers; the host records the
+//! answer. Two artifacts in one process that each link this crate hold
+//! two registries and neither can be surprised by the other, which is the
+//! whole reason this crate holds no static state.
+//!
+//! It also removes the failure a registration-callback design has: a
+//! library that registers into a copy of a table the host never reads,
+//! where the symptom is a lookup answering "not found" for something that
+//! was definitely registered.
+//!
+//! # What a provider is filed under is the host's choice
+//!
+//! A [`KeyTemplate`] renders one, `%id` by default. A host that wants two
+//! builds of one provider at once passes `%id@%version` to
+//! [`Registry::keyed_by`] and gets two entries where the default would
+//! have refused the second as a duplicate.
+
+#![forbid(unsafe_code)]
+
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use std::path::{Path, PathBuf};
+
+use super::key::{KeyError, KeyFields, KeyTemplate};
+use super::kind::{Kind, KindMismatch, Offer, Remote};
+use super::raw::{
+    EntryFn, Host, HostBlock, Lease, LibraryView, LocalLibrary, Opened, Origin, ProviderView,
+    Rejected, Shared, Snapshot, SnapshotEntry,
+};
+use crate::value::alloc::Alloc;
+use crate::value::status::Status;
+use crate::value::types::Text;
+
+/// Where the platform's loader looks for the libraries a loaded file
+/// imports: on Windows, the DLLs a plugin links, such as `guatiao.dll` or
+/// a runtime it ships beside itself.
+///
+/// The file itself is always opened by the path the host named; this
+/// decides only where its imports are found. A library the process has
+/// already loaded answers an import of its name wherever it came from,
+/// under either search.
+///
+/// **Only Windows has a per-load choice; elsewhere this is ignored.** On
+/// Linux and FreeBSD `dlopen` finds a library's imports on
+/// `LD_LIBRARY_PATH`, in the directories its own `RUNPATH` names
+/// (`$ORIGIN` is its directory) and in the system's, never in its own
+/// directory unless the `RUNPATH` says so: a plugin built with
+/// `-Wl,-rpath,$ORIGIN` finds what it ships beside itself, as
+/// [`Library`](ImportSearch::Library) has it on Windows; on macOS, an
+/// import named `@rpath/...` and a run path of `@loader_path` do the same.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImportSearch {
+    /// The library's own directory, the host's executable's directory,
+    /// the system directory and the directories the process added
+    /// (`AddDllDirectory`), and nothing else: not the current directory,
+    /// not `PATH`. Windows' `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+    /// LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, what Python's `ctypes` loads a
+    /// library by path with. A source file's `import_dirs`
+    /// ([`add_source_file`](Registry::add_source_file)) are looked in for
+    /// what these leave missing.
+    #[default]
+    Library,
+    /// [`Library`](ImportSearch::Library)'s directories first. A library
+    /// the file imports itself that they leave missing is then looked for
+    /// in a source file's `import_dirs` and where Windows' standard search
+    /// goes after the system directory (the Windows directory, the current
+    /// directory, `PATH`), and mapped from the first holding it, with what
+    /// it forwards to beside it; everything else the file imports is found
+    /// as under [`Library`](ImportSearch::Library). What is mapped that
+    /// way stays while the file does, and answers its name to every
+    /// library loaded meanwhile, under either search. For a library whose
+    /// imports live elsewhere, such as a Python bridge importing
+    /// `python3.dll` from a Python installation on `PATH`.
+    Path,
+}
+
+/// Why a file could not be loaded.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum LoadError {
+    /// The operating system refused to map it, or it is not a library at
+    /// all. Carries what the loader said.
+    Open {
+        /// The file.
+        path: PathBuf,
+        /// The loader's own message, which names the real cause far
+        /// better than any wording here could.
+        reason: String,
+    },
+    /// It mapped and exported the entry symbol, but what came back was
+    /// refused by a check where it entered: too small, text that is not
+    /// UTF-8, a pointer that is misaligned or no address at all, an array
+    /// past its cap, a code pointer outside the library's code.
+    Malformed {
+        /// The file.
+        path: PathBuf,
+        /// Which part of the descriptor, and what was wrong with it.
+        reason: String,
+    },
+    /// Two **different** providers land on one key. Names both paths,
+    /// because "duplicate provider" without the second one is a message
+    /// that sends the reader looking through every library they have.
+    ///
+    /// Not the same provider twice — that is
+    /// [`Skipped::ProviderAlreadyLoaded`] and is ordinary. This is two
+    /// distinct implementations claiming one name, which only a host's own
+    /// [`KeyTemplate`] can produce: `%id` gives every provider a distinct
+    /// key by construction, and a template naming less than that does not.
+    Duplicate {
+        /// What they both render.
+        key: String,
+        /// The one already loaded.
+        first: PathBuf,
+        /// The one that arrived second and was refused.
+        second: PathBuf,
+    },
+}
+
+impl core::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            LoadError::Open { path, reason } => {
+                write!(f, "{} could not be loaded: {reason}", path.display())
+            }
+            LoadError::Malformed { path, reason } => write!(
+                f,
+                "{} answered with a descriptor this build refuses: {reason}",
+                path.display()
+            ),
+            LoadError::Duplicate { key, first, second } => write!(
+                f,
+                "both {} and {} offer `{key}`",
+                first.display(),
+                second.display()
+            ),
+        }
+    }
+}
+
+impl core::error::Error for LoadError {}
+
+/// Why a file was passed over rather than loaded or failed.
+///
+/// **Every one of these is an answer, not a failure.** A scan of a real
+/// directory produces them constantly and a host that treated them as
+/// errors would report a healthy installation as broken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Skipped {
+    /// It mapped, but exported no entry symbol. Not a library, and not an
+    /// error: a directory of libraries may hold anything.
+    NoEntrySymbol,
+    /// Its entry point answered null, which is a library saying it has
+    /// nothing for this host.
+    DeclinedThisHost,
+    /// This library is already loaded, and names where from.
+    ///
+    /// **The routine case, not a problem.** A host's search path and the
+    /// directory beside its executable are commonly the same directory, so
+    /// a plugin is offered two or three times on an ordinary run; a plugin
+    /// staged into place by copy is offered under two paths. Reporting
+    /// either as an error prints a page of noise over a healthy install,
+    /// and refusing the second registration silently disables whatever the
+    /// first one had not got to yet.
+    ///
+    /// Recognised by canonical **path** first, which costs no load, and by
+    /// library **id** after, which catches the same library at two paths.
+    AlreadyLoaded {
+        /// Where it was loaded from the first time.
+        from: PathBuf,
+    },
+    /// One provider inside a library that loaded: a provider with this id
+    /// is already registered, so this one was passed over and **the rest
+    /// of the library went on loading**.
+    ///
+    /// Two libraries offering one provider is ordinary — a re-export, a
+    /// vendored copy — and they agree on its id, which is exactly what
+    /// makes this detectable. The first one loaded wins, because it is the
+    /// one already handed out.
+    ProviderAlreadyLoaded {
+        /// The provider's id.
+        id: String,
+        /// The library that had already registered it.
+        from: PathBuf,
+    },
+    /// Its bytes could not be read, or could not be parsed as an object
+    /// file at all.
+    ///
+    /// Neither a library nor a broken one — a text file with a library's
+    /// extension is simply not a library. Reported rather than dropped,
+    /// because somebody looking for a plugin that did not appear needs to
+    /// see that the file was considered.
+    NotExaminable,
+    /// It is a library, and it speaks an envelope version this host does
+    /// not. Names the version it declared, so the remedy — rebuild one
+    /// side — is visible.
+    UnsupportedAbi {
+        /// The `abi_version` the library declared.
+        declared: u32,
+    },
+    /// It is a library, and a scan rule kept it out **before it was
+    /// mapped**, by what it declared. Names the rule, so a person looking
+    /// for it sees which one.
+    Filtered {
+        /// The rule, as written.
+        by: String,
+    },
+    /// It declares itself a **source** of libraries (`source=<what it
+    /// serves>`), which is not a library and is never loaded by a scan:
+    /// a host adds one with
+    /// [`add_source_file`](Registry::add_source_file). Read before
+    /// mapping it.
+    Source {
+        /// What it says it serves.
+        serves: String,
+    },
+}
+
+/// One clause, to follow the file's name: `{path}: {skipped}`.
+impl core::fmt::Display for Skipped {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Skipped::NoEntrySymbol => f.write_str("not a guatiao library"),
+            Skipped::DeclinedThisHost => f.write_str("declined this host"),
+            Skipped::AlreadyLoaded { from } => write!(f, "already loaded from {}", from.display()),
+            Skipped::ProviderAlreadyLoaded { id, from } => write!(
+                f,
+                "its provider `{id}` is already registered by {}",
+                from.display()
+            ),
+            Skipped::NotExaminable => f.write_str("could not be read as a library file"),
+            Skipped::UnsupportedAbi { declared } => write!(
+                f,
+                "built for envelope ABI {declared}, and this host speaks {}",
+                super::desc::ABI_VERSION
+            ),
+            Skipped::Filtered { by } => write!(f, "kept out by `{by}`"),
+            Skipped::Source { serves } => {
+                write!(
+                    f,
+                    "a source of {serves} libraries, which a host adds rather than loads"
+                )
+            }
+        }
+    }
+}
+
+/// What one [`Registry::load_file`] did.
+///
+/// Two outcomes rather than `Option`, because "nothing happened" has
+/// several readings a caller acts on differently: a file that is not a
+/// library at all, a library declining this host, and one this registry
+/// already has.
+#[derive(Debug)]
+pub enum Loading<'a> {
+    /// It loaded, and here is what it offered.
+    Loaded(&'a Loaded),
+    /// It did not, and this is why. Not a failure.
+    Skipped(Skipped),
+}
+
+impl<'a> Loading<'a> {
+    /// What it loaded, or `None` when it was skipped.
+    pub fn loaded(self) -> Option<&'a Loaded> {
+        match self {
+            Loading::Loaded(one) => Some(one),
+            Loading::Skipped(_) => None,
+        }
+    }
+
+    /// Why it was passed over, or `None` when it loaded.
+    pub fn skipped(&self) -> Option<&Skipped> {
+        match self {
+            Loading::Loaded(_) => None,
+            Loading::Skipped(why) => Some(why),
+        }
+    }
+}
+
+/// Why nothing can serve a kind.
+///
+/// Two answers rather than one, because a person acts on them
+/// differently: install something, versus fix what you have.
+#[derive(Debug)]
+pub enum WhyNot<'a> {
+    /// No loaded provider claims this kind at all.
+    NothingClaimsIt,
+    /// Providers claim it, and each said why it cannot run here.
+    NoneAvailable(Vec<(&'a Provider, &'a str)>),
+}
+
+/// One provider a loaded library offers.
+#[derive(Debug)]
+pub struct Provider {
+    view: ProviderView,
+    from: PathBuf,
+    /// Copied out of the offering library's descriptor, so retiring that
+    /// library leaves nothing here pointing into its image.
+    library: String,
+    version: String,
+    /// The source that served its library, or empty.
+    source: String,
+    /// COMPUTED here rather than borrowed, so it is owned. A [`Text`] and
+    /// not a `String`, because it is a string this crate hands to C: it is
+    /// already a `guatiao_string` and needs no conversion at the boundary.
+    key: Text,
+    /// What this host ranked it, resolved when it loaded and again
+    /// whenever the ranking changes. Absent means 0.
+    priority: i32,
+    /// Which of its library's lease's descriptors is its own.
+    at: usize,
+}
+
+// `Send` and `Sync` for this type are declared in `raw/host.rs`; see there.
+
+impl Provider {
+    /// Every kind it speaks. May be empty, which is a provider reached by
+    /// name rather than by capability.
+    pub fn kinds(&self) -> &[String] {
+        &self.view.kinds
+    }
+
+    /// Whether it speaks this kind.
+    ///
+    /// The capability question, asked of one provider.
+    /// [`Registry::providers`] is the same question asked of all of them.
+    pub fn supports(&self, kind: &str) -> bool {
+        self.view.supports(kind)
+    }
+
+    /// What this host ranked it. Zero unless somebody said otherwise.
+    ///
+    /// **Host policy, not a property of the provider** — which is why it
+    /// is here and not in the descriptor. A library does not know how a
+    /// person ranks it against the others they installed, and two machines
+    /// with the same libraries can rank them differently.
+    pub fn priority(&self) -> i32 {
+        self.priority
+    }
+
+    /// Whether it can actually run here, and why not when it cannot.
+    ///
+    /// **Asked every time, never cached** — see
+    /// [`ProviderInfo::available`](super::desc::ProviderInfo::available).
+    /// A provider that declares no slot is available.
+    ///
+    /// What "available" means is between this host and that library. All
+    /// this does is carry the answer, and the reason when there is one.
+    pub fn available(&self) -> Result<(), &str> {
+        self.view.available()
+    }
+
+    /// Its own identifier, unique across every provider loaded.
+    pub fn id(&self) -> &str {
+        &self.view.id
+    }
+
+    /// The id of the library offering it.
+    pub fn library(&self) -> &str {
+        &self.library
+    }
+
+    /// Its version: the one it declared, or its library's when it declared
+    /// none. Declared semver, compared here as a string.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// What this registry filed it under, rendered from the host's
+    /// [`KeyTemplate`]. The argument [`Registry::provider`] takes.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// A name to show a person. Empty when the library offered none.
+    pub fn display_name(&self) -> &str {
+        &self.view.display_name
+    }
+
+    /// The library it came from.
+    pub fn from(&self) -> &Path {
+        &self.from
+    }
+
+    /// The name of the source that served its library, as a refresh
+    /// reports it, or empty for a library the host loaded or registered
+    /// itself. What `%source` renders.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// The schema for its configuration, as an ordinary value, or `None`
+    /// when it takes none.
+    ///
+    /// Read it with [`crate::schema::read::SchemaRef`] and check a
+    /// configuration against it with [`crate::schema::validate_map`] —
+    /// the provider declared it; nothing here interprets it.
+    pub fn config_schema(&self) -> Option<&crate::value::types::Value> {
+        self.view.config.as_ref()
+    }
+
+    /// Whatever else this provider declared, or `None`.
+    ///
+    /// A key this host does not recognise is skipped, the same rule the
+    /// value model has for a tag it does not know.
+    pub fn meta(&self) -> Option<&crate::value::types::Map> {
+        self.view.meta.as_ref()
+    }
+
+    /// The descriptions of the kinds this provider serves and of every
+    /// object kind their slots reach: what a host binds a kind from when
+    /// it has no file for it. Empty when the provider carries none, as a
+    /// provider written by hand may.
+    ///
+    /// # Errors
+    ///
+    /// [`DescriptionError`](crate::library::kind::DescriptionError) when
+    /// what it carries is not a description, naming where.
+    pub fn kind_descriptions(
+        &self,
+    ) -> Result<Vec<crate::library::kind::KindDescription>, crate::library::kind::DescriptionError>
+    {
+        match self.view.kind_descriptions() {
+            Some(text) => crate::library::kind::KindDescription::document_json(text),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// The function table and the size the library compiled it at.
+    ///
+    /// **Deliberately raw, and deliberately not generic.** Whoever
+    /// defines a `kind` defines what its table looks like, so only they
+    /// can say how large it must be. A typed read is
+    /// [`ProviderView::vtable_as`](crate::library::raw::ProviderView::vtable_as).
+    ///
+    /// Read it the way [`crate::value::Alloc::from_raw`] reads an
+    /// allocator: refuse a declared size below the kind's table, and read
+    /// only the slots that table has; a larger one is a table with slots
+    /// appended after them.
+    pub fn vtable(&self) -> (*const core::ffi::c_void, usize) {
+        (self.view.vtable, self.view.vtable_size)
+    }
+
+    /// The function table this provider speaks `kind` through, and the
+    /// size it was compiled at: a per-kind table first, then
+    /// [`vtable`](Provider::vtable) when it claims the kind. `None` for a
+    /// kind it does not serve, or serves as a pure label.
+    pub fn table_for(&self, kind: &str) -> Option<(*const core::ffi::c_void, usize)> {
+        self.view.table_for(kind)
+    }
+
+    /// This provider's per-kind table for `K`, validated, as a proxy over
+    /// its own `ctx`. The typed path: only a table in the descriptor's
+    /// `tables` qualifies.
+    ///
+    /// `Ok(None)` for a provider built only from a configuration (`create`
+    /// present, `ctx` null): its table fits `K`, and with no instance a
+    /// call through it could only fail. [`instantiate`](Provider::instantiate)
+    /// builds one; [`Offer::default_instance`] follows the same rule.
+    pub fn as_kind<K: ?Sized + Kind>(&self) -> Result<Option<Remote<K>>, KindMismatch> {
+        let remote = Remote::from_view(&self.view)?;
+        Ok(self.view.has_default_instance().then_some(remote))
+    }
+
+    /// An instance of this provider built from `config`, as `K`. See
+    /// [`Offer::instantiate`].
+    pub fn instantiate<K: ?Sized + Kind>(
+        &self,
+        config: &crate::value::types::Value,
+    ) -> Result<super::kind::Instance<K>, super::kind::InstantiateError> {
+        super::kind::Instance::build(&self.view, config)
+    }
+
+    /// The same, as an offer carrying what a chooser needs to show.
+    pub fn offer<K: ?Sized + Kind>(&self) -> Result<Offer<K>, KindMismatch> {
+        // Validated before anything is copied: most providers a kind is
+        // asked of serve another.
+        let remote = Remote::unheld(&self.view)?;
+        Ok(Offer::new(
+            remote,
+            self.view.clone(),
+            Some(self.key().to_string()),
+            Some(self.library.clone()),
+            self.version.clone(),
+            self.priority,
+        ))
+    }
+
+    /// The whole descriptor this provider was read from.
+    ///
+    /// [`ProviderView::vtable_as`] is on it, because casting a table to a
+    /// type is the one thing this module cannot do: it carries
+    /// `#![forbid(unsafe_code)]`, which is worth more than the
+    /// convenience of a shorter call.
+    pub fn view(&self) -> &ProviderView {
+        &self.view
+    }
+
+    /// The context pointer to hand back to every call through the table.
+    pub fn ctx(&self) -> *mut core::ffi::c_void {
+        self.view.ctx
+    }
+
+    /// Everything a [`KeyTemplate`] can name.
+    fn fields(&self) -> KeyFields<'_> {
+        KeyFields {
+            id: &self.view.id,
+            name: &self.view.display_name,
+            library: &self.library,
+            version: &self.version,
+            source: &self.source,
+        }
+    }
+}
+
+/// One library that was loaded, and what it offered.
+#[derive(Debug)]
+pub struct Loaded {
+    /// The file it came from.
+    pub path: PathBuf,
+    /// What this registry filed it under, from the host's library
+    /// template. Two libraries rendering one key are the same library as
+    /// far as this host is concerned, and the second is skipped.
+    pub key: Text,
+    /// The library's own identifier. Copied out of its descriptor.
+    pub id: String,
+    /// Its version string, uninterpreted. Copied out of its descriptor.
+    pub version: String,
+    /// The name of the source that served it, as a refresh reports it, or
+    /// empty for a library the host loaded or registered itself. What
+    /// `%source` renders.
+    pub source: String,
+    /// How many providers it registered — which is not how many it
+    /// offered, when one of them was already loaded from elsewhere.
+    pub providers: usize,
+    /// Providers it offered that were already registered. Empty on an
+    /// ordinary load; non-empty when this library re-exports something a
+    /// host already had.
+    pub skipped: Vec<Skipped>,
+    /// Whatever else the library declared, or `None`. A copy in this
+    /// process's own heap.
+    pub meta: Option<crate::value::types::Map>,
+    /// `path` resolved once at load time, for the dedup that runs before
+    /// anything is opened. Falls back to `path` when it cannot be resolved.
+    canonical: PathBuf,
+    /// The mapping, when this registry made one. Dropping it leaves the
+    /// library mapped; only `unload` closes it.
+    origin: Origin,
+    /// What every handle into this library holds: its tables, copied,
+    /// and the parts of a library the host built.
+    lease: Arc<Lease>,
+    /// Its say in being unmapped, or `None` for a library that declares
+    /// none. See [`LibraryInfo::unload`](super::desc::LibraryInfo::unload).
+    unload: Option<unsafe extern "C" fn() -> crate::value::status::Status>,
+    /// The file it was mapped from, or `None` for a library that came from
+    /// no file.
+    file: Option<LibraryFile>,
+}
+
+/// What a library file was when it was mapped: enough to tell later that
+/// the file at its path is still that file, unchanged. Device and inode on
+/// unix, volume serial and file index on Windows; size and last write on
+/// both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Identity {
+    volume: u64,
+    index: u64,
+    size: u64,
+    modified: (i64, i64),
+}
+
+impl Identity {
+    /// The identity of an open file.
+    #[cfg(unix)]
+    fn of(file: &std::fs::File) -> Result<Identity, std::io::Error> {
+        use std::os::unix::fs::MetadataExt as _;
+        let m = file.metadata()?;
+        Ok(Identity {
+            volume: m.dev(),
+            index: m.ino(),
+            size: m.size(),
+            modified: (m.mtime(), m.mtime_nsec()),
+        })
+    }
+
+    /// The identity of an open file.
+    #[cfg(windows)]
+    fn of(file: &std::fs::File) -> Result<Identity, std::io::Error> {
+        let info = winapi_util::file::information(file)?;
+        let written = info.last_write_time().unwrap_or(0);
+        Ok(Identity {
+            volume: info.volume_serial_number(),
+            index: info.file_index(),
+            size: info.file_size(),
+            modified: (i64::try_from(written).unwrap_or(i64::MAX), 0),
+        })
+    }
+
+    /// No identity where the platform names none.
+    #[cfg(not(any(unix, windows)))]
+    fn of(_file: &std::fs::File) -> Result<Identity, std::io::Error> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "this platform names no file identity",
+        ))
+    }
+
+    /// The identity of the file at `path`.
+    fn at(path: &Path) -> Result<Identity, std::io::Error> {
+        Identity::of(&std::fs::File::open(path)?)
+    }
+}
+
+/// A library file: its absolute path and its identity at load, known only
+/// when it was the same immediately before and after the mapping. No
+/// handle is held.
+#[derive(Debug)]
+struct LibraryFile {
+    path: PathBuf,
+    /// The identity, or why it is not known.
+    identity: Result<Identity, String>,
+    /// The digest once read.
+    digest: std::sync::Mutex<Option<String>>,
+}
+
+impl LibraryFile {
+    /// What a load of `path` saw, from the identities taken before and
+    /// after the mapping.
+    fn new(
+        path: PathBuf,
+        before: Result<Identity, std::io::Error>,
+        after: Result<Identity, std::io::Error>,
+    ) -> LibraryFile {
+        let identity = match (before, after) {
+            (Ok(before), Ok(after)) if before == after => Ok(before),
+            (Ok(_), Ok(_)) => Err("the file changed while it was being loaded".to_string()),
+            (Err(e), _) | (_, Err(e)) => Err(format!(
+                "the file could not be examined when it loaded: {e}"
+            )),
+        };
+        LibraryFile {
+            path,
+            identity,
+            digest: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// `sha256:` and 64 lowercase hex digits of the file at the path, read
+    /// while it is still the file that was loaded, and then kept.
+    fn digest(&self) -> Result<String, std::io::Error> {
+        use core::fmt::Write as _;
+        use sha2::Digest as _;
+        use std::io::Read as _;
+
+        let changed = || std::io::Error::other("the file changed since it was loaded");
+        // A poisoned lock guards nothing broken: the cache is set last.
+        let mut cached = self
+            .digest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(done) = &*cached {
+            return Ok(done.clone());
+        }
+        let loaded = self
+            .identity
+            .as_ref()
+            .map_err(|why| std::io::Error::other(format!("no digest can be vouched for: {why}")))?;
+        let mut file = std::fs::File::open(&self.path)?;
+        if Identity::of(&file)? != *loaded {
+            return Err(changed());
+        }
+        let mut hasher = sha2::Sha256::new();
+        let mut buf = alloc::vec![0u8; 64 * 1024];
+        loop {
+            match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => hasher.update(&buf[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        let mut text = String::with_capacity(7 + 64);
+        text.push_str("sha256:");
+        for byte in hasher.finalize() {
+            // Writing to a `String` cannot fail.
+            let _ = write!(text, "{byte:02x}");
+        }
+        // Written to while it was read: the bytes hashed are of no one
+        // state of the file.
+        if Identity::of(&file)? != *loaded {
+            return Err(changed());
+        }
+        *cached = Some(text.clone());
+        Ok(text)
+    }
+}
+
+impl Loaded {
+    /// The SHA-256 of the file this library was mapped from, as `sha256:`
+    /// and 64 lowercase hex digits, or `None` for a library that came from
+    /// no file: one the host registered, or one a source served.
+    ///
+    /// At load the registry maps the file by its absolute path and records
+    /// the file's identity (device and inode on unix, volume and file index
+    /// on Windows, with its size and last write) from that path just before
+    /// and just after the mapping; no handle is kept. The first time a host
+    /// asks, the file at that path is opened, its identity checked against
+    /// the recorded one, hashed in full on the calling thread, and checked
+    /// again; only then is the digest kept. So **a digest is answered only
+    /// for the file that was loaded, unchanged**; a file replaced or
+    /// written since is an error, never another file's digest. What it says
+    /// is what was loaded, not whether it should have been: a host that
+    /// pins libraries by digest checks the bytes before it loads them.
+    ///
+    /// # Errors
+    ///
+    /// "the file changed since it was loaded" when the identity differs;
+    /// the reason when the identity could not be recorded at load (the file
+    /// could not be examined, or changed during the load); the I/O error of
+    /// a read. Only a success is kept, so a later call asks again.
+    pub fn digest(&self) -> Result<Option<String>, std::io::Error> {
+        self.file.as_ref().map(LibraryFile::digest).transpose()
+    }
+
+    /// Everything a library [`KeyTemplate`] can name.
+    fn fields(&self) -> KeyFields<'_> {
+        KeyFields::library(&self.id, &self.version).with_source(&self.source)
+    }
+
+    /// Whether the registry closes it once nothing uses it: a mapping, or
+    /// a library a source served.
+    pub(crate) fn closes(&self) -> bool {
+        self.origin.closes()
+    }
+
+    /// Whether a source served it.
+    pub(crate) fn is_served(&self) -> bool {
+        self.origin.is_served()
+    }
+
+    /// Its say in being unmapped, for `unload` to ask.
+    pub(crate) fn unload_slot(
+        &self,
+    ) -> Option<unsafe extern "C" fn() -> crate::value::status::Status> {
+        self.unload
+    }
+
+    /// The lease every handle into it holds.
+    pub(crate) fn lease(&self) -> &Arc<Lease> {
+        &self.lease
+    }
+}
+
+/// A library this registry mapped, retired and has not closed yet: kept
+/// until no handle holds its lease and its slot agrees.
+#[derive(Debug)]
+struct Leaving {
+    key: String,
+    lease: Arc<Lease>,
+    origin: Origin,
+    unload: Option<unsafe extern "C" fn() -> crate::value::status::Status>,
+}
+
+/// One library leaving the registry: its record, and what `retire` or
+/// `unload` decides the fate of.
+pub(crate) struct Taken {
+    pub(crate) retired: Retired,
+    pub(crate) origin: Origin,
+    pub(crate) lease: Arc<Lease>,
+    pub(crate) unload: Option<unsafe extern "C" fn() -> crate::value::status::Status>,
+}
+
+/// What one library taking its leave came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Retired {
+    /// The library key it answered to, which may now be loaded again.
+    pub key: String,
+    /// Its own identifier.
+    pub id: String,
+    /// Its version string, uninterpreted.
+    pub version: String,
+    /// How many providers left the registry with it.
+    pub providers: usize,
+}
+
+/// Why a library could not be retired or unloaded.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum UnloadError {
+    /// No library answers to that key.
+    NotFound {
+        /// The key that was asked for.
+        key: String,
+    },
+    /// It is code in the host's own binary — `register_local`,
+    /// `register_entry` — so there is no mapping to unmap. Retiring it
+    /// works; unloading it cannot.
+    Linked {
+        /// The library key.
+        key: String,
+    },
+    /// The library has no `unload` slot, so it promises nothing about
+    /// what it handed out. It is left as it was;
+    /// [`unload_unchecked`](Registry::unload_unchecked) is the host
+    /// insisting.
+    NotSupported {
+        /// The library key.
+        key: String,
+    },
+    /// A handle still holds the library's lease — a `Remote`, an
+    /// `Offer`, an `Instance`, an `Object` or a `ProviderView` taken from
+    /// it, or an answer another library pinned through the host's services
+    /// — and the library is left exactly as it was. Drop them, or retire
+    /// it and let [`collect`](Registry::collect) close it once they are
+    /// gone.
+    Busy {
+        /// The library key.
+        key: String,
+        /// How many holds there were besides the registry's own.
+        leases: usize,
+    },
+    /// The library's own `unload` slot refused, and the library is left
+    /// exactly as it was: registered and mapped.
+    Refused {
+        /// The library key.
+        key: String,
+        /// What it answered.
+        status: crate::value::status::Status,
+    },
+    /// The loader could not close the mapping. The library is retired
+    /// either way, and the handle is given up.
+    Close {
+        /// The library key.
+        key: String,
+        /// The loader's own message.
+        reason: String,
+    },
+}
+
+impl core::fmt::Display for UnloadError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            UnloadError::NotFound { key } => write!(f, "no library answers to `{key}`"),
+            UnloadError::Linked { key } => write!(
+                f,
+                "`{key}` is linked into this binary and cannot be unmapped"
+            ),
+            UnloadError::NotSupported { key } => write!(
+                f,
+                "`{key}` has no unload slot, so it does not support being unloaded"
+            ),
+            UnloadError::Busy { key, leases } => {
+                write!(f, "`{key}` is still in use: {leases} handle(s) hold it")
+            }
+            UnloadError::Refused { key, status } => {
+                write!(f, "`{key}` refused to be unloaded ({status:?})")
+            }
+            UnloadError::Close { key, reason } => write!(
+                f,
+                "`{key}` was retired and its mapping could not be closed: {reason}"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for UnloadError {}
+
+/// The host's own table of what it has loaded.
+///
+/// # What a library sees of it
+///
+/// A library is handed a [`Host`]: a pointer to a block this registry
+/// leaks on first use and never frees, carrying the host's name, its
+/// allocator and a services table. The table reads a **snapshot** this
+/// registry publishes after every change — loading, re-keying, ranking —
+/// so a lookup from a library never borrows the registry itself, and no
+/// lock is held while a library's entry point runs. A lookup made from an
+/// entry point sees every library registered before it, not the one being
+/// loaded. Once this registry is dropped the block answers
+/// `GUATIAO_ERR_GONE`.
+///
+/// # Dropping it leaves every library mapped
+///
+/// A [`Remote`], an [`Offer`] or a boxed trait taken from it holds its
+/// library's lease and may outlive it, so a drop forgets each mapping
+/// rather than closing it, as [`retire`](Registry::retire) does.
+/// [`unload`](Registry::unload) and [`collect`](Registry::collect) are the
+/// only ways a library is unmapped.
+///
+/// # A registry does not isolate an image
+///
+/// The loader maps one file once per process, however many registries
+/// load it. A second registry loading a file the first already loaded
+/// gets the same image: the same statics, and the same descriptor a
+/// derived library built on its first entry call, with the [`Host`] and
+/// allocator of the registry that loaded it first. Its lookups through
+/// that host then answer `GUATIAO_ERR_GONE` once that first registry is
+/// dropped. A host that rebuilds its registry on a reload carries the
+/// library's state over; it does not start it again.
+#[derive(Debug)]
+pub struct Registry {
+    /// The host's own name and version, OWNED. The block a library keeps
+    /// carries its own copies.
+    host_id: Box<str>,
+    host_version: Box<str>,
+    alloc: Option<Alloc>,
+    key: KeyTemplate,
+    library_key: KeyTemplate,
+    loaded: Vec<Loaded>,
+    providers: Vec<Provider>,
+    /// A rendered key to an index into `providers`.
+    by_key: BTreeMap<String, usize>,
+    /// Provider id to the rank this host gave it.
+    ///
+    /// Kept beside the registry rather than on the descriptor because it
+    /// is the HOST's opinion. Absent means 0, so an unranked provider
+    /// sorts below any raised one and alongside every other unranked one.
+    priorities: BTreeMap<String, i32>,
+    /// Where a file this registry opens has its imports found.
+    import_search: ImportSearch,
+    /// What the services read. This is the strong handle; the block holds
+    /// a weak one, so dropping the registry is what makes it `GONE`.
+    shared: Arc<Shared>,
+    /// The block libraries keep, leaked on first use.
+    block: Option<&'static HostBlock>,
+    /// Libraries retired and not yet closed, oldest first.
+    leaving: Vec<Leaving>,
+    /// The sources the host added, each with what it opened.
+    pub(crate) sources: Vec<super::source::SourceState>,
+    /// The directories the host watches, each with what it saw.
+    pub(crate) watched: Vec<super::source::WatchState>,
+}
+
+// `Send` and `Sync` for this type are declared in `raw/host.rs`, where
+// `unsafe` is allowed; the reasoning is beside them.
+
+impl Registry {
+    /// A registry that introduces its host as `id`/`version`, offering
+    /// libraries no allocator of its own.
+    pub fn new(id: &str, version: &str) -> Registry {
+        Registry::with_alloc(id, version, None)
+    }
+
+    /// The same, offering libraries the host's allocator so a tree they
+    /// build for it is built in the host's arena.
+    pub fn with_alloc(id: &str, version: &str, alloc: Option<Alloc>) -> Registry {
+        Registry {
+            host_id: id.into(),
+            host_version: version.into(),
+            alloc,
+            key: KeyTemplate::default(),
+            library_key: KeyTemplate::library("%id").expect("one field and nothing else"),
+            loaded: Vec::new(),
+            providers: Vec::new(),
+            by_key: BTreeMap::new(),
+            priorities: BTreeMap::new(),
+            import_search: ImportSearch::default(),
+            shared: Arc::new(Shared::default()),
+            block: None,
+            leaving: Vec::new(),
+            sources: Vec::new(),
+            watched: Vec::new(),
+        }
+    }
+
+    /// How this host introduces itself to a library: a handle to a block
+    /// that outlives this registry.
+    ///
+    /// Leaked on the first call and reused after. A host driving a library
+    /// itself hands it this; the loader hands it to every entry point.
+    pub fn host(&mut self) -> Host {
+        let block = match self.block {
+            Some(block) => block,
+            None => {
+                let block = super::raw::leak_host_block(
+                    &self.host_id,
+                    &self.host_version,
+                    self.alloc,
+                    Arc::downgrade(&self.shared),
+                );
+                self.block = Some(block);
+                block
+            }
+        };
+        block.host()
+    }
+
+    /// Republishes what the services read. Called after every change.
+    fn publish(&self) {
+        self.publish_without(None);
+    }
+
+    /// Republishes what the services read, leaving out the providers of
+    /// the library `without` holds: the first step of an `unload`, so no
+    /// library can pin one of them while the registry counts its holds.
+    pub(crate) fn publish_without(&self, without: Option<&Arc<Lease>>) {
+        let ranked = self.ranked(self.providers.iter());
+        let mut snapshot = Snapshot::default();
+        for provider in ranked {
+            // Every provider the registry holds has a lease of its
+            // library's, which built a descriptor for it.
+            let Some(lease) = provider.view.hold.lease() else {
+                continue;
+            };
+            if without.is_some_and(|w| Arc::ptr_eq(w, lease)) {
+                continue;
+            }
+            // One hold per library, however many providers it offers.
+            let held = match snapshot.leases.iter().position(|l| Arc::ptr_eq(l, lease)) {
+                Some(at) => at,
+                None => {
+                    snapshot.leases.push(Arc::clone(lease));
+                    snapshot.leases.len() - 1
+                }
+            };
+            snapshot
+                .by_key
+                .insert(provider.key().to_string(), snapshot.entries.len());
+            snapshot.entries.push(SnapshotEntry {
+                kinds: provider.view.kinds.clone(),
+                lease: held,
+                at: provider.at,
+            });
+        }
+        // A poisoned lock means a reader panicked while holding it; the
+        // snapshot it was reading is intact, and this replaces it.
+        let mut slot = self
+            .shared
+            .snapshot
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = snapshot;
+    }
+
+    /// Ranks every provider with this id, now and whenever one loads.
+    ///
+    /// **This is how a host chooses between two implementations of one
+    /// kind**, and it is a host's call rather than a library's: a library
+    /// does not know what else is installed, and two machines with the
+    /// same set can rank them differently. A frontend reads its own
+    /// configuration and calls this; nothing here reads a file.
+    ///
+    /// Takes effect immediately for what is already loaded, and is
+    /// remembered for anything that loads later — so the order in which a
+    /// host ranks and scans does not change the answer.
+    pub fn set_priority(&mut self, id: &str, priority: i32) {
+        self.priorities.insert(id.to_string(), priority);
+        for provider in &mut self.providers {
+            if provider.view.id == *id {
+                provider.priority = priority;
+            }
+        }
+        self.publish();
+    }
+
+    /// What this host ranked that id. Zero unless it said otherwise.
+    pub fn priority(&self, id: &str) -> i32 {
+        self.priorities.get(id).copied().unwrap_or(0)
+    }
+
+    /// Where every file this registry opens from now on has its imports
+    /// found: [`load_file`](Registry::load_file), a scan, a watched
+    /// directory and [`add_source_file`](Registry::add_source_file).
+    /// [`ImportSearch::Library`] unless the host says otherwise; what is
+    /// already open stays as it was opened.
+    pub fn set_import_search(&mut self, search: ImportSearch) {
+        self.import_search = search;
+    }
+
+    /// Where a file this registry opens has its imports found.
+    pub fn import_search(&self) -> ImportSearch {
+        self.import_search
+    }
+
+    /// Every provider serving one kind, best first.
+    ///
+    /// **`(priority DESC, key ASC)`**. The key tiebreak is deliberate:
+    /// load order follows directory iteration, which no filesystem
+    /// promises to keep stable across runs or machines, so "whichever
+    /// loaded first" is not a rule anyone can document or reproduce. A key
+    /// is arbitrary but **deterministic and inspectable**, and a host that
+    /// wants a different winner says so with a priority rather than
+    /// depending on an order nothing guarantees.
+    ///
+    /// Collected rather than lazy, because sorting needs every candidate
+    /// first. A registry holds tens of providers, not millions.
+    fn ranked<'a>(&'a self, of: impl Iterator<Item = &'a Provider>) -> Vec<&'a Provider> {
+        let mut found: Vec<&Provider> = of.collect();
+        found.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then_with(|| a.key().cmp(b.key()))
+        });
+        found
+    }
+
+    /// Names LIBRARIES with `template` rather than the default `%id`.
+    ///
+    /// This is the "how many versions of one library may I have" knob.
+    /// `%id` means one, and a second is skipped as
+    /// [`Skipped::AlreadyLoaded`]; `"%id@%version"` means as many as are
+    /// on disk, because two builds then render two keys.
+    ///
+    /// With `%id` and a directory scan, **which** build survives is the
+    /// scan's order: [`scan_dir`](super::scan::scan_dir) visits names in
+    /// byte order and the first to claim a key keeps it. That is not
+    /// version order: of `libfoo-1.2.0` and `libfoo-1.10.0` a descending
+    /// scan loads 1.2.0. A host wanting the newest uses `"%id@%version"`,
+    /// loads every build, and picks with the semver library it already
+    /// has; the loader never parses a version.
+    pub fn libraries_keyed_by(&mut self, template: &str) -> Result<(), KeyError> {
+        let key = KeyTemplate::library(template)?;
+        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+        for (at, one) in self.loaded.iter().enumerate() {
+            let rendered = key.render(one.fields());
+            if seen.insert(rendered.clone(), at).is_some() {
+                return Err(KeyError::Collides { key: rendered });
+            }
+        }
+        for one in &mut self.loaded {
+            one.key = Text::new(&key.render(one.fields()));
+        }
+        self.library_key = key;
+        Ok(())
+    }
+
+    /// The template this registry files libraries under.
+    pub fn library_key_template(&self) -> &KeyTemplate {
+        &self.library_key
+    }
+
+    /// The id this host introduces itself by.
+    pub fn host_id(&self) -> &str {
+        &self.host_id
+    }
+
+    /// The version this host introduces itself by.
+    pub fn host_version(&self) -> &str {
+        &self.host_version
+    }
+
+    /// Names PROVIDERS with `template` rather than the default `%id`.
+    ///
+    /// `"%id@%version"` is the one to reach for: it is what lets two
+    /// builds of one provider sit in one registry. The whole field list is
+    /// on [`KeyTemplate`].
+    ///
+    /// Callable at any point — anything already loaded is re-keyed, and a
+    /// template that would give two of them the same key is refused with
+    /// [`KeyError::Collides`] rather than losing one. **A refusal changes
+    /// nothing**: every key is rendered and checked before any is written.
+    pub fn keyed_by(&mut self, template: &str) -> Result<(), KeyError> {
+        let key = KeyTemplate::provider(template)?;
+        let rendered: Vec<String> = self
+            .providers
+            .iter()
+            .map(|p| key.render(p.fields()))
+            .collect();
+
+        let mut by_key = BTreeMap::new();
+        for (at, one) in rendered.iter().enumerate() {
+            if by_key.insert(one.clone(), at).is_some() {
+                return Err(KeyError::Collides { key: one.clone() });
+            }
+        }
+
+        for (provider, one) in self.providers.iter_mut().zip(rendered) {
+            provider.key = Text::new(&one);
+        }
+        self.by_key = by_key;
+        self.key = key;
+        self.publish();
+        Ok(())
+    }
+
+    /// The template this registry files providers under.
+    pub fn key_template(&self) -> &KeyTemplate {
+        &self.key
+    }
+
+    /// A path as the dedup compares it: resolved, or itself when it
+    /// cannot be.
+    fn canonical(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    /// Where this library is already loaded from, by canonical path.
+    ///
+    /// Asked **before** opening anything, because it is the one dedup that
+    /// costs no `dlopen` — and mapping a library is irreversible.
+    fn loaded_from_path(&self, path: &Path) -> Option<&Loaded> {
+        let want = Registry::canonical(path);
+        self.loaded.iter().find(|l| l.canonical == want)
+    }
+
+    /// Loads one file the caller named.
+    ///
+    /// [`Loading::Skipped`] is an **answer**, not a failure: the file is
+    /// not a library, the library declined this host, or it is one this
+    /// registry already has. That is why a caller can hand this every file
+    /// in a directory without pre-filtering by name, and why a repeat is
+    /// cheap rather than loud — a host's search path and the directory
+    /// beside its executable are routinely the same place.
+    ///
+    /// **Mapping a library runs its static initialisers**, which may do
+    /// anything, including abort the process. Name files you are willing
+    /// to run.
+    ///
+    /// A library's entry point may ask its [`Host`] what is loaded: it
+    /// sees every library registered before it, and not itself. A
+    /// provider that needs a peer offered by a library loaded later looks
+    /// it up from a vtable call, not from `describe`.
+    pub fn load_file(&mut self, path: &Path) -> Result<Loading<'_>, LoadError> {
+        self.load_from(path, "")
+    }
+
+    /// [`load_file`](Registry::load_file) for a file `source` found.
+    pub(crate) fn load_from(
+        &mut self,
+        path: &Path,
+        source: &str,
+    ) -> Result<Loading<'_>, LoadError> {
+        self.collect();
+        // By path first: the only dedup that can happen without loading.
+        if let Some(already) = self.loaded_from_path(path) {
+            let from = already.path.clone();
+            return Ok(Loading::Skipped(Skipped::AlreadyLoaded { from }));
+        }
+
+        // The entry point runs with nothing of this registry borrowed or
+        // locked: the host it reads is the leaked block, and what the
+        // block answers is the last published snapshot.
+        let host = self.host();
+        // One absolute path for the mapping and for `Loaded::digest`: a bare
+        // name is the file in the current directory on every platform, not
+        // whatever the loader's own search finds.
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let before = Identity::at(&absolute);
+        let opened =
+            super::raw::open_library(&absolute, host, self.import_search).map_err(|reason| {
+                LoadError::Open {
+                    path: path.to_path_buf(),
+                    reason,
+                }
+            })?;
+        let after = Identity::at(&absolute);
+        let file = LibraryFile::new(absolute, before, after);
+        self.absorb_file(path, source, opened, Some(file))
+    }
+
+    /// Registers a library the host **links** rather than loads: its
+    /// providers are compiled into the host, and `describe` is what its
+    /// entry point would have called.
+    ///
+    /// The same absorb as [`load_file`](Registry::load_file) — the same
+    /// keys, the same dedup, the same refusals, the same `Loaded` record
+    /// — over a descriptor that came from this process instead of a
+    /// file. `name` stands in for the path in every report (`<name>`),
+    /// and a second registration under the same name is
+    /// [`Skipped::AlreadyLoaded`] like a second load of one file.
+    ///
+    /// `describe` is what `guatiao::local_providers!` writes as
+    /// `library`, or a hand-written library's own `describe`; it sees
+    /// this registry's [`Host`] exactly as a loaded library's entry would,
+    /// and answers anything that converts to a [`LocalLibrary`]: owned
+    /// [`LibraryParts`](super::kind::LibraryParts), which the library's
+    /// lease keeps until it is retired and its last handle dropped, or a
+    /// borrowed descriptor, read and copied here and not kept. A `None`
+    /// is the library declining this host.
+    ///
+    /// **Registering a descriptor is trusting its producer**, as loading
+    /// a file is: it is read under the same checks, and what they cannot
+    /// see — that a table is one for the kind it names, that a slot
+    /// expects its `ctx` — is the producer's contract.
+    pub fn register_local<'a, L: Into<LocalLibrary<'a>>>(
+        &mut self,
+        name: &str,
+        describe: impl FnOnce(Host) -> Option<L>,
+    ) -> Result<Loading<'_>, LoadError> {
+        self.collect();
+        let path = PathBuf::from(format!("<{name}>"));
+        if let Some(already) = self.loaded_from_path(&path) {
+            let from = already.path.clone();
+            return Ok(Loading::Skipped(Skipped::AlreadyLoaded { from }));
+        }
+        let host = self.host();
+        let opened = super::raw::open_local(describe(host).map(Into::into));
+        self.absorb(&path, "", opened)
+    }
+
+    /// [`register_local`](Registry::register_local) for a library that
+    /// speaks C: `entry` is what its `guatiao_library_entry` would be --
+    /// a library written in C and linked into a Rust host, or anything a
+    /// host written in C links (`guatiao_registry_register_entry`). The
+    /// same absorb, keys, dedup, refusals and `<name>` path.
+    ///
+    /// **Handing over an entry point is choosing to run it**, as naming a
+    /// file is for [`load_file`](Registry::load_file): `entry` is called
+    /// with this registry's host block and answers null or a descriptor
+    /// well-formed for its own `struct_size` that lives for the process --
+    /// exactly what a loaded library's entry point promises, and read under
+    /// the same checks.
+    pub fn register_entry(&mut self, name: &str, entry: EntryFn) -> Result<Loading<'_>, LoadError> {
+        self.collect();
+        let path = PathBuf::from(format!("<{name}>"));
+        if let Some(already) = self.loaded_from_path(&path) {
+            let from = already.path.clone();
+            return Ok(Loading::Skipped(Skipped::AlreadyLoaded { from }));
+        }
+        let host = self.host();
+        let opened = super::raw::open_entry(entry, host);
+        self.absorb(&path, "", opened)
+    }
+
+    /// Records what opening `path` came to, served by `source` (empty for
+    /// none). Everything after the `dlopen`, so it is testable without one.
+    pub(crate) fn absorb(
+        &mut self,
+        path: &Path,
+        source: &str,
+        opened: Opened,
+    ) -> Result<Loading<'_>, LoadError> {
+        self.absorb_file(path, source, opened, None)
+    }
+
+    /// [`absorb`](Registry::absorb) for a library mapped from `file`, kept
+    /// with its record when it is loaded.
+    fn absorb_file(
+        &mut self,
+        path: &Path,
+        source: &str,
+        opened: Opened,
+        file: Option<LibraryFile>,
+    ) -> Result<Loading<'_>, LoadError> {
+        let (lib, mut origin) = match opened {
+            Opened::NoEntrySymbol => return Ok(Loading::Skipped(Skipped::NoEntrySymbol)),
+            Opened::Declined => return Ok(Loading::Skipped(Skipped::DeclinedThisHost)),
+            Opened::Rejected(Rejected::UnsupportedAbi { declared }) => {
+                return Ok(Loading::Skipped(Skipped::UnsupportedAbi { declared }));
+            }
+            Opened::Rejected(Rejected::Malformed(why)) => {
+                return Err(LoadError::Malformed {
+                    path: path.to_path_buf(),
+                    reason: why.to_string(),
+                });
+            }
+            Opened::Loaded(view, origin) => (view, origin),
+        };
+        let LibraryView {
+            id,
+            version,
+            meta,
+            unload,
+            providers: views,
+        } = lib;
+
+        // By KEY after: the same library staged at two paths is the same
+        // library, which is the case a path comparison cannot see and a
+        // filename comparison only guesses at. Whether two versions of one
+        // library are the same thing is the host's template's answer.
+        let library_key = self
+            .library_key
+            .render(KeyFields::library(&id, &version).with_source(source));
+        if let Some(already) = self.loaded.iter().find(|l| *l.key == *library_key) {
+            let from = already.path.clone();
+            self.pass_over(origin);
+            return Ok(Loading::Skipped(Skipped::AlreadyLoaded { from }));
+        }
+
+        // **The rendered key is what decides whether a provider is already
+        // here.** Under `%id` a second build of one provider renders the
+        // key the first did and is passed over; under `%id@%version` it
+        // renders its own and is kept. Same key and same id is the ordinary
+        // repeat — a re-export, a vendored copy, a second build — and the
+        // rest of the library goes on loading. Same key and a DIFFERENT id
+        // is the host's template failing, refused before anything is
+        // recorded so the registry is left exactly as it was.
+        let mut skipped = Vec::new();
+        let mut taken: Vec<(ProviderView, String, String)> = Vec::new();
+        for view in views {
+            // A provider's own version, or its library's when it declared
+            // none.
+            let at = view.version.clone().unwrap_or_else(|| version.clone());
+            let key = self.key.render(KeyFields {
+                id: &view.id,
+                name: &view.display_name,
+                library: &id,
+                version: &at,
+                source,
+            });
+
+            // Whoever holds that key already: registered earlier, or
+            // earlier in this same library.
+            let holder: Option<(String, PathBuf)> = self
+                .by_key
+                .get(&key)
+                .map(|&i| {
+                    (
+                        self.providers[i].view.id.clone(),
+                        self.providers[i].from.clone(),
+                    )
+                })
+                .or_else(|| {
+                    taken
+                        .iter()
+                        .find(|(_, _, earlier)| *earlier == key)
+                        .map(|(v, _, _)| (v.id.clone(), path.to_path_buf()))
+                });
+            match holder {
+                Some((held_by, from)) if held_by == view.id => {
+                    skipped.push(Skipped::ProviderAlreadyLoaded {
+                        id: view.id.clone(),
+                        from,
+                    });
+                }
+                Some((_, first)) => {
+                    self.pass_over(origin);
+                    return Err(LoadError::Duplicate {
+                        key,
+                        first,
+                        second: path.to_path_buf(),
+                    });
+                }
+                None => taken.push((view, at, key)),
+            }
+        }
+
+        let count = taken.len();
+        // Every handle into the library holds this: the registry's copies
+        // of its tables, and the parts of one the host built.
+        let mut views: Vec<ProviderView> = Vec::with_capacity(count);
+        let mut named: Vec<(String, String)> = Vec::with_capacity(count);
+        for (view, at, key) in taken {
+            views.push(view);
+            named.push((at, key));
+        }
+        let lease = Lease::adopt(&mut views, origin.take_parts());
+        for (built, (view, (at, key))) in views.into_iter().zip(named).enumerate() {
+            // What this host already said about that id, if anything —
+            // read BEFORE the view moves into the provider.
+            let priority = self.priorities.get(&view.id).copied().unwrap_or(0);
+            self.by_key.insert(key.clone(), self.providers.len());
+            self.providers.push(Provider {
+                view,
+                from: path.to_path_buf(),
+                library: id.clone(),
+                version: at,
+                source: source.to_string(),
+                key: Text::new(&key),
+                priority,
+                at: built,
+            });
+        }
+        self.loaded.push(Loaded {
+            path: path.to_path_buf(),
+            key: Text::new(&library_key),
+            id,
+            version,
+            source: source.to_string(),
+            providers: count,
+            skipped,
+            meta,
+            canonical: Registry::canonical(path),
+            origin,
+            lease,
+            unload,
+            file,
+        });
+        self.publish();
+        Ok(Loading::Loaded(self.loaded.last().expect("just pushed")))
+    }
+
+    /// Gives up the handle of a file passed over after its entry point ran.
+    ///
+    /// A second handle to an image this registry already holds is closed:
+    /// the loader counted the open against that image, so closing is a
+    /// decrement and the image stays, and keeping it would leave `unload`
+    /// unable to unmap. Any other image keeps its mapping, since whatever
+    /// its entry point started may still address it.
+    fn pass_over(&self, origin: Origin) {
+        // Opened and not kept: the source hears of it at once.
+        if origin.is_served() {
+            let _ = origin.close();
+            return;
+        }
+        if self.loaded.iter().any(|l| l.origin.same_image(&origin)) {
+            // A failed close leaves the handle given up, which is `keep`.
+            let _ = origin.close();
+        } else {
+            origin.keep();
+        }
+    }
+
+    /// Takes one library out of this registry, **leaving it mapped**.
+    ///
+    /// `key` is the library key, from the template
+    /// [`libraries_keyed_by`](Registry::libraries_keyed_by) sets (`%id` by
+    /// default). Its providers leave the registry and the snapshot a
+    /// library reads, its [`Loaded`] record goes, and the key may be
+    /// loaded again — a retired library is not
+    /// [`Skipped::AlreadyLoaded`]. Nothing new can be obtained from it;
+    /// what a host already took — a [`Remote`], an [`Offer`], an
+    /// instance, an object, an answer another library pinned through the
+    /// host's services — keeps working, because each holds the library's
+    /// lease and the mapping stays.
+    ///
+    /// **A retired library is closed when nothing uses it**: once no
+    /// handle holds its lease and, for one mapped from a file, its
+    /// `unload` slot agrees, [`collect`](Registry::collect) closes it, as
+    /// does this registry's next `load_file`, `register_local`,
+    /// `register_entry`, `retire`, `unload` or `refresh`. A mapped library
+    /// with no slot stays mapped. A library a source served is closed the
+    /// same way, its own slot asked when it has one, and its source told.
+    /// A library the host links has nothing to close, and is let go here. The lease, with its copies of the library's tables
+    /// and the parts of one the host built, is freed when the last handle
+    /// is dropped and the registry has let it go.
+    pub fn retire(&mut self, key: &str) -> Result<Retired, UnloadError> {
+        self.collect();
+        let taken = self.take_library(key)?;
+        if taken.origin.closes() {
+            self.leaving.push(Leaving {
+                key: taken.retired.key.clone(),
+                lease: taken.lease,
+                origin: taken.origin,
+                unload: taken.unload,
+            });
+        } else {
+            taken.origin.keep();
+        }
+        Ok(taken.retired)
+    }
+
+    /// Closes every retired library nothing uses any more, and answers
+    /// their keys, oldest first.
+    ///
+    /// A library qualifies once no handle holds its lease. It is then
+    /// asked through its `unload` slot, and closed when it agrees; one
+    /// that refuses stays retired and mapped and is asked again next time,
+    /// and one with no slot promises nothing and stays mapped. Dropping a
+    /// handle never closes anything: the handle may be dropped while the
+    /// library's own code is on the stack.
+    pub fn collect(&mut self) -> Vec<String> {
+        let mut closed = Vec::new();
+        let mut kept = Vec::new();
+        for leaving in core::mem::take(&mut self.leaving) {
+            // The registry's own entry is the only hold left.
+            if Arc::strong_count(&leaving.lease) > 1 {
+                kept.push(leaving);
+                continue;
+            }
+            // A served library with no slot of its own has its source's
+            // `close` as its promise; a mapped one with none promises nothing.
+            let agrees = match leaving.unload {
+                Some(ask) => super::raw::ask_unload(ask) == Status::GUATIAO_OK,
+                None => leaving.origin.is_served(),
+            };
+            if !agrees {
+                kept.push(leaving);
+                continue;
+            }
+            let Leaving {
+                key, lease, origin, ..
+            } = leaving;
+            drop(lease);
+            // A failed close leaves the handle given up, as `libloading`
+            // does; the library is gone from the registry either way.
+            let _ = origin.close();
+            closed.push(key);
+        }
+        self.leaving = kept;
+        closed
+    }
+
+    /// How many holds `loaded`'s lease has besides this registry's own:
+    /// its record, and the views of its providers it keeps. Asked once its
+    /// providers are unpublished, so the snapshot holds it no more.
+    pub(crate) fn holds_besides_own(&self, loaded: &Loaded) -> usize {
+        let lease = &loaded.lease;
+        let mine = self
+            .providers
+            .iter()
+            .filter(|p| p.view.hold.holds(lease))
+            .count();
+        Arc::strong_count(lease).saturating_sub(1 + mine)
+    }
+
+    /// The record one library key answers to.
+    ///
+    /// For `unload`, which lives in `raw/image.rs` because asking a
+    /// library's slot is `unsafe` and this module carries
+    /// `#![forbid(unsafe_code)]`.
+    pub(crate) fn library(&self, key: &str) -> Option<&Loaded> {
+        self.loaded.iter().find(|l| *l.key == *key)
+    }
+
+    /// Removes a library and hands back its record, its mapping and its
+    /// lease. Whoever calls decides what becomes of them.
+    pub(crate) fn take_library(&mut self, key: &str) -> Result<Taken, UnloadError> {
+        let at = self
+            .loaded
+            .iter()
+            .position(|l| *l.key == *key)
+            .ok_or_else(|| UnloadError::NotFound {
+                key: key.to_string(),
+            })?;
+        let one = self.loaded.remove(at);
+
+        // By path, which is what `absorb` recorded on every provider it
+        // took from this library and is unique per registered library.
+        let before = self.providers.len();
+        self.providers.retain(|p| p.from != one.path);
+        let providers = before - self.providers.len();
+
+        // `by_key` is by index, so every index after a removal is wrong.
+        self.by_key = self
+            .providers
+            .iter()
+            .enumerate()
+            .map(|(at, p)| (p.key().to_string(), at))
+            .collect();
+        self.publish();
+
+        Ok(Taken {
+            retired: Retired {
+                key: key.to_string(),
+                id: one.id,
+                version: one.version,
+                providers,
+            },
+            origin: one.origin,
+            lease: one.lease,
+            unload: one.unload,
+        })
+    }
+
+    /// Every provider that speaks one kind, best first: `(priority DESC,
+    /// key ASC)`.
+    ///
+    /// The capability question — "what can serve this?" — as opposed to
+    /// [`provider`](Registry::provider), which is the identity one. A
+    /// provider serving several kinds answers to each of them, which is
+    /// why it is one provider rather than one per kind.
+    pub fn providers(&self, kind: &str) -> impl Iterator<Item = &Provider> {
+        self.ranked(self.providers.iter().filter(move |p| p.supports(kind)))
+            .into_iter()
+    }
+
+    /// Every provider of every kind, best first: `(priority DESC, key
+    /// ASC)`. [`all`](Registry::all) is the same set in load order.
+    pub fn all_ranked(&self) -> impl Iterator<Item = &Provider> {
+        self.ranked(self.providers.iter()).into_iter()
+    }
+
+    /// Every provider serving `K` with a valid table, as the trait, best
+    /// first — **unavailable ones included**. The consumer asks each and
+    /// chooses; nothing here picks.
+    ///
+    /// A provider claiming `K` whose table fails validation is not an
+    /// offer, because it cannot be called; [`mismatches`](Registry::mismatches)
+    /// reports it.
+    pub fn offers<K: ?Sized + Kind>(&self) -> impl Iterator<Item = Offer<K>> + '_ {
+        self.providers(K::NAME).filter_map(|p| p.offer::<K>().ok())
+    }
+
+    /// Providers claiming `K` whose per-kind table failed validation,
+    /// each with why, so a host can report them rather than lose them.
+    ///
+    /// A provider claiming `K` with no per-kind table — a library written
+    /// before per-kind tables existed, or a pure label — is neither an
+    /// offer nor a mismatch: the typed path never saw a table to judge.
+    pub fn mismatches<K: ?Sized + Kind>(
+        &self,
+    ) -> impl Iterator<Item = (&Provider, KindMismatch)> + '_ {
+        self.providers(K::NAME)
+            .filter_map(|p| p.as_kind::<K>().err().map(|why| (p, why)))
+            .filter(|(_, why)| *why != KindMismatch::NoTable)
+    }
+
+    /// One provider by key, as `K`: `None` when nothing answers to the
+    /// key, `Some(Err)` when it does and its table does not validate.
+    pub fn offer<K: ?Sized + Kind>(&self, key: &str) -> Option<Result<Offer<K>, KindMismatch>> {
+        self.provider(key).map(Provider::offer::<K>)
+    }
+
+    /// One provider by the key this registry filed it under.
+    ///
+    /// Under the default template that is its id; under `%id@%version` it
+    /// is `"hello@1.2.0"`. [`Provider::key`] is the other side of this,
+    /// for a host that has a provider and wants the name it answers to.
+    pub fn provider(&self, key: &str) -> Option<&Provider> {
+        self.by_key.get(key).map(|&at| &self.providers[at])
+    }
+
+    /// Every provider that serves one kind **and can actually run here**.
+    ///
+    /// [`providers`](Registry::providers) is who CLAIMS the kind; this is
+    /// who can serve it now. Each is asked at the moment of the question,
+    /// so a provider whose optional dependency arrived or went away since
+    /// the last call answers differently — which is the point.
+    pub fn available(&self, kind: &str) -> impl Iterator<Item = &Provider> {
+        self.providers(kind).filter(|p| p.available().is_ok())
+    }
+
+    /// The best provider serving one kind that can actually run here, or
+    /// `None`.
+    ///
+    /// The question a host usually has. It is
+    /// [`available`](Registry::available) taking the head, which is
+    /// `(priority DESC, key ASC)` — and a host that wants to see what it
+    /// passed over, to say "ssh -> openssh (also: putty)", iterates
+    /// instead.
+    pub fn best(&self, kind: &str) -> Option<&Provider> {
+        self.available(kind).next()
+    }
+
+    /// Why nothing can serve `kind`, or `None` when something can.
+    ///
+    /// **The two answers are kept apart because the remedies differ.**
+    /// "Nothing claims it" means install something; "everything that
+    /// claims it is unavailable here" means fix what you already have, and
+    /// carries each provider's own words about why. Collapsing them into
+    /// one "unsupported" leaves a person with no idea which way to go.
+    pub fn why_not(&self, kind: &str) -> Option<WhyNot<'_>> {
+        let mut refused = Vec::new();
+        for provider in self.providers(kind) {
+            match provider.available() {
+                // Something can serve it, so there is nothing to explain.
+                Ok(()) => return None,
+                Err(reason) => refused.push((provider, reason)),
+            }
+        }
+        if refused.is_empty() {
+            Some(WhyNot::NothingClaimsIt)
+        } else {
+            Some(WhyNot::NoneAvailable(refused))
+        }
+    }
+
+    /// Every provider with one id, whatever the key template made of it —
+    /// which is every loaded version of it, best first: `(priority DESC,
+    /// key ASC)`.
+    ///
+    /// More than one only under a template that renders versions apart
+    /// (`%id@%version`); under `%id` the second build was skipped at load.
+    /// Which of them is "newest" is the host's to decide, with the semver
+    /// library it already has.
+    pub fn providers_of(&self, id: &str) -> impl Iterator<Item = &Provider> {
+        self.ranked(self.providers.iter().filter(move |p| p.id() == id))
+            .into_iter()
+    }
+
+    /// Every library loaded so far.
+    pub fn loaded(&self) -> &[Loaded] {
+        &self.loaded
+    }
+
+    /// The library that offered `provider`: its key, version and
+    /// [`digest`](Loaded::digest). `None` for a provider this registry
+    /// does not hold.
+    pub fn library_of(&self, provider: &Provider) -> Option<&Loaded> {
+        // By lease, the one identity a library has that no path or loader
+        // can share with another.
+        self.loaded
+            .iter()
+            .find(|l| provider.view.hold.holds(&l.lease))
+    }
+
+    /// Every provider, of every kind.
+    pub fn all(&self) -> &[Provider] {
+        &self.providers
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::raw::Hold;
+    use core::ffi::c_void;
+
+    #[test]
+    fn a_file_that_could_not_be_examined_at_load_has_no_digest_but_a_reason() {
+        let unseen = || std::io::Error::other("permission denied");
+        let same = Identity {
+            volume: 1,
+            index: 2,
+            size: 3,
+            modified: (4, 5),
+        };
+        for (before, after, why) in [
+            (
+                Err(unseen()),
+                Ok(same),
+                "the file could not be examined when it loaded: permission denied",
+            ),
+            (
+                Ok(same),
+                Ok(Identity { size: 9, ..same }),
+                "the file changed while it was being loaded",
+            ),
+        ] {
+            let file = LibraryFile::new(PathBuf::from("unused"), before, after);
+            let refused = file.digest().expect_err("nothing to vouch for");
+            assert_eq!(
+                refused.to_string(),
+                format!("no digest can be vouched for: {why}")
+            );
+        }
+    }
+
+    fn provider(id: &str, version: Option<&str>) -> ProviderView {
+        ProviderView {
+            kinds: vec!["thing".to_string()],
+            id: id.to_string(),
+            display_name: String::new(),
+            config: None,
+            vtable: core::ptr::null(),
+            vtable_size: 0,
+            ctx: core::ptr::null_mut::<c_void>(),
+            meta: None,
+            version: version.map(str::to_string),
+            available: None,
+            tables: Vec::new(),
+            create: None,
+            destroy: None,
+            kind_descriptions: None,
+            hold: Hold::None,
+        }
+    }
+
+    fn library(id: &str, version: &str, providers: Vec<ProviderView>) -> Opened {
+        Opened::Loaded(
+            LibraryView {
+                id: id.to_string(),
+                version: version.to_string(),
+                meta: None,
+                unload: None,
+                providers,
+            },
+            Origin::Linked(None),
+        )
+    }
+
+    #[test]
+    fn a_skip_reads_as_a_clause_after_the_file_name() {
+        let from = PathBuf::from("first.so");
+        let cases = [
+            (Skipped::NoEntrySymbol, "not a guatiao library".to_string()),
+            (Skipped::DeclinedThisHost, "declined this host".to_string()),
+            (
+                Skipped::AlreadyLoaded { from: from.clone() },
+                "already loaded from first.so".to_string(),
+            ),
+            (
+                Skipped::ProviderAlreadyLoaded {
+                    id: "acme_hello".to_string(),
+                    from,
+                },
+                "its provider `acme_hello` is already registered by first.so".to_string(),
+            ),
+            (
+                Skipped::NotExaminable,
+                "could not be read as a library file".to_string(),
+            ),
+            (
+                Skipped::UnsupportedAbi { declared: 7 },
+                format!(
+                    "built for envelope ABI 7, and this host speaks {}",
+                    crate::library::desc::ABI_VERSION
+                ),
+            ),
+            (
+                Skipped::Filtered {
+                    by: "kind=greeter".to_string(),
+                },
+                "kept out by `kind=greeter`".to_string(),
+            ),
+        ];
+        for (skipped, expected) in cases {
+            assert_eq!(skipped.to_string(), expected);
+        }
+    }
+
+    fn registry() -> Registry {
+        Registry::new("test-host", "1.0")
+    }
+
+    /// Each way a file can come to nothing is reported as itself.
+    #[test]
+    fn every_outcome_of_opening_a_file_is_reported_as_itself() {
+        let mut r = registry();
+        let p = Path::new("a.so");
+
+        assert_eq!(
+            r.absorb(p, "", Opened::NoEntrySymbol).unwrap().skipped(),
+            Some(&Skipped::NoEntrySymbol)
+        );
+        assert_eq!(
+            r.absorb(p, "", Opened::Declined).unwrap().skipped(),
+            Some(&Skipped::DeclinedThisHost)
+        );
+        assert_eq!(
+            r.absorb(
+                p,
+                "",
+                Opened::Rejected(Rejected::UnsupportedAbi { declared: 7 })
+            )
+            .unwrap()
+            .skipped(),
+            Some(&Skipped::UnsupportedAbi { declared: 7 })
+        );
+        assert!(matches!(
+            r.absorb(
+                p,
+                "",
+                Opened::Rejected(Rejected::Malformed(
+                    crate::library::raw::check::Refusal::new("the library descriptor", "is null")
+                ))
+            ),
+            Err(LoadError::Malformed { .. })
+        ));
+        assert!(r.loaded().is_empty(), "nothing was recorded");
+    }
+
+    /// Under `%id`, a second build of one provider renders the key the
+    /// first did and is skipped; under `%id@%version` it is kept.
+    #[test]
+    fn the_key_template_decides_whether_two_builds_of_a_provider_coexist() {
+        let mut r = registry();
+        r.libraries_keyed_by("%id@%version").unwrap();
+        r.absorb(
+            Path::new("one.so"),
+            "",
+            library("lib", "1.0.0", vec![provider("lib_p", None)]),
+        )
+        .unwrap();
+
+        let second = r
+            .absorb(
+                Path::new("two.so"),
+                "",
+                library("lib", "2.0.0", vec![provider("lib_p", None)]),
+            )
+            .unwrap();
+        let loaded = second.loaded().expect("the library loads");
+        assert_eq!(loaded.providers, 0);
+        assert!(matches!(
+            loaded.skipped.as_slice(),
+            [Skipped::ProviderAlreadyLoaded { id, .. }] if id == "lib_p"
+        ));
+        assert_eq!(r.providers_of("lib_p").count(), 1);
+
+        let mut apart = registry();
+        apart.libraries_keyed_by("%id@%version").unwrap();
+        apart.keyed_by("%id@%version").unwrap();
+        apart
+            .absorb(
+                Path::new("one.so"),
+                "",
+                library("lib", "1.0.0", vec![provider("lib_p", None)]),
+            )
+            .unwrap();
+        let loaded = apart
+            .absorb(
+                Path::new("two.so"),
+                "",
+                library("lib", "2.0.0", vec![provider("lib_p", None)]),
+            )
+            .unwrap()
+            .loaded()
+            .expect("the second build loads")
+            .providers;
+        assert_eq!(loaded, 1);
+        let versions: Vec<&str> = apart.providers_of("lib_p").map(Provider::version).collect();
+        assert_eq!(
+            versions,
+            ["1.0.0", "2.0.0"],
+            "every loaded version, key order"
+        );
+        assert!(apart.provider("lib_p@2.0.0").is_some());
+    }
+
+    /// Two DIFFERENT providers on one key is the template failing, and is
+    /// refused before anything is recorded.
+    #[test]
+    fn two_different_providers_on_one_key_are_refused_and_nothing_is_recorded() {
+        let mut r = registry();
+        r.keyed_by("%library").unwrap();
+        let err = r
+            .absorb(
+                Path::new("one.so"),
+                "",
+                library(
+                    "lib",
+                    "1.0.0",
+                    vec![provider("lib_a", None), provider("lib_b", None)],
+                ),
+            )
+            .unwrap_err();
+        assert!(matches!(err, LoadError::Duplicate { key, .. } if key == "lib"));
+        assert!(r.loaded().is_empty() && r.all().is_empty());
+    }
+
+    /// A provider offered twice within one library is a skip, not a
+    /// refusal: the first stands.
+    #[test]
+    fn a_provider_repeated_inside_one_library_is_skipped() {
+        let mut r = registry();
+        let loaded = r
+            .absorb(
+                Path::new("one.so"),
+                "",
+                library(
+                    "lib",
+                    "1.0.0",
+                    vec![provider("lib_p", None), provider("lib_p", None)],
+                ),
+            )
+            .unwrap();
+        let loaded = loaded.loaded().unwrap();
+        assert_eq!((loaded.providers, loaded.skipped.len()), (1, 1));
+    }
+}

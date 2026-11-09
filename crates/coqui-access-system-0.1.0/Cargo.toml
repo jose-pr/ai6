@@ -1,0 +1,31 @@
+# coqui-access/providers/access/system at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+[package]
+name = "coqui-access-system"
+description = "The operating system's own accounts: PAM and NSS on Unix, LogonUserW and the NetUser API on Windows"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[target]
+[target."cfg(unix)"]
+[target."cfg(unix)".dependencies]
+[target."cfg(unix)".dependencies.nonstick]
+version = "0.1.2"
+default-features = false
+features = ["link"]
+[target."cfg(unix)".dependencies.uzers]
+version = "0.12.2"
+default-features = false
+[target."cfg(windows)"]
+[target."cfg(windows)".dependencies]
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.61"
+default-features = false
+features = ["Win32_Foundation", "Win32_NetworkManagement_NetManagement", "Win32_Security", "Win32_Security_Authorization"]

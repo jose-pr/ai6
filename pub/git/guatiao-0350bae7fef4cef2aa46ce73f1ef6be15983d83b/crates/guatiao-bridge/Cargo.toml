@@ -1,0 +1,48 @@
+[package]
+name = "guatiao-bridge"
+description = "What every guatiao bridge to a language runtime shares: an engine trait, its thread, manifests and stamps, the glue to a source, and kinds served from their descriptions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+license.workspace = true
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+
+# docs.rs documents every feature.
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+name = "guatiao_bridge"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Manifests written as JSON or YAML under a `#!json` or `#!yaml` first line.
+# TOML manifests are always read.
+json = []
+yaml = ["guatiao-serde/yaml"]
+
+[dependencies]
+guatiao = { path = "../guatiao", version = "=0.0.0-alpha.1" }
+# TOML for manifests, JSON for kind descriptions and the shared vectors.
+guatiao-serde = { path = "../guatiao-serde", version = "=0.0.0-alpha.1", default-features = false, features = [
+    "json",
+    "toml",
+] }
+# Reads a manifest in the format its first line names. A git
+# dependency until anycfg is published, which comes before this crate's
+# release.
+anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
+
+[dev-dependencies]
+guatiao = { path = "../guatiao", features = ["provider", "load"] }
+# The example kinds the test engine serves.
+greeter_kind = { path = "../../examples/greeter_kind" }
+# The mechanism the test engine's tables are built with.
+guatiao-libffi = { path = "../guatiao-libffi" }
+
+[lints]
+workspace = true

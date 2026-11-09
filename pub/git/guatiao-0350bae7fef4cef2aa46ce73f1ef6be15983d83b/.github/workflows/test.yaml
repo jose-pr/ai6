@@ -1,0 +1,2139 @@
+name: Test
+
+# On-demand test workflow: workflow_dispatch (with a ref input) plus
+# throwaway "ci-*" tags, deleted after the run. Not triggered by push/PR on
+# branches. release.yml calls it as its test gate, so a release runs exactly
+# the suite a ci-* tag does -- never a copy that drifted.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to test"
+        type: string
+        required: false
+        default: ""
+  push:
+    tags:
+      - "ci-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.toolchain }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # stable + the declared MSRV; both must pass. Keep this in step
+        # with `rust-version` in the workspace Cargo.toml.
+        toolchain: [stable, "1.89"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all --check
+      - name: Clippy
+        # `--all-targets`, so tests and examples are linted too -- the same
+        # invocation the local gate runs.
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Build
+        # `cargo test` does not build a cdylib for the package under
+        # test, and `c_exports` links one. Building first is what keeps
+        # that test from turning into a stated skip on every run.
+        # `--all-features` also turns on `c-header`, so the committed
+        # header is compared against a fresh render.
+        run: cargo build --workspace --all-features
+
+      - name: Test
+        run: cargo test --workspace --all-features
+
+      - name: Test guatiao-serde with its default features
+        # `--all-features` turns on `exact-numbers`, which compiles out the
+        # tests only a default build has: that the crate leaves other
+        # crates' serde_json numbers alone, and that a wide number reads
+        # through an `f64` without the feature.
+        run: cargo test -p guatiao-serde
+
+      - name: Docs
+        # Strict, so a broken intra-doc link fails here rather than
+        # accumulating. `--all-features` because that is the build docs.rs
+        # publishes (`[package.metadata.docs.rs] all-features = true`): a
+        # link to a feature-gated item is only resolvable there.
+        run: cargo doc --workspace --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  miri:
+    # Undefined behaviour the tests pass through: the value model is repr(C)
+    # unions, raw slices and a hand-rolled drop. Only the tests that load no
+    # library run here -- Miri cannot map one -- and the one deep-tree test is
+    # skipped for time, not weakened. The nightly is pinned so a run means
+    # the same thing twice.
+    name: Miri (value model, loader)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-21
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: The value model and the schema, unit tests
+        run: "cargo miri test -p guatiao --all-features --lib -- value:: schema::"
+      - name: The value model, integration tests
+        run: >-
+          cargo miri test -p guatiao --all-features
+          --test container_roundtrip --test std_traits --test public_surface
+          --test exports_boundary --test schema_as_value
+          --test kind_glue_probes --test schema_constraints --test schema_annotations
+          --test status_codes --test ownership
+          -- --skip a_tree_of_any_depth
+      - name: The path grammar and the flat projection, in the crate that has them
+        # They moved out of `guatiao` with the rest of the projection; the
+        # walk is the same kind of thing Miri is here for -- it reads and
+        # rebuilds trees a caller supplied.
+        run: >-
+          cargo miri test -p guatiao-intake --all-features
+          --test paths --test flat_projection
+      - name: The wire decoder, which reads bytes nobody vouched for
+        # The three heavy tests (random inputs, a deep tree, a thousand keys)
+        # run natively; under Miri they take minutes and add no new path.
+        run: >-
+          cargo miri test -p guatiao --all-features --test wire_roundtrip --test wire_channel
+          -- --skip ten_thousand_random --skip a_tree_deeper_than --skip a_thousand_keys
+      - name: The loader, the kind runtime and sources, under Stacked Borrows
+        # The directories with the most `unsafe`, through descriptors the
+        # host links rather than loads, and a source a host links. Registering
+        # resolves a path, hence isolation off; the block a registry hands
+        # its libraries is leaked by design, hence the leak check off.
+        # `scan::` holds no `unsafe` and reads directories, so it runs
+        # natively only.
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-ignore-leaks
+        run: >-
+          cargo miri test -p guatiao --all-features --lib
+          -- library::raw:: library::kind:: library::registry:: library::source::
+          && cargo miri test -p guatiao --all-features
+          --test host_lookups --test provider_offers
+      - name: The loader, the kind runtime and sources, under Tree Borrows
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-ignore-leaks -Zmiri-tree-borrows
+        run: >-
+          cargo miri test -p guatiao --all-features --lib
+          -- library::raw:: library::kind:: library::registry:: library::source::
+          && cargo miri test -p guatiao --all-features
+          --test host_lookups --test provider_offers
+
+  public-api:
+    # A change to what a consumer can name must be a line somebody wrote:
+    # each crate commits its surface, and a difference here fails with the
+    # diff. Regenerate with the command in AGENTS.md, in the same commit.
+    name: Public API snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-21
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api@0.52.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Compare each crate with its snapshot
+        shell: bash
+        run: |
+          status=0
+          for crate in guatiao guatiao-serde guatiao-intake guatiao-bridge guatiao-libffi guatiao-source-remote; do
+            cargo public-api -p "$crate" --all-features -ss > "$RUNNER_TEMP/$crate.txt"
+            diff -u "crates/$crate/public-api.txt" "$RUNNER_TEMP/$crate.txt" || status=1
+          done
+          exit $status
+
+  wasm:
+    # The crates build for a browser. The layout is written in pointer
+    # widths, so wasm32 (4-byte pointers) is the same contract as 64-bit.
+    name: wasm32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the crates for wasm32
+        run: >-
+          cargo check --target wasm32-unknown-unknown
+          -p guatiao -p guatiao-serde -p guatiao-intake
+          --features guatiao/derive,guatiao/provider,guatiao-serde/json,guatiao-serde/toml,guatiao-serde/yaml
+      - name: Build the module
+        run: cargo build -p guatiao --target wasm32-unknown-unknown --release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-tools
+      - name: The module exports the C surface, the wire encoding included
+        # Checked against the committed header rather than a count, so a
+        # function added to it is held to the same rule: every export is a
+        # function `guatiao.h` declares, and every `guatiao_wire_*` (the
+        # encoding, its walker, the frames, the receiver) and
+        # `guatiao_memory_*` (the memory a page passes arguments in) one it
+        # declares is exported.
+        shell: bash
+        run: |
+          exported=$(wasm-tools print target/wasm32-unknown-unknown/release/guatiao.wasm \
+            | grep -oE '\(export "guatiao_[a-z0-9_]+"' | cut -d'"' -f2 | sort -u)
+          declared=$(grep -oE '\bguatiao_[a-z0-9_]+\(' crates/guatiao/include/guatiao.h | tr -d '(' | sort -u)
+          undeclared=$(comm -23 <(echo "$exported") <(echo "$declared"))
+          missing=$(comm -13 <(echo "$exported") <(grep -E '^guatiao_(wire|memory)_' <<<"$declared"))
+          echo "guatiao_* exports: $(wc -l <<<"$exported"), wire and memory: $(grep -cE '^guatiao_(wire|memory)_' <<<"$exported")"
+          echo "exported, not declared: ${undeclared:-none}"
+          echo "declared, not exported: ${missing:-none}"
+          test -z "$undeclared" && test -z "$missing" && test "$(wc -l <<<"$exported")" -ge 20
+      - name: The wire encoding
+        run: cargo test -p guatiao --test wire_roundtrip --test wire_channel
+      - name: The WebTransport example's page
+        # Its own workspace and lockfile; `--locked` builds exactly the
+        # `wasm-bindgen` the README tells the reader to install a CLI for.
+        # It runs from the page's directory: that is where its target and
+        # rustflags are configured.
+        run: cargo build --release --locked
+        working-directory: examples/wire_over_webtransport/client
+
+  python:
+    name: Python bindings (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The same suite on the three platforms, because this is where a
+    # binding breaks: the library's filename, how it is found, and how
+    # ctypes lays out a struct are each per platform. Every supported
+    # version on Linux, the edges on Windows and macOS.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.9"
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.9"
+          - os: windows-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.14"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build native libraries
+        # The bindings drive a shared library, and `--all-features` is
+        # what exports the registry surface and the serde formats.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build the guatiao-source-py bridge against this Python
+        # So `test_bridge` and the example host's bridge leg run rather
+        # than skip: a Python host serving Python libraries through it.
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - name: Install
+        run: pip install -e "bindings/python/guatiao[dev]" -e bindings/python/guatiao-serde -e bindings/python/guatiao-intake
+      - name: Test
+        # Each package's suite alone: guatiao, guatiao-serde, guatiao-intake.
+        run: |
+          pytest bindings/python/guatiao/tests -rs
+          pytest bindings/python/guatiao-serde/tests -rs
+          pytest bindings/python/guatiao-intake/tests -rs
+        shell: bash
+        env:
+          GUATIAO_LIBRARY: target/debug
+      - name: Types
+        # One leg is enough: the binding and the Python examples under
+        # mypy --strict, so a provider that misspells a kind's method or
+        # its types fails here rather than in a host.
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+        run: >-
+          mypy --strict bindings/python/guatiao/src/guatiao bindings/python/guatiao-serde/src/guatiao_serde bindings/python/guatiao-intake/src/guatiao_intake examples/python_provider/py_greeter examples/python_provider/py_tally examples/greeter_kind/python examples/python_host
+        env:
+          MYPYPATH: bindings/python/guatiao/src:bindings/python/guatiao-serde/src:bindings/python/guatiao-intake/src:examples/greeter_kind/python
+
+  bridge:
+    name: guatiao-source-py (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The bridge from hosts that are not Python: a Rust host (its tests and
+    # the example host) and a C host, each adding it as a source and
+    # calling greeters written in Python. Its own workspace, so its
+    # format, lint and tests run here and nowhere else. A stated skip
+    # (no bridge, no compiler) fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Where a host that is not Python finds libpython
+        # The bridge names libpython by its file name; this Python is not
+        # installed where the loader looks by default.
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the workspace
+        # The guatiao library the C host links, and the example host.
+        run: cargo build --workspace --all-features
+      - name: Format check and clippy
+        working-directory: crates/guatiao-source-py
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - name: Build the bridge
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - name: What the bridge links to reach Python
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   readelf -d crates/guatiao-source-py/target/debug/libguatiao_source_py.so | grep NEEDED ;;
+            macOS)   otool -L crates/guatiao-source-py/target/debug/libguatiao_source_py.dylib ;;
+            Windows) llvm-readobj --coff-imports crates/guatiao-source-py/target/debug/guatiao_source_py.dll | grep 'Name:' ;;
+          esac
+      - name: Test, from a Rust host and a C host
+        run: |
+          cargo test --manifest-path crates/guatiao-source-py/Cargo.toml -- --nocapture 2>&1 | tee bridge-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "skipped:" bridge-test.log
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+      - name: The example host serves the Python greeters
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   bridge=crates/guatiao-source-py/target/debug/libguatiao_source_py.so ;;
+            macOS)   bridge=crates/guatiao-source-py/target/debug/libguatiao_source_py.dylib ;;
+            Windows) bridge=crates/guatiao-source-py/target/debug/guatiao_source_py.dll ;;
+          esac
+          # On Windows the bridge's python3.dll is found on PATH.
+          GREETER_HOST_IMPORT_SEARCH=path \
+          GREETER_HOST_SOURCE=$bridge \
+          GREETER_HOST_SOURCE_CONFIG='{"dirs": ["examples/python_provider"],
+            "paths": ["bindings/python/guatiao/src", "examples/greeter_kind/python"]}' \
+            cargo run -p greeter_host 2>&1 | tee host.log
+          grep -q "served py_greeter as py_greeter" host.log
+          grep -q "py_greeter_hello greets: hello, ana" host.log
+          grep -q "py_greeter_shouter configured with" host.log
+
+  lua:
+    name: Lua (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The guatiao-source-lua source from a Rust host, a C host and the Python
+    # suite, in each Lua it builds with; and the loadable module required
+    # by a stock interpreter (Lua 5.4, and LuaJIT where packaged), hosting
+    # greeters written in Rust, C, Python and Lua. Each crate is a
+    # workspace of its own. A stated skip fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+            crates/guatiao-source-lua
+            bindings/lua/guatiao
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Stock interpreters (Linux, macOS)
+        if: runner.os != 'Windows'
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y lua5.4 luajit
+              echo "GUATIAO_LUA=$(command -v lua5.4)" >> "$GITHUB_ENV" ;;
+            macOS)
+              # Lua 5.4 as lua.org ships it: Homebrew's `lua` follows the
+              # newest release.
+              brew install luajit
+              curl -sSfL https://www.lua.org/ftp/lua-5.4.8.tar.gz -o "$RUNNER_TEMP/lua.tar.gz"
+              echo "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae  $RUNNER_TEMP/lua.tar.gz" | shasum -a 256 -c
+              tar -xzf "$RUNNER_TEMP/lua.tar.gz" -C "$RUNNER_TEMP"
+              make -C "$RUNNER_TEMP/lua-5.4.8" macosx
+              echo "GUATIAO_LUA=$RUNNER_TEMP/lua-5.4.8/src/lua" >> "$GITHUB_ENV" ;;
+          esac
+          echo "GUATIAO_LUAJIT=$(command -v luajit)" >> "$GITHUB_ENV"
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Stock Lua 5.4 from lua.org (Windows)
+        # Built as Lua's own Windows builds are: lua54.dll, and lua.exe
+        # linking it.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\lua54"
+          Invoke-WebRequest https://www.lua.org/ftp/lua-5.4.8.tar.gz -OutFile "$env:RUNNER_TEMP\lua.tar.gz"
+          $sum = (Get-FileHash "$env:RUNNER_TEMP\lua.tar.gz" -Algorithm SHA256).Hash.ToLower()
+          if ($sum -ne '4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae') { throw "lua-5.4.8.tar.gz: $sum" }
+          tar -xzf "$env:RUNNER_TEMP\lua.tar.gz" -C $env:RUNNER_TEMP
+          New-Item -ItemType Directory -Force "$out\obj" | Out-Null
+          Set-Location "$env:RUNNER_TEMP\lua-5.4.8\src"
+          $lib = Get-ChildItem *.c | Where-Object { $_.Name -notin 'lua.c', 'luac.c' }
+          foreach ($c in $lib) { cl /nologo /O2 /c /MD /DLUA_BUILD_AS_DLL /DLUA_COMPAT_5_3 "/Fo$out\obj\$($c.BaseName).obj" $c.Name; if ($LASTEXITCODE) { exit 1 } }
+          link /nologo /DLL "/OUT:$out\lua54.dll" "/IMPLIB:$out\lua54.lib" "$out\obj\*.obj"
+          if ($LASTEXITCODE) { exit 1 }
+          cl /nologo /O2 /MD "/Fo$out\obj\lua.obj" "/Fe$out\lua.exe" lua.c "$out\lua54.lib"
+          if ($LASTEXITCODE) { exit 1 }
+          "GUATIAO_LUA=$out\lua.exe" >> $env:GITHUB_ENV
+      - name: Build the workspace, guatiao-source-py and the source
+        # The Rust greeter and the guatiao library the C hosts link; the
+        # Python greeters; the Lua source, which its tests add as a file.
+        run: |
+          cargo build --workspace --all-features
+          cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+          cargo build --manifest-path crates/guatiao-source-lua/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - name: Format check and clippy
+        run: |
+          for crate in crates/guatiao-source-lua bindings/lua/guatiao; do
+            (cd "$crate" && cargo fmt --check && cargo clippy --all-targets -- -D warnings)
+          done
+      - name: Where the tests find what they call
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   py=libguatiao_source_py.so;    lua=libguatiao_source_lua.so ;;
+            macOS)   py=libguatiao_source_py.dylib; lua=libguatiao_source_lua.dylib ;;
+            Windows) py=guatiao_source_py.dll;      lua=guatiao_source_lua.dll ;;
+          esac
+          {
+            echo "GUATIAO_LIBRARY=$GITHUB_WORKSPACE/target/debug"
+            echo "GUATIAO_PY_BRIDGE=$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$py"
+            echo "GUATIAO_LUA_SOURCE=$GITHUB_WORKSPACE/crates/guatiao-source-lua/target/debug/$lua"
+          } >> "$GITHUB_ENV"
+      - name: The source, Lua 5.4, from a Rust, a C and a Lua host
+        run: |
+          cargo test --manifest-path crates/guatiao-source-lua/Cargo.toml -- --nocapture 2>&1 | tee lua-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "skipped:" lua-test.log; then exit 1; fi
+      - name: The source in Lua 5.5 and Luau
+        run: |
+          for flavour in lua55 luau; do
+            cargo test --manifest-path crates/guatiao-source-lua/Cargo.toml --no-default-features \
+              --features "$flavour,source" --target-dir "target-$flavour"
+          done
+      - name: The source from Python
+        run: |
+          python -m pip install pytest
+          python -m pytest -rs bindings/python/guatiao/tests/test_lua_source.py 2>&1 | tee py-lua.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "SKIPPED" py-lua.log; then exit 1; fi
+        env:
+          PYTHONPATH: bindings/python/guatiao/src
+      - name: The module in a stock Lua 5.4
+        run: |
+          cargo build --manifest-path bindings/lua/guatiao/Cargo.toml
+          cargo test --manifest-path bindings/lua/guatiao/Cargo.toml -- --nocapture 2>&1 | tee module-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "skipped:" module-test.log; then exit 1; fi
+      - name: The module in LuaJIT
+        if: runner.os != 'Windows'
+        run: |
+          cargo build --manifest-path bindings/lua/guatiao/Cargo.toml --no-default-features --features luajit --target-dir target-luajit
+          GUATIAO_LUA="$GUATIAO_LUAJIT" cargo test --manifest-path bindings/lua/guatiao/Cargo.toml \
+            --no-default-features --features luajit --target-dir target-luajit -- --nocapture 2>&1 | tee jit-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "skipped:" jit-test.log; then exit 1; fi
+
+  wasm-source:
+    name: guatiao-source-wasm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The WebAssembly source from a Rust host, a C host and a Python host,
+    # over guests written in Rust (wasm32-unknown-unknown) and Go (wasip1,
+    # Go's own toolchain). Its own workspace, as are the Rust guest crate
+    # and example, so their format, lint and tests run here and nowhere
+    # else. A stated skip (no guest toolchain, no compiler) fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-wasm
+            crates/guatiao-source-wasm/guest
+            examples/wasm_greeter_rust
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Build the guatiao library the C and Python hosts load
+        run: cargo build -p guatiao --features load
+      - name: Format check and clippy (source, Rust guest crate, example)
+        run: |
+          (cd crates/guatiao-source-wasm && cargo fmt --check && cargo clippy --all-targets -- -D warnings)
+          (cd crates/guatiao-source-wasm/guest && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
+            && cargo clippy --target wasm32-unknown-unknown -- -D warnings)
+          (cd examples/wasm_greeter_rust && cargo fmt --check \
+            && cargo clippy --release --target wasm32-unknown-unknown -- -D warnings)
+      - name: The Rust guest crate and the Go guest package, natively
+        run: |
+          (cd crates/guatiao-source-wasm/guest && cargo test)
+          (cd crates/guatiao-source-wasm/guest-go && test -z "$(gofmt -l .)" && go vet ./... && go test ./...)
+          (cd examples/wasm_greeter_go && test -z "$(gofmt -l .)" && GOOS=wasip1 GOARCH=wasm go vet .)
+      - name: Build the source
+        run: cargo build --manifest-path crates/guatiao-source-wasm/Cargo.toml
+      - name: Test, from a Rust host and a C host (builds both guests)
+        run: |
+          cargo test --manifest-path crates/guatiao-source-wasm/Cargo.toml -- --nocapture 2>&1 | tee wasm-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "skipped:" wasm-test.log
+        env:
+          GUATIAO_REQUIRE_ALL: "1"
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+      - name: Test, from a Python host
+        run: |
+          pip install -e "bindings/python/guatiao[dev]"
+          python -m pytest bindings/python/guatiao/tests/test_wasm_source.py -rs 2>&1 | tee wasm-py.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "SKIPPED" wasm-py.log
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+
+  node:
+    name: Node bindings (node${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The previous and the current LTS on the three platforms: the
+    # library's filename, how it is found and koffi's prebuilt part are
+    # each per platform. The greeters are written in Rust, C, Python
+    # (through the guatiao-source-py bridge) and TypeScript, and a stated skip
+    # (no compiler, no bridge) fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ["22", "24"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The libraries, the Rust greeters and the Rust caller of any
+        # greeter (`examples/greeter_caller`).
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            bindings/node/package-lock.json
+            bindings/node/guatiao-remote/package-lock.json
+            examples/package-lock.json
+      - name: Install
+        # The workspace: guatiao, guatiao-serde and guatiao-intake, the
+        # last two resolving the first from the checkout.
+        working-directory: bindings/node
+        run: npm ci
+      - name: Types
+        # tsc --strict over the sources, the tests (whose type-check file
+        # must meet every expected error) and the examples.
+        working-directory: bindings/node
+        run: |
+          for p in guatiao guatiao-serde guatiao-intake; do
+            (cd "$p" && npm run typecheck)
+          done
+      - name: Build
+        # The core first: the others compile against its published types.
+        working-directory: bindings/node
+        run: |
+          for p in guatiao guatiao-serde guatiao-intake; do
+            (cd "$p" && npm run build)
+          done
+      - name: Install the examples, against the build
+        working-directory: examples
+        run: npm ci
+      - name: The examples, as a consumer of the published types
+        working-directory: bindings/node/guatiao
+        run: npx tsc -p ../../../examples/tsconfig.json
+      - name: Test
+        working-directory: bindings/node/guatiao
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   bridge=libguatiao_source_py.so ;;
+            macOS)   bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          export GUATIAO_PY_BRIDGE="$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge"
+          npm test 2>&1 | tee node-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -nE "[0-9]+ skipped" node-test.log; then exit 1; fi
+          for p in guatiao-serde guatiao-intake; do
+            (cd "../$p" && npm test 2>&1 | tee "../guatiao/$p-test.log"; test "${PIPESTATUS[0]}" -eq 0)
+            if grep -nE "[0-9]+ skipped" "$p-test.log"; then exit 1; fi
+          done
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+          NO_COLOR: "1"
+      - name: The remote protocol's TypeScript client
+        # Its own install (outside the workspace): the shared vectors, a
+        # scripted peer and guatiao-remote-server over WebSocket, in Node
+        # everywhere and in Chrome (the runner's own) on Linux. The
+        # workspace build above built the server and derived_greeter; the
+        # datagram echo the page suite calls is an example of the crate.
+        working-directory: bindings/node/guatiao-remote
+        run: |
+          cargo build --workspace --all-features --example datagram_echo
+          npm ci
+          npm run typecheck
+          npm run build
+          if [ "$RUNNER_OS" = Linux ]; then
+            export CHROME_EXECUTABLE="$(command -v google-chrome)"
+            npx vitest run 2>&1 | tee remote-test.log
+          else
+            npx vitest run --project node 2>&1 | tee remote-test.log
+          fi
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -nE "[0-9]+ skipped" remote-test.log; then exit 1; fi
+        env:
+          NO_COLOR: "1"
+      - name: What the packages ship
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        working-directory: bindings/node
+        run: |
+          for p in guatiao guatiao-serde guatiao-intake guatiao-remote; do
+            (cd "$p" && npm pack --dry-run --json > pack.json)
+          done
+          python3 - <<'EOF'
+          import json
+          for p in ("guatiao", "guatiao-serde", "guatiao-intake", "guatiao-remote"):
+              files = {f["path"] for f in json.load(open(f"{p}/pack.json"))[0]["files"]}
+              print(p, sorted(files))
+              # The entry the manifest names: guatiao-remote's sits under dist/guatiao-remote/src/.
+              entry = json.load(open(f"{p}/package.json"))["exports"]["."]
+              for need in ("AGENTS.md", "README.md", "LICENSE", "package.json", entry["import"][2:], entry["types"][2:]):
+                  assert need in files, f"{p}: {need} does not ship"
+              stray = [f for f in files if not (f.startswith("dist/") or f in ("AGENTS.md", "README.md", "LICENSE", "package.json"))]
+              assert not stray, f"{p} ships what it should not: {stray}"
+              assert not any(".local." in f for f in files), f"{p}: a .local file ships"
+          EOF
+
+  go:
+    name: Go bindings (go${{ matrix.go }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Go's two newest releases on the three platforms: the library's
+    # filename, how it is found, and the C compiler cgo drives are each per
+    # platform. The three modules are tested together through
+    # bindings/go/go.work, and serde and intake again each alone against
+    # the core by a replace, as a consumer builds them. The examples'
+    # greeters are written in Rust, C, Python (through the guatiao-source-py
+    # bridge) and Go, both ways, and the Go library built as a file is
+    # scanned and called by the Rust example host. A stated skip fails the
+    # job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ["1.26", "1.27"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The libraries, the Rust greeters, the Rust caller of any greeter
+        # and the Rust example host.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: The C compiler cgo uses
+        run: go env CC && "$(go env CC)" --version
+      - name: Vet and format
+        working-directory: bindings/go
+        run: |
+          go vet ./guatiao/... ./guatiao-serde/... ./guatiao-intake/...
+          (cd ../../examples && go vet ./...)
+          unformatted=$(gofmt -l . ../../examples/greeter_kind/go ../../examples/go_host ../../examples/go_provider ../../examples/internal)
+          test -z "$unformatted" || { echo "not gofmt'd: $unformatted"; exit 1; }
+      - name: Test the binding and the examples
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   bridge=libguatiao_source_py.so ;;
+            macOS)   bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          export GUATIAO_PY_BRIDGE="$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge"
+          (cd bindings/go && go test -count=1 -v ./guatiao/... ./guatiao-serde/... ./guatiao-intake/...) 2>&1 | tee go-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          # serde and intake alone, outside the workspace: their own go.mod
+          # with the core replaced by this checkout's, nothing downloaded.
+          for module in guatiao-serde guatiao-intake; do
+            modfile="$RUNNER_TEMP/$module.mod"
+            cp "bindings/go/$module/go.mod" "$modfile"
+            echo "replace github.com/Boriken-Dev/guatiao/bindings/go/guatiao => $GITHUB_WORKSPACE/bindings/go/guatiao" >> "$modfile"
+            (cd "bindings/go/$module" && GOWORK=off GOPROXY=off GOFLAGS=-mod=mod go test -count=1 -v -modfile="$modfile" ./...) 2>&1 | tee -a go-test.log
+            test "${PIPESTATUS[0]}" -eq 0
+          done
+          (cd examples && go test -count=1 -v ./...) 2>&1 | tee -a go-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n -- "--- SKIP" go-test.log
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+      - name: Under the race detector and the strict pointer checks
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.27'
+        run: |
+          modules="./guatiao/... ./guatiao-serde/... ./guatiao-intake/..."
+          (cd bindings/go && go test -count=1 -race $modules && GOEXPERIMENT=cgocheck2 go test -count=1 $modules)
+          (cd examples && go test -count=1 -race ./... && GOEXPERIMENT=cgocheck2 go test -count=1 ./...)
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+      - name: A Rust host loads the Go library as a file
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   name=libgo_greeter.so ;;
+            macOS)   name=libgo_greeter.dylib ;;
+            Windows) name=go_greeter.dll ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$name" ./go_provider/cshared)
+          GUATIAO_GO_LIBRARY="$RUNNER_TEMP/go-library" \
+            cargo test -p greeter_host --all-features --test go_library -- --nocapture 2>&1 | tee go-library.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "skipped:" go-library.log
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+
+  julia:
+    name: Julia bindings (julia ${{ matrix.julia }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Julia's LTS and its current release on the three platforms. The tests
+    # call greeters written in Rust, C, Python (through the guatiao-source-py
+    # bridge), Go (built as a library file) and Julia, both ways, and run
+    # the example host. A stated skip fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        julia: ["lts", "1"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The libraries, the Rust greeters and the Rust caller of any greeter.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Build the Go greeter as a library file
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   name=libgo_greeter.so ;;
+            macOS)   name=libgo_greeter.dylib ;;
+            Windows) name=go_greeter.dll ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$name" ./go_provider/cshared)
+          echo "GUATIAO_GO_LIBRARY=$RUNNER_TEMP/go-library" >> "$GITHUB_ENV"
+        env:
+          CGO_ENABLED: "1"
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.julia }}
+      - name: Test the binding and the examples
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   bridge=libguatiao_source_py.so ;;
+            macOS)   bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          export GUATIAO_PY_BRIDGE="$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge"
+          julia --version
+          julia --startup-file=no --project=bindings/julia/Guatiao -e 'using Pkg; Pkg.test()'
+          # GuatiaoSerde and GuatiaoIntake, each in a temporary environment
+          # holding the core from the checkout.
+          for p in Serde Intake; do
+            julia --startup-file=no -e "using Pkg; Pkg.activate(temp = true);
+              Pkg.develop([PackageSpec(path = \"bindings/julia/Guatiao\"), PackageSpec(path = \"bindings/julia/Guatiao$p\")]);
+              Pkg.test(\"Guatiao$p\")"
+          done
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+          GUATIAO_REQUIRE_ALL: "1"
+
+  r:
+    name: R bindings (R ${{ matrix.r }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # R's floor and its current release on the three platforms. The tests
+    # call greeters written in Rust, C, Python (through the guatiao-source-py
+    # bridge), Go (built as a library file) and R, both ways, and run the
+    # example host, all inside R CMD check. A stated skip fails the job, and
+    # so does any check WARNING.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        r: ["4.2", "release"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The libraries, the Rust greeters and the Rust caller of any greeter.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Build the Go greeter as a library file
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   name=libgo_greeter.so ;;
+            macOS)   name=libgo_greeter.dylib ;;
+            Windows) name=go_greeter.dll ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$name" ./go_provider/cshared)
+          echo "GUATIAO_GO_LIBRARY=$RUNNER_TEMP/go-library" >> "$GITHUB_ENV"
+        env:
+          CGO_ENABLED: "1"
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.r }}
+          use-public-rspm: true
+      - name: libffi, which the package's glue compiles against
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libffi-dev
+      - name: bit64, which the package suggests and its integer64 tests need
+        run: Rscript -e 'r <- getOption("repos"); r[r == "@CRAN@"] <- "https://cloud.r-project.org"' -e 'install.packages("bit64", repos = r)' -e 'stopifnot(requireNamespace("bit64"))'
+      - name: Build and check the package
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   bridge=libguatiao_source_py.so ;;
+            macOS)   bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          export GUATIAO_PY_BRIDGE="$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge"
+          R --version | head -1
+          mkdir -p "$RUNNER_TEMP/r-check"
+          R CMD build --no-manual bindings/r/guatiao
+          mv guatiao_*.tar.gz "$RUNNER_TEMP/r-check/"
+          cd "$RUNNER_TEMP/r-check"
+          status=0
+          R CMD check --no-manual guatiao_*.tar.gz || status=$?
+          cat guatiao.Rcheck/tests/guatiao.Rout* 2>/dev/null | tail -n 30 || true
+          grep -E "^\* checking .*(WARNING|ERROR)|^Status" guatiao.Rcheck/00check.log || true
+          if [ "$status" -ne 0 ] || grep -qE "^\* checking .*(WARNING|ERROR)" guatiao.Rcheck/00check.log; then
+            cat guatiao.Rcheck/00check.log
+            exit 1
+          fi
+          # guatiao.serde and guatiao.intake compile against the installed
+          # guatiao.
+          R CMD INSTALL guatiao_*.tar.gz
+          for p in serde intake; do
+            R CMD build --no-manual "$GITHUB_WORKSPACE/bindings/r/guatiao.$p"
+            status=0
+            R CMD check --no-manual guatiao.${p}_*.tar.gz || status=$?
+            cat guatiao.$p.Rcheck/tests/guatiao.$p.Rout* 2>/dev/null | tail -n 10 || true
+            if [ "$status" -ne 0 ] || grep -qE "^\* checking .*(WARNING|ERROR)" guatiao.$p.Rcheck/00check.log; then
+              cat guatiao.$p.Rcheck/00check.log
+              exit 1
+            fi
+          done
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+          GUATIAO_REPO: ${{ github.workspace }}
+          GUATIAO_REQUIRE_ALL: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+
+  octave:
+    name: Octave bindings (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Ubuntu's Octave (the floor here) and MSYS2's on Windows. The tests
+    # call greeters written in Rust, C, Python (through the guatiao-source-py
+    # bridge), Go (built as a library file) and M, both ways, and run the
+    # example host; a stated skip fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Build the Go greeter as a library file
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   name=libgo_greeter.so ;;
+            Windows) name=go_greeter.dll ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$name" ./go_provider/cshared)
+        env:
+          CGO_ENABLED: "1"
+      - name: Octave and libffi (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends octave octave-dev libffi-dev
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-octave
+            mingw-w64-ucrt-x86_64-libffi
+            mingw-w64-ucrt-x86_64-gcc
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          octave-cli --version | head -1
+          cd bindings/matlab/guatiao/tests
+          octave-cli --no-gui --eval "run_tests('Exit', true)"
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+          GUATIAO_REPO: ${{ github.workspace }}
+          GUATIAO_GO_LIBRARY: ${{ runner.temp }}/go-library
+          GUATIAO_PY_BRIDGE: ${{ github.workspace }}/crates/guatiao-source-py/target/debug/libguatiao_source_py.so
+          GUATIAO_REQUIRE_ALL: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          octave-cli --version | head -1
+          export PATH="$(cygpath "$PYTHON_HOME"):$PATH"
+          export GUATIAO_LIBRARY="$(cygpath -m "$GITHUB_WORKSPACE/target/debug")"
+          export GUATIAO_REPO="$(cygpath -m "$GITHUB_WORKSPACE")"
+          export GUATIAO_GO_LIBRARY="$(cygpath -m "$RUNNER_TEMP/go-library")"
+          export GUATIAO_PY_BRIDGE="$(cygpath -m "$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/guatiao_source_py.dll")"
+          cd bindings/matlab/guatiao/tests
+          octave-cli --no-gui --eval "run_tests('Exit', true)"
+        env:
+          PYTHON_HOME: ${{ env.pythonLocation }}
+          GUATIAO_REQUIRE_ALL: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+
+  matlab:
+    name: MATLAB bindings (${{ matrix.release }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # MATLAB through setup-matlab, licensed for a public repository. The
+    # floor's Windows leg runs on windows-2022, whose Visual Studio 2022 it
+    # supports; the current release finds the newer one on windows-latest.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, release: R2024a }
+          - { os: ubuntu-latest, release: latest }
+          - { os: macos-latest, release: R2024a }
+          - { os: macos-latest, release: latest }
+          - { os: windows-2022, release: R2024a }
+          - { os: windows-latest, release: latest }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        run: |
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV" ;;
+            macOS) echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV" ;;
+            Windows) echo "$pythonLocation" >> "$GITHUB_PATH" ;;
+          esac
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Build the Go and C greeters as library files
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   go=libgo_greeter.so; c=libc_greeter.so; cc=cc; pic=-fPIC ;;
+            macOS)   go=libgo_greeter.dylib; c=libc_greeter.dylib; cc=cc; pic=-fPIC ;;
+            Windows) go=go_greeter.dll; c=c_greeter.dll; cc=gcc; pic= ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library" "$RUNNER_TEMP/c-greeter"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$go" ./go_provider/cshared)
+          $cc -shared $pic -I crates/guatiao/include -I examples/greeter_kind/include \
+            -o "$RUNNER_TEMP/c-greeter/$c" crates/guatiao/tests/c_consumer/greeter_in_c.c
+          echo "GUATIAO_CC=$cc" >> "$GITHUB_ENV"
+        env:
+          CGO_ENABLED: "1"
+      - name: libffi (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libffi-dev
+      - name: libffi (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libffi:x64-windows-static-md
+          "GUATIAO_FFI_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows-static-md" >> $env:GITHUB_ENV
+      - uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+      - name: Where the tests find things
+        run: |
+          w() { if [ "$RUNNER_OS" = Windows ]; then cygpath -m "$1"; else echo "$1"; fi; }
+          case "$RUNNER_OS" in
+            Linux) bridge=libguatiao_source_py.so ;;
+            macOS) bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          {
+            echo "GUATIAO_LIBRARY=$(w "$GITHUB_WORKSPACE/target/debug")"
+            echo "GUATIAO_REPO=$(w "$GITHUB_WORKSPACE")"
+            echo "GUATIAO_GO_LIBRARY=$(w "$RUNNER_TEMP/go-library")"
+            echo "GUATIAO_C_GREETER=$(w "$RUNNER_TEMP/c-greeter")"
+            echo "GUATIAO_PY_BRIDGE=$(w "$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge")"
+          } >> "$GITHUB_ENV"
+      - name: Test
+        uses: matlab-actions/run-command@v3
+        with:
+          command: cd bindings/matlab/guatiao/tests; disp(version); ok = run_tests(); assert(ok, 'the suite failed');
+        env:
+          GUATIAO_REQUIRE_ALL: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+
+  fortran:
+    name: Fortran bindings (${{ matrix.compiler }} ${{ matrix.version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # gfortran, Intel ifx and LLVM flang, on the three platforms where each
+    # runs (ifx is x64 only and has no macOS build; flang comes from
+    # apt.llvm.org). The binding builds with fpm and with CMake; the host's
+    # tests call greeters written in Rust, C, Python (through the guatiao-source-py
+    # bridge), Go (built as a library file) and Fortran, both ways; the
+    # Fortran library file is scanned and called by the Rust and Python
+    # example hosts. A stated skip fails the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, compiler: gcc, version: "13" }
+          - { os: ubuntu-latest, compiler: gcc, version: "15" }
+          - { os: ubuntu-latest, compiler: intel, version: "2025.2" }
+          - { os: ubuntu-latest, compiler: flang, version: "22" }
+          - { os: macos-latest, compiler: gcc, version: "15" }
+          - { os: windows-latest, compiler: gcc, version: "15" }
+          - { os: windows-latest, compiler: intel, version: "2025.2" }
+    defaults:
+      run:
+        shell: bash
+    env:
+      GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+      GUATIAO_REQUIRE_ALL: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The libraries, the Rust greeters, the Rust caller of any greeter
+        # and the Rust example host.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: |
+          cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+          case "$RUNNER_OS" in
+            Linux)   bridge=libguatiao_source_py.so ;;
+            macOS)   bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          echo "GUATIAO_PY_BRIDGE=$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge" >> "$GITHUB_ENV"
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Build the Go greeter as a library file
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   name=libgo_greeter.so ;;
+            macOS)   name=libgo_greeter.dylib ;;
+            Windows) name=go_greeter.dll ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$name" ./go_provider/cshared)
+          echo "GUATIAO_GO_LIBRARY=$RUNNER_TEMP/go-library" >> "$GITHUB_ENV"
+        env:
+          CGO_ENABLED: "1"
+      - uses: fortran-lang/setup-fortran@v1
+        if: matrix.compiler != 'flang'
+        with:
+          compiler: ${{ matrix.compiler }}
+          version: ${{ matrix.version }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        # ifx links through Visual Studio's link.exe, and the oneAPI setup
+        # finds no Visual Studio on this image.
+        if: runner.os == 'Windows' && matrix.compiler == 'intel'
+      - name: LLVM flang
+        if: matrix.compiler == 'flang'
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh ${{ matrix.version }}
+          sudo apt-get install -y flang-${{ matrix.version }} libflang-rt-${{ matrix.version }}-dev || \
+            sudo apt-get install -y flang-${{ matrix.version }}
+          echo "FC=flang-${{ matrix.version }}" >> "$GITHUB_ENV"
+      - uses: fortran-lang/setup-fpm@v10
+        if: runner.os != 'macOS'
+        with:
+          fpm-version: v0.13.0
+      - name: fpm, built from its single-file source
+        # The macOS release binary loads Homebrew's gcc@12 runtime, which
+        # the runner does not have.
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/fpm.F90" \
+            https://github.com/fortran-lang/fpm/releases/download/v0.13.0/fpm-0.13.0.F90
+          echo "001cff6cf1145f215baa0888ba27acc06cea30a89b79d1a8be97db3fffbc8cd2  $RUNNER_TEMP/fpm.F90" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/fpm-bin" "$RUNNER_TEMP/fpm-mod"
+          "$FC" -O1 -fopenmp -J "$RUNNER_TEMP/fpm-mod" "$RUNNER_TEMP/fpm.F90" -o "$RUNNER_TEMP/fpm-bin/fpm"
+          echo "$RUNNER_TEMP/fpm-bin" >> "$GITHUB_PATH"
+      - name: Ninja, and the C compiler for the C greeter
+        run: |
+          python -m pip install ninja
+          # The greeter written in C is built with gcc-style flags.
+          if [ "$RUNNER_OS" = Windows ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+          elif [ "${{ matrix.compiler }}" != gcc ]; then
+            echo "CC=cc" >> "$GITHUB_ENV"
+          fi
+      - name: The compilers
+        run: |
+          echo "FC=$FC CC=${CC:-}"
+          "$FC" --version
+          fpm --version
+          cmake --version
+          type -a link || true
+      - name: Every other link out of the way
+        # A coreutils `link` that an earlier step leaves on PATH (in the
+        # runner's temp directory) shadows Visual Studio's link.exe.
+        if: runner.os == 'Windows' && matrix.compiler == 'intel'
+        run: |
+          which -a link | while read -r f; do
+            case "$f" in
+              *"Microsoft Visual Studio"*) echo "keeps $f" ;;
+              *) echo "removes $f"; rm -f "$f" "$f.exe" ;;
+            esac
+          done
+          cmd //c "where link" | tr -d '\r' | while read -r f; do
+            case "$f" in
+              *"Microsoft Visual Studio"*) echo "keeps $f" ;;
+              *) echo "removes $f"; rm -f "$(cygpath -u "$f")" ;;
+            esac
+          done
+          command -v link
+      - name: Test the binding with fpm
+        working-directory: bindings/fortran/guatiao
+        run: |
+          fpm test --compiler "$FC" 2>&1 | tee fortran-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "  SKIP" fortran-test.log
+      - name: Build and test the binding with CMake
+        run: |
+          cmake -S bindings/fortran/guatiao -B "$RUNNER_TEMP/fortran-cmake" -G Ninja -DCMAKE_Fortran_COMPILER="$FC"
+          cmake --build "$RUNNER_TEMP/fortran-cmake"
+          ctest --test-dir "$RUNNER_TEMP/fortran-cmake" --output-on-failure
+      - name: Test the greeter package
+        working-directory: examples/fortran_greeter
+        run: fpm test --compiler "$FC"
+      - name: Test the host, calling every greeter
+        working-directory: examples/fortran_host
+        run: |
+          fpm test --compiler "$FC" 2>&1 | tee fortran-host.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "  SKIP" fortran-host.log
+      - name: The Rust and Python hosts scan the Fortran library and call it
+        run: |
+          cmake -S examples/fortran_greeter -B "$RUNNER_TEMP/fortran-library" -G Ninja -DCMAKE_Fortran_COMPILER="$FC"
+          cmake --build "$RUNNER_TEMP/fortran-library"
+          export GUATIAO_FORTRAN_LIBRARY="$RUNNER_TEMP/fortran-library"
+          cargo test -p greeter_host --all-features --test fortran_library -- --nocapture 2>&1 | tee fortran-library.log
+          test "${PIPESTATUS[0]}" -eq 0
+          # A negated command mid-step never fails it: only the last one does.
+          if grep -n "skipped:" fortran-library.log; then exit 1; fi
+          python -m pip install -e "bindings/python/guatiao[dev]"
+          python -m pytest -p no:cacheprovider bindings/python/guatiao/tests/test_examples.py -k fortran -rs -q 2>&1 | tee fortran-python.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -n "skipped" fortran-python.log
+
+  cpp:
+    name: C++ bindings (${{ matrix.cxx }}, C++${{ matrix.std }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The three header-only packages (each suite built with exceptions on
+    # and off, and the files that must not compile), the host calling
+    # greeters written in Rust, C, Python (through the guatiao-source-py bridge),
+    # Go (built as a library file) and C++ through sources and refresh();
+    # the C++ library file scanned and called by the Rust and Python example
+    # hosts; and a project outside the repository consuming the packages
+    # through find_package. One leg configures that project with no library
+    # named, so the packages build theirs with cargo. A stated skip fails
+    # the job.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cxx: g++, cc: gcc, std: "17", cargo_fallback: true }
+          - { os: ubuntu-latest, cxx: clang++, cc: clang, std: "20", cargo_fallback: false }
+          - { os: macos-latest, cxx: clang++, cc: clang, std: "17", cargo_fallback: false }
+          - { os: windows-latest, cxx: cl, cc: cl, std: "17", cargo_fallback: false }
+          - { os: windows-latest, cxx: cl, cc: cl, std: "20", cargo_fallback: false }
+    defaults:
+      run:
+        shell: bash
+    env:
+      GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+      GUATIAO_REQUIRE_ALL: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The libraries, the Rust greeters, the Rust caller of any greeter
+        # and the Rust example host.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        run: |
+          cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+          case "$RUNNER_OS" in
+            Linux)   bridge=libguatiao_source_py.so ;;
+            macOS)   bridge=libguatiao_source_py.dylib ;;
+            Windows) bridge=guatiao_source_py.dll ;;
+          esac
+          echo "GUATIAO_PY_BRIDGE=$GITHUB_WORKSPACE/crates/guatiao-source-py/target/debug/$bridge" >> "$GITHUB_ENV"
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Build the Go greeter as a library file
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   name=libgo_greeter.so ;;
+            macOS)   name=libgo_greeter.dylib ;;
+            Windows) name=go_greeter.dll ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/go-library"
+          (cd examples && go build -buildmode=c-shared -o "$RUNNER_TEMP/go-library/$name" ./go_provider/cshared)
+          echo "GUATIAO_GO_LIBRARY=$RUNNER_TEMP/go-library" >> "$GITHUB_ENV"
+        env:
+          CGO_ENABLED: "1"
+      - uses: ilammy/msvc-dev-cmd@v1
+        # cl and the Windows SDK on PATH, for CMake with Ninja.
+        if: runner.os == 'Windows'
+      - name: Ninja, and the compilers
+        run: |
+          python -m pip install ninja
+          echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = Windows ]; then
+            # Git's coreutils `link` shadows Visual Studio's link.exe.
+            which -a link | while read -r f; do
+              case "$f" in
+                *"Microsoft Visual Studio"*) ;;
+                *) rm -f "$f" "$f.exe" ;;
+              esac
+            done
+          else
+            "${{ matrix.cxx }}" --version
+          fi
+          cmake --version
+      - name: Test the packages
+        run: |
+          for p in guatiao guatiao-serde guatiao-intake; do
+            cmake -S "bindings/cpp/$p" -B "$RUNNER_TEMP/cpp-$p" -G Ninja -DCMAKE_CXX_STANDARD=${{ matrix.std }}
+            cmake --build "$RUNNER_TEMP/cpp-$p"
+            ctest --test-dir "$RUNNER_TEMP/cpp-$p" --output-on-failure
+          done
+      - name: Test the host, calling every greeter
+        run: |
+          cmake -S examples/cpp_host -B "$RUNNER_TEMP/cpp-host" -G Ninja -DCMAKE_CXX_STANDARD=${{ matrix.std }}
+          cmake --build "$RUNNER_TEMP/cpp-host"
+          ctest --test-dir "$RUNNER_TEMP/cpp-host" -V 2>&1 | tee cpp-host.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "  SKIP" cpp-host.log; then exit 1; fi
+      - name: The Rust and Python hosts scan the C++ library and call it
+        run: |
+          export GUATIAO_CPP_LIBRARY="$RUNNER_TEMP/cpp-host/greeters/cpp"
+          cargo test -p greeter_host --all-features --test cpp_library -- --nocapture 2>&1 | tee cpp-library.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "skipped:" cpp-library.log; then exit 1; fi
+          # The Rust host's test rebuilt the libraries without serde's
+          # features; the Python host reads them as they ship.
+          cargo build --workspace --all-features
+          python -m pip install -e "bindings/python/guatiao[dev]"
+          python -m pytest -p no:cacheprovider bindings/python/guatiao/tests/test_examples.py -k cpp -rs -q 2>&1 | tee cpp-python.log
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n "skipped" cpp-python.log; then exit 1; fi
+      - name: A project outside the repository consumes the packages
+        run: |
+          cmake -S examples/cpp_consumer -B "$RUNNER_TEMP/cpp-consumer" -G Ninja \
+            -DCMAKE_CXX_STANDARD=${{ matrix.std }} \
+            -Dguatiao_DIR="$GITHUB_WORKSPACE/bindings/cpp/guatiao" \
+            -Dguatiao-serde_DIR="$GITHUB_WORKSPACE/bindings/cpp/guatiao-serde" \
+            -Dguatiao-intake_DIR="$GITHUB_WORKSPACE/bindings/cpp/guatiao-intake"
+          cmake --build "$RUNNER_TEMP/cpp-consumer"
+          ctest --test-dir "$RUNNER_TEMP/cpp-consumer" --output-on-failure
+      - name: The packages build their libraries with cargo when none is named
+        if: matrix.cargo_fallback
+        run: |
+          unset GUATIAO_LIBRARY
+          cmake -S examples/cpp_consumer -B "$RUNNER_TEMP/cpp-consumer-cargo" -G Ninja \
+            -Dguatiao_DIR="$GITHUB_WORKSPACE/bindings/cpp/guatiao" \
+            -Dguatiao-serde_DIR="$GITHUB_WORKSPACE/bindings/cpp/guatiao-serde" \
+            -Dguatiao-intake_DIR="$GITHUB_WORKSPACE/bindings/cpp/guatiao-intake"
+          cmake --build "$RUNNER_TEMP/cpp-consumer-cargo"
+          ctest --test-dir "$RUNNER_TEMP/cpp-consumer-cargo" --output-on-failure
+
+  dart:
+    name: Dart bindings (${{ matrix.os }}, ${{ matrix.sdk }})
+    runs-on: ${{ matrix.os }}
+    # The same three platforms as the Python job, for the same reason: a
+    # binding breaks where the platforms differ -- the library's filename,
+    # how it is found, and how the loader treats an unmapped image. One
+    # more leg runs the floor `pubspec.yaml` declares.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        sdk: [stable]
+        include:
+          - os: ubuntu-latest
+            sdk: '3.10.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: Build native libraries
+        # The bindings drive a shared library, and `--all-features` is
+        # what exports the registry surface and the serde formats.
+        run: cargo build --workspace --all-features
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.14"
+      - name: Where a host that is not Python finds libpython
+        if: runner.os != 'Windows'
+        run: |
+          echo "LD_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$pythonLocation/lib" >> "$GITHUB_ENV"
+      - name: Build the guatiao-source-py bridge, for the Python greeters
+        # The kinds cases call a greeter written in Python through it, and
+        # one written in C, which each suite compiles with the runner's
+        # own compiler.
+        run: cargo build --manifest-path crates/guatiao-source-py/Cargo.toml
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - name: Install
+        # guatiao, guatiao_serde and guatiao_intake; the last two take the
+        # first from the checkout (pubspec_overrides.yaml).
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart pub get)
+          done
+        shell: bash
+        if: matrix.sdk == 'stable'
+      - name: Install without the tooling that needs a newer SDK
+        # `ffigen` and `lints` ask for a newer SDK than the packages do and
+        # only the stable leg uses them; the floor leg builds and tests the
+        # packages against what their own `sdk:` constraint admits.
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart pub remove ffigen lints)
+          done
+        shell: bash
+        if: matrix.sdk != 'stable'
+      - name: Analyze
+        # `--fatal-infos`, because a lint at info level is still a lint.
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart analyze --fatal-infos)
+          done
+        shell: bash
+        if: matrix.sdk == 'stable'
+      - name: Format check
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart format --output=none --set-exit-if-changed .)
+          done
+        shell: bash
+        if: matrix.sdk == 'stable'
+      - name: Test
+        # Each package's suite alone. A stated skip fails the step: the
+        # job builds everything a case needs.
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart test --reporter expanded 2>&1 | tee "$RUNNER_TEMP/$p-test.log"; test "${PIPESTATUS[0]}" -eq 0)
+            if grep -qE '^[0-9:]+ \+[0-9]+ ~[0-9]+' "$RUNNER_TEMP/$p-test.log"; then
+              # The first line counting a skip names the case; the reason follows it.
+              grep -nE -m1 -A2 '^[0-9:]+ \+[0-9]+ ~[0-9]+' "$RUNNER_TEMP/$p-test.log" || true
+              exit 1
+            fi
+          done
+        shell: bash
+        if: matrix.sdk == 'stable'
+        env:
+          # Absolute: the suites run from the package directories, so a path
+          # relative to the workspace would not resolve.
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+          GUATIAO_PY_BRIDGE: ${{ github.workspace }}/crates/guatiao-source-py/target/debug/${{ runner.os == 'Windows' && 'guatiao_source_py.dll' || runner.os == 'macOS' && 'libguatiao_source_py.dylib' || 'libguatiao_source_py.so' }}
+          # Plain lines, so the skip count stays where the check reads it.
+          NO_COLOR: '1'
+      - name: Test on the floor
+        # Only the top-level suites: `test/stable_only/` holds what needs an
+        # SDK newer than the floor, and one file that does not compile there
+        # fails the whole run.
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart test --reporter expanded test/*_test.dart 2>&1 | tee "$RUNNER_TEMP/$p-test.log"; test "${PIPESTATUS[0]}" -eq 0)
+            if grep -qE '^[0-9:]+ \+[0-9]+ ~[0-9]+' "$RUNNER_TEMP/$p-test.log"; then
+              # The first line counting a skip names the case; the reason follows it.
+              grep -nE -m1 -A2 '^[0-9:]+ \+[0-9]+ ~[0-9]+' "$RUNNER_TEMP/$p-test.log" || true
+              exit 1
+            fi
+          done
+        shell: bash
+        if: matrix.sdk != 'stable'
+        env:
+          # Absolute: the suites run from the package directories, so a path
+          # relative to the workspace would not resolve.
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/debug
+          GUATIAO_PY_BRIDGE: ${{ github.workspace }}/crates/guatiao-source-py/target/debug/${{ runner.os == 'Windows' && 'guatiao_source_py.dll' || runner.os == 'macOS' && 'libguatiao_source_py.dylib' || 'libguatiao_source_py.so' }}
+          # Plain lines, so the skip count stays where the check reads it.
+          NO_COLOR: '1'
+
+  flutter:
+    # The example Flutter app, built the way an application builds: the
+    # three packages' build hooks run cargo for each target, with nothing
+    # installed but rustup's targets and the platform's Flutter setup. The
+    # desktop app is run and must print what each surface answered; the
+    # APK must carry every library for every ABI.
+    name: Flutter example (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            desktop: linux
+            targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          - os: windows-latest
+            desktop: windows
+            targets: ''
+          - os: macos-latest
+            desktop: macos
+            # A release macOS app is universal, and the simulator build
+            # covers both of its architectures.
+            targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios-sim,x86_64-apple-ios
+    defaults:
+      run:
+        shell: bash
+        working-directory: examples/flutter_app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.targets }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build libgtk-3-dev xvfb
+      - uses: actions/setup-java@v4
+        if: runner.os == 'Linux'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Analyze and test guatiao_flutter
+        # The widgets' own suite on this platform's VM, against the library
+        # cargo builds (it carries the core too).
+        working-directory: bindings/dart/guatiao_flutter
+        run: |
+          cargo build -p guatiao-intake --manifest-path ../../../Cargo.toml
+          case "${{ matrix.desktop }}" in
+            linux) library=libguatiao_intake.so ;;
+            windows) library=guatiao_intake.dll ;;
+            macos) library=libguatiao_intake.dylib ;;
+          esac
+          flutter pub get
+          flutter analyze
+          GUATIAO_LIBRARY="$PWD/../../../target/debug/$library" flutter test
+      - name: Build the desktop app
+        run: flutter build ${{ matrix.desktop }} --release
+      - name: Build it again, from the hooks' cache
+        # Nothing changed, so no hook may run again.
+        run: |
+          flutter build ${{ matrix.desktop }} --release -v > rebuild.log 2>&1 || { tail -50 rebuild.log; exit 1; }
+          grep -c 'Skipping build for guatiao' rebuild.log
+          if grep -q 'Rerunning build for guatiao' rebuild.log; then exit 1; fi
+      - name: Run the desktop app
+        env:
+          GUATIAO_EXAMPLE_EXIT: '1'
+        run: |
+          case "${{ matrix.desktop }}" in
+            linux) xvfb-run -a build/linux/x64/release/bundle/flutter_app > run.log 2>&1 ;;
+            windows) build/windows/x64/runner/Release/flutter_app.exe > run.log 2>&1 ;;
+            macos) build/macos/Build/Products/Release/flutter_app.app/Contents/MacOS/flutter_app > run.log 2>&1 ;;
+          esac
+          cat run.log
+          grep -q 'guatiao example: json .*agent\[1\].name second' run.log
+          grep 'guatiao example: libraries' run.log
+      - name: Build the Android app
+        if: runner.os == 'Linux'
+        run: |
+          flutter build apk --release
+          python3 - <<'EOF'
+          import zipfile
+          names = set(zipfile.ZipFile("build/app/outputs/flutter-apk/app-release.apk").namelist())
+          missing = [f"lib/{abi}/lib{lib}.so"
+                     for abi in ("arm64-v8a", "armeabi-v7a", "x86_64")
+                     for lib in ("guatiao", "guatiao_serde", "guatiao_intake")
+                     if f"lib/{abi}/lib{lib}.so" not in names]
+          print("missing:", missing)
+          raise SystemExit(1 if missing else 0)
+          EOF
+      - name: Build the iOS app for the simulator
+        if: runner.os == 'macOS'
+        run: flutter build ios --simulator
+
+  dart-web:
+    # The Dart packages in a browser: the same suites in Chrome under both
+    # web compilers, over one module per page. The application library's
+    # module carries all three surfaces; intake's carries the core and
+    # intake, so serde is not run against it.
+    name: Dart on the web (Chrome, ${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [dart2js, dart2wasm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the modules
+        run: cargo build -p myapp -p guatiao-intake --target wasm32-unknown-unknown --release
+      - name: Build the remote server the remote suites call over WebSocket and WebTransport
+        run: cargo build -p guatiao-source-remote -p derived_greeter --features guatiao-source-remote/ws,guatiao-source-remote/tls,guatiao-source-remote/webtransport --lib --bins --example datagram_echo
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart pub get)
+          done
+        shell: bash
+      - name: Test against the application's module
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart test -p chrome --compiler ${{ matrix.compiler }})
+          done
+        shell: bash
+        env:
+          GUATIAO_WASM: ${{ github.workspace }}/target/wasm32-unknown-unknown/release/myapp.wasm
+      - name: Test against intake's module
+        run: |
+          for p in guatiao guatiao_intake; do
+            (cd "bindings/dart/$p" && dart test -p chrome --compiler ${{ matrix.compiler }})
+          done
+        shell: bash
+        env:
+          GUATIAO_WASM: ${{ github.workspace }}/target/wasm32-unknown-unknown/release/guatiao_intake.wasm
+
+  dart-armv7:
+    # The Dart packages on 32-bit ARM, emulated: the libraries built for
+    # armv7-unknown-linux-gnueabihf and Dart's linux-arm SDK, both run
+    # through qemu-user, once against the separate libraries and once
+    # against the application's own.
+    name: Dart on armv7 (emulated)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+      QEMU_LD_PREFIX: /usr/arm-linux-gnueabihf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Install the cross linker and qemu-user
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: armv7-unknown-linux-gnueabihf
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the libraries for armv7
+        run: >-
+          cargo build --target armv7-unknown-linux-gnueabihf
+          -p guatiao -p guatiao-serde -p guatiao-intake -p hello_library -p derived_greeter -p greeter_caller -p myapp
+          --features guatiao/load,guatiao/derive,guatiao/provider,guatiao/regex,guatiao-serde/exact-numbers,guatiao-serde/toml,guatiao-serde/yaml
+      - name: Build the remote server for the runner
+        # The remote suites call it over WebSocket from the emulated VM: a
+        # separate process, so it runs natively.
+        run: cargo build -p guatiao-source-remote -p derived_greeter --features guatiao-source-remote/ws,guatiao-source-remote/tls
+      - name: Dart for linux-arm
+        # The stable channel's latest release, the one the other legs'
+        # `sdk: stable` resolves to, with its published checksum.
+        shell: bash
+        run: |
+          version=$(curl -fsSL https://storage.googleapis.com/dart-archive/channels/stable/release/latest/VERSION | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          base=https://storage.googleapis.com/dart-archive/channels/stable/release/$version/sdk/dartsdk-linux-arm-release.zip
+          curl -fsSL -o dart-arm.zip "$base"
+          curl -fsSL -o dart-arm.zip.sha256sum "$base.sha256sum"
+          echo "$(cut -d' ' -f1 dart-arm.zip.sha256sum)  dart-arm.zip" | sha256sum -c -
+          unzip -q dart-arm.zip -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/dart-sdk/bin" >> "$GITHUB_PATH"
+      - name: Run ARM programs without QEMU_LD_PREFIX
+        # A build hook (guatiao's, ffigen's) runs with an environment that
+        # drops QEMU_LD_PREFIX, so the ARM loader and each cross library go
+        # where an ARM program looks for them. That directory already exists
+        # (binutils-arm-linux-gnueabihf keeps its linker scripts there), so
+        # the libraries are linked into it one by one.
+        run: |
+          cross=/usr/arm-linux-gnueabihf/lib
+          sudo mkdir -p /usr/lib/arm-linux-gnueabihf
+          for f in "$cross"/*.so*; do
+            [ -e "/usr/lib/arm-linux-gnueabihf/${f##*/}" ] || sudo ln -s "$f" /usr/lib/arm-linux-gnueabihf/
+          done
+          [ -e /lib/ld-linux-armhf.so.3 ] || sudo ln -s "$cross/ld-linux-armhf.so.3" /lib/ld-linux-armhf.so.3
+          env -u QEMU_LD_PREFIX /lib/ld-linux-armhf.so.3 --list "$(command -v dart)" | tee "$RUNNER_TEMP/dart-libs.txt"
+          if grep 'not found' "$RUNNER_TEMP/dart-libs.txt"; then exit 1; fi
+          env -u QEMU_LD_PREFIX dart --version
+        shell: bash
+      - name: Install
+        # The tooling goes as on the floor leg: ffigen and lints are not
+        # needed to run the suites, and under emulation every hook is slow.
+        run: |
+          dart --version
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart pub remove ffigen lints && dart pub get)
+          done
+        shell: bash
+      - name: Test against the separate libraries
+        # CC builds the C greeter the kinds suite loads for armv7: the
+        # runner's own clang builds for x86-64, which this process refuses.
+        # Set on the test steps alone, so no build script compiled for the
+        # runner sees it.
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart test)
+          done
+        shell: bash
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/armv7-unknown-linux-gnueabihf/debug
+          CC: arm-linux-gnueabihf-gcc
+      - name: Test against the application's library
+        run: |
+          for p in guatiao guatiao_serde guatiao_intake; do
+            (cd "bindings/dart/$p" && dart test)
+          done
+        shell: bash
+        env:
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/armv7-unknown-linux-gnueabihf/debug/libmyapp.so
+          CC: arm-linux-gnueabihf-gcc
+
+  bindings-armv7:
+    # The bindings on 32-bit ARM, emulated: an Ubuntu armhf root entered
+    # with chroot through qemu-user, the armv7 libraries cross-built against
+    # it with clang and lld, and each binding's suite run inside it (Go's on
+    # the runner, its test programs run by qemu-user). A 64-bit run cannot
+    # catch a word-sized layout written as a number; this can. Julia has no
+    # armv7 build at its floor.
+    name: ${{ matrix.suite }} on armv7 (emulated)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [python, node, go, r, octave, fortran]
+    defaults:
+      run:
+        shell: bash
+    env:
+      SUITE: ${{ matrix.suite }}
+      ARMHF: /opt/armhf-root
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: clang
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS: >-
+        -C link-arg=--target=armv7-unknown-linux-gnueabihf -C link-arg=--sysroot=/opt/armhf-root
+        -C link-arg=-fuse-ld=lld -L native=/opt/armhf-root/usr/lib/arm-linux-gnueabihf
+      CC_armv7_unknown_linux_gnueabihf: clang
+      CFLAGS_armv7_unknown_linux_gnueabihf: --target=armv7-unknown-linux-gnueabihf --sysroot=/opt/armhf-root
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Install clang, lld and qemu-user
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld qemu-user-static
+          # chroot runs the root's ARM programs only with the fix-binary flag.
+          grep -q '^flags:.*F' /proc/sys/fs/binfmt_misc/qemu-arm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-gnueabihf
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # One cache for the six legs, saved by the leg that builds the most.
+          key: armv7
+          save-if: ${{ matrix.suite == 'python' }}
+          workspaces: |
+            .
+            crates/guatiao-source-py
+      - name: The armhf root
+        # Ubuntu's base image for armhf, its checksum pinned, entered with
+        # chroot. apt inside it needs /dev and /proc, and its sandbox user
+        # fails under qemu-user.
+        run: |
+          base=ubuntu-base-24.04.5-base-armhf.tar.gz
+          curl -fsSL -o "$RUNNER_TEMP/$base" "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04.5/release/$base"
+          echo "4fcee4d278f1c5232e085a021a85e4c6cef3853557a88d98ff380b5e5d5841bb  $RUNNER_TEMP/$base" | sha256sum -c -
+          sudo mkdir -p "$ARMHF"
+          sudo tar -xzf "$RUNNER_TEMP/$base" -C "$ARMHF"
+          sudo cp /etc/resolv.conf "$ARMHF/etc/resolv.conf"
+          sudo mount --bind /dev "$ARMHF/dev"
+          sudo mount -t proc proc "$ARMHF/proc"
+          packages="libc6-dev libgcc-13-dev gcc"
+          case "$SUITE" in
+            python)  packages="$packages python3 python3-pytest libpython3.12-dev" ;;
+            node)    packages="$packages python3 libpython3.12-dev" ;;
+            go)      packages="$packages libpython3.12-dev" ;;
+            r)       packages="$packages r-base-core r-base-dev libffi-dev r-cran-bit64 libpython3.12-dev" ;;
+            octave)  packages="$packages octave octave-dev libffi-dev libpython3.12-dev" ;;
+            fortran) packages="$packages gfortran cmake make" ;;
+          esac
+          apt() { sudo chroot "$ARMHF" /usr/bin/env DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 apt-get -o APT::Sandbox::User=root -qq "$@"; }
+          apt update
+          # shellcheck disable=SC2086
+          apt install -y --no-install-recommends $packages
+      - name: Build the libraries for armv7
+        # The packages and features dart-armv7 builds, plus what a suite's
+        # own tests load.
+        run: |
+          cargo build --target armv7-unknown-linux-gnueabihf \
+            -p guatiao -p guatiao-serde -p guatiao-intake -p hello_library -p derived_greeter -p greeter_caller -p myapp \
+            --features guatiao/load,guatiao/derive,guatiao/provider,guatiao/regex,guatiao-serde/exact-numbers,guatiao-serde/toml,guatiao-serde/yaml
+          case "$SUITE" in
+            python) cargo build --target armv7-unknown-linux-gnueabihf -p guatiao-source-remote \
+                      --features guatiao-source-remote/tcp,guatiao-source-remote/local,guatiao-source-remote/shm,guatiao-source-remote/ws ;;
+            go)     cargo build --target armv7-unknown-linux-gnueabihf -p greeter_host ;;
+          esac
+      - name: Build the guatiao-source-py bridge for armv7, for the Python greeters
+        if: matrix.suite != 'fortran'
+        working-directory: crates/guatiao-source-py
+        run: cargo build --target armv7-unknown-linux-gnueabihf
+        env:
+          PYO3_CROSS: "1"
+          PYO3_CROSS_PYTHON_VERSION: "3.12"
+          PYO3_CROSS_PYTHON_IMPLEMENTATION: CPython
+      - uses: actions/setup-go@v5
+        if: matrix.suite == 'go' || matrix.suite == 'r' || matrix.suite == 'octave'
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: A C compiler for armv7, as cgo calls one
+        if: matrix.suite == 'go' || matrix.suite == 'r' || matrix.suite == 'octave'
+        run: |
+          printf '#!/bin/sh\nexec clang --target=armv7-unknown-linux-gnueabihf --sysroot=%s -fuse-ld=lld -Wno-unused-command-line-argument "$@"\n' "$ARMHF" > "$RUNNER_TEMP/armcc"
+          chmod +x "$RUNNER_TEMP/armcc"
+      - name: Build the Go greeter for armv7 as a library file
+        if: matrix.suite == 'r' || matrix.suite == 'octave'
+        working-directory: examples
+        run: go build -buildmode=c-shared -o "$RUNNER_TEMP/go-arm/libgo_greeter.so" ./go_provider/cshared
+        env:
+          GOARCH: arm
+          GOARM: "7"
+          CGO_ENABLED: "1"
+          CC: ${{ runner.temp }}/armcc
+      - name: The tree and the armv7 libraries in the root
+        run: |
+          sudo mkdir -p "$ARMHF/work/src" "$ARMHF/work/lib" "$ARMHF/work/py" "$ARMHF/work/go"
+          tar --exclude=./.git --exclude=./target --exclude='*/target' --exclude='*/node_modules' -cf - . | sudo tar -xf - -C "$ARMHF/work/src"
+          lib=target/armv7-unknown-linux-gnueabihf/debug
+          sudo cp "$lib"/*.so "$ARMHF/work/lib/"
+          if [ -e "$lib/guatiao-remote-server" ]; then sudo cp "$lib/guatiao-remote-server" "$ARMHF/work/lib/"; fi
+          bridge=crates/guatiao-source-py/target/armv7-unknown-linux-gnueabihf/debug/libguatiao_source_py.so
+          if [ -e "$bridge" ]; then sudo cp "$bridge" "$ARMHF/work/py/"; fi
+          if [ -e "$RUNNER_TEMP/go-arm/libgo_greeter.so" ]; then sudo cp "$RUNNER_TEMP/go-arm/libgo_greeter.so" "$ARMHF/work/go/"; fi
+      - name: Python
+        if: matrix.suite == 'python'
+        # Against the separate libraries, then the application's own.
+        run: |
+          for lib in /work/lib /work/lib/libmyapp.so; do
+            sudo chroot "$ARMHF" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin LANG=C.UTF-8 \
+              PYTHONPATH=/work/src/bindings/python/guatiao/src:/work/src/bindings/python/guatiao-serde/src:/work/src/bindings/python/guatiao-intake/src \
+              GUATIAO_LIBRARY="$lib" GUATIAO_PY_BRIDGE=/work/py/libguatiao_source_py.so \
+              sh -c 'cd /work/src && python3 -m pytest -p no:cacheprovider -rs -q bindings/python/guatiao/tests bindings/python/guatiao-serde/tests bindings/python/guatiao-intake/tests'
+          done
+      - name: Node
+        if: matrix.suite == 'node'
+        # Node's own armv7l build, its checksum checked; a stated skip
+        # fails the step, as on the node job.
+        run: |
+          node=node-v22.23.4-linux-armv7l
+          curl -fsSL -o "$RUNNER_TEMP/$node.tar.xz" "https://nodejs.org/dist/v22.23.4/$node.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/SHASUMS256.txt" https://nodejs.org/dist/v22.23.4/SHASUMS256.txt
+          (cd "$RUNNER_TEMP" && grep " $node.tar.xz\$" SHASUMS256.txt | sha256sum -c -)
+          sudo mkdir -p "$ARMHF/opt"
+          sudo tar -xJf "$RUNNER_TEMP/$node.tar.xz" -C "$ARMHF/opt"
+          inroot() {
+            sudo chroot "$ARMHF" /usr/bin/env -i HOME=/root PATH="/opt/$node/bin:/usr/bin:/bin" LANG=C.UTF-8 NO_COLOR=1 \
+              GUATIAO_PY_BRIDGE=/work/py/libguatiao_source_py.so "$@"
+          }
+          inroot sh -c 'cd /work/src/bindings/node && npm ci'
+          inroot sh -c 'cd /work/src/bindings/node/guatiao && npm run build'
+          inroot sh -c 'cd /work/src/examples && npm ci'
+          for lib in /work/lib /work/lib/libmyapp.so; do
+            for p in guatiao guatiao-serde guatiao-intake; do
+              inroot env GUATIAO_LIBRARY="$lib" sh -c "cd /work/src/bindings/node/$p && npm test" 2>&1 | tee "$RUNNER_TEMP/node-$p.log"
+              test "${PIPESTATUS[0]}" -eq 0
+              if grep -nE "[0-9]+ skipped" "$RUNNER_TEMP/node-$p.log"; then exit 1; fi
+            done
+          done
+      - name: Go
+        if: matrix.suite == 'go'
+        # On the runner, cgo through the armv7 compiler; the test programs
+        # run by qemu-user, the root their loader's prefix. A stated skip
+        # fails the step, as on the go job.
+        run: |
+          (cd bindings/go && go vet ./guatiao/... ./guatiao-serde/... ./guatiao-intake/... \
+            && go test -v ./guatiao/... ./guatiao-serde/... ./guatiao-intake/...) 2>&1 | tee "$RUNNER_TEMP/go.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          (cd examples && go vet ./... && go test -v ./...) 2>&1 | tee "$RUNNER_TEMP/go-examples.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          if grep -n -- "--- SKIP" "$RUNNER_TEMP/go.log" "$RUNNER_TEMP/go-examples.log"; then exit 1; fi
+        env:
+          GOARCH: arm
+          GOARM: "7"
+          CGO_ENABLED: "1"
+          CC: ${{ runner.temp }}/armcc
+          QEMU_LD_PREFIX: /opt/armhf-root
+          PYTHONHOME: /opt/armhf-root/usr
+          GOFLAGS: -count=1
+          GUATIAO_LIBRARY: ${{ github.workspace }}/target/armv7-unknown-linux-gnueabihf/debug
+          GUATIAO_PY_BRIDGE: ${{ github.workspace }}/crates/guatiao-source-py/target/armv7-unknown-linux-gnueabihf/debug/libguatiao_source_py.so
+      - name: R
+        if: matrix.suite == 'r'
+        # R CMD check of the three packages, every greeter required; a check
+        # WARNING fails the step, as on the r job.
+        run: |
+          inroot() {
+            sudo chroot "$ARMHF" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin LANG=C.UTF-8 \
+              GUATIAO_LIBRARY=/work/lib GUATIAO_REPO=/work/src GUATIAO_PY_BRIDGE=/work/py/libguatiao_source_py.so \
+              GUATIAO_GO_LIBRARY=/work/go GUATIAO_REQUIRE_ALL=1 PYTHONDONTWRITEBYTECODE=1 "$@"
+          }
+          sudo mkdir -p "$ARMHF/work/rcheck"
+          inroot sh -c 'cd /work/rcheck && R CMD build --no-manual /work/src/bindings/r/guatiao'
+          status=0
+          inroot sh -c 'cd /work/rcheck && R CMD check --no-manual guatiao_*.tar.gz' || status=$?
+          sudo sh -c "cat $ARMHF/work/rcheck/guatiao.Rcheck/tests/guatiao.Rout*" | tail -n 30 || true
+          if [ "$status" -ne 0 ] || sudo grep -qE "^\* checking .*(WARNING|ERROR)" "$ARMHF/work/rcheck/guatiao.Rcheck/00check.log"; then
+            sudo cat "$ARMHF/work/rcheck/guatiao.Rcheck/00check.log"
+            exit 1
+          fi
+          inroot sh -c 'cd /work/rcheck && R CMD INSTALL guatiao_*.tar.gz'
+          for p in serde intake; do
+            inroot sh -c "cd /work/rcheck && R CMD build --no-manual /work/src/bindings/r/guatiao.$p"
+            status=0
+            inroot sh -c "cd /work/rcheck && R CMD check --no-manual guatiao.${p}_*.tar.gz" || status=$?
+            if [ "$status" -ne 0 ] || sudo grep -qE "^\* checking .*(WARNING|ERROR)" "$ARMHF/work/rcheck/guatiao.$p.Rcheck/00check.log"; then
+              sudo cat "$ARMHF/work/rcheck/guatiao.$p.Rcheck/00check.log"
+              exit 1
+            fi
+          done
+      - name: Octave
+        if: matrix.suite == 'octave'
+        # The suite from a copy, so the MEX files are built outside the
+        # tree; every greeter required, as on the octave job.
+        run: |
+          sudo cp -r "$ARMHF/work/src/bindings/matlab/guatiao" "$ARMHF/work/octave"
+          sudo chroot "$ARMHF" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin LANG=C.UTF-8 \
+            GUATIAO_LIBRARY=/work/lib GUATIAO_REPO=/work/src GUATIAO_PY_BRIDGE=/work/py/libguatiao_source_py.so \
+            GUATIAO_GO_LIBRARY=/work/go GUATIAO_REQUIRE_ALL=1 \
+            sh -c 'cd /work/octave/tests && octave-cli --no-gui --eval "run_tests(\"Exit\", true)"'
+      - name: Fortran
+        if: matrix.suite == 'fortran'
+        # The binding's CMake build and its tests, with gfortran; a stated
+        # skip fails the step, as on the fortran job.
+        run: |
+          sudo chroot "$ARMHF" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin LANG=C.UTF-8 GUATIAO_LIBRARY=/work/lib \
+            GUATIAO_REQUIRE_ALL=1 \
+            sh -c 'cmake -S /work/src/bindings/fortran/guatiao -B /work/fortran && cmake --build /work/fortran -j 4 && ctest --test-dir /work/fortran --output-on-failure'

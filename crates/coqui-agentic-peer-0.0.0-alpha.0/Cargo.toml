@@ -1,0 +1,44 @@
+# coqui-agentic-peer/crates/coqui-agentic-peer at 33f64efc8789d346c3799402f9a2b068d0b4c6b2, with what it inherits written out.
+[package]
+name = "coqui-agentic-peer"
+description = "A proven link between two peers: pair once, then ACP, A2A, MCP or anything else over it"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-agentic-peer"
+homepage = "https://boriken-dev.github.io/coqui-agentic-peer/"
+readme = "README.md"
+keywords = ["agent", "peer", "acp", "a2a", "mcp"]
+categories = ["network-programming"]
+exclude = [".*", "*.local.*"]
+publish = false
+[dependencies]
+mdns-sd = "0.21"
+serde_json = "1"
+socket2 = "0.6"
+url = "2.5"
+[dependencies.coqui-peer]
+git = "https://github.com/Boriken-Dev/coqui-peer"
+rev = "381e2a8144a228e592dc7d82eeb7db85885422ec"
+[dependencies.coqui-peer-webcrypto]
+git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
+rev = "95ee8d4a6d4ed461bd53021c92972e79bf10a864"
+features = ["pin"]
+[dependencies.coqui-peer-noise]
+git = "https://github.com/Boriken-Dev/coqui-peer-noise"
+rev = "6fd5137ef13d908581f6d1c9b0ca6b1bc19e3df3"
+features = ["pin"]
+[dependencies.coqui-web-channel]
+git = "https://github.com/Boriken-Dev/coqui-web-channel.git"
+rev = "0b5b05c9af3417f6b13edc0fc7d9c86c02a63eca"
+[dev-dependencies]
+proptest = "1"
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

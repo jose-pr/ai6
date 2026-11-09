@@ -1,0 +1,245 @@
+# guatiao
+
+**One contract for passing configuration and providers between languages.**
+A value model whose C form is plain structs, a JSON Schema through which a
+provider says what it needs to be initialised, and an envelope through which
+one shared library offers any number of providers. Nothing is opaque: a C,
+C++, Dart, Fortran, Go, Julia, MATLAB, Node, Octave, Python, R or Rust consumer reads a tree, a schema or a descriptor
+without calling into any library.
+
+*Guatiao* is the Taíno pact in which two people exchange names and become
+kin. An ABI is the same agreement between two sides of a boundary.
+
+## Installation
+
+The crates are on crates.io. A pre-release is only selected when it is named
+exactly, so the version is spelled out:
+
+```toml
+[dependencies]
+guatiao = "=0.0.0-alpha.1"
+```
+
+Every dependency sits behind a default-off feature, so a default build
+pulls in nothing.
+
+| Feature | Adds |
+| --- | --- |
+| `derive` | `#[derive(ToValue, FromValue, Schema)]` |
+| `provider` | `#[guatiao::kind]`, `#[derive(Provider)]`, `guatiao::providers!` |
+| `load` | `Registry::load_file`, `scan_dir`: mapping a library and calling it |
+| `regex` | enforcing a schema's `pattern` when validating |
+| `c-header` | regenerating the committed `include/guatiao.h` |
+
+JSON, TOML and YAML, and forms, are a package of their own beside each
+core one, over the `guatiao_serde` and `guatiao_intake` libraries: PyPI
+`guatiao-serde` and `guatiao-intake`, pub.dev `guatiao_serde` and
+`guatiao_intake`, npm `guatiao-serde` and `guatiao-intake`, the Go modules
+`.../bindings/go/guatiao-serde` and `.../bindings/go/guatiao-intake`, the Julia packages
+`GuatiaoSerde` and `GuatiaoIntake` (`bindings/julia/GuatiaoSerde`,
+`bindings/julia/GuatiaoIntake`), the R packages `guatiao.serde` and
+`guatiao.intake` (`bindings/r/guatiao.serde`, `bindings/r/guatiao.intake`), and in MATLAB,
+Octave and Fortran the sub-packages `guatiao.serde` and `guatiao.intake` and
+the modules `guatiao_serde` and `guatiao_intake` of the one package, and in
+C++ the CMake packages `guatiao-serde` and `guatiao-intake`
+(`bindings/cpp/guatiao-serde`, `bindings/cpp/guatiao-intake`). Each
+finds its library through `GUATIAO_SERDE_LIBRARY` or
+`GUATIAO_INTAKE_LIBRARY`, then `GUATIAO_LIBRARY` (a directory, or a file
+exporting its functions, else the file beside it).
+
+A Python consumer installs the bindings and points them at a library that
+exports the ABI:
+
+```bash
+pip install guatiao
+export GUATIAO_LIBRARY=/path/to/the/library
+```
+
+A Dart or Flutter consumer adds the package, whose build hook builds the
+library from source for the target being built (see
+[Dart and Flutter](flutter.md)), or points it at the same library:
+
+```bash
+flutter pub add guatiao
+export GUATIAO_LIBRARY=/path/to/the/library   # or this, without the hook
+```
+
+In a browser the same package loads the WebAssembly module instead
+(`await loadModule(url)`, see [In a browser](wasm.md)), with the same API.
+
+A Node consumer, TypeScript or JavaScript, installs the package the same
+way:
+
+```bash
+npm install guatiao
+export GUATIAO_LIBRARY=/path/to/the/library
+```
+
+A Go consumer adds the module, built with cgo, and points it at the same
+library:
+
+```bash
+go get github.com/Boriken-Dev/guatiao/bindings/go/guatiao
+export GUATIAO_LIBRARY=/path/to/the/library
+```
+
+A Julia consumer adds the package from its directory of the repository
+and points it at the same library:
+
+```bash
+julia -e 'using Pkg; Pkg.add(url = "https://github.com/Boriken-Dev/guatiao", subdir = "bindings/julia/Guatiao")'
+export GUATIAO_LIBRARY=/path/to/the/library
+```
+
+An R consumer installs the source package from its directory of the
+repository (it compiles a small C glue, which needs libffi) and points it
+at the same library:
+
+```bash
+Rscript -e 'remotes::install_github("Boriken-Dev/guatiao", subdir = "bindings/r/guatiao")'
+export GUATIAO_LIBRARY=/path/to/the/library
+```
+
+A GNU Octave consumer installs the package from a release (it compiles a
+small MEX file, which needs libffi); a MATLAB consumer installs the
+toolbox and runs `guatiao.build()` once. Both point it at the same
+library:
+
+```matlab
+pkg install guatiao-VERSION.tar.gz; pkg load guatiao   % Octave
+setenv('GUATIAO_LIBRARY', '/path/to/the/library')
+```
+
+A Fortran consumer adds the package with fpm (a git dependency on the
+repository, whose root manifest builds `bindings/fortran/guatiao`) or CMake, and
+points it at the same library:
+
+```toml
+[dependencies]
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", tag = "..." }
+```
+
+A C++ consumer adds the CMake package (`find_package(guatiao CONFIG)`
+with `guatiao_DIR` naming `bindings/cpp/guatiao`, or `FetchContent`) and
+links the library it finds: the one `GUATIAO_LIBRARY` names, or one it
+builds with cargo from the repository's sources:
+
+```cmake
+find_package(guatiao CONFIG REQUIRED)
+target_link_libraries(app PRIVATE guatiao::guatiao)
+```
+
+A C consumer includes `guatiao.h` and links nothing to read a value.
+
+## 30-second tour
+
+Build a value in Rust, and read it back by converting rather than by a
+getter per kind:
+
+```rust
+use guatiao::Map;
+
+let mut map = Map::new();
+map.set("host", "10.0.0.1");
+map.set("port", 5900);
+
+let host: &str = map.required("host")?.try_into()?;
+let port: u16 = map.required("port")?.try_into()?;
+```
+
+The same tree from Python, over ctypes:
+
+```python
+from guatiao import Value
+
+with Value(host="10.0.0.1", port=5900) as v:
+    v.as_map()["port"].to_python()     # 5900
+```
+
+Load the plugins in a directory (the `load` feature) and call one through the
+table its kind declares:
+
+```rust
+use guatiao::library::{Registry, scan_dir};
+use std::path::Path;
+
+let mut registry = Registry::new("my-host", "1.0");
+scan_dir(&mut registry, Path::new("/opt/myapp/plugins"))?;
+let greeter = registry.best("greeter").expect("something serves it");
+```
+
+## Where a library's imports are found
+
+A library file the registry opens (loaded, scanned, watched, or added as
+a source) is opened by the path the host named. What that file imports in
+turn, such as `guatiao.dll` for a plugin written in C++ or a runtime it
+ships beside itself, is found where the platform's loader looks:
+
+| | where a file's imports are found |
+| --- | --- |
+| Windows, the default (`library`) | beside the file, beside the host's executable, in the system directory and in directories the process added (`AddDllDirectory`, Python's `os.add_dll_directory`); never the current directory or `PATH` |
+| Windows, `path` | the same first; a library the file imports itself that they leave missing is then looked for in a source file's `import_dirs`, the Windows directory, the current directory and `PATH`, and mapped from there; everything else it imports is found as under `library` |
+| Linux, FreeBSD | `LD_LIBRARY_PATH`, the directories the file's own `RUNPATH` names (`$ORIGIN` is the file's directory) and the system's; not the file's directory unless its `RUNPATH` names it, and not the current directory |
+| macOS | an import named `@rpath/...` on `DYLD_LIBRARY_PATH` and in the file's run paths (`@loader_path` is the file's directory), then the system's; not the file's directory unless a run path names it, and not the current directory |
+
+A library the process has already loaded answers an import of its name
+wherever it came from, so a host that loaded `guatiao.dll` itself serves
+every plugin that imports it. A plugin that ships its imports beside it
+loads under the default on Windows as it is, on Linux and FreeBSD built
+with `-Wl,-rpath,'$ORIGIN'`, and on macOS when what it imports is named
+`@rpath/...` and it is built with `-Wl,-rpath,@loader_path`. A host that verified a plugin file keeps, on
+Windows, the plugin's imports to its directory, the host's and the
+system's.
+
+A source file whose imports live in a directory of their own, such as
+the Python bridge, which imports `python3.dll` from a Python installation,
+names it in its configuration's `import_dirs`, which the registry takes
+for itself: on Windows a library the file imports itself and the search
+leaves missing is mapped from the first of them holding it, with what it
+forwards to beside it (`python3XX.dll`), under either setting; a relative
+one is the file's directory's. A library mapped that way, or from `PATH`
+under `path`, is the process's while the file that needed it is: any
+library loaded meanwhile that imports the same name binds to it.
+`path` is the host's choice for a file whose imports are wherever `PATH`
+says: `Registry::set_import_search(ImportSearch::Path)`, in C
+`guatiao_registry_set_import_search(reg, GUATIAO_IMPORT_SEARCH_PATH)`,
+and the same setting in every binding's registry. It widens only what the
+file itself imports and the default leaves missing. Other platforms have
+no such choice per file and ignore both: there the file's own `RUNPATH`
+and the loader's environment decide.
+
+## Learn more
+
+- [Passing data](ownership.md): who owns a tree, which allocator it is in,
+  and how to pass one across a call or a library without copying it.
+- [Rust API reference](https://boriken-dev.github.io/guatiao/rust/guatiao/index.html), built by rustdoc
+  from the crates in this workspace.
+- [Python, host and provider](python.md): calling libraries from Python,
+  and writing one in Python that a host in any language loads.
+- [Node.js, host and provider](node.md): calling libraries from Node,
+  and writing providers in TypeScript that a host in the same process
+  calls.
+- [Go, host and provider](go.md): calling libraries from Go, and writing
+  providers in Go, linked into a host or built as a library file any host
+  loads.
+- [Julia, host and provider](julia.md): calling libraries from Julia, and
+  writing providers in Julia that a host in the same process calls.
+- [R, host and provider](r.md): calling libraries from R, and writing
+  providers in R that a host in the same session calls on R's thread.
+- [MATLAB and Octave, host and provider](matlab.md): calling libraries from
+  MATLAB or GNU Octave, and writing providers as classes that a host in
+  the same session calls on the interpreter's thread.
+- [Fortran, host and provider](fortran.md): calling libraries from
+  Fortran, and writing providers in Fortran, linked into a host or built
+  as a library file any host loads.
+- [C++, host and provider](cpp.md): calling libraries from C++, and
+  writing providers as C++ classes, linked into a host or built as a
+  library file any host loads.
+- [One library for your application](app-library.md): guatiao's C
+  surfaces in a library of the application's own, and every binding
+  using it.
+- [Python API reference](api/python.md), for the ctypes bindings.
+- [Dart API reference](api/dart.md), for the Dart bindings, over `dart:ffi`
+  or the WebAssembly module on the web -- a plain Dart package, so a
+  Flutter app uses the same one.
+- [Changelog](changelog.md).

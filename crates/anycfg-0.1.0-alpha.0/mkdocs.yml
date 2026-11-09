@@ -1,0 +1,50 @@
+site_name: anycfg
+site_description: Format-neutral Rust configuration loading with Serde, pluggable codecs and ordered merging.
+site_url: https://jose-pr.github.io/anycfg-rs/
+repo_url: https://github.com/jose-pr/anycfg-rs
+repo_name: jose-pr/anycfg-rs
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guides:
+      - Register formats: guide/formats.md
+      - Automatic format selection: guide/automatic-selection.md
+      - Sources and streams: guide/sources.md
+      - Configuration locations: guide/paths.md
+      - Merging layers: guide/merging.md
+      - Serde and typed configuration: guide/serde.md
+      - Security and limits: guide/security.md
+  - API Reference:
+      - API overview: api/reference.md
+      - Rust API (rustdoc): https://jose-pr.github.io/anycfg-rs/rust/anycfg/index.html
+  - Changelog: changelog.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.snippets:
+      base_path: ["."]
+  - pymdownx.superfences

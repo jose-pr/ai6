@@ -1,0 +1,95 @@
+import '../../xml/nodes/node.dart';
+import '../exceptions/evaluation_exception.dart';
+import '../types/boolean.dart';
+import '../types/date_time.dart';
+import '../types/duration.dart';
+import '../types/number.dart';
+import '../types/sequence.dart';
+import '../types/string.dart';
+
+/// https://www.w3.org/TR/xpath-31/#id-value-comparisons
+XPathSequence opValueEqual(XPathSequence left, XPathSequence right) {
+  final item1 = _atomizeSingle(left);
+  final item2 = _atomizeSingle(right);
+  if (item1 == null || item2 == null) return XPathSequence.empty;
+  return XPathSequence.single(item1 == item2);
+}
+
+/// https://www.w3.org/TR/xpath-31/#id-value-comparisons
+XPathSequence opValueNotEqual(XPathSequence left, XPathSequence right) {
+  final item1 = _atomizeSingle(left);
+  final item2 = _atomizeSingle(right);
+  if (item1 == null || item2 == null) return XPathSequence.empty;
+  return XPathSequence.single(item1 != item2);
+}
+
+/// https://www.w3.org/TR/xpath-31/#id-value-comparisons
+XPathSequence opValueLessThan(XPathSequence left, XPathSequence right) =>
+    _compareValue(left, right, (c) => c < 0);
+
+/// https://www.w3.org/TR/xpath-31/#id-value-comparisons
+XPathSequence opValueLessThanOrEqual(XPathSequence left, XPathSequence right) =>
+    _compareValue(left, right, (c) => c <= 0);
+
+/// https://www.w3.org/TR/xpath-31/#id-value-comparisons
+XPathSequence opValueGreaterThan(XPathSequence left, XPathSequence right) =>
+    _compareValue(left, right, (c) => c > 0);
+
+/// https://www.w3.org/TR/xpath-31/#id-value-comparisons
+XPathSequence opValueGreaterThanOrEqual(
+  XPathSequence left,
+  XPathSequence right,
+) => _compareValue(left, right, (c) => c >= 0);
+
+Object? _atomizeSingle(XPathSequence seq) {
+  final data = _atomize(seq);
+  if (data.isEmpty) return null;
+  if (data.length > 1) {
+    throw XPathEvaluationException(
+      'Sequence contains more than one item: $data',
+    );
+  }
+  return data.first;
+}
+
+Iterable<Object> _atomize(XPathSequence seq) => seq.expand((item) {
+  if (item is XmlNode) {
+    return [xsString.cast(item)];
+  } else {
+    return [item];
+  }
+});
+
+XPathSequence _compareValue(
+  XPathSequence left,
+  XPathSequence right,
+  bool Function(int) test,
+) {
+  final item1 = _atomizeSingle(left);
+  final item2 = _atomizeSingle(right);
+  if (item1 == null || item2 == null) return XPathSequence.empty;
+  return XPathSequence.single(test(compare(item1, item2)));
+}
+
+/// Compares two XPath values.
+int compare(Object a, Object b) {
+  if (xsNumeric.matches(a) && xsNumeric.matches(b)) {
+    return xsNumeric.cast(a).compareTo(xsNumeric.cast(b));
+  } else if (xsString.matches(a) && xsString.matches(b)) {
+    return xsString.cast(a).compareTo(xsString.cast(b));
+  } else if (xsBoolean.matches(a) && xsBoolean.matches(b)) {
+    final ba = a as bool;
+    final bb = b as bool;
+    return ba == bb
+        ? 0
+        : ba
+        ? 1
+        : -1;
+  } else if (xsDateTime.matches(a) && xsDateTime.matches(b)) {
+    return xsDateTime.cast(a).compareTo(xsDateTime.cast(b));
+  } else if (xsDuration.matches(a) && xsDuration.matches(b)) {
+    return xsDuration.cast(a).compareTo(xsDuration.cast(b));
+  } else {
+    return a.toString().compareTo(b.toString());
+  }
+}

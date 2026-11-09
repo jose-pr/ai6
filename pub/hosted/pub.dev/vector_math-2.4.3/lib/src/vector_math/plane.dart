@@ -1,0 +1,74 @@
+// Copyright 2013 The Flutter Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+part of '../../vector_math.dart';
+
+/// Defines a plane with a [normal] vector and a [constant].
+class Plane {
+  /// Create a plane with a zero [normal] and zero [constant].
+  Plane() : _normal = Vector3.zero(), constant = 0.0;
+
+  /// Create a plane as a copy of [other].
+  Plane.copy(Plane other) : _normal = Vector3.copy(other._normal), constant = other.constant;
+
+  /// Create a plane from normal components and a [constant].
+  Plane.components(double x, double y, double z, this.constant) : _normal = Vector3(x, y, z);
+
+  /// Create a plane from a normal vector and a [constant].
+  Plane.normalconstant(Vector3 normal_, this.constant) : _normal = Vector3.copy(normal_);
+  final Vector3 _normal;
+
+  /// The constant term in the plane equation.
+  double constant;
+
+  /// Find the intersection point between the three planes [a], [b] and [c] and
+  /// copy it into [result].
+  static void intersection(Plane a, Plane b, Plane c, Vector3 result) {
+    final cross = Vector3.zero();
+
+    b.normal.crossInto(c.normal, cross);
+
+    final double f = -a.normal.dot(cross);
+
+    final Vector3 v1 = cross.scaled(a.constant);
+
+    c.normal.crossInto(a.normal, cross);
+
+    final Vector3 v2 = cross.scaled(b.constant);
+
+    a.normal.crossInto(b.normal, cross);
+
+    final Vector3 v3 = cross.scaled(c.constant);
+
+    result
+      ..x = (v1.x + v2.x + v3.x) / f
+      ..y = (v1.y + v2.y + v3.y) / f
+      ..z = (v1.z + v2.z + v3.z) / f;
+  }
+
+  /// The normal vector of the plane.
+  Vector3 get normal => _normal;
+
+  /// Copy the [normal] and [constant] from [o] into this.
+  void copyFrom(Plane o) {
+    _normal.setFrom(o._normal);
+    constant = o.constant;
+  }
+
+  /// Set the normal components and constant term of this plane.
+  void setFromComponents(double x, double y, double z, double w) {
+    _normal.setValues(x, y, z);
+    constant = w;
+  }
+
+  /// Normalize this plane so that [normal] has unit length.
+  void normalize() {
+    final double inverseLength = 1.0 / normal.length;
+    _normal.scale(inverseLength);
+    constant *= inverseLength;
+  }
+
+  /// Return the signed distance from [point] to this plane.
+  double distanceToVector3(Vector3 point) => _normal.dot(point) + constant;
+}

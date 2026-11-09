@@ -1,0 +1,89 @@
+# escape=`
+# An Outer Office app builder for Windows desktop and the web. Unverified: it has not been built,
+# since that needs a Windows container host that runs x64 images. See containers/README.md.
+#
+# The image is your own. Visual Studio's licence does not let it be redistributed, so the Build
+# Tools are installed while it builds and it is never pushed to a public registry.
+#
+# The defaults are what tools/sdk/sdk.lock names on main; check_lock.py compares them.
+
+ARG BASE_IMAGE=mcr.microsoft.com/windows/servercore:ltsc2025@sha256:4e5730bddf049d5dd9f758a3b4e6875ecf19b5bfeee5068e07aeeb5df9c63c55
+FROM ${BASE_IMAGE}
+
+SHELL ["powershell", "-NoLogo", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+WORKDIR C:\src
+
+ENV RUSTUP_HOME=C:\ai6\rust\rustup `
+    CARGO_HOME=C:\ai6\rust\cargo `
+    FLUTTER_ROOT=C:\ai6\flutter `
+    PUB_CACHE=C:\ai6\pub-cache `
+    AI6_SDK_DEPS=C:\ai6\deps `
+    FLUTTER_WINDOWING=true
+
+# The bootstrapper at this link floats; what it installs is signed by the vendor, and 3010 is its
+# "restart needed", which a container build has no use for.
+RUN $p = Start-Process -Wait -PassThru -FilePath powershell -ArgumentList '-NoProfile', '-Command', `
+      'Invoke-WebRequest -UseBasicParsing https://aka.ms/vs/17/release/vs_buildtools.exe -OutFile C:\vs_buildtools.exe'; `
+    if ($p.ExitCode -ne 0) { throw 'could not download vs_buildtools.exe' }; `
+    $p = Start-Process -Wait -PassThru -FilePath C:\vs_buildtools.exe -ArgumentList '--quiet', '--wait', '--norestart', '--nocache', `
+      '--installPath', 'C:\BuildTools', '--includeRecommended', '--add', 'Microsoft.VisualStudio.Workload.VCTools'; `
+    if ($p.ExitCode -notin 0, 3010) { throw \"vs_buildtools.exe exited with $($p.ExitCode)\" }; `
+    Remove-Item C:\vs_buildtools.exe
+
+ARG GIT_URL=https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip
+ARG GIT_SHA256=e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa877
+RUN Invoke-WebRequest -UseBasicParsing $env:GIT_URL -OutFile C:\mingit.zip; `
+    $actual = (Get-FileHash C:\mingit.zip -Algorithm SHA256).Hash.ToLowerInvariant(); `
+    if ($actual -ne $env:GIT_SHA256) { throw \"MinGit is $actual, expected $env:GIT_SHA256\" }; `
+    Expand-Archive C:\mingit.zip -DestinationPath C:\mingit; `
+    Remove-Item C:\mingit.zip; `
+    [Environment]::SetEnvironmentVariable('PATH', \"C:\ai6\rust\cargo\bin;C:\ai6\flutter\bin;C:\ai6\flutter\bin\cache\dart-sdk\bin;C:\mingit\cmd;$env:PATH\", 'Machine')
+
+ARG RUST_VERSION=1.99.1
+ARG RUSTUP_VERSION=1.29.2
+ARG RUSTUP_SHA256=00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd
+RUN Invoke-WebRequest -UseBasicParsing \"https://static.rust-lang.org/rustup/archive/$env:RUSTUP_VERSION/x86_64-pc-windows-msvc/rustup-init.exe\" -OutFile C:\rustup-init.exe; `
+    $actual = (Get-FileHash C:\rustup-init.exe -Algorithm SHA256).Hash.ToLowerInvariant(); `
+    if ($actual -ne $env:RUSTUP_SHA256) { throw \"rustup-init is $actual, expected $env:RUSTUP_SHA256\" }; `
+    C:\rustup-init.exe -y --no-modify-path --profile minimal --default-toolchain $env:RUST_VERSION -c clippy -c rustfmt -t wasm32-unknown-unknown; `
+    if ($LASTEXITCODE -ne 0) { throw \"rustup-init exited with $LASTEXITCODE\" }; `
+    Remove-Item C:\rustup-init.exe
+
+# deps' pub/ is the pub cache, its cdn/ is what tool/cdn_files.dart fill --deps reads, and its
+# crates/ is the vendor directory that `crates.py use "$AI6_SDK_DEPS"` points cargo at.
+ARG DEPS_GIT_URL=https://github.com/jose-pr/ai6.git
+ARG DEPS_REF=a5f6c682957d35c4921460b4b57f9f3a1cf1e7f1
+RUN git init -q C:\deps; `
+    git -C C:\deps fetch -q --depth 1 $env:DEPS_GIT_URL $env:DEPS_REF; `
+    if ($LASTEXITCODE -ne 0) { throw \"DEPS_REF $env:DEPS_REF is not in $env:DEPS_GIT_URL\" }; `
+    git -C C:\deps -c core.autocrlf=false checkout -q --detach FETCH_HEAD; `
+    New-Item -ItemType Directory -Force $env:AI6_SDK_DEPS | Out-Null; `
+    Move-Item C:\deps\pub $env:PUB_CACHE; `
+    Get-ChildItem (Join-Path $env:PUB_CACHE 'git') -Directory -ErrorAction SilentlyContinue | ForEach-Object { `
+      New-Item -ItemType Directory -Force (Join-Path $_.FullName '.git') | Out-Null; `
+      New-Item -ItemType File -Force (Join-Path $_.FullName '.git\pub-packages') | Out-Null }; `
+    Move-Item C:\deps\cdn (Join-Path $env:AI6_SDK_DEPS 'cdn'); `
+    Move-Item C:\deps\crates (Join-Path $env:AI6_SDK_DEPS 'crates'); `
+    Remove-Item C:\deps -Recurse -Force
+
+# Last, so another ref reuses every layer above it. Flutter refuses to run without its .git.
+ARG FLUTTER_GIT_URL=https://github.com/flutter/flutter.git
+ARG FLUTTER_REF=2541e508405f5d9728286d6ed3307163a5406e08
+ENV FLUTTER_GIT_URL=${FLUTTER_GIT_URL}
+LABEL ai6.flutter.git-url="${FLUTTER_GIT_URL}" ai6.flutter.ref="${FLUTTER_REF}"
+RUN git -c core.autocrlf=false -c core.longpaths=true clone -q -c core.autocrlf=false -c core.longpaths=true --filter=tree:0 --no-checkout $env:FLUTTER_GIT_URL $env:FLUTTER_ROOT; `
+    if ($LASTEXITCODE -ne 0) { throw \"could not clone $env:FLUTTER_GIT_URL\" }; `
+    Set-Location $env:FLUTTER_ROOT; `
+    $commit = $null; `
+    foreach ($name in \"refs/remotes/origin/$env:FLUTTER_REF\", \"refs/tags/$env:FLUTTER_REF\", $env:FLUTTER_REF) { `
+      $commit = git rev-parse -q --verify \"$name^{commit}\" 2>$null; `
+      if ($commit) { break } `
+    }; `
+    if (-not $commit) { throw \"FLUTTER_REF $env:FLUTTER_REF is not a tag, branch or commit of $env:FLUTTER_GIT_URL\" }; `
+    git checkout -q --detach $commit; `
+    flutter config --no-analytics --no-cli-animations --enable-windows-desktop --enable-web --enable-windowing; `
+    flutter precache --windows --web; `
+    flutter --version; `
+    if ($LASTEXITCODE -ne 0) { throw 'flutter --version failed' }; `
+    Set-Content C:\ai6\flutter-commit $commit; `
+    Write-Host \"ai6: FLUTTER_REF $env:FLUTTER_REF is commit $commit\"

@@ -1,0 +1,73 @@
+# coqui-peer-noise/. at 6fd5137ef13d908581f6d1c9b0ca6b1bc19e3df3, with what it inherits written out.
+test = [{ name = "pair", required-features = ["pin"] }, { name = "pair_vectors", required-features = ["pin"] }]
+example = [{ name = "pair", required-features = ["pin"] }]
+[package]
+name = "coqui-peer-noise"
+version = "0.0.0-alpha.0"
+description = "The Noise method of coqui-peer: Noise_XX_25519_AESGCM_SHA256 between two X25519 keys, in a browser or natively, ending in an encrypted session"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-peer-noise"
+homepage = "https://boriken-dev.github.io/coqui-peer-noise/"
+keywords = ["noise", "peer", "x25519", "handshake", "browser"]
+categories = ["cryptography", "authentication", "network-programming"]
+exclude = [".*", "*.local.*", "/bindings/", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+pin = ["coqui-peer/pin"]
+[dependencies]
+[dependencies.coqui-peer]
+git = "https://github.com/Boriken-Dev/coqui-peer"
+rev = "381e2a8144a228e592dc7d82eeb7db85885422ec"
+[dependencies.guatiao]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+default-features = false
+features = ["derive"]
+[dependencies.x25519-dalek]
+version = "2.0.1"
+default-features = false
+features = ["static_secrets", "zeroize"]
+[dependencies.aes-gcm]
+version = "0.11"
+default-features = false
+features = ["aes", "alloc", "zeroize"]
+[dependencies.hkdf]
+version = "0.13"
+default-features = false
+[dependencies.sha2]
+version = "0.11.1"
+default-features = false
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+[dependencies.getrandom]
+version = "0.4"
+default-features = false
+[dependencies.zeroize]
+version = "1"
+default-features = false
+features = ["alloc"]
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"
+[dev-dependencies.curve25519-dalek]
+version = "4.1"
+default-features = false
+[dev-dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+default-features = false
+features = ["json", "toml"]
+[dev-dependencies.snow]
+version = "0.10"
+default-features = false
+features = ["use-aes-gcm", "use-chacha20poly1305", "use-sha2", "use-curve25519", "use-getrandom"]

@@ -1,0 +1,301 @@
+format_version: 1.0.0
+files:
+  package:guatiao/ffi.dart:
+    used-config:
+      ffi-native: false
+    symbols:
+      c:@E@guatiao_status_code:
+        name: guatiao_status_code
+      c:@E@guatiao_tag:
+        name: guatiao_tag
+      c:@F@guatiao_alloc_default:
+        name: guatiao_alloc_default
+      c:@F@guatiao_alloc_is_wiping:
+        name: guatiao_alloc_is_wiping
+      c:@F@guatiao_alloc_wiping:
+        name: guatiao_alloc_wiping
+      c:@F@guatiao_buffer_push:
+        name: guatiao_buffer_push
+      c:@F@guatiao_date_add_span:
+        name: guatiao_date_add_span
+      c:@F@guatiao_date_format:
+        name: guatiao_date_format
+      c:@F@guatiao_date_normalize:
+        name: guatiao_date_normalize
+      c:@F@guatiao_date_parse:
+        name: guatiao_date_parse
+      c:@F@guatiao_datetime_add_span:
+        name: guatiao_datetime_add_span
+      c:@F@guatiao_datetime_format:
+        name: guatiao_datetime_format
+      c:@F@guatiao_datetime_normalize:
+        name: guatiao_datetime_normalize
+      c:@F@guatiao_datetime_parse:
+        name: guatiao_datetime_parse
+      c:@F@guatiao_duration_read:
+        name: guatiao_duration_read
+      c:@F@guatiao_kind_document_read:
+        name: guatiao_kind_document_read
+      c:@F@guatiao_kind_floor_hash:
+        name: guatiao_kind_floor_hash
+      c:@F@guatiao_list_clear:
+        name: guatiao_list_clear
+      c:@F@guatiao_list_discard:
+        name: guatiao_list_discard
+      c:@F@guatiao_list_push:
+        name: guatiao_list_push
+      c:@F@guatiao_map_clear:
+        name: guatiao_map_clear
+      c:@F@guatiao_map_copy_from:
+        name: guatiao_map_copy_from
+      c:@F@guatiao_map_discard:
+        name: guatiao_map_discard
+      c:@F@guatiao_map_set:
+        name: guatiao_map_set
+      c:@F@guatiao_map_settle_lent:
+        name: guatiao_map_settle_lent
+      c:@F@guatiao_memory_alloc:
+        name: guatiao_memory_alloc
+      c:@F@guatiao_memory_free:
+        name: guatiao_memory_free
+      c:@F@guatiao_merge:
+        name: guatiao_merge
+      c:@F@guatiao_registry_add_source:
+        name: guatiao_registry_add_source
+      c:@F@guatiao_registry_add_source_file:
+        name: guatiao_registry_add_source_file
+      c:@F@guatiao_registry_available:
+        name: guatiao_registry_available
+      c:@F@guatiao_registry_best:
+        name: guatiao_registry_best
+      c:@F@guatiao_registry_catalog:
+        name: guatiao_registry_catalog
+      c:@F@guatiao_registry_collect:
+        name: guatiao_registry_collect
+      c:@F@guatiao_registry_free:
+        name: guatiao_registry_free
+      c:@F@guatiao_registry_host:
+        name: guatiao_registry_host
+      c:@F@guatiao_registry_import_search:
+        name: guatiao_registry_import_search
+      c:@F@guatiao_registry_keyed_by:
+        name: guatiao_registry_keyed_by
+      c:@F@guatiao_registry_kind_descriptions:
+        name: guatiao_registry_kind_descriptions
+      c:@F@guatiao_registry_libraries:
+        name: guatiao_registry_libraries
+      c:@F@guatiao_registry_libraries_keyed_by:
+        name: guatiao_registry_libraries_keyed_by
+      c:@F@guatiao_registry_load_file:
+        name: guatiao_registry_load_file
+      c:@F@guatiao_registry_new:
+        name: guatiao_registry_new
+      c:@F@guatiao_registry_priority:
+        name: guatiao_registry_priority
+      c:@F@guatiao_registry_provider:
+        name: guatiao_registry_provider
+      c:@F@guatiao_registry_provider_available:
+        name: guatiao_registry_provider_available
+      c:@F@guatiao_registry_provider_config:
+        name: guatiao_registry_provider_config
+      c:@F@guatiao_registry_provider_create:
+        name: guatiao_registry_provider_create
+      c:@F@guatiao_registry_provider_ctx:
+        name: guatiao_registry_provider_ctx
+      c:@F@guatiao_registry_provider_destroy:
+        name: guatiao_registry_provider_destroy
+      c:@F@guatiao_registry_provider_meta:
+        name: guatiao_registry_provider_meta
+      c:@F@guatiao_registry_provider_table:
+        name: guatiao_registry_provider_table
+      c:@F@guatiao_registry_provider_vtable:
+        name: guatiao_registry_provider_vtable
+      c:@F@guatiao_registry_providers:
+        name: guatiao_registry_providers
+      c:@F@guatiao_registry_refresh:
+        name: guatiao_registry_refresh
+      c:@F@guatiao_registry_register_entry:
+        name: guatiao_registry_register_entry
+      c:@F@guatiao_registry_retire:
+        name: guatiao_registry_retire
+      c:@F@guatiao_registry_scan_dir:
+        name: guatiao_registry_scan_dir
+      c:@F@guatiao_registry_scan_dir_rules:
+        name: guatiao_registry_scan_dir_rules
+      c:@F@guatiao_registry_scan_path:
+        name: guatiao_registry_scan_path
+      c:@F@guatiao_registry_set_import_search:
+        name: guatiao_registry_set_import_search
+      c:@F@guatiao_registry_set_priority:
+        name: guatiao_registry_set_priority
+      c:@F@guatiao_registry_unload:
+        name: guatiao_registry_unload
+      c:@F@guatiao_registry_unload_unchecked:
+        name: guatiao_registry_unload_unchecked
+      c:@F@guatiao_registry_watch_dir:
+        name: guatiao_registry_watch_dir
+      c:@F@guatiao_registry_why_not:
+        name: guatiao_registry_why_not
+      c:@F@guatiao_schema_differences:
+        name: guatiao_schema_differences
+      c:@F@guatiao_schema_redact:
+        name: guatiao_schema_redact
+      c:@F@guatiao_schema_validate:
+        name: guatiao_schema_validate
+      c:@F@guatiao_span_format:
+        name: guatiao_span_format
+      c:@F@guatiao_span_normalize:
+        name: guatiao_span_normalize
+      c:@F@guatiao_span_parse:
+        name: guatiao_span_parse
+      c:@F@guatiao_string_push:
+        name: guatiao_string_push
+      c:@F@guatiao_time_format:
+        name: guatiao_time_format
+      c:@F@guatiao_time_normalize:
+        name: guatiao_time_normalize
+      c:@F@guatiao_time_parse:
+        name: guatiao_time_parse
+      c:@F@guatiao_timestamp_format:
+        name: guatiao_timestamp_format
+      c:@F@guatiao_timestamp_normalize:
+        name: guatiao_timestamp_normalize
+      c:@F@guatiao_timestamp_parse:
+        name: guatiao_timestamp_parse
+      c:@F@guatiao_value_absent:
+        name: guatiao_value_absent
+      c:@F@guatiao_value_bool:
+        name: guatiao_value_bool
+      c:@F@guatiao_value_bytes:
+        name: guatiao_value_bytes
+      c:@F@guatiao_value_clone:
+        name: guatiao_value_clone
+      c:@F@guatiao_value_free:
+        name: guatiao_value_free
+      c:@F@guatiao_value_from_walker:
+        name: guatiao_value_from_walker
+      c:@F@guatiao_value_is_sensitive:
+        name: guatiao_value_is_sensitive
+      c:@F@guatiao_value_list:
+        name: guatiao_value_list
+      c:@F@guatiao_value_make_local:
+        name: guatiao_value_make_local
+      c:@F@guatiao_value_map:
+        name: guatiao_value_map
+      c:@F@guatiao_value_null:
+        name: guatiao_value_null
+      c:@F@guatiao_value_number:
+        name: guatiao_value_number
+      c:@F@guatiao_value_string:
+        name: guatiao_value_string
+      c:@F@guatiao_value_visit:
+        name: guatiao_value_visit
+      c:@F@guatiao_value_wipe:
+        name: guatiao_value_wipe
+      c:@F@guatiao_wire_announce:
+        name: guatiao_wire_announce
+      c:@F@guatiao_wire_close:
+        name: guatiao_wire_close
+      c:@F@guatiao_wire_decode:
+        name: guatiao_wire_decode
+      c:@F@guatiao_wire_encode:
+        name: guatiao_wire_encode
+      c:@F@guatiao_wire_encode_walker:
+        name: guatiao_wire_encode_walker
+      c:@F@guatiao_wire_receiver_accept:
+        name: guatiao_wire_receiver_accept
+      c:@F@guatiao_wire_receiver_free:
+        name: guatiao_wire_receiver_free
+      c:@F@guatiao_wire_receiver_new:
+        name: guatiao_wire_receiver_new
+      c:@F@guatiao_wire_send:
+        name: guatiao_wire_send
+      c:@F@guatiao_wire_visit:
+        name: guatiao_wire_visit
+      c:@S@guatiao_alloc:
+        name: guatiao_alloc
+      c:@S@guatiao_buffer:
+        name: guatiao_buffer
+      c:@S@guatiao_bytes:
+        name: guatiao_bytes
+      c:@S@guatiao_bytes_mut:
+        name: guatiao_bytes_mut
+      c:@S@guatiao_date:
+        name: guatiao_date
+      c:@S@guatiao_datetime:
+        name: guatiao_datetime
+      c:@S@guatiao_entries:
+        name: guatiao_entries
+      c:@S@guatiao_entry:
+        name: guatiao_entry
+      c:@S@guatiao_host_info:
+        name: guatiao_host_info
+      c:@S@guatiao_host_services:
+        name: guatiao_host_services
+      c:@S@guatiao_kind_header:
+        name: guatiao_kind_header
+      c:@S@guatiao_kind_table:
+        name: guatiao_kind_table
+      c:@S@guatiao_kind_tables:
+        name: guatiao_kind_tables
+      c:@S@guatiao_kinds:
+        name: guatiao_kinds
+      c:@S@guatiao_library_info:
+        name: guatiao_library_info
+      c:@S@guatiao_list:
+        name: guatiao_list
+      c:@S@guatiao_map:
+        name: guatiao_map
+      c:@S@guatiao_merge_override:
+        name: guatiao_merge_override
+      c:@S@guatiao_object:
+        name: guatiao_object
+      c:@S@guatiao_provider_error:
+        name: guatiao_provider_error
+      c:@S@guatiao_provider_info:
+        name: guatiao_provider_info
+      c:@S@guatiao_providers:
+        name: guatiao_providers
+      c:@S@guatiao_registry:
+        name: guatiao_registry
+      c:@S@guatiao_source_info:
+        name: guatiao_source_info
+      c:@S@guatiao_span:
+        name: guatiao_span
+      c:@S@guatiao_str:
+        name: guatiao_str
+      c:@S@guatiao_string:
+        name: guatiao_string
+      c:@S@guatiao_text_error:
+        name: guatiao_text_error
+      c:@S@guatiao_time:
+        name: guatiao_time
+      c:@S@guatiao_timestamp:
+        name: guatiao_timestamp
+      c:@S@guatiao_value:
+        name: guatiao_value
+      c:@S@guatiao_values:
+        name: guatiao_values
+      c:@S@guatiao_visitor:
+        name: guatiao_visitor
+      c:@S@guatiao_walker:
+        name: guatiao_walker
+      c:@S@guatiao_wire_event:
+        name: guatiao_wire_event
+      c:@S@guatiao_wire_receiver:
+        name: guatiao_wire_receiver
+      c:@U@guatiao_payload:
+        name: guatiao_payload
+      c:guatiao.h@T@guatiao_map_ptr:
+        name: guatiao_map_ptr
+      c:guatiao.h@T@guatiao_number:
+        name: guatiao_number
+      c:guatiao.h@T@guatiao_status:
+        name: guatiao_status
+        dart-name: Dartguatiao_status
+      c:guatiao.h@T@guatiao_status_code:
+        name: guatiao_status_code$1
+        dart-name: Dartguatiao_status_code
+      c:guatiao.h@T@guatiao_tag:
+        name: guatiao_tag$1
+        dart-name: Dartguatiao_tag

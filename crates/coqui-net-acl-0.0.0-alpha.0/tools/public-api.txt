@@ -1,0 +1,85 @@
+pub mod coqui_net_acl
+pub enum coqui_net_acl::Action
+pub coqui_net_acl::Action::Deny
+pub coqui_net_acl::Action::Permit
+impl core::fmt::Display for coqui_net_acl::Action
+pub fn coqui_net_acl::Action::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum coqui_net_acl::IpNet
+pub coqui_net_acl::IpNet::Any
+pub coqui_net_acl::IpNet::V4(u32, u8)
+pub coqui_net_acl::IpNet::V6(u128, u8)
+impl coqui_net_acl::IpNet
+pub fn coqui_net_acl::IpNet::contains(&self, core::net::ip_addr::IpAddr) -> bool
+impl core::fmt::Display for coqui_net_acl::IpNet
+pub fn coqui_net_acl::IpNet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for coqui_net_acl::IpNet
+pub type coqui_net_acl::IpNet::Err = coqui_net_acl::ParseError
+pub fn coqui_net_acl::IpNet::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for coqui_net_acl::IpNet
+pub fn coqui_net_acl::IpNet::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for coqui_net_acl::IpNet
+pub fn coqui_net_acl::IpNet::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[non_exhaustive] pub enum coqui_net_acl::Outcome
+pub coqui_net_acl::Outcome::Deferred
+pub coqui_net_acl::Outcome::Deny
+pub coqui_net_acl::Outcome::Permit
+pub struct coqui_net_acl::Acl
+pub coqui_net_acl::Acl::default: coqui_net_acl::Action
+pub coqui_net_acl::Acl::rules: alloc::vec::Vec<coqui_net_acl::Rule>
+impl coqui_net_acl::Acl
+pub fn coqui_net_acl::Acl::canonicalize_fingerprints<E>(&mut self, impl core::ops::function::FnMut(usize, &str) -> core::result::Result<alloc::string::String, E>) -> core::result::Result<(), E>
+pub fn coqui_net_acl::Acl::decide(&self, core::net::socket_addr::SocketAddr, core::net::socket_addr::SocketAddr) -> coqui_net_acl::AclDecision
+pub fn coqui_net_acl::Acl::decide_anonymous(&self, core::net::socket_addr::SocketAddr, core::net::socket_addr::SocketAddr) -> coqui_net_acl::AclDecision
+pub fn coqui_net_acl::Acl::decide_peer(&self, core::net::socket_addr::SocketAddr, core::net::socket_addr::SocketAddr, &str) -> coqui_net_acl::AclDecision
+pub fn coqui_net_acl::Acl::non_defaults(&self) -> alloc::vec::Vec<coqui_net_acl::NonDefault>
+pub fn coqui_net_acl::Acl::permits_bind(&self, core::net::socket_addr::SocketAddr) -> coqui_net_acl::BindDecision
+pub fn coqui_net_acl::Acl::prepend(&mut self, coqui_net_acl::Rule)
+pub fn coqui_net_acl::Acl::push(&mut self, coqui_net_acl::Rule)
+impl core::fmt::Display for coqui_net_acl::Acl
+pub fn coqui_net_acl::Acl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for coqui_net_acl::Acl
+pub fn coqui_net_acl::Acl::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for coqui_net_acl::Acl
+pub fn coqui_net_acl::Acl::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct coqui_net_acl::AclDecision
+pub coqui_net_acl::AclDecision::log: bool
+pub coqui_net_acl::AclDecision::outcome: coqui_net_acl::Outcome
+pub coqui_net_acl::AclDecision::rule_index: core::option::Option<usize>
+impl coqui_net_acl::AclDecision
+pub fn coqui_net_acl::AclDecision::proceeds(&self) -> bool
+pub struct coqui_net_acl::BindDecision
+pub coqui_net_acl::BindDecision::permitted: bool
+pub coqui_net_acl::BindDecision::rule_index: core::option::Option<usize>
+pub struct coqui_net_acl::NonDefault
+pub coqui_net_acl::NonDefault::default: alloc::string::String
+pub coqui_net_acl::NonDefault::setting: alloc::string::String
+pub coqui_net_acl::NonDefault::value: alloc::string::String
+pub struct coqui_net_acl::ParseError(_)
+impl core::error::Error for coqui_net_acl::ParseError
+impl core::fmt::Display for coqui_net_acl::ParseError
+pub fn coqui_net_acl::ParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_net_acl::PortRange
+pub coqui_net_acl::PortRange::end: u16
+pub coqui_net_acl::PortRange::start: u16
+impl core::fmt::Display for coqui_net_acl::PortRange
+pub fn coqui_net_acl::PortRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for coqui_net_acl::PortRange
+pub type coqui_net_acl::PortRange::Err = coqui_net_acl::ParseError
+pub fn coqui_net_acl::PortRange::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for coqui_net_acl::PortRange
+pub fn coqui_net_acl::PortRange::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for coqui_net_acl::PortRange
+pub fn coqui_net_acl::PortRange::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct coqui_net_acl::Rule
+pub coqui_net_acl::Rule::action: coqui_net_acl::Action
+pub coqui_net_acl::Rule::destination: core::option::Option<coqui_net_acl::IpNet>
+pub coqui_net_acl::Rule::fingerprint: core::option::Option<alloc::string::String>
+pub coqui_net_acl::Rule::log: bool
+pub coqui_net_acl::Rule::port: core::option::Option<coqui_net_acl::PortRange>
+pub coqui_net_acl::Rule::source: coqui_net_acl::IpNet
+impl coqui_net_acl::Rule
+pub fn coqui_net_acl::Rule::new(coqui_net_acl::Action, coqui_net_acl::IpNet) -> Self
+impl serde_core::ser::Serialize for coqui_net_acl::Rule
+pub fn coqui_net_acl::Rule::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for coqui_net_acl::Rule
+pub fn coqui_net_acl::Rule::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>

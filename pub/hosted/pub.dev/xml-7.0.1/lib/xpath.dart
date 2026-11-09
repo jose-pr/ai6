@@ -1,0 +1,44 @@
+/// Dart XPath adds support of XPath 3.1 expressions to the XML library.
+library;
+
+import 'package:meta/meta.dart' show experimental;
+
+import 'src/xml/nodes/node.dart';
+import 'src/xml/utils/name.dart';
+import 'src/xpath/evaluation/context.dart';
+import 'src/xpath/types/function.dart';
+import 'src/xpath/types/sequence.dart';
+
+export 'src/xpath/exceptions/evaluation_exception.dart';
+export 'src/xpath/exceptions/parser_exception.dart';
+export 'src/xpath/generator.dart' show XPathGenerator;
+export 'src/xpath/types/function.dart' show XPathFunction;
+export 'src/xpath/types/sequence.dart' show XPathSequence;
+
+extension XPathExtension on XmlNode {
+  /// Returns an iterable over the nodes matching the provided XPath
+  /// [expression].
+  @experimental
+  Iterable<XmlNode> xpath(
+    String expression, {
+    Map<String, Object>? variables,
+    Map<XmlName, XPathFunction>? functions,
+  }) => xpathEvaluate(
+    expression,
+    variables: variables,
+    functions: functions,
+  ).whereType<XmlNode>();
+
+  /// Returns the value resulting from evaluating the given XPath [expression].
+  ///
+  /// The returned value is of type [XPathSequence], which is an iterable of
+  /// [Object]s.
+  @experimental
+  XPathSequence xpathEvaluate(
+    String expression, {
+    Map<String, Object>? variables,
+    Map<XmlName, XPathFunction>? functions,
+  }) => XPathContext.canonical(
+    this,
+  ).copy(variables: variables, functions: functions).evaluate(expression);
+}

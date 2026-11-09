@@ -1,0 +1,267 @@
+# guatiao for Node.js
+
+[![npm version](https://img.shields.io/npm/v/guatiao.svg)](https://www.npmjs.com/package/guatiao)
+[![Node versions](https://img.shields.io/node/v/guatiao.svg)](https://www.npmjs.com/package/guatiao)
+[![License: MPL 2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/Boriken-Dev/guatiao/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://boriken-dev.github.io/guatiao/node/)
+[![CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/guatiao/test.yaml)](https://github.com/Boriken-Dev/guatiao/actions/workflows/test.yaml)
+
+Node.js and TypeScript bindings for the
+[guatiao](https://github.com/Boriken-Dev/guatiao/) ABI: **one value model
+for passing data between languages**, a JSON Schema that describes a
+value, and a registry that loads plugin libraries. Typed ESM over koffi,
+with nothing to compile. It works with any shared library that exports the
+ABI, whether that is `guatiao` itself or an application that carries it.
+
+> **Status: alpha.** The package carries no native library of its own:
+> you point it at one.
+
+## Features
+
+- **Value trees as JavaScript objects** — build, read and change a tree in
+  place, or convert it to and from plain objects, arrays and `Map`s.
+- **Numbers keep their exact text** — `1.10` stays `1.10` and an integer
+  of any size survives as a `bigint`.
+- **Be a plugin host** — scan a directory, filter on what a library
+  declares before loading it, list providers best first, build an
+  instance from a configuration, call a provider through its table with
+  JavaScript values in and out.
+- **A kind is never declared twice** — a kind crate commits its kinds'
+  description beside their C header; `guatiao-kind` writes a module from
+  it whose kinds are values in JavaScript and interfaces in TypeScript, so
+  `class Hello extends Provider implements Greeter` is checked by `tsc`,
+  and `kindsOf()` loads the same description at run time.
+- **Write a provider in TypeScript or plain JavaScript** — classes become
+  providers of a kind, in a library a host calls the way it calls one
+  written in Rust, C or Python; an ES module of a package is a library,
+  named and versioned by its `package.json`. No build step: Node runs a
+  JavaScript provider as it is, and refuses one missing a required method,
+  naming it.
+- **Hand a library a JavaScript object** — any object with the right
+  methods becomes an object of a kind (a listener, a callback) that a
+  library calls, or holds until it is done with it.
+- **Dates, times, spans and exact lengths** — `PlainDate`, `PlainTime`,
+  `PlainDateTime` and `Span` to the nanosecond, instants as `Date`, read
+  and written by the library itself.
+- **Values on the wire** — `value.toWire()` and `Value.fromWire(bytes)`
+  carry a tree exactly as bytes, and `guatiao/wire` announces a schema on
+  a channel before its values, with a `Receiver` that checks each one.
+- **Redaction** — a copy of a value with every field its schema marks
+  secret hidden.
+- **JSON, TOML and YAML**, and **forms checked against a schema**, are
+  the packages [`guatiao-serde`](https://www.npmjs.com/package/guatiao-serde)
+  and [`guatiao-intake`](https://www.npmjs.com/package/guatiao-intake),
+  each over its own library and built on this one.
+- **Importing never fails** — the native library is looked for on first
+  use, and a missing one names every place that was searched.
+
+## Installation
+
+```bash
+npm install guatiao
+```
+
+The package drives a shared library that exports the guatiao ABI. Say
+where it is:
+
+```bash
+export GUATIAO_LIBRARY=/opt/myapp/lib          # a directory holding guatiao.dll / libguatiao.so / libguatiao.dylib
+export GUATIAO_LIBRARY=/opt/myapp/myapp.dll    # or the file itself, whatever it is called
+```
+
+or call `useLibrary(path)` before the first call. Without either, the
+platform's library search is tried by file name. A library that exports
+only part of the ABI is fine: calling a function it lacks throws
+`MissingSymbol` naming it.
+
+Node 22 or later, on a platform koffi ships a build for (Linux, macOS,
+Windows, FreeBSD, OpenBSD, Android; x64 and arm64), and on 32-bit ARM
+Linux.
+
+## Quick start
+
+### Values
+
+```ts
+import { Value } from 'guatiao';
+
+using v = new Value({ host: '10.0.0.1', port: 5900, tags: ['a', 'b'] });
+const m = v.asMap();
+m.set('port', 5901);
+m.get('tags')!.asList().push('c');
+
+m.get('port')!.toJS();      // 5901
+m.keys();                   // ['host', 'port', 'tags'], insertion order
+m.get('port')!.intOr(22n);  // 5901n, or 22n if it were not an integer
+v.toJS();                   // back to a plain object
+```
+
+A `Value` owns its tree and frees it on `close()`, or at the end of the
+scope with `using`. `m.get('tags')` is a `Ref`: a path into the tree that
+is walked again on every access, so it stays valid while the tree grows
+around it.
+
+**Numbers keep their exact text.** Choose what comes back when reading:
+
+```ts
+using n = Value.number('1.10');
+n.toJS();                       // 1.1
+n.toJS({ numbers: 'text' });    // '1.10'
+using big = new Value(2n ** 64n);
+big.toJS();                     // 18446744073709551616n
+```
+
+### Hosting plugins
+
+```ts
+import { Registry } from 'guatiao';
+import { Greeter } from './greeter_kind.js';   // written by guatiao-kind from the kind's description
+
+using reg = new Registry('my-host', '1.0');
+reg.scanDir('/opt/plugins', { rules: 'kind=greeter' });
+for (const provider of reg.providers('greeter')) console.log(provider.key);
+
+const greeter = reg.bind('acme_hello', Greeter);
+using answer = greeter.greet('ana');
+answer.toJS();                                // { greeting: 'hello, ana' }
+```
+
+### A kind, and a provider of it
+
+A kind crate commits its kinds as data beside its C header
+(`greeter_kind.kinds.json`). Write the module once, and commit it:
+
+```bash
+npx guatiao-kind greeter_kind.kinds.json --out greeter_kind   # greeter_kind.js and greeter_kind.d.ts
+```
+
+```ts
+import { BadValue } from 'guatiao';
+import { Provider, library } from 'guatiao/provide';
+import { Greeter } from './greeter_kind.js';   // a value, and in TypeScript an interface
+
+export class Hello extends Provider implements Greeter {
+  static override readonly kinds = [Greeter];
+  greet(name: string) {
+    if (!name) throw new BadValue('nobody to greet');
+    return { greeting: `hello, ${name}` };
+  }
+}
+
+reg.registerLibrary(library('hello', '1.0.0', { providers: [Hello] }));
+```
+
+The same provider in JavaScript drops the types (`static kinds =
+[Greeter]`), and `/** @implements {Greeter} */` lets an editor with
+`// @ts-check` check it. A host in this process, written in any language,
+calls `Hello` through the same table it would call a Rust or C greeter
+through. A kind with no header behind it is a class:
+
+```js
+import { Kind, slot, t } from 'guatiao/kinds';
+
+export class Echo extends Kind {
+  static floorHash = 0x6563686f;
+  static slots = { echo: slot(t.str).named('text').returns(t.text).required() };
+}
+```
+
+`describeKinds([Echo])` answers its description, the document a kind
+crate commits beside its header, which Dart and the other languages write
+code from. In TypeScript the same kind can be written as an interface,
+the way a Rust trait declares one, and `guatiao-kind` reads it into the
+description (the compiler reads it: `typescript` 7.0 or newer):
+
+```ts
+import type { MapAnswer, i64, u32 } from 'guatiao/kinds';
+
+/** Counts by name. */
+export interface Tally {
+  /** Adds `by` to the count under `name`. @throws */
+  add(name: string, by: u32): i64;
+  /** Every count: an optional slot. */
+  all?(): MapAnswer;
+}
+```
+
+```bash
+npx guatiao-kind tally_kind.ts --out tally_kind --document tally_kind.kinds.json
+```
+
+### Dates and spans
+
+```ts
+import { PlainDate, Span } from 'guatiao/time';
+
+PlainDate.parse('2026-01-31').add(Span.parse('1mo')).toString();   // '2026-02-28'
+```
+
+## Known limits
+
+- An instant reads into a `Date`, which counts milliseconds: what lies
+  below one is dropped, toward the past. `PlainTime`, `PlainDateTime` and
+  `Span` keep every nanosecond.
+- A map read with `toJS()` becomes a plain object, whose integer-like keys
+  (`"2"`) JavaScript lists before the others; `toJS({ maps: 'map' })`
+  keeps the map's order.
+- `ListRef.set` and `insert` rebuild the list, because the C ABI only
+  appends and removes.
+- A library may call a provider or object written here from any thread;
+  the call runs on Node's main thread when its event loop turns, the
+  calling thread waiting. A native call made synchronously from Node's
+  thread that waits for such a thread never returns.
+- A provider answers synchronously: a method returning a promise is
+  refused.
+- A `Remote` cannot run a kind's default body for a slot a provider leaves
+  out, as a Rust caller does: it throws `Unsupported`.
+- Describe kinds (`kind()`, `kindsOf()`, a kind class's first use) and
+  build libraries (`library()`) at module level, not inside a call a
+  library is making: koffi cannot register a callback there.
+- A kind whose slots refer to itself, directly or through another kind,
+  cannot be loaded from a description.
+- On Linux and macOS, CPython served through the guatiao-source-py bridge inside
+  a Node process does not free what a call from Node drops: a Python object such
+  a call releases is never deallocated.
+- 64-bit platforms and 32-bit ARM, not 32-bit x86 (where the guatiao
+  library does not build), and not in a browser.
+
+## API overview
+
+| Module | Purpose |
+| --- | --- |
+| `guatiao` | `Value`, `Ref`, `MapRef`, `ListRef`, `Registry`, `Instance`, `redact`, `useLibrary`, the errors |
+| `guatiao/kinds` | `kindsOf`, `kindOf`: kinds loaded from their description; `Kind`, `slot`: a kind defined as a class; `describeKinds`: a kind's description; `kind`, `t`: the descriptor underneath; `Remote`, `ObjectHandle`; serving a table over an object; `u32`, `i64`, `Taken`, `Lent`, `ObjectKind` and the other types a kind written as an interface is spelled with |
+| `guatiao/describe` | `describeInterfaces`: kinds written as TypeScript interfaces, read into their description |
+| `guatiao-kind` (a command) | writes a module and its `.d.ts` from a kinds description, or from TypeScript interfaces |
+| `guatiao/provide` | `Provider`, `library`, `libraryOf`, `s`: providers written in TypeScript, a module as a library |
+| `guatiao/time` | `PlainDate`, `PlainTime`, `PlainDateTime`, `Span`, instants, exact lengths, `normalize` |
+| `guatiao/wire` | channel frames (`announce`, `send`, `close`) and a `Receiver` checking each value against its channel's schema |
+| `guatiao/ffi` | for a package over another guatiao library: `openSurface`, memory, `adopt`, `borrow`, `withNodes` |
+
+[`AGENTS.md`](https://github.com/Boriken-Dev/guatiao/blob/main/bindings/node/guatiao/AGENTS.md)
+is the full API reference and ships in the package. The C ABI is described
+by [`guatiao.h`](https://github.com/Boriken-Dev/guatiao/blob/main/crates/guatiao/include/guatiao.h).
+
+## Development
+
+```bash
+cd bindings/node
+npm ci                # the workspace: this package, guatiao-serde and guatiao-intake
+cd guatiao
+npm run typecheck     # tsc --strict over the sources, the tests and the examples
+npm test              # vitest
+npm run build         # dist/
+```
+
+The tests need the library and the repository's example plugins in one
+directory; `test/setup.ts` points `GUATIAO_LIBRARY` at the
+repository's build output when the variable is unset, and the repository's
+own `AGENTS.md` says how to produce it. The greeter written in C is built
+with the first C compiler found, the Python greeters are served through
+the guatiao-source-py bridge (`GUATIAO_PY_BRIDGE`, else its debug build), and the
+example host runs once `examples/` is installed (`npm install` there,
+after `npm run build` here); a test that lacks one skips and says which.
+
+## License
+
+MPL 2.0 — see [LICENSE](https://github.com/Boriken-Dev/guatiao/blob/main/LICENSE).

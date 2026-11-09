@@ -1,0 +1,46 @@
+# guatiao/crates/guatiao-intake at 0350bae7fef4cef2aa46ce73f1ef6be15983d83b, with what it inherits written out.
+[package]
+name = "guatiao-intake"
+links = "guatiao-intake"
+description = "Taking a guatiao value in from a person: the path grammar, flat key-to-text storage, checking a store of text, and how a schema is shown -- sections, widget hints and conditional visibility"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+publish = true
+license = "MPL-2.0"
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[lib]
+name = "guatiao_intake"
+crate-type = ["rlib", "cdylib"]
+path = "src/lib.rs"
+[features]
+c-header = ["dep:cbindgen"]
+derive = ["dep:guatiao-derive", "guatiao/derive"]
+[dependencies]
+[dependencies.guatiao]
+path = "../guatiao"
+version = "=0.0.0-alpha.1"
+[dependencies.guatiao-derive]
+path = "../guatiao-derive"
+version = "=0.0.0-alpha.1"
+optional = true
+features = ["form"]
+[dev-dependencies]
+[dev-dependencies.guatiao]
+path = "../guatiao"
+features = ["provider", "load"]
+[build-dependencies]
+[build-dependencies.cbindgen]
+version = "0.29"
+optional = true
+[lints]
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

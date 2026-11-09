@@ -1,0 +1,192 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The JavaScript echo, served by the source and called from a Rust host as the
+//! channel kind, keeps every rule that needs no thread of its own (the
+//! engine calls a provider only on its own thread).
+
+extern crate alloc;
+
+#[path = "../../../examples/channel_echo/tests/rules/mod.rs"]
+mod rules;
+
+use alloc::sync::Arc;
+use std::path::PathBuf;
+
+use channel_echo_kind::ChannelEcho;
+use guatiao::library::{Candidate, Host, LocalLibrary, ProviderError, Registry, Source};
+use guatiao::{List, Map};
+use guatiao_bridge::BridgeSource;
+use guatiao_libffi::Libffi;
+use guatiao_source_js::JsEngine;
+
+fn repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+struct Held(Arc<BridgeSource<JsEngine>>);
+
+impl Source for Held {
+    fn list(&self, host: Host) -> Result<Vec<Candidate>, ProviderError> {
+        self.0.list(host)
+    }
+    fn open(&self, host: Host, id: &str) -> Result<LocalLibrary<'static>, ProviderError> {
+        self.0.open(host, id)
+    }
+    fn close(&self, id: &str, stamp: &str) {
+        self.0.close(id, stamp);
+    }
+}
+
+#[test]
+fn the_js_echo_keeps_every_inline_rule() {
+    let mut config = Map::new();
+    let mut dirs = List::new();
+    dirs.push(
+        repo()
+            .join("examples/channel_echo/node")
+            .display()
+            .to_string(),
+    );
+    config.set("dirs", dirs);
+    let mut kinds = List::new();
+    kinds.push(
+        repo()
+            .join("examples/channel_echo/kind/include/channel_echo.kinds.json")
+            .display()
+            .to_string(),
+    );
+    config.set("kinds", kinds);
+    let source = Arc::new(
+        BridgeSource::<JsEngine>::pinned(&config, "js-channel-test")
+            .expect("QuickJS starts")
+            .with_mechanism(Arc::new(Libffi)),
+    );
+    let mut registry = Registry::new("js-channel-host", "1.0");
+    registry.add_source("js", Held(source)).expect("added");
+    let changed = registry.refresh();
+    assert!(changed.refused.is_empty(), "{changed:?}");
+    let echo = registry
+        .offer::<dyn ChannelEcho>("channel_echo_js_echo")
+        .expect("the echo is served")
+        .expect("as the trait")
+        .shared()
+        .expect("an instance");
+    rules::hold_every_inline_rule("the JavaScript echo", &|config: &Map, sink| {
+        echo.start(config, sink)
+    });
+}
+
+/// Takes a channel and closes it with a status, from a library in
+/// JavaScript: a kind's slot named `close` keeps its name on the handle.
+#[guatiao::kind]
+pub trait Closer: Send + Sync {
+    /// Calls `close(status, reason)` on the channel it was handed.
+    fn finish(
+        &self,
+        channel: guatiao::library::Object<dyn guatiao_channel::Channel>,
+        status: u32,
+        reason: &str,
+    ) -> Result<(), ProviderError>;
+}
+
+/// A channel that remembers what it was closed with, and that it was let go.
+struct Recording {
+    closed_with: Arc<std::sync::Mutex<Vec<(u32, String)>>>,
+    destroyed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl guatiao_channel::Channel for Recording {
+    fn send(&self, _bytes: &[u8]) -> Result<(), ProviderError> {
+        Ok(())
+    }
+    fn close(&self, status: u32, reason: &str) {
+        self.closed_with
+            .lock()
+            .unwrap()
+            .push((status, reason.to_owned()));
+    }
+}
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        self.destroyed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn close_on_a_handle_reaches_the_provider_with_its_status_and_reason() {
+    let dir = std::env::temp_dir().join(format!("guatiao-js-closer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let document = format!(
+        "{{\"kinds\":[{},{},{}]}}",
+        CloserVtable::description(),
+        guatiao_channel::ChannelVtable::description(),
+        guatiao_channel::ChannelSinkVtable::description()
+    );
+    std::fs::write(dir.join("closer.kinds.json"), &document).unwrap();
+    std::fs::write(
+        dir.join("closer.guatiao"),
+        "type = \"js\"\nname = \"closer\"\nkinds = [\"closer\"]\npaths = [\".\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("package.json"),
+        "{\"name\":\"closer\",\"version\":\"1.0.0\",\"type\":\"module\",\"exports\":\"./closer.js\"}",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("closer.js"),
+        format!(
+            "import {{ kindsOf }} from 'guatiao/kinds';\n\
+             import {{ Provider }} from 'guatiao/provide';\n\
+             const described = kindsOf({document});\n\
+             export class Closer extends Provider {{\n\
+               static kinds = [described['closer']];\n\
+               finish(channel, status, reason) {{ channel.close(status, reason); channel.destroy(); }}\n\
+             }}\n"
+        ),
+    )
+    .unwrap();
+    let mut config = Map::new();
+    let mut dirs = List::new();
+    dirs.push(dir.display().to_string());
+    config.set("dirs", dirs);
+    let mut kinds = List::new();
+    kinds.push(dir.join("closer.kinds.json").display().to_string());
+    config.set("kinds", kinds);
+    let source = Arc::new(
+        BridgeSource::<JsEngine>::pinned(&config, "js-closer-test")
+            .expect("QuickJS starts")
+            .with_mechanism(Arc::new(Libffi)),
+    );
+    let mut registry = Registry::new("js-closer-host", "1.0");
+    registry.add_source("js", Held(source)).expect("added");
+    let changed = registry.refresh();
+    assert!(changed.refused.is_empty(), "{changed:?}");
+    let closer = registry
+        .offer::<dyn Closer>("closer_closer")
+        .expect("served")
+        .expect("as the trait")
+        .shared()
+        .expect("an instance");
+    let closed_with = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let destroyed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let channel = guatiao_channel::Channel::into_object(Recording {
+        closed_with: Arc::clone(&closed_with),
+        destroyed: Arc::clone(&destroyed),
+    });
+    closer
+        .finish(channel, 5, "the host gave up")
+        .expect("finished");
+    assert_eq!(
+        *closed_with.lock().unwrap(),
+        [(5, "the host gave up".to_owned())],
+        "close(5, reason) arrived whole"
+    );
+    assert!(destroyed.load(std::sync::atomic::Ordering::SeqCst));
+    let _ = std::fs::remove_dir_all(&dir);
+}

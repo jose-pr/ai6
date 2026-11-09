@@ -1,0 +1,35 @@
+# guatiao/crates/guatiao-derive at 0350bae7fef4cef2aa46ce73f1ef6be15983d83b, with what it inherits written out.
+[package]
+name = "guatiao-derive"
+description = "Derive macros for guatiao: ToValue, FromValue and Schema, and, behind features, the `kind` attribute and the Provider and Form derives -- the proc-macro half, reached through `guatiao` features"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+publish = true
+license = "MPL-2.0"
+readme = "README.md"
+exclude = [".*", "*.local.*"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[lib]
+name = "guatiao_derive"
+path = "src/lib.rs"
+proc-macro = true
+[dependencies]
+syn = "2"
+quote = "1"
+proc-macro2 = "1"
+[features]
+provider = ["syn/full"]
+form = []
+[dev-dependencies]
+prettyplease = "0.2"
+serde_json = "1"
+[lints]
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

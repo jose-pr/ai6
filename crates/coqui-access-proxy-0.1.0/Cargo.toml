@@ -1,0 +1,35 @@
+# coqui-access/providers/access/proxy at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+[package]
+name = "coqui-access-proxy"
+description = "Trusted reverse-proxy identity headers as an authenticator"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[dependencies.coqui-access-kit]
+path = "crates/coqui-access-kit"
+[dependencies.coqui-net-acl]
+git = "https://github.com/Boriken-Dev/coqui-net-acl"
+rev = "6cbcb4b937ea1902291aaf1636d4d6bd391adc3a"
+[dependencies.coqui-peer-tls]
+git = "https://github.com/Boriken-Dev/coqui-peer-tls"
+rev = "e5c1e6df27260ba3b4cec0a1ad5e37a04652e5f4"
+features = ["fields"]
+[dependencies.data-encoding]
+version = "2.11"
+[dependencies.percent-encoding]
+version = "2.3"
+[dependencies.rustls-pki-types]
+version = "1.15"
+default-features = false
+features = ["std"]
+[dev-dependencies]
+[dev-dependencies.rcgen]
+version = "0.14"

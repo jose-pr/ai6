@@ -1,0 +1,475 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+import 'dart:ffi';
+import 'dart:io';
+
+import 'package:ffi/ffi.dart';
+
+import 'bindings.g.dart';
+import 'status.dart';
+
+/// No library of this base name was found by any route.
+class LibraryNotFound implements Exception {
+  LibraryNotFound(this.basename, this.filename, [this.cause, this.variable]);
+
+  final String basename;
+
+  /// The platform's filename for [basename].
+  final String filename;
+
+  /// What the loader said, when it was reached at all.
+  final Object? cause;
+
+  /// The surface's own environment variable, consulted before
+  /// `GUATIAO_LIBRARY`; `null` for the core.
+  final String? variable;
+
+  @override
+  String toString() {
+    final tail = cause == null ? '' : ' ($cause)';
+    final own = variable == null ? '' : 'the $variable environment variable, ';
+    return 'LibraryNotFound: could not find $filename: checked the '
+        'libraries registered with guatiao.useLibrary, $own'
+        'the GUATIAO_LIBRARY environment variable, the library a build '
+        'hook bundled, guatiao.libraryDirectory and the platform library '
+        'search path$tail';
+  }
+}
+
+/// [name] is not exported by the library this build linked.
+///
+/// The library was found and loaded; it was simply built without the
+/// feature that symbol belongs to.
+class MissingSymbol implements Exception {
+  MissingSymbol(this.path, this.name, [this.feature]);
+
+  final String path;
+  final String name;
+
+  /// The build feature the symbol belongs to, when one is known.
+  final String? feature;
+
+  @override
+  String toString() {
+    final where = feature == null ? '' : " (feature '$feature')";
+    return 'MissingSymbol: $path was not built with $name$where';
+  }
+}
+
+/// Throws [UnsupportedError] unless a pointer is four or eight bytes
+/// wide: the widths the ABI's layout is written for and tested on.
+void requireWordSize(int bytes) {
+  if (bytes != 4 && bytes != 8) {
+    throw UnsupportedError(
+      'package:guatiao reads structs laid out for 32- and 64-bit processes; '
+      'this one has $bytes-byte pointers',
+    );
+  }
+}
+
+/// The platform's filename for a library of this base name.
+String dllFilename(String basename) {
+  if (Platform.isWindows) return '$basename.dll';
+  if (Platform.isMacOS) return 'lib$basename.dylib';
+  return 'lib$basename.so';
+}
+
+/// Every surface this package speaks, by the base name of the library
+/// that carries it when each is its own file.
+const List<String> surfaces = <String>[
+  'guatiao',
+  'guatiao_serde',
+  'guatiao_intake',
+];
+
+/// One symbol per surface, to recognise a library that carries it.
+const Map<String, String> _probe = <String, String>{
+  'guatiao': 'guatiao_value_free',
+  'guatiao_serde': 'guatiao_json_parse',
+  'guatiao_intake': 'guatiao_intake_check',
+};
+
+/// Each surface's own environment variable, consulted before
+/// `GUATIAO_LIBRARY`.
+const Map<String, String> _variable = <String, String>{
+  'guatiao_serde': 'GUATIAO_SERDE_LIBRARY',
+  'guatiao_intake': 'GUATIAO_INTAKE_LIBRARY',
+};
+
+/// Where to look when `GUATIAO_LIBRARY` is unset.
+///
+/// A host that ships its own copies points this at their directory before
+/// the first native call. A process cannot set its own environment, so an
+/// embedder -- a Flutter app, a test suite -- has no other way to say
+/// where its libraries are. `GUATIAO_LIBRARY` still wins.
+String? libraryDirectory;
+
+String? _inDirectory(String directory, String filename) {
+  if (!Directory(directory).existsSync()) return null;
+  final candidate = '$directory${Platform.pathSeparator}$filename';
+  return File(candidate).existsSync() ? candidate : null;
+}
+
+// The library each package's build hook bundled, reached through the
+// asset id the hook gave it: whatever its file is called (an application's
+// own crate), wherever the build put it (a `dart run` cache, an APK).
+// Never called: their addresses lead to the file that holds them.
+@Native<Void Function()>(
+  symbol: 'guatiao_value_free',
+  assetId: 'package:guatiao/guatiao',
+)
+external void _bundledCore();
+
+@Native<Void Function()>(
+  symbol: 'guatiao_json_parse',
+  assetId: 'package:guatiao_serde/guatiao_serde',
+)
+external void _bundledSerde();
+
+@Native<Void Function()>(
+  symbol: 'guatiao_intake_check',
+  assetId: 'package:guatiao_intake/guatiao_intake',
+)
+external void _bundledIntake();
+
+/// Where the library a build hook bundled for [basename] is, or `null`
+/// when none was (no hook ran, or it was told to build nothing).
+///
+/// A surface other than the core falls back to the core's bundled library
+/// when that exports [probe]: an application's own crate, built by the
+/// core's hook, carries every surface it links.
+String? bundledLibraryPath(String basename, {String? probe}) {
+  final own = _bundledFile(basename);
+  if (own != null) return own;
+  if (basename == 'guatiao' || probe == null) return null;
+  final core = _bundledFile('guatiao');
+  return core != null && _carries(core, probe) ? core : null;
+}
+
+String? _bundledFile(String basename) {
+  final Pointer<Void> address;
+  try {
+    address = switch (basename) {
+      'guatiao' => Native.addressOf<NativeFunction<Void Function()>>(
+        _bundledCore,
+      ),
+      'guatiao_serde' => Native.addressOf<NativeFunction<Void Function()>>(
+        _bundledSerde,
+      ),
+      'guatiao_intake' => Native.addressOf<NativeFunction<Void Function()>>(
+        _bundledIntake,
+      ),
+      _ => nullptr,
+    }.cast<Void>();
+  } on Object {
+    return null;
+  }
+  if (address == nullptr) return null;
+  final path = _fileHolding(address);
+  // A symbol found in the program itself (a static link) is not a file
+  // to open again.
+  if (path == null || path == Platform.resolvedExecutable) return null;
+  // Android maps a library straight out of the APK (`base.apk!/lib/...`);
+  // its own loader finds it again by name.
+  if (Platform.isAndroid && path.contains('!/')) {
+    return path.substring(path.lastIndexOf('/') + 1);
+  }
+  return path;
+}
+
+typedef _GetModuleHandleExC =
+    Int32 Function(Uint32, Pointer<Void>, Pointer<Pointer<Void>>);
+typedef _GetModuleHandleExDart =
+    int Function(int, Pointer<Void>, Pointer<Pointer<Void>>);
+typedef _GetModuleFileNameC =
+    Uint32 Function(Pointer<Void>, Pointer<Utf16>, Uint32);
+typedef _GetModuleFileNameDart =
+    int Function(Pointer<Void>, Pointer<Utf16>, int);
+typedef _DladdrC = Int32 Function(Pointer<Void>, Pointer<Pointer<Void>>);
+typedef _DladdrDart = int Function(Pointer<Void>, Pointer<Pointer<Void>>);
+
+/// The file of the loaded image holding [address]: `GetModuleHandleExW` on
+/// Windows, `dladdr` elsewhere.
+String? _fileHolding(Pointer<Void> address) {
+  try {
+    if (Platform.isWindows) {
+      final kernel32 = DynamicLibrary.open('kernel32.dll');
+      final handleOf = kernel32
+          .lookupFunction<_GetModuleHandleExC, _GetModuleHandleExDart>(
+            'GetModuleHandleExW',
+          );
+      final nameOf = kernel32
+          .lookupFunction<_GetModuleFileNameC, _GetModuleFileNameDart>(
+            'GetModuleFileNameW',
+          );
+      return using((arena) {
+        final module = arena<Pointer<Void>>();
+        // FROM_ADDRESS | UNCHANGED_REFCOUNT: a lookup, not a load.
+        if (handleOf(0x4 | 0x2, address, module) == 0) return null;
+        const capacity = 32768;
+        final name = arena<Uint16>(capacity).cast<Utf16>();
+        final length = nameOf(module.value, name, capacity);
+        if (length == 0 || length >= capacity) return null;
+        return name.toDartString(length: length);
+      });
+    }
+    final DynamicLibrary libdl;
+    if (Platform.isAndroid) {
+      libdl = DynamicLibrary.open('libdl.so');
+    } else if (DynamicLibrary.process().providesSymbol('dladdr')) {
+      libdl = DynamicLibrary.process();
+    } else {
+      libdl = DynamicLibrary.open('libdl.so.2');
+    }
+    final dladdr = libdl.lookupFunction<_DladdrC, _DladdrDart>('dladdr');
+    return using((arena) {
+      // Dl_info: dli_fname, dli_fbase, dli_sname, dli_saddr.
+      final info = arena<Pointer<Void>>(4);
+      if (dladdr(address, info) == 0) return null;
+      final name = info[0];
+      return name == nullptr ? null : name.cast<Utf8>().toDartString();
+    });
+  } on Object {
+    return null;
+  }
+}
+
+bool _carries(String path, String symbol) {
+  try {
+    return DynamicLibrary.open(path).providesSymbol(symbol);
+  } on Object {
+    return false;
+  }
+}
+
+/// Where [basename]'s library is.
+///
+/// [variable] first, when given and not `GUATIAO_LIBRARY`: a file it
+/// names is taken as it is, a directory holds the platform's filename.
+/// Then `GUATIAO_LIBRARY`: a directory holding the platform's filename,
+/// or a file, taken when it exports [probe] (or when [probe] is `null`),
+/// else the platform's filename beside it. Then the library a build hook
+/// bundled ([bundledLibraryPath]). Then [libraryDirectory]; otherwise the
+/// bare filename, which hands the search to the platform's own loader.
+String resolveLibraryPath(String basename, {String? variable, String? probe}) {
+  final filename = dllFilename(basename);
+  final own = variable == null || variable == 'GUATIAO_LIBRARY'
+      ? null
+      : Platform.environment[variable];
+  if (own != null && own.isNotEmpty) {
+    if (Directory(own).existsSync()) {
+      final found = _inDirectory(own, filename);
+      if (found != null) return found;
+    } else if (File(own).existsSync()) {
+      return own;
+    }
+  }
+  final env = Platform.environment['GUATIAO_LIBRARY'];
+  if (env != null && env.isNotEmpty) {
+    final found = _inDirectory(env, filename);
+    if (found != null) return found;
+    if (!Directory(env).existsSync() && File(env).existsSync()) {
+      // A file `GUATIAO_LIBRARY` names serves every surface it exports,
+      // whatever it is called; for any other, the surface's own library
+      // is looked for beside it.
+      if (probe == null || _carries(env, probe)) return env;
+      final beside = _inDirectory(File(env).parent.path, filename);
+      if (beside != null) return beside;
+    }
+  }
+  final bundled = bundledLibraryPath(basename, probe: probe);
+  if (bundled != null) return bundled;
+  final configured = libraryDirectory;
+  if (configured != null && configured.isNotEmpty) {
+    final found = _inDirectory(configured, filename);
+    if (found != null) return found;
+  }
+  return filename;
+}
+
+/// One loaded shared library: its bindings, its default allocator, and
+/// the symbol lookups the rest of the package goes through.
+///
+/// Symbols are resolved lazily by [GuatiaoBindings]' own `late final`
+/// lookups, so opening a library costs nothing beyond the load itself.
+class NativeLib {
+  NativeLib._(this.path, this._dylib) : bindings = GuatiaoBindings(_dylib) {
+    requireWordSize(sizeOf<IntPtr>());
+  }
+
+  /// Opens [basename]'s library, found by [resolveLibraryPath] with
+  /// [variable] and [probe], or throws [LibraryNotFound].
+  factory NativeLib.open(String basename, {String? variable, String? probe}) {
+    final path = resolveLibraryPath(basename, variable: variable, probe: probe);
+    try {
+      return NativeLib._(path, DynamicLibrary.open(path));
+    } on Object catch (error) {
+      throw LibraryNotFound(basename, dllFilename(basename), error, variable);
+    }
+  }
+
+  /// Where the library was loaded from.
+  final String path;
+
+  final DynamicLibrary _dylib;
+
+  /// The loaded library, for a package's own generated bindings over the
+  /// surface it carries.
+  DynamicLibrary get library => _dylib;
+
+  /// The generated raw surface over this library.
+  final GuatiaoBindings bindings;
+
+  Pointer<guatiao_alloc>? _alloc;
+  Pointer<guatiao_alloc>? _wiping;
+
+  /// Whether this build exports [name].
+  bool provides(String name) => _dylib.providesSymbol(name);
+
+  /// Throws [MissingSymbol] unless this build exports [name].
+  void require(String name, {String? feature}) {
+    if (!_dylib.providesSymbol(name)) {
+      throw MissingSymbol(path, name, feature);
+    }
+  }
+
+  /// `guatiao_value_free` as a finalizer callback, for the backstop a
+  /// `Value` attaches to itself.
+  ///
+  /// The C function returns a status the finalizer never reads.
+  late final Pointer<NativeFinalizerFunction> valueFreeFinalizer = _dylib
+      .lookup<NativeFinalizerFunction>('guatiao_value_free');
+
+  /// `guatiao_wire_receiver_free` as a finalizer callback, for the
+  /// backstop a channel `Receiver` attaches to itself.
+  late final Pointer<NativeFinalizerFunction> wireReceiverFreeFinalizer = _dylib
+      .lookup<NativeFinalizerFunction>('guatiao_wire_receiver_free');
+
+  /// The wiping allocator, filled by `guatiao_alloc_wiping` once: every
+  /// block freed through it is overwritten with zeros first. Allocated for
+  /// the life of the library and never released, as [alloc] is.
+  Pointer<guatiao_alloc> get wipingAlloc {
+    final cached = _wiping;
+    if (cached != null) return cached;
+    require('guatiao_alloc_wiping');
+    final out = calloc<guatiao_alloc>();
+    final status = bindings.guatiao_alloc_wiping(out);
+    if (status != 0) {
+      calloc.free(out);
+      throw StateError('guatiao_alloc_wiping failed with status $status');
+    }
+    return _wiping = out;
+  }
+
+  /// The default allocator, filled by `guatiao_alloc_default` once.
+  ///
+  /// Allocated for the life of the library and never released: every
+  /// container built through it keeps a pointer to these 40 bytes.
+  Pointer<guatiao_alloc> get alloc {
+    final cached = _alloc;
+    if (cached != null) return cached;
+    require('guatiao_alloc_default');
+    final out = calloc<guatiao_alloc>();
+    final status = bindings.guatiao_alloc_default(out);
+    if (status != 0) {
+      calloc.free(out);
+      throw StateError('guatiao_alloc_default failed with status $status');
+    }
+    return _alloc = out;
+  }
+}
+
+final Map<String, NativeLib> _registered = <String, NativeLib>{};
+final Map<String, NativeLib> _opened = <String, NativeLib>{};
+
+/// Answers for a surface with a library that is already open, ahead of
+/// every other route.
+///
+/// Two cases need it, and neither can be expressed by a path:
+///
+/// - **One library carrying several surfaces.** An application that links
+///   the ABI into its own shared library exports `guatiao_*` from that
+///   one file, under its own name. Registering it says so.
+/// - **Symbols already in the process.** A statically linked build has no
+///   file to open, and `DynamicLibrary.process()` is the library.
+///
+/// With no [forSurfaces], the library is registered for each surface it
+/// actually exports, so a host registers what it has and nothing else.
+/// Naming them explicitly skips that check and takes the caller's word.
+/// [path] is only what an error message will quote.
+void useLibrary(
+  DynamicLibrary library, {
+  Iterable<String>? forSurfaces,
+  String path = '<registered>',
+}) {
+  final wanted = forSurfaces ?? surfaces;
+  var any = false;
+  for (final basename in wanted) {
+    final probe = _probe[basename];
+    if (probe == null) {
+      throw ArgumentError.value(
+        basename,
+        'forSurfaces',
+        'not a guatiao surface',
+      );
+    }
+    if (forSurfaces == null && !library.providesSymbol(probe)) continue;
+    _registered[basename] = NativeLib._(path, library);
+    any = true;
+  }
+  if (!any) {
+    throw ArgumentError.value(
+      path,
+      'library',
+      'exports none of the guatiao surfaces (looked for ${_probe.values.join(', ')})',
+    );
+  }
+}
+
+/// Forgets every library registered with [useLibrary]; the next call
+/// resolves again. For a test that swaps one out.
+void forgetLibraries() {
+  _registered.clear();
+  _opened.clear();
+}
+
+/// The library carrying the surface [basename] (`'guatiao'`,
+/// `'guatiao_serde'`, `'guatiao_intake'`), opened once on first use: the
+/// one registered with [useLibrary] for it, else the one
+/// [resolveLibraryPath] finds through the surface's own variable
+/// (`GUATIAO_SERDE_LIBRARY`, `GUATIAO_INTAKE_LIBRARY`) and
+/// `GUATIAO_LIBRARY`. Throws [LibraryNotFound].
+///
+/// A surface this package does not know names its own [variable] and
+/// [probe].
+NativeLib openSurface(String basename, {String? variable, String? probe}) =>
+    _registered[basename] ??
+    (_opened[basename] ??= NativeLib.open(
+      basename,
+      variable: variable ?? _variable[basename],
+      probe: probe ?? _probe[basename],
+    ));
+
+/// The `guatiao` library, loaded on first use.
+NativeLib core() => openSurface('guatiao');
+
+/// Loads a WebAssembly module, on the web. A native process loads a
+/// shared library instead, found as above: throws `Unsupported`.
+Future<void> loadModule(Uri url) async => throw Unsupported(
+  Status.unsupported.code,
+  'loadModule is for the web: a native process loads the library '
+  'GUATIAO_LIBRARY, useLibrary or the platform search finds',
+);
+
+/// Loads a WebAssembly module from its bytes, on the web. A native
+/// process loads a shared library instead: throws `Unsupported`.
+Future<void> loadModuleBytes(
+  List<int> bytes, {
+  String source = '<bytes>',
+}) async => throw Unsupported(
+  Status.unsupported.code,
+  'loadModuleBytes is for the web: a native process loads the library '
+  'GUATIAO_LIBRARY, useLibrary or the platform search finds',
+);

@@ -1,0 +1,156 @@
+[package]
+name = "guatiao-source-remote"
+description = "guatiao providers called across a process, a machine or a network: a source any host adds, a server exposing a registry, and one framed protocol over every transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+license.workspace = true
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+
+# docs.rs documents every feature.
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+name = "guatiao_source_remote"
+path = "src/lib.rs"
+# The rlib is what a Rust host or server links; the cdylib is the source
+# file any host adds (`add_source_file`), in any language.
+crate-type = ["rlib", "cdylib"]
+
+# The server a device runs. Not `guatiao-source-remote`: on Windows its debug
+# files would collide with the library's.
+[[bin]]
+name = "guatiao-remote-server"
+path = "src/bin/guatiao-remote-server.rs"
+
+[[example]]
+name = "datagram_echo"
+required-features = ["webtransport"]
+
+[features]
+default = []
+
+# Trusted TCP: no encryption, peers admitted by an access control list
+# (coqui-net-acl), and a pre-shared key proved both ways in the handshake
+# (HMAC-SHA256).
+tcp = ["dep:hmac", "dep:sha2", "dep:getrandom", "dep:coqui-net-acl", "dep:windows-sys"]
+
+# TLS over TCP, the secure level: mutual TLS through coqui-peer-tls
+# (rustls, ring), each side known by its certificate's fingerprint,
+# unknown clients waiting in a trust store until an operator accepts them.
+# TLS 1.3 by default; TLS 1.2 too where a policy allows it.
+tls = ["tcp", "dep:coqui-peer", "dep:coqui-peer-tls", "dep:rustls"]
+
+# A client verifying a server by the operating system's certificate
+# authorities and verifier (`roots = "platform"`, `Roots::platform()`):
+# coqui-peer-tls's `platform-roots`, rustls-platform-verifier. A CA bundle
+# file needs only `tls`.
+platform-roots = ["tls", "coqui-peer-tls/platform-roots"]
+
+# QUIC, the secure level over UDP: the same mutual TLS 1.3 and trust as
+# `tls`, one QUIC stream per link for frames and datagrams beside it.
+# quinn runs on a small tokio runtime inside the transport; the link
+# itself stays on threads.
+quic = ["tls", "dep:quinn", "dep:tokio"]
+
+# The same machine by name, at the local level: a Unix socket (std) on
+# Unix, a named pipe on Windows.
+local = ["dep:interprocess", "dep:windows-sys"]
+
+# The same machine through shared memory: two rings in a mapped file, a
+# local connection beside them for wake-ups.
+shm = ["local", "dep:memmap2"]
+
+# RDMA, experimental and Linux only: frames by one-sided writes into
+# registered rings, set up over a trusted TCP connection. libibverbs
+# (rdma-core) is opened at run time, so building needs nothing of it;
+# elsewhere than Linux the transport answers `Unsupported`.
+rdma = ["tcp", "dep:libloading", "dep:libc"]
+
+# WebSocket, what a browser can open, through coqui-web-channel: `ws://` on
+# loopback with no TLS, `wss://` (with `tls`) with a server certificate.
+# Each frame's body is one binary message.
+ws = ["tcp", "dep:coqui-web-channel", "coqui-web-channel/websocket", "dep:url", "dep:coqui-peer"]
+
+# WebTransport (HTTP/3 over QUIC), what a browser opens with the server's
+# certificate pinned by its hash, through coqui-web-channel.
+webtransport = ["tls", "dep:coqui-web-channel", "coqui-web-channel/webtransport", "dep:url"]
+
+[dependencies]
+guatiao = { path = "../guatiao", version = "=0.0.0-alpha.1", features = ["load"] }
+# The kind tables it serves and calls through: libffi's closures and calls.
+guatiao-libffi = { path = "../guatiao-libffi", version = "=0.0.0-alpha.1" }
+# Kind descriptions read from their JSON documents, and peer manifests.
+guatiao-bridge = { path = "../guatiao-bridge", version = "=0.0.0-alpha.1", features = ["json", "yaml"] }
+guatiao-serde = { path = "../guatiao-serde", version = "=0.0.0-alpha.1", default-features = false, features = ["json", "toml", "yaml"] }
+# The server binary reads its `--acl` and `--policy` files through it. A git
+# dependency until anycfg is published, which comes before this crate's
+# release.
+anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
+# The trusted level's handshake proof. RustCrypto, pure Rust.
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+# The handshake's nonces.
+getrandom = { version = "0.3", optional = true }
+# Admission by ordered permit/deny rules, before anything is read.
+coqui-net-acl = { version = "=0.0.0-alpha.0", optional = true, features = ["serde"] }
+# Peer ids, the trust store and the sans-IO handshake driver.
+coqui-peer = { version = "=0.0.0-alpha.1", optional = true }
+# Mutual TLS: identities, pinned and stored trust, the TLS policy.
+coqui-peer-tls = { version = "=0.0.0-alpha.1", optional = true, features = ["generate", "serde", "acl"] }
+# The TLS state the link's threads share; coqui-peer-tls's version.
+rustls = { version = "0.23", optional = true, default-features = false, features = ["std"] }
+# QUIC (the `quic` feature): quinn with rustls on ring, and the runtime
+# it runs on.
+quinn = { version = "0.11.12", optional = true, default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+tokio = { version = "1.47", optional = true, default-features = false, features = ["rt-multi-thread", "time", "net"] }
+# The shared rings' file, mapped.
+memmap2 = { version = "0.9", optional = true }
+# WebSocket and WebTransport channels (features `ws`, `webtransport`).
+# A git dependency until coqui-web-channel is released: it keeps this crate from
+# publishing.
+coqui-web-channel = { git = "https://github.com/Boriken-Dev/coqui-web-channel.git", rev = "0b5b05c9af3417f6b13edc0fc7d9c86c02a63eca", optional = true }
+# The URLs coqui-web-channel's dialers take.
+url = { version = "2.5", optional = true }
+
+# Named pipes on Windows: overlapped I/O, so one thread reads while
+# another writes, with no `unsafe` here.
+[target.'cfg(windows)'.dependencies]
+interprocess = { version = "2", optional = true, default-features = false }
+# Ending a read blocked on a pipe or a socket from another thread
+# (`CancelIoEx`), which nothing safe does on Windows. interprocess's own
+# version.
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_System_IO"] }
+
+# RDMA: libibverbs opened at run time, and `poll` on its completion
+# channel beside the TCP connection. Both are already in the build
+# (`guatiao`'s loader, `getrandom`).
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = { version = "0.8", optional = true }
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+guatiao = { path = "../guatiao", features = ["provider", "load"] }
+# The example kinds the tests serve and call.
+greeter_kind = { path = "../../examples/greeter_kind" }
+# Reads the shared vectors.
+serde_json = "1"
+# The secure level's tests: a client that presents a certificate it holds
+# no key for, written against rustls itself.
+coqui-peer = "=0.0.0-alpha.1"
+coqui-peer-tls = { version = "=0.0.0-alpha.1", features = ["generate"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+# The QUIC tests' own clients (an impostor, a server agreeing no protocol).
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+tokio = { version = "1.47", default-features = false, features = ["rt-multi-thread", "time", "net"] }
+# A test certificate authority and the server certificates it issues.
+rcgen = "0.14"
+# A port held bound and never listening: a peer nobody can reach.
+socket2 = "0.6"
+
+[lints]
+workspace = true

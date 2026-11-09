@@ -1,0 +1,47 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  exclude:
+    # Examples are excluded from analysis since they have their own analysis
+    # options files.
+    - "example/**"
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: false
+
+# Enable additional analysis options for Effective Dart.
+linter:
+  rules:
+    # STYLE
+    - directives_ordering
+    - lines_longer_than_80_chars
+
+    # DOCUMENTATION
+    - public_member_api_docs
+    #- comment_references # Unused because https://github.com/dart-lang/sdk/issues/36974
+
+    # USAGE
+    - prefer_relative_imports
+    - prefer_adjacent_string_concatenation
+    - prefer_interpolation_to_compose_strings
+    - unnecessary_lambdas
+    - avoid_catching_errors
+
+    # DESIGN
+    - use_to_and_as_if_applicable
+    # - one_member_abstracts # Disabled because there are interfaces with only one method.
+    #- avoid_classes_with_only_static_members # Disabled because there are super classes with only a `parser` for example.
+    - prefer_mixin
+    - use_setters_to_change_properties
+    - avoid_setters_without_getters
+    - avoid_returning_this
+    - type_annotate_public_apis
+    #- prefer_typing_uninitialized_variables
+    - omit_local_variable_types
+    - avoid_types_on_closure_parameters
+    - avoid_private_typedef_functions
+    - use_function_type_syntax_for_parameters
+    #- avoid_positional_boolean_parameters # Disabled because a single boolean parameter (e.g., in the constructor of `TomlBoolean`) is okay.
+    - avoid_equals_and_hash_code_on_mutable_classes
+    - avoid_null_checks_in_equality_operators

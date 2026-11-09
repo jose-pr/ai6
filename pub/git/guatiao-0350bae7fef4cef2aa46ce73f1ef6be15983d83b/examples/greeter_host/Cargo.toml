@@ -1,0 +1,44 @@
+[package]
+name = "greeter_host"
+description = "An example guatiao host: scans a search path, offers every greeter it found, and builds one from a configuration it wrote itself"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "greeter_host"
+path = "src/main.rs"
+
+[dependencies]
+# `provider` for the kind traits and the derives, `load` for mapping a
+# library. A host compiles against the KIND crate, never against a
+# library: the libraries it loads are whatever is on disk.
+guatiao = { path = "../../crates/guatiao", features = ["provider", "load"] }
+greeter_kind = { path = "../greeter_kind" }
+# Only to show a schema as text. The engine names no format; a host that
+# wants one renders it.
+guatiao-serde = { path = "../../crates/guatiao-serde", features = ["json"] }
+
+[dev-dependencies]
+# A dev-dependency's cdylib lands beside the test binary, which is how the
+# test hands this host a directory holding a real library to scan. The
+# binary itself does not depend on it: a host names no library.
+derived_greeter = { path = "../derived_greeter" }
+# The docs' migration snippets, and reading a provider's form back.
+guatiao-intake = { path = "../../crates/guatiao-intake", features = ["derive"] }
+# The configuration page: a configuration read from TOML text through
+# guatiao, holding plugin tables of `toml`'s own type through
+# `guatiao_serde::adapt`.
+guatiao-serde = { path = "../../crates/guatiao-serde", features = ["toml"] }
+toml = "1"
+# Reads a configuration file by its extension or its first line; a git
+# dependency until anycfg is published.
+anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
+# A library's digest, computed the way a host pinning it would.
+sha2 = "0.10"
+
+[lints]
+workspace = true

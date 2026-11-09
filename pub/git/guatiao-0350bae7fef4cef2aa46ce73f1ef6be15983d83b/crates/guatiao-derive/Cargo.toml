@@ -1,0 +1,50 @@
+[package]
+name = "guatiao-derive"
+description = "Derive macros for guatiao: ToValue, FromValue and Schema, and, behind features, the `kind` attribute and the Provider and Form derives -- the proc-macro half, reached through `guatiao` features"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+license.workspace = true
+readme = "README.md"
+exclude = [".*", "*.local.*"]
+
+# docs.rs documents every feature.
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+name = "guatiao_derive"
+path = "src/lib.rs"
+# A proc-macro crate can export nothing but macros, which is why the traits
+# the generated code names live in `guatiao` and not here.
+proc-macro = true
+
+# Deliberately only these three. A proc-macro crate is compiled for the
+# HOST on every cross build, so its dependency list is paid by every
+# consumer on every target. `syn`'s default features are the derive-shaped
+# ones; `full` is not enabled and should not be.
+[dependencies]
+syn = "2"
+quote = "1"
+proc-macro2 = "1"
+
+# `#[guatiao::kind]` parses a whole `trait` item, which needs `syn/full`
+# -- measured at about a third more build time for this crate, so it is
+# paid only by a consumer that turns it on (`guatiao/provider`).
+[features]
+provider = ["syn/full"]
+# `#[derive(Form)]`, reached as `guatiao_intake::Form` with that crate's
+# `derive` feature. Emits `::guatiao_intake::` paths, so it is off unless
+# that crate is what turned it on.
+form = []
+
+[dev-dependencies]
+# Renders the kind expansion for its snapshot test.
+prettyplease = "0.2"
+# Reads the floor hash vectors (`tests/vectors/floor_hash.json`).
+serde_json = "1"
+
+[lints]
+workspace = true

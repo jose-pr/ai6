@@ -1,0 +1,39 @@
+[package]
+name = "spake2"
+version = "0.4.0"
+authors = ["Brian Warner <warner@lothar.com>"]
+description = "The SPAKE2 password-authenticated key-exchange algorithm."
+documentation = "https://docs.rs/spake2"
+homepage = "https://github.com/RustCrypto/PAKEs"
+repository = "https://github.com/RustCrypto/PAKEs/tree/master/spake2"
+license = "MIT OR Apache-2.0"
+keywords = ["crypto", "pake", "authentication"]
+categories = ["cryptography", "authentication"]
+exclude = [".gitignore"]
+readme = "README.md"
+edition = "2021"
+rust-version = "1.60"
+
+[dependencies]
+curve25519-dalek = { version = "4", default-features = false, features = ["rand_core"] }
+rand_core = { version = "0.6", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+hkdf = { version = "0.12", default-features = false }
+
+[dev-dependencies]
+bencher = "0.1"
+hex = "0.4"
+num-bigint = "0.4"
+
+[features]
+default = ["getrandom"]
+getrandom = ["rand_core/getrandom"]
+std = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+name = "spake2"
+harness = false

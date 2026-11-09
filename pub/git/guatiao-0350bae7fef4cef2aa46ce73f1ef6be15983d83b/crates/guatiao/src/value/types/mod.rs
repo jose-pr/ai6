@@ -1,0 +1,301 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The C form of a value: plain structs, no opaque handles.
+//!
+//! A **view** is `{const ptr, len}`, an **owned** container is
+//! `{ptr, len, cap, alloc}`: [`Str`]/[`Text`], [`Bytes`]/[`Buffer`],
+//! [`Values`]/[`List`], [`Entries`]/[`Map`]. A [`Value`] holds owned
+//! containers, and a view of a node is a const pointer to one because a
+//! list's element type IS the node type.
+//!
+//! **`cap == 0` means the buffer is not owned**, `Vec`'s own rule, which
+//! is what lets a C literal be read like any other value and never
+//! freed. Only GROWTH copies out, so a literal that will be mutated must
+//! live in writable storage, and `cap >= len` does not hold on input.
+//!
+//! **The fields are private, and that is the safety argument**: every
+//! `SAFETY:` comment here assumes a node reached in safe code is well
+//! formed, which holds because safe code cannot build one by hand.
+//!
+//! ```compile_fail
+//! let v = guatiao::Value { tag: 7, _pad: 0, payload: unreachable!() };
+//! ```
+//!
+//! ```compile_fail
+//! let mut m = guatiao::Map::new();
+//! m.len = 4096;
+//! ```
+//!
+//! ```compile_fail
+//! let a = guatiao::Text::new("hello");
+//! let b = guatiao::Text { ptr: a.ptr, len: a.len, cap: a.cap, alloc: a.alloc };
+//! ```
+//!
+//! A NUMBER and a STRING share the `text` arm and not a type, so no
+//! `&mut Text` comes off a number:
+//!
+//! ```
+//! use guatiao::{Text, TryAsMut, Value};
+//! let mut v = Value::from(1i64);
+//! assert!(TryAsMut::<Text>::try_as_mut(&mut v).is_none());
+//! ```
+
+#![allow(non_camel_case_types)]
+// Right for the model, wrong for SCREAMING_CASE C constants: cbindgen
+// copies every doc comment here into the header.
+#![allow(missing_docs)]
+
+// A `//` comment, never a `///`: see `value/mod.rs`.
+pub mod buffer;
+pub mod list;
+pub mod map;
+pub mod maybe_null;
+pub mod number;
+pub mod text;
+
+pub use buffer::{Buffer, Bytes};
+pub use list::{List, Values};
+pub use map::{Entries, Entry, Map};
+pub use maybe_null::MaybeNull;
+pub use number::Number;
+pub use text::{Str, Text};
+
+// The node lives beside this directory, and every path through `types`
+// still reaches it.
+pub use super::value::{Payload, Tag, Value};
+
+use core::alloc::Layout;
+use core::ffi::c_void;
+
+use crate::value::alloc::{Alloc, AllocError};
+
+use crate::value::error::ValueError;
+
+/// The short forms abort on an allocation failure; the `_in` and `try_`
+/// ones report it.
+///
+/// A short form allocates on Rust's own heap or through the allocator its
+/// container recorded, and a failure there is the condition
+/// `String::from` and `Vec::push` already meet: the standard library
+/// aborts, through the global allocation-error handler, rather than
+/// returning. A foreign allocator returning null may be an arena that is
+/// merely full, so `_in` and `try_` hand the refusal back.
+///
+/// `layout` is the request as nearly as the caller knows it: the element
+/// being added, or the bytes being copied.
+pub(crate) fn or_abort<T>(built: Result<T, ValueError>, layout: Layout) -> T {
+    match built {
+        Ok(v) => v,
+        Err(_) => alloc::alloc::handle_alloc_error(layout),
+    }
+}
+
+/// Whether `recorded`, an allocator a container recorded, is this build's
+/// wiping allocator.
+pub(crate) fn lives_in_wiping(recorded: *const crate::value::alloc::Allocator) -> bool {
+    !recorded.is_null()
+        // SAFETY: the address a container recorded is an allocator that
+        // outlives it, by the contract on `Alloc`.
+        && unsafe { Alloc::from_raw(recorded) }.is_ok_and(|a| a.is_wiping())
+}
+
+/// Where a copy of a buffer that recorded `recorded` goes when `asked` was
+/// named: the wiping allocator for one that lives there, so a copy of a
+/// secret is wiped as the original is, whatever was asked.
+pub(crate) fn copy_home(recorded: *const crate::value::alloc::Allocator, asked: Alloc) -> Alloc {
+    if lives_in_wiping(recorded) {
+        Alloc::wiping()
+    } else {
+        asked
+    }
+}
+
+/// Where `clone()` copies a container that recorded `recorded`: into
+/// [`Alloc::wiping`] when it lives there; into [`Alloc::rust`] otherwise.
+pub(crate) fn clone_home(recorded: *const crate::value::alloc::Allocator) -> Alloc {
+    copy_home(recorded, Alloc::rust())
+}
+
+/// What `Clone` does with a copy `clone_in` refused: an allocation
+/// failure aborts, as the short forms do, and content this build refuses
+/// (an unknown tag, text that is not UTF-8, a number outside the grammar,
+/// a tree past `MAX_DEPTH`) panics, because `Clone` cannot report it.
+pub(crate) fn cloned<T>(copy: Result<T, ValueError>, layout: Layout) -> T {
+    match copy {
+        Ok(v) => v,
+        Err(ValueError::Alloc(_)) => alloc::alloc::handle_alloc_error(layout),
+        Err(e) => panic!("guatiao: cannot clone content this build refuses ({e}); use clone_in"),
+    }
+}
+
+/// `is_local`, `into_local`, `into_alloc` and `make_local_in` on an owned
+/// container or a node. `$homed(&self, alloc)` answers whether everything
+/// it owns records `alloc` or this build's wiping allocator, without
+/// allocating; `$settle(&mut self,
+/// alloc)` moves what does not; `$layout(&self)` is what an aborted local
+/// copy reports.
+macro_rules! where_it_lives {
+    ($ty:ty, $homed:path, $settle:path, $layout:expr) => {
+        impl $ty {
+            /// Whether everything this owns, map keys included, records
+            /// this binary's allocator ([`Alloc::rust`]) or this build's
+            /// wiping allocator ([`Alloc::wiping`]), where a secret stays:
+            /// what [`into_local`](Self::into_local) hands back unchanged.
+            /// A value that owns nothing is local. Answering allocates
+            /// nothing.
+            pub fn is_local(&self) -> bool {
+                $homed(self, Alloc::rust().as_raw())
+            }
+
+            /// This, owned in this binary's allocator: unchanged, and
+            /// allocating nothing, when it [`is_local`](Self::is_local);
+            /// otherwise copied into [`Alloc::rust`] and the original
+            /// overwritten with zeros and freed through the allocators it
+            /// recorded. Where `clone` would copy a tree you already own,
+            /// this moves it. A node in this build's wiping allocator
+            /// stays there, so a secret is still wiped when freed, and a
+            /// second call changes nothing.
+            ///
+            /// # Panics
+            ///
+            /// As `clone`, on content this build refuses, which only a
+            /// foreign producer can write;
+            /// [`into_alloc`](Self::into_alloc) reports it. An allocation
+            /// failure aborts.
+            pub fn into_local(self) -> $ty {
+                if self.is_local() {
+                    return self;
+                }
+                let layout = $layout(&self);
+                let copy = self.clone_in(Alloc::rust());
+                let mut original = self;
+                $crate::value::wipe::Wipe::wipe(&mut original);
+                $crate::value::types::cloned(copy, layout)
+            }
+
+            /// This, owned in `alloc`: unchanged when everything it owns
+            /// already records `alloc`, otherwise copied there and the
+            /// original overwritten with zeros and freed through the
+            /// allocators it recorded, so the move leaves nothing readable
+            /// behind, whatever `alloc` is. A node in this build's wiping
+            /// allocator counts as home and stays there, a secret kept a
+            /// secret.
+            ///
+            /// # Errors
+            ///
+            /// As `clone_in`: `alloc` refusing, or content this build
+            /// refuses. The original is freed either way.
+            pub fn into_alloc(self, alloc: Alloc) -> Result<$ty, ValueError> {
+                if $homed(&self, alloc.as_raw()) {
+                    return Ok(self);
+                }
+                let copy = self.clone_in(alloc);
+                let mut original = self;
+                $crate::value::wipe::Wipe::wipe(&mut original);
+                copy
+            }
+
+            /// Moves this tree into `alloc` where it stands: every block
+            /// another allocator made, a container's array or a key's or
+            /// a leaf's bytes, is moved into one from `alloc` and the old
+            /// one overwritten with zeros and freed through the allocator
+            /// that made it, whatever `alloc` is. Nothing is
+            /// copied twice and nothing is read as content, so a tree a
+            /// foreign producer wrote moves as it is. A block in this
+            /// build's wiping allocator stays where it is. Allocates
+            /// nothing when everything already records `alloc` or lives
+            /// there.
+            ///
+            /// Where [`into_alloc`](Self::into_alloc) takes the tree, this
+            /// works through `&mut`: on a tree you were lent, or one a
+            /// callee may have grown with parts of its own.
+            ///
+            /// # Errors
+            ///
+            /// `alloc` refusing. The tree is then whole, every block
+            /// either moved or where it was.
+            pub fn make_local_in(&mut self, alloc: Alloc) -> Result<(), ValueError> {
+                if $homed(self, alloc.as_raw()) {
+                    return Ok(());
+                }
+                $settle(self, alloc)
+            }
+        }
+    };
+}
+pub(crate) use where_it_lives;
+
+/// The layout of `n` bytes, for [`or_abort`]: `Layout::array::<u8>(n)`, and
+/// one byte when `n` exceeds `isize::MAX`, which has no layout.
+pub(crate) fn bytes_layout(n: usize) -> Layout {
+    Layout::array::<u8>(n).unwrap_or(Layout::new::<u8>())
+}
+
+/// The allocation failure inside a store's error. A store can fail on
+/// nothing else: its key and value are already text and a node.
+pub(crate) fn only_alloc(e: ValueError) -> AllocError {
+    match e {
+        ValueError::Alloc(e) => e,
+        _ => {
+            debug_assert!(false, "a store failed on something other than memory: {e}");
+            AllocError::Failed
+        }
+    }
+}
+
+/// The allocator a short form grows a container through: the one it
+/// recorded, or Rust's own for one that recorded none.
+pub(crate) fn short_form_alloc(recorded: Result<Alloc, ValueError>) -> Alloc {
+    recorded.unwrap_or_else(|_| Alloc::rust())
+}
+
+// The numbers a foreign consumer compiles against: a change to one is an
+// ABI break and fails the build here. The C side asserts the same
+// numbers with `_Static_assert`, because Rust agreeing with itself
+// proves nothing about the header.
+const _: () = {
+    use core::mem::{align_of, offset_of, size_of};
+
+    // In pointer widths, so the one layout holds on every target: a view
+    // is two words, an owned container four, a node a tag and its padding
+    // then a container, an entry a key then a node.
+    const P: usize = size_of::<usize>();
+
+    assert!(size_of::<Str>() == 2 * P);
+    assert!(size_of::<Bytes>() == 2 * P);
+    assert!(size_of::<Values>() == 2 * P);
+    assert!(size_of::<Entries>() == 2 * P);
+
+    // `Number` is a `Text` under a different tag, so it is the same
+    // storage; nothing new crosses the boundary.
+    assert!(size_of::<Number>() == 4 * P);
+    assert!(size_of::<Text>() == 4 * P);
+    assert!(size_of::<Buffer>() == 4 * P);
+    assert!(size_of::<List>() == 4 * P);
+    assert!(size_of::<Map>() == 4 * P);
+
+    assert!(size_of::<Payload>() == 4 * P);
+    assert!(size_of::<Value>() == 8 + 4 * P);
+    assert!(size_of::<Entry>() == 4 * P + size_of::<Value>());
+
+    assert!(offset_of!(Value, tag) == 0);
+    assert!(offset_of!(Value, _pad) == 4);
+    assert!(offset_of!(Value, payload) == 8);
+    assert!(offset_of!(Entry, key) == 0);
+    assert!(offset_of!(Entry, value) == 4 * P);
+
+    // A C caller may wire `malloc` straight through, and `malloc`
+    // guarantees only `max_align_t` -- 8 on the targets in view. An
+    // element type needing more would silently break every malloc-backed
+    // allocator, so adding one is a build failure instead.
+    assert!(align_of::<Value>() <= 8);
+    assert!(align_of::<Entry>() <= 8);
+    assert!(align_of::<Text>() <= 8);
+};
+
+// The allocator vtable speaks `*mut c_void`, which must be as wide as
+// the containers' pointers or the `(size, align)` pair handed to `free`
+// describes a different block.
+const _: () = assert!(size_of::<*mut c_void>() == size_of::<*mut u8>());

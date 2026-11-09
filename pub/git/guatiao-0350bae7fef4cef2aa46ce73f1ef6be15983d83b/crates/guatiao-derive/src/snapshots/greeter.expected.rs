@@ -1,0 +1,265 @@
+pub trait Greeter: Send + Sync {
+    fn greet(&self, name: &str) -> Result<String, ProviderError>;
+    fn count(&self, bytes: &[u8], flag: bool) -> i64 {
+        bytes.len() as i64
+    }
+}
+/// The kind's function table: a header, then one slot per method,
+/// in declaration order.
+#[repr(C)]
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub struct GreeterVtable {
+    pub header: ::guatiao::library::KindHeader,
+    pub greet: ::core::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut ::core::ffi::c_void,
+            name: ::guatiao::Str,
+            out: *mut ::guatiao::Text,
+            err: *mut ::guatiao::library::ProviderError,
+        ) -> ::guatiao::Status,
+    >,
+    pub count: ::core::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut ::core::ffi::c_void,
+            bytes: ::guatiao::value::types::Bytes,
+            flag: bool,
+            out: *mut i64,
+        ) -> ::guatiao::Status,
+    >,
+}
+#[allow(non_snake_case, clippy::missing_safety_doc)]
+impl GreeterVtable {
+    /// The table for one implementation of the kind.
+    #[doc(hidden)]
+    pub const fn of<__T: Greeter>() -> Self {
+        Self {
+            header: ::guatiao::library::KindHeader::new(
+                ::core::mem::size_of::<Self>(),
+                <dyn Greeter as ::guatiao::library::Kind>::FLOOR_HASH,
+            ),
+            greet: ::core::option::Option::Some(Self::__guatiao_shim_greet::<__T>),
+            count: ::core::option::Option::Some(Self::__guatiao_shim_count::<__T>),
+        }
+    }
+    /// The smallest table a reader accepts: every slot.
+    #[doc(hidden)]
+    pub const fn floor() -> usize {
+        ::core::mem::size_of::<Self>()
+    }
+    /// FNV-1a over the shape and every slot's signature, as a
+    /// literal, so a C header generator can render it: what a C
+    /// implementation writes into the table's header.
+    pub const FLOOR_HASH: u32 = 465901636;
+    /// The kind as data, compact JSON: its name, floor hash, and each
+    /// slot in table order with its arguments and answer, as the
+    /// header declares them, and whether it is required and fallible.
+    /// What a binding loads instead of declaring the kind again.
+    pub fn description() -> ::guatiao::__private::alloc::string::String {
+        let mut out = ::guatiao::__private::alloc::string::String::new();
+        out.push_str(
+            "{\"name\":\"greeter\",\"floor_hash\":465901636,\"object\":false,\"slots\":[{\"name\":\"greet\",\"required\":true,\"fallible\":true,\"args\":[{\"name\":\"name\",\"type\":\"str\"}],\"answer\":{\"type\":\"text\"}},{\"name\":\"count\",\"required\":false,\"fallible\":false,\"args\":[{\"name\":\"bytes\",\"type\":\"bytes\"},{\"name\":\"flag\",\"type\":\"bool\"}],\"answer\":{\"type\":\"i64\"}}]}",
+        );
+        out
+    }
+    /// # Safety
+    ///
+    /// Called through the table `of::<__T>()` built, with the `ctx`
+    /// that table's provider declared: a `&__T`.
+    #[doc(hidden)]
+    pub unsafe extern "C" fn __guatiao_shim_greet<__T: Greeter>(
+        __ctx: *mut ::core::ffi::c_void,
+        name: ::guatiao::Str,
+        __out: *mut ::guatiao::Text,
+        __err: *mut ::guatiao::library::ProviderError,
+    ) -> ::guatiao::Status {
+        ::guatiao::library::kind::catch(|| {
+            let ::core::option::Option::Some(__this) = (unsafe {
+                ::guatiao::library::kind::ctx_ref::<__T>(__ctx)
+            }) else {
+                return ::guatiao::Status::GUATIAO_ERR_NULL;
+            };
+            let name = match ::core::str::from_utf8(name.into()) {
+                ::core::result::Result::Ok(__v) => __v,
+                ::core::result::Result::Err(__e) => {
+                    return unsafe {
+                        ::guatiao::library::kind::write_err(
+                            __err,
+                            ::guatiao::Status::from(__e).into(),
+                        )
+                    };
+                }
+            };
+            match __this.greet(name) {
+                ::core::result::Result::Ok(__answer) => {
+                    unsafe {
+                        ::guatiao::library::kind::write_out(
+                            __out,
+                            ::guatiao::Text::new(&__answer),
+                        )
+                    }
+                }
+                ::core::result::Result::Err(__e) => {
+                    unsafe { ::guatiao::library::kind::write_err(__err, __e) }
+                }
+            }
+        })
+    }
+    /// # Safety
+    ///
+    /// Called through the table `of::<__T>()` built, with the `ctx`
+    /// that table's provider declared: a `&__T`.
+    #[doc(hidden)]
+    pub unsafe extern "C" fn __guatiao_shim_count<__T: Greeter>(
+        __ctx: *mut ::core::ffi::c_void,
+        bytes: ::guatiao::value::types::Bytes,
+        flag: bool,
+        __out: *mut i64,
+    ) -> ::guatiao::Status {
+        ::guatiao::library::kind::catch(|| {
+            let ::core::option::Option::Some(__this) = (unsafe {
+                ::guatiao::library::kind::ctx_ref::<__T>(__ctx)
+            }) else {
+                return ::guatiao::Status::GUATIAO_ERR_NULL;
+            };
+            let bytes: &[u8] = ::core::convert::From::from(bytes);
+            unsafe {
+                ::guatiao::library::kind::write_out(__out, __this.count(bytes, flag))
+            }
+        })
+    }
+}
+impl ::guatiao::library::Kind for dyn Greeter {
+    const NAME: &'static str = "greeter";
+    type Vtable = GreeterVtable;
+    const FLOOR: usize = GreeterVtable::floor();
+    const FLOOR_HASH: u32 = GreeterVtable::FLOOR_HASH;
+    const REQUIRED: &'static [(&'static str, usize)] = &[
+        (
+            "greet",
+            ::core::mem::offset_of!(GreeterVtable, greet)
+                + ::core::mem::size_of::<usize>(),
+        ),
+    ];
+    const OBJECT: bool = false;
+    fn live_objects(
+        seen: &mut ::guatiao::__private::alloc::vec::Vec<&'static str>,
+    ) -> usize {
+        if seen.contains(&"greeter") {
+            return 0;
+        }
+        seen.push("greeter");
+        0usize
+    }
+    fn describe(
+        seen: &mut ::guatiao::__private::alloc::vec::Vec<&'static str>,
+        out: &mut ::guatiao::__private::alloc::vec::Vec<
+            ::guatiao::__private::alloc::string::String,
+        >,
+    ) {
+        if seen.contains(&"greeter") {
+            return;
+        }
+        seen.push("greeter");
+        out.push(GreeterVtable::description());
+    }
+    fn as_dyn(remote: &::guatiao::library::Remote<Self>) -> &Self {
+        remote
+    }
+    fn as_dyn_mut(remote: &mut ::guatiao::library::Remote<Self>) -> &mut Self {
+        remote
+    }
+    fn boxed(
+        remote: ::guatiao::library::Remote<Self>,
+    ) -> ::guatiao::__private::alloc::boxed::Box<Self> {
+        ::guatiao::__private::alloc::boxed::Box::new(remote)
+    }
+    fn shared(
+        remote: ::guatiao::library::Remote<Self>,
+    ) -> ::guatiao::__private::alloc::sync::Arc<Self> {
+        ::guatiao::__private::alloc::sync::Arc::new(remote)
+    }
+}
+unsafe impl ::guatiao::library::kind::Lend for dyn Greeter {}
+#[allow(clippy::needless_question_mark, clippy::redundant_closure_call)]
+impl Greeter for ::guatiao::library::Remote<dyn Greeter> {
+    fn greet(&self, name: &str) -> Result<String, ProviderError> {
+        let __f: unsafe extern "C" fn(
+            ctx: *mut ::core::ffi::c_void,
+            name: ::guatiao::Str,
+            out: *mut ::guatiao::Text,
+            err: *mut ::guatiao::library::ProviderError,
+        ) -> ::guatiao::Status = unsafe {
+            self.slot(::core::mem::offset_of!(GreeterVtable, greet))
+        }
+            .expect("validated: a required slot is present and non-null");
+        let __arg_name = ::guatiao::Str::new(name);
+        let mut __out = ::guatiao::Text::new("");
+        let mut __err = ::guatiao::library::ProviderError::none();
+        let __status = unsafe { __f(self.ctx(), __arg_name, &mut __out, &mut __err) };
+        if __status != ::guatiao::Status::GUATIAO_OK {
+            return ::core::result::Result::Err(
+                ::guatiao::library::kind::take_err(__err, __status),
+            );
+        }
+        ::core::result::Result::Ok(
+            match ::guatiao::library::kind::text_ret(__out) {
+                ::core::result::Result::Ok(__v) => {
+                    ::guatiao::__private::alloc::string::ToString::to_string(&*__v)
+                }
+                ::core::result::Result::Err(__e) => {
+                    return ::core::result::Result::Err(__e);
+                }
+            },
+        )
+    }
+    fn count(&self, bytes: &[u8], flag: bool) -> i64 {
+        match unsafe {
+            self.slot::<
+                    unsafe extern "C" fn(
+                        ctx: *mut ::core::ffi::c_void,
+                        bytes: ::guatiao::value::types::Bytes,
+                        flag: bool,
+                        out: *mut i64,
+                    ) -> ::guatiao::Status,
+                >(::core::mem::offset_of!(GreeterVtable, count))
+        } {
+            ::core::option::Option::Some(__f) => {
+                let __arg_bytes = ::guatiao::value::types::Bytes::new(bytes);
+                let __arg_flag = flag;
+                let mut __out: i64 = ::core::default::Default::default();
+                let __status = unsafe {
+                    __f(self.ctx(), __arg_bytes, __arg_flag, &mut __out)
+                };
+                if __status != ::guatiao::Status::GUATIAO_OK {
+                    ::core::panic!(
+                        "guatiao: the provider failed `{}`, which cannot fail: {}",
+                        "count", ::core::format_args!("{:?}", __status)
+                    );
+                }
+                __out
+            }
+            ::core::option::Option::None => bytes.len() as i64,
+        }
+    }
+}
+impl ::core::convert::From<::guatiao::library::Remote<dyn Greeter>>
+for ::guatiao::__private::alloc::boxed::Box<dyn Greeter> {
+    fn from(remote: ::guatiao::library::Remote<dyn Greeter>) -> Self {
+        ::guatiao::__private::alloc::boxed::Box::new(remote)
+    }
+}
+impl Greeter for ::guatiao::library::Instance<dyn Greeter> {
+    fn greet(&self, name: &str) -> Result<String, ProviderError> {
+        (**self).greet(name)
+    }
+    fn count(&self, bytes: &[u8], flag: bool) -> i64 {
+        (**self).count(bytes, flag)
+    }
+}
+impl ::core::convert::From<::guatiao::library::Instance<dyn Greeter>>
+for ::guatiao::__private::alloc::boxed::Box<dyn Greeter> {
+    fn from(instance: ::guatiao::library::Instance<dyn Greeter>) -> Self {
+        ::guatiao::__private::alloc::boxed::Box::new(instance)
+    }
+}

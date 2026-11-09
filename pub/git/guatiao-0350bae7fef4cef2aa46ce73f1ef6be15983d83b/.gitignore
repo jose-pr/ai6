@@ -1,0 +1,97 @@
+# Category rule: nothing dot-prefixed at the repo root gets tracked except the
+# git config files and CI re-included below (a category beats a list -- the
+# same philosophy as Cargo's exclude = [".*"]). Root-anchored on purpose;
+# nested dotfiles are governed by the specific rules below.
+/.*
+!/.gitignore
+!/.gitattributes
+!/.github/
+
+# Private agent config, always excluded. No trailing slash on purpose: a
+# linked .agents is a symlink, which git treats as a file, so a directory-only
+# `.agents/` would NOT ignore it. These stay even though /.* covers them at
+# the root: they also catch nested copies. *.local.* is the unshared override
+# (machine- or user-specific) and must never be committed.
+.agents
+*.local.*
+CLAUDE*
+.claude
+
+# The built docs site: rustdoc output plus the mkdocs build.
+/site/
+
+# Rust
+/target/
+# The Python bridge is a workspace of its own, with its own build output.
+/crates/guatiao-source-py/target/
+/crates/guatiao-source-lua/target/
+/crates/guatiao-source-js/target/
+/crates/guatiao-source-remote/rdma-tests/target/
+/crates/guatiao-source-rhai/target/
+/bindings/lua/guatiao/target/
+/crates/guatiao-source-wasm/target/
+/crates/guatiao-source-wasm/guest/target/
+/examples/wasm_greeter_rust/target/
+**/*.rs.bk
+# A library workspace: consumers resolve their own lockfile. The browser
+# example is a program, and its README pins a tool to the version this
+# lockfile names.
+Cargo.lock
+!/examples/wire_over_webtransport/client/Cargo.lock
+
+# Node, wherever a package or an example carries some
+node_modules/
+/bindings/node/guatiao/dist/
+/bindings/node/guatiao-serde/dist/
+/bindings/node/guatiao-intake/dist/
+/bindings/node/guatiao-remote/dist/
+*.tsbuildinfo
+
+# Go: what `go build` writes beside the examples
+/examples/go_host/go_host
+/examples/go_host/go_host.exe
+/examples/go_provider/cshared/*.dll
+/examples/go_provider/cshared/*.so
+/examples/go_provider/cshared/*.dylib
+/examples/go_provider/cshared/cshared.h
+/examples/go-greeter/
+/examples/c-greeter/
+/go-library/
+
+# Julia: a package's resolved environment is its user's
+Manifest.toml
+Manifest-v*.toml
+
+# MATLAB and Octave: the gateway the test runner builds beside the package
+/bindings/matlab/guatiao/inst/guatiao_mex.mex*
+
+# R: what installing or checking the package from its source writes
+/bindings/r/guatiao/src/Makevars
+/bindings/r/*/src/*.o
+/bindings/r/*/src/*.so
+/bindings/r/*/src/*.dll
+/bindings/r/*/*.tar.gz
+*.Rcheck/
+.Rhistory
+
+# C++: what a CMake build of a package or an example writes beside it
+/bindings/cpp/*/build/
+/examples/cpp_*/build/
+
+# Fortran: what fpm and a CMake build write beside the sources
+/bindings/fortran/guatiao/build/
+/examples/fortran_*/build/
+*.mod
+*.smod
+# a Go module's manifest, not a Fortran module
+!go.mod
+
+# Python, wherever an example or a crate carries some
+__pycache__/
+*.py[cod]
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

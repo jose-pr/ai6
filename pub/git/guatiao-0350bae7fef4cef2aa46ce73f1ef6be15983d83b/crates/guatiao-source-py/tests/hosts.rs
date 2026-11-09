@@ -1,0 +1,281 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The bridge from a Rust host and from a C host: each adds it as a source
+//! and calls a greeter written in Python.
+//!
+//! The bridge is this crate's cdylib, which `cargo test` does not build:
+//! `cargo build` first, or these state a skip. The C host also links a
+//! guatiao library built with `load`, from `GUATIAO_LIBRARY`.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+extern crate alloc;
+
+use guatiao::library::{ImportSearch, Object, ProviderError, Registry};
+use guatiao::value::convert::TryAsRef;
+use guatiao::{List, Map};
+
+#[path = "../../guatiao/tests/support/c_compiler.rs"]
+mod c_compiler;
+
+fn repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn library_name(base: &str) -> String {
+    format!(
+        "{}{base}{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    )
+}
+
+/// This crate's cdylib, beside the test binary's directory.
+fn bridge() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let debug = exe.parent()?.parent()?;
+    let path = debug.join(library_name("guatiao_source_py"));
+    path.is_file().then_some(path)
+}
+
+fn text_list(items: &[PathBuf]) -> List {
+    let mut list = List::new();
+    for item in items {
+        list.push(item.to_string_lossy().as_ref());
+    }
+    list
+}
+
+/// On Windows, the Python installation the bridge's `python3.dll` is
+/// mapped from: the first directory on `PATH` holding it beside a `Lib`.
+fn python_home() -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .find(|dir| dir.join("python3.dll").is_file() && dir.join("Lib").is_dir())
+}
+
+/// A configuration naming, on Windows, the Python installation in
+/// `import_dirs`: the registry maps `python3.dll` from there under its
+/// default import search, which never reaches `PATH`.
+fn with_python(mut config: Map) -> Map {
+    if cfg!(windows) {
+        let home =
+            python_home().expect("a Python installation on PATH, as the bridge built against");
+        config.set("import_dirs", text_list(&[home]));
+    }
+    config
+}
+
+fn config() -> Map {
+    let mut config = Map::new();
+    config.set(
+        "dirs",
+        text_list(&[repo().join("examples/python_provider")]),
+    );
+    config.set(
+        "paths",
+        text_list(&[
+            repo().join("bindings/python/guatiao/src"),
+            repo().join("examples/greeter_kind/python"),
+        ]),
+    );
+    with_python(config)
+}
+
+#[test]
+fn a_rust_host_serves_python_libraries() {
+    let Some(bridge) = bridge() else {
+        println!("skipped: the bridge is not built beside this test; `cargo build` first");
+        return;
+    };
+    let mut registry = Registry::new("rust-host", "1.0");
+    // The default: the bridge's imports are found beside it, beside the
+    // host, in the system directory and in `import_dirs`, never on `PATH`.
+    assert_eq!(registry.import_search(), ImportSearch::Library);
+    let name = registry
+        .add_source_file(&bridge, &config())
+        .unwrap_or_else(|e| panic!("the bridge was refused: {e}"));
+    let changed = registry.refresh();
+    assert!(changed.refused.is_empty(), "{changed:?}");
+    let mut ids: Vec<&str> = changed.loaded.iter().map(|s| s.id.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, ["py_greeter", "py_tally"]);
+    assert!(changed.loaded.iter().all(|s| s.source == name));
+    let provider = registry.provider("py_greeter_hello").expect("served");
+    assert_eq!(provider.kinds(), ["greeter", "counter"]);
+    // The same file is no library: a scan names it a source.
+    let dir = bridge.parent().unwrap();
+    let mut scanner = Registry::new("scanner", "1.0");
+    let report = guatiao::library::scan_dir(&mut scanner, dir).expect("a readable directory");
+    assert!(
+        report.skipped.iter().any(|(path, why)| path == &bridge
+            && matches!(why, guatiao::library::Skipped::Source { serves } if serves == "python")),
+        "{report:?}"
+    );
+    // A refresh with nothing changed changes nothing.
+    assert!(registry.refresh().is_empty());
+    let _ = TryAsRef::<str>::try_as_ref(&guatiao::Value::from("unused"));
+}
+
+/// Opens sessions; served in Python by `tests/python/close_probe.py`.
+#[guatiao::kind]
+pub trait Opener: Send + Sync {
+    /// A new session.
+    fn open(&self) -> Result<Object<dyn Session>, ProviderError>;
+}
+
+/// A line whose last slot is named `close`, as the object's own end is not.
+#[guatiao::kind(object)]
+pub trait Session: Send {
+    /// Says something; refused once closed.
+    fn send(&mut self, what: &str) -> Result<(), ProviderError>;
+    /// Closes the line; the object lives on until it is dropped.
+    fn close(&mut self) -> Result<(), ProviderError>;
+    /// How many things were said.
+    fn said(&self) -> i64;
+}
+
+/// A library's manifest in `dir`, by the file name the source lists.
+fn manifest_file(dir: &Path, stem: &str) -> PathBuf {
+    dir.join(format!("{stem}.guatiao"))
+}
+
+#[test]
+fn a_slot_named_close_is_served_from_python() {
+    let Some(bridge) = bridge() else {
+        println!("skipped: the bridge is not built beside this test; `cargo build` first");
+        return;
+    };
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("close_probe");
+    std::fs::create_dir_all(&dir).unwrap();
+    let python = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/python");
+    let manifest = manifest_file(&dir, "close_probe");
+    std::fs::write(
+        &manifest,
+        format!(
+            "type = \"python\"\nmodule = \"close_probe\"\nversion = \"0.1.0\"\nkinds = [\"opener\"]\npaths = [{:?}]\n",
+            python.display().to_string()
+        ),
+    )
+    .unwrap();
+    let mut config = Map::new();
+    config.set("manifests", text_list(&[manifest]));
+    config.set(
+        "paths",
+        text_list(&[repo().join("bindings/python/guatiao/src")]),
+    );
+    let config = with_python(config);
+    let mut registry = Registry::new("close-host", "1.0");
+    registry
+        .add_source_file(&bridge, &config)
+        .unwrap_or_else(|e| panic!("the bridge was refused: {e}"));
+    let changed = registry.refresh();
+    assert!(changed.refused.is_empty(), "{changed:?}");
+    let opener = registry
+        .offer::<dyn Opener>("close_probe_dialer")
+        .expect("served")
+        .expect("as the trait")
+        .shared()
+        .expect("an instance");
+    let mut session = opener.open().expect("a session");
+    session.send("hi").expect("said");
+    session.close().expect("closed");
+    assert_eq!(session.said(), 1);
+    let refused = session.send("again").expect_err("closed");
+    assert!(refused.message().contains("closed"), "{refused:?}");
+    drop(session);
+}
+
+#[test]
+fn a_c_host_serves_python_libraries() {
+    let Some(bridge) = bridge() else {
+        println!("skipped: the bridge is not built beside this test; `cargo build` first");
+        return;
+    };
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler");
+        return;
+    };
+    let Some(named) = std::env::var_os("GUATIAO_LIBRARY").map(PathBuf::from) else {
+        println!(
+            "skipped: GUATIAO_LIBRARY names no guatiao build (with `load`) for the C host to link"
+        );
+        return;
+    };
+    // A directory holds guatiao's own library; a file is a library carrying
+    // the core surface under a name of its own, linked as it is.
+    let (guatiao_dir, core_file) = if named.is_dir() {
+        (named, None)
+    } else {
+        let dir = named.parent().map(Path::to_path_buf).unwrap_or_default();
+        (dir, Some(named))
+    };
+    let out_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let exe = out_dir.join(if cfg!(windows) {
+        "c_host.exe"
+    } else {
+        "c_host"
+    });
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(repo().join("crates/guatiao/include"))
+        .arg("-I")
+        .arg(repo().join("examples/greeter_kind/include"))
+        .arg("-o")
+        .arg(&exe)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/c_host.c"));
+    match (&core_file, cfg!(windows)) {
+        (None, true) => {
+            compile.arg(guatiao_dir.join("guatiao.dll.lib"));
+        }
+        (Some(file), true) => {
+            let mut import = file.clone().into_os_string();
+            import.push(".lib");
+            compile.arg(import);
+        }
+        (None, false) => {
+            compile
+                .arg(format!("-L{}", guatiao_dir.display()))
+                .arg("-lguatiao");
+        }
+        (Some(file), false) => {
+            compile.arg(file);
+        }
+    }
+    if !cfg!(windows) {
+        compile.arg(format!("-Wl,-rpath,{}", guatiao_dir.display()));
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the C host did not build:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let mut run = Command::new(&exe);
+    run.arg(&bridge)
+        .arg(repo().join("examples/python_provider"))
+        .arg(repo().join("bindings/python/guatiao/src"))
+        .arg(repo().join("examples/greeter_kind/python"));
+    if cfg!(windows) {
+        // Where Windows finds guatiao.dll for the host it just linked.
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut dirs = vec![guatiao_dir.clone()];
+        dirs.extend(std::env::split_paths(&path));
+        run.env("PATH", std::env::join_paths(dirs).expect("paths join"));
+    }
+    let ran = run.output().expect("the C host runs");
+    let stdout = String::from_utf8_lossy(&ran.stdout);
+    assert!(
+        ran.status.success() && stdout.contains("all checks passed"),
+        "stdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(
+        stdout.contains("py_greeter_hello greets: hello, ana"),
+        "{stdout}"
+    );
+}

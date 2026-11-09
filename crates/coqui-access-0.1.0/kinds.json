@@ -1,0 +1,153 @@
+{
+  "kinds": [
+    {
+      "name": "coqui_authenticator",
+      "floor_hash": 3375864644,
+      "object": false,
+      "doc": "Checks credentials and returns only a [`Lookup`] reference.",
+      "slots": [
+        {
+          "name": "authenticate",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "attempt",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Checks one attempt without returning person details or credential material.\n\nAn error means the authenticator could not find out; it is never a verdict."
+        },
+        {
+          "name": "describe",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this authenticator is and what it takes. Defaults to nothing said."
+        }
+      ]
+    },
+    {
+      "name": "coqui_directory",
+      "floor_hash": 2407154769,
+      "object": false,
+      "doc": "Resolves an authenticated reference into the authoritative [`Person`] record.",
+      "slots": [
+        {
+          "name": "lookup",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "lookup",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Returns the person for `lookup`, or `None` when the reference is unknown or the\naccount is disabled."
+        },
+        {
+          "name": "describe",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this directory is. Defaults to nothing said."
+        }
+      ]
+    },
+    {
+      "name": "coqui_authorizer",
+      "floor_hash": 2693612885,
+      "object": false,
+      "doc": "Authorizes one action on one resource for a [`Person`] a directory returned.",
+      "slots": [
+        {
+          "name": "authorize",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Evaluates the request using the supplied authoritative person record."
+        }
+      ]
+    },
+    {
+      "name": "coqui_accounts",
+      "floor_hash": 610858279,
+      "object": false,
+      "doc": "Account management for a provider that keeps its own accounts.\n\nA separate kind, so authentication providers that keep nothing (an LDAP client, a\nreverse-proxy header reader) do not implement it. A provider offering this kind is\nusually also an [`Authenticator`] and a [`Directory`] over the same store.",
+      "slots": [
+        {
+          "name": "accounts",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The accounts kept, without anything that proves one."
+        },
+        {
+          "name": "put",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "account",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Makes an account, or changes the one of that name; a field not said is left as it\nis. A provider that makes secrets itself answers with the one it made."
+        },
+        {
+          "name": "remove",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "name",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Takes an account away. `GUATIAO_ERR_NOT_FOUND` when none has that name."
+        },
+        {
+          "name": "waiting",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What was shown lately and is nobody's yet, and could be accepted as somebody's with\n[`put`](Accounts::put): a peer certificate nobody has accepted. Empty for a\nprovider that keeps no such thing."
+        }
+      ]
+    }
+  ]
+}

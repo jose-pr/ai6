@@ -1,0 +1,663 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! `#[derive(Provider)]`: a type implementing kind traits becomes a
+//! provider, with every piece of glue generated.
+//!
+//! ```ignore
+//! #[derive(Default, Provider)]
+//! #[provider(Greeter, Counter)]
+//! struct Hello;
+//! ```
+//!
+//! The attribute names the kinds; everything else defaults. The long form:
+//!
+//! ```ignore
+//! #[provider(kinds(Greeter), id = "acme_hello", name = "Hello", version = "1.0.0",
+//!            config = HelloConfig, new = Hello::build, available = Hello::ready)]
+//! ```
+//!
+//! - `id` defaults to `{CARGO_PKG_NAME}_{type in snake case}`, with `-` in
+//!   the package name as `_`; `name` to the type's ident; `version` to
+//!   empty, which means the library's.
+//! - `config = C` is what an instance is built from: the host reads `C`'s
+//!   schema (`Schema`), decodes the value it sends as `C` (`FromValue`)
+//!   and builds `Self` through `TryFrom<C, Error: Into<ProviderError>>`.
+//!   `config = Self`, or `config` alone, when the type derives `Schema`
+//!   and `FromValue` itself: no second type, no `TryFrom`. The
+//!   `create`/`destroy` slots are emitted; each instance's address is the
+//!   `ctx` the kind tables call with.
+//! - `new = path` is a `fn() -> Self`; `new_with_host = path` is a
+//!   `fn(Host) -> Self`; neither means `Default` — except with `config`,
+//!   where neither means no default instance at all.
+//! - `available = path` is a `fn(&Self) -> Result<(), &'static str>`,
+//!   asked on every call of the default instance; refused without one.
+//!
+//! What is emitted: one `static` table per kind (`<Kind>Vtable::of::<T>()`),
+//! a `OnceLock<T>` holding the default instance, the `create`/`destroy`
+//! shims when `config` is given, an `impl ProviderDecl for T` building a
+//! `ProviderParts` through its builder, and compile-time checks that `T`
+//! implements every kind named — so a missing `impl` reads as an ordinary
+//! trait error on the type's own span — and that none is an object kind.
+
+#![forbid(unsafe_code)]
+
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, quote_spanned};
+use syn::spanned::Spanned;
+use syn::{DeriveInput, Ident, Path, Type};
+
+use crate::kind::snake_case;
+
+/// Expands the derive, or emits a compile error at the user's span.
+pub(crate) fn expand(input: TokenStream) -> TokenStream {
+    match try_expand(input) {
+        Ok(tokens) => tokens,
+        Err(e) => e.to_compile_error(),
+    }
+}
+
+#[derive(Default)]
+struct Decl {
+    kinds: Vec<Path>,
+    id: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    config: Option<Type>,
+    new: Option<Path>,
+    new_with_host: Option<Path>,
+    available: Option<Path>,
+    /// `form = Ty`: a type deriving `Form`, whose screen the descriptor's
+    /// `meta` carries under `form`.
+    form: Option<Type>,
+    /// `crate = <path>`: where the expansion finds `guatiao`.
+    krate: Option<Path>,
+}
+
+fn try_expand(input: TokenStream) -> syn::Result<TokenStream> {
+    let ast: DeriveInput = syn::parse2(input)?;
+    if ast.generics.params.iter().next().is_some() {
+        return Err(syn::Error::new_spanned(
+            &ast.generics,
+            "a provider cannot be generic: one type is one instance behind one descriptor",
+        ));
+    }
+    let decl = read_attrs(&ast)?;
+    if decl.kinds.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &ast.ident,
+            "a provider names at least one kind: `#[provider(Greeter)]`",
+        ));
+    }
+    // Each kind once: a second table for one kind would be a second
+    // `tables` entry under one name, and only the first would be read.
+    let spelled = |kind: &Path| -> String {
+        let mut kind = kind.clone();
+        kind.leading_colon = None;
+        quote!(#kind).to_string().split_whitespace().collect()
+    };
+    for (i, kind) in decl.kinds.iter().enumerate() {
+        if decl.kinds[..i].iter().any(|k| spelled(k) == spelled(kind)) {
+            return Err(syn::Error::new_spanned(
+                kind,
+                format!(
+                    "`{}` is named twice: a provider serves a kind through one table",
+                    spelled(kind)
+                ),
+            ));
+        }
+    }
+    if decl.new.is_some() && decl.new_with_host.is_some() {
+        return Err(syn::Error::new_spanned(
+            &ast.ident,
+            "`new` and `new_with_host` are two ways to build the one instance; name one",
+        ));
+    }
+    let has_default_instance =
+        decl.config.is_none() || decl.new.is_some() || decl.new_with_host.is_some();
+    if decl.available.is_some() && !has_default_instance {
+        return Err(syn::Error::new_spanned(
+            &ast.ident,
+            "`available` asks the provider's default instance, and a provider built only from a \
+             configuration has none; add `new` or `new_with_host`, or drop `available`",
+        ));
+    }
+    Ok(crate::krate::reroot(
+        emit(&ast.ident, &decl, has_default_instance),
+        decl.krate.as_ref(),
+    ))
+}
+
+fn read_attrs(ast: &DeriveInput) -> syn::Result<Decl> {
+    let mut decl = Decl::default();
+    let mut seen = false;
+    for attr in &ast.attrs {
+        if !attr.path().is_ident("provider") {
+            continue;
+        }
+        seen = true;
+        attr.parse_nested_meta(|meta| {
+            let key = meta
+                .path
+                .get_ident()
+                .map(|i| i.to_string())
+                .unwrap_or_default();
+            match key.as_str() {
+                "kinds" => meta.parse_nested_meta(|kind| {
+                    decl.kinds.push(kind.path.clone());
+                    Ok(())
+                }),
+                "id" => set_str(&meta, &mut decl.id, "id"),
+                "name" => set_str(&meta, &mut decl.name, "name"),
+                "version" => set_str(&meta, &mut decl.version, "version"),
+                "config" => {
+                    once(&meta, decl.config.is_some(), "config")?;
+                    // `config` alone: the type is its own configuration.
+                    decl.config = Some(if meta.input.peek(syn::Token![=]) {
+                        meta.value()?.parse()?
+                    } else {
+                        syn::parse_quote!(Self)
+                    });
+                    Ok(())
+                }
+                "new" => {
+                    once(&meta, decl.new.is_some(), "new")?;
+                    decl.new = Some(meta.value()?.parse()?);
+                    Ok(())
+                }
+                "new_with_host" => {
+                    once(&meta, decl.new_with_host.is_some(), "new_with_host")?;
+                    decl.new_with_host = Some(meta.value()?.parse()?);
+                    Ok(())
+                }
+                "available" => {
+                    once(&meta, decl.available.is_some(), "available")?;
+                    decl.available = Some(meta.value()?.parse()?);
+                    Ok(())
+                }
+                "crate" => {
+                    once(&meta, decl.krate.is_some(), "crate")?;
+                    decl.krate = Some(meta.value()?.parse()?);
+                    Ok(())
+                }
+                "form" => {
+                    once(&meta, decl.form.is_some(), "form")?;
+                    decl.form = Some(meta.value()?.parse()?);
+                    Ok(())
+                }
+                // A bare path with no `=` is a kind: `#[provider(Greeter)]`.
+                _ if !meta.input.peek(syn::Token![=]) => {
+                    decl.kinds.push(meta.path.clone());
+                    Ok(())
+                }
+                other => Err(meta.error(format!(
+                    "`{other}` is not a provider option; the options are `kinds(..)`, `id`, \
+                     `name`, `version`, `config`, `new`, `new_with_host`, `available`, `form` \
+                     and `crate`"
+                ))),
+            }
+        })?;
+    }
+    if !seen {
+        return Err(syn::Error::new_spanned(
+            &ast.ident,
+            "a provider needs `#[provider(..)]` naming its kinds",
+        ));
+    }
+    Ok(decl)
+}
+
+fn once(meta: &syn::meta::ParseNestedMeta<'_>, already: bool, what: &str) -> syn::Result<()> {
+    if already {
+        return Err(meta.error(format!("`{what}` is given twice")));
+    }
+    Ok(())
+}
+
+fn set_str(
+    meta: &syn::meta::ParseNestedMeta<'_>,
+    slot: &mut Option<String>,
+    what: &str,
+) -> syn::Result<()> {
+    once(meta, slot.is_some(), what)?;
+    let lit: syn::LitStr = meta.value()?.parse()?;
+    *slot = Some(lit.value());
+    Ok(())
+}
+
+/// The kind's table type, reached through the trait so only the trait
+/// has to be in scope: `<dyn Greeter as Kind>::Vtable`.
+fn vtable_type(kind: &Path) -> TokenStream {
+    quote! { <dyn #kind as ::guatiao::library::Kind>::Vtable }
+}
+
+fn emit(ty: &Ident, decl: &Decl, has_default_instance: bool) -> TokenStream {
+    let snake = snake_case(&ty.to_string());
+    let name = decl.name.clone().unwrap_or_else(|| ty.to_string());
+    let version = decl.version.clone().unwrap_or_default();
+    let id = match &decl.id {
+        Some(id) => quote! { ::guatiao::__private::alloc::string::String::from(#id) },
+        None => quote! {
+            ::guatiao::__private::alloc::format!("{}_{}", ::core::env!("CARGO_PKG_NAME").replace('-', "_"), #snake)
+        },
+    };
+
+    let live_kinds = decl.kinds.iter();
+    let checks = decl.kinds.iter().enumerate().map(|(i, kind)| {
+        let check = format_ident!("__guatiao_implements_{}", i);
+        // An object kind's shims read `ctx` as a cell one caller owns, and
+        // a provider's `ctx` is shared: refused here, on the kind's span.
+        let not_object = quote_spanned! {kind.span()=>
+            const _: () = ::core::assert!(
+                !<dyn #kind as ::guatiao::library::Kind>::OBJECT,
+                "an object kind cannot be named in `#[provider(..)]`: a provider is shared, and an object is owned by one caller; return it from a provider kind's method instead"
+            );
+        };
+        quote! {
+            fn #check<__T: #kind>() {}
+            let _ = #check::<#ty> as fn();
+            #not_object
+        }
+    });
+    let tables = decl.kinds.iter().enumerate().map(|(i, kind)| {
+        let table = format_ident!("__GUATIAO_TABLE_{}", i);
+        let vtable = vtable_type(kind);
+        quote! {
+            static #table: #vtable = <#vtable>::of::<#ty>();
+        }
+    });
+    let table_entries = decl.kinds.iter().enumerate().map(|(i, kind)| {
+        let table = format_ident!("__GUATIAO_TABLE_{}", i);
+        let vtable = vtable_type(kind);
+        quote! {
+            .table(::guatiao::library::KindTable::new(
+                <dyn #kind as ::guatiao::library::Kind>::NAME,
+                &#table as *const #vtable as *const ::core::ffi::c_void,
+                ::core::mem::size_of::<#vtable>(),
+            ))
+        }
+    });
+    let describers = decl.kinds.iter().map(|kind| {
+        quote! { <dyn #kind as ::guatiao::library::Kind>::describe, }
+    });
+    let kind_names: Vec<TokenStream> = decl
+        .kinds
+        .iter()
+        .map(|kind| quote! { <dyn #kind as ::guatiao::library::Kind>::NAME, })
+        .collect();
+    // `config = Self`, or `config` alone: the type is its own
+    // configuration. Spelled as the type, since `Self` does not resolve
+    // inside the free shim functions.
+    let config_ty = decl.config.as_ref().map(|c| match c {
+        Type::Path(path) if path.qself.is_none() && path.path.is_ident("Self") => {
+            Type::Path(syn::TypePath {
+                qself: None,
+                path: ty.clone().into(),
+            })
+        }
+        other => other.clone(),
+    });
+
+    let build = match (&decl.new, &decl.new_with_host) {
+        (Some(new), _) => quote! { #new() },
+        (_, Some(new)) => quote! { #new(host) },
+        _ => quote! { <#ty as ::core::default::Default>::default() },
+    };
+    // The default instance: the one `ctx` of the descriptor. A provider
+    // built only from a configuration has none, and its `ctx` is null.
+    let instance = if has_default_instance {
+        quote! {
+            let instance: *mut ::core::ffi::c_void =
+                (__GUATIAO_INSTANCE.get_or_init(|| #build) as *const #ty as *mut #ty)
+                    .cast::<::core::ffi::c_void>();
+        }
+    } else {
+        quote! {
+            let _ = host;
+            let instance: *mut ::core::ffi::c_void = ::core::ptr::null_mut();
+        }
+    };
+    let config = match &config_ty {
+        Some(config) => quote! {
+            let builder = builder.config(<#config as ::guatiao::Schema>::schema_in(alloc)?);
+        },
+        None => quote! {},
+    };
+    // The form the type deriving `Form` declares, under `meta["form"]`,
+    // the key `guatiao_intake::PROVIDER_FORM_KEY` names.
+    let form = decl.form.as_ref().map(|form| {
+        quote! {
+            let builder = {
+                let mut __meta = ::guatiao::Map::new_in(alloc);
+                __meta.set_in("form", <#form>::__guatiao_form(alloc)?, alloc)?;
+                builder.meta(__meta)
+            };
+        }
+    });
+    // Instances from a configuration: decode it as `C`, build `Self`
+    // through `TryFrom<C>`, box it. `C = Self` is the identity `From`.
+    let (create_shims, create_slot, destroy_slot) = match &config_ty {
+        Some(config) => (
+            quote! {
+                /// # Safety
+                ///
+                /// Called through the descriptor: `config` is null or a
+                /// well-formed value, `out` and `err` are null or writable.
+                unsafe extern "C" fn __guatiao_create(
+                    _ctx: *mut ::core::ffi::c_void,
+                    config: *const ::guatiao::Value,
+                    out: *mut *mut ::core::ffi::c_void,
+                    err: *mut ::guatiao::library::ProviderError,
+                ) -> ::guatiao::Status {
+                    let status = ::guatiao::library::kind::catch(|| {
+                        // SAFETY: the caller's contract.
+                        let built = unsafe { ::guatiao::library::kind::config_arg::<#config>(config) }
+                            .and_then(|__c| {
+                                <#ty as ::core::convert::TryFrom<#config>>::try_from(__c)
+                                    .map_err(::core::convert::Into::<::guatiao::library::ProviderError>::into)
+                            });
+                        // SAFETY: the caller's contract.
+                        unsafe { ::guatiao::library::kind::instance_out::<#ty>(out, err, built) }
+                    });
+                    if status == ::guatiao::Status::GUATIAO_OK {
+                        __GUATIAO_LIVE.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
+                    }
+                    status
+                }
+
+                /// # Safety
+                ///
+                /// `instance` is null or came from `__guatiao_create`.
+                unsafe extern "C" fn __guatiao_destroy(
+                    _ctx: *mut ::core::ffi::c_void,
+                    instance: *mut ::core::ffi::c_void,
+                ) {
+                    if !instance.is_null() {
+                        __GUATIAO_LIVE.fetch_sub(1, ::core::sync::atomic::Ordering::Relaxed);
+                    }
+                    // A panicking `Drop` stops here: this is an `extern "C"`
+                    // function, and a panic out of it aborts the host.
+                    ::guatiao::library::kind::catch_unit(|| {
+                        // SAFETY: the caller's contract.
+                        unsafe { ::guatiao::library::kind::destroy_instance::<#ty>(instance) }
+                    });
+                }
+            },
+            quote! { .create(__guatiao_create) },
+            quote! { .destroy(__guatiao_destroy) },
+        ),
+        None => (quote! {}, quote! {}, quote! {}),
+    };
+    let (available_shim, available_slot) = match &decl.available {
+        Some(ask) => (
+            quote! {
+                /// # Safety
+                ///
+                /// Called through the descriptor with the `ctx` it declared.
+                unsafe extern "C" fn __guatiao_available(
+                    ctx: *mut ::core::ffi::c_void,
+                    reason: *mut ::guatiao::Str,
+                ) -> bool {
+                    // SAFETY: the descriptor's `ctx` is the instance below.
+                    unsafe {
+                        ::guatiao::library::kind::available_via::<#ty>(ctx, reason, |__this| #ask(__this))
+                    }
+                }
+            },
+            quote! { .available(__guatiao_available) },
+        ),
+        None => (quote! {}, quote! {}),
+    };
+
+    quote! {
+        const _: () = {
+            #(#checks)*
+
+            #(#tables)*
+
+            /// Instances built from a configuration and not yet destroyed.
+            static __GUATIAO_LIVE: ::core::sync::atomic::AtomicUsize =
+                ::core::sync::atomic::AtomicUsize::new(0);
+
+            /// The one instance, built on the first entry call.
+            static __GUATIAO_INSTANCE: ::std::sync::OnceLock<#ty> = ::std::sync::OnceLock::new();
+
+            #available_shim
+
+            #create_shims
+
+            impl ::guatiao::library::kind::ProviderDecl for #ty {
+                const KINDS: &'static [&'static str] = &[ #(#kind_names)* ];
+
+                fn live(seen: &mut ::guatiao::__private::alloc::vec::Vec<&'static str>) -> usize {
+                    __GUATIAO_LIVE.load(::core::sync::atomic::Ordering::Relaxed)
+                        #(+ <dyn #live_kinds as ::guatiao::library::Kind>::live_objects(seen))*
+                }
+
+                fn provider(
+                    host: ::guatiao::library::Host,
+                    alloc: ::guatiao::Alloc,
+                ) -> ::core::result::Result<::guatiao::library::kind::ProviderParts, ::guatiao::ValueError> {
+                    #instance
+                    let id = #id;
+                    let builder = ::guatiao::library::kind::ProviderParts::builder(&id)
+                        .name(#name)
+                        .version(#version)
+                        .kinds(<#ty as ::guatiao::library::kind::ProviderDecl>::KINDS)
+                        #(#table_entries)*
+                        .kind_descriptions(::guatiao::library::kind::kind_document(&[ #(#describers)* ]))
+                        .ctx(instance)
+                        #available_slot
+                        #create_slot
+                        #destroy_slot;
+                    #config
+                    #form
+                    ::core::result::Result::Ok(builder.build())
+                }
+            }
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn expand_str(item: &str) -> Result<String, String> {
+        let item: TokenStream = item.parse().unwrap();
+        match try_expand(item) {
+            Ok(t) => Ok(t.to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    #[test]
+    fn the_short_form_names_kinds_and_defaults_the_rest() {
+        let out = expand_str("#[provider(Greeter, counter::Counter)] struct Hello;").unwrap();
+        let file: syn::File = syn::parse_str(&out).expect("parses");
+        assert_eq!(file.items.len(), 1, "one `const _` block");
+        assert!(out.contains("static __GUATIAO_TABLE_0 : < dyn Greeter as :: guatiao :: library :: Kind > :: Vtable ="));
+        assert!(out.contains(":: Vtable > :: of :: < Hello > ()"));
+        assert!(out.contains("static __GUATIAO_TABLE_1 : < dyn counter :: Counter as"));
+        assert!(out.contains("< Hello as :: core :: default :: Default > :: default ()"));
+        assert!(
+            out.contains(
+                ":: core :: env ! (\"CARGO_PKG_NAME\") . replace ('-' , \"_\") , \"hello\""
+            )
+        );
+        assert!(
+            out.contains(". name (\"Hello\") . version (\"\")"),
+            "name defaults to the ident, version to empty"
+        );
+        assert!(
+            !out.contains(". available (")
+                && !out.contains(". create (")
+                && !out.contains(". destroy ("),
+            "no available, create or destroy slot"
+        );
+        assert!(
+            out.contains("__GUATIAO_INSTANCE . get_or_init"),
+            "a default instance"
+        );
+        assert!(
+            out.contains("! < dyn Greeter as :: guatiao :: library :: Kind > :: OBJECT")
+                && out.contains(
+                    "! < dyn counter :: Counter as :: guatiao :: library :: Kind > :: OBJECT"
+                ),
+            "every named kind is asserted not to be an object kind: {out}"
+        );
+    }
+
+    #[test]
+    fn a_configuration_builds_instances() {
+        let out = expand_str("#[provider(Greeter, config = HiConfig)] struct Hi;").unwrap();
+        assert!(out.contains("config_arg :: < HiConfig > (config)"));
+        assert!(out.contains("< Hi as :: core :: convert :: TryFrom < HiConfig >> :: try_from"));
+        assert!(out.contains(". create (__guatiao_create) . destroy (__guatiao_destroy)"));
+        assert!(
+            out.contains(":: core :: ptr :: null_mut ()") && !out.contains("get_or_init"),
+            "no default instance without `new`: {out}"
+        );
+        assert!(
+            out.contains(":: guatiao :: library :: kind :: catch_unit"),
+            "a panicking `Drop` stops at the destroy slot: {out}"
+        );
+        let out = expand_str("#[provider(Greeter, config = HiConfig, new = Hi::make)] struct Hi;")
+            .unwrap();
+        assert!(
+            out.contains("get_or_init"),
+            "a default instance beside the built ones"
+        );
+    }
+
+    #[test]
+    fn a_type_can_be_its_own_configuration() {
+        for attr in [
+            "#[provider(Greeter, config)]",
+            "#[provider(Greeter, config = Self)]",
+        ] {
+            let out = expand_str(&format!("{attr} struct Hi;")).unwrap();
+            assert!(
+                out.contains("config_arg :: < Hi > (config)"),
+                "{attr}: {out}"
+            );
+            assert!(out.contains("< Hi as :: guatiao :: Schema > :: schema_in (alloc) ?"));
+            assert!(
+                out.contains("< Hi as :: core :: convert :: TryFrom < Hi >> :: try_from"),
+                "the identity conversion: {attr}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_long_form_overrides_everything() {
+        let out = expand_str(
+            "#[provider(kinds(Greeter), id = \"acme_hi\", name = \"Hi\", version = \"2.0.0\", \
+             config = HiConfig, new_with_host = Hi::build, available = Hi::ready)] struct Hi;",
+        )
+        .unwrap();
+        assert!(out.contains("String :: from (\"acme_hi\")"));
+        assert!(out.contains(". name (\"Hi\") . version (\"2.0.0\")"));
+        assert!(out.contains("< HiConfig as :: guatiao :: Schema > :: schema_in (alloc) ?"));
+        assert!(out.contains("Hi :: build (host)"));
+        assert!(
+            out.contains(
+                "available_via :: < Hi > (ctx , reason , | __this | Hi :: ready (__this))"
+            )
+        );
+        let out = expand_str("#[provider(Greeter, new = Hi::make)] struct Hi;").unwrap();
+        assert!(out.contains("Hi :: make ()"));
+    }
+
+    /// With `crate = <path>` nothing is rooted at `::guatiao`.
+    #[test]
+    fn a_crate_path_reroots_every_generated_path() {
+        for attr in [
+            "#[provider(Greeter, counter::Counter, crate = ::kinds::guatiao)]",
+            "#[provider(Greeter, config, form = Hi, crate = ::kinds::guatiao)]",
+            "#[provider(kinds(Greeter), config = HiConfig, new_with_host = Hi::build, \
+             available = Hi::ready, crate = ::kinds::guatiao)]",
+        ] {
+            let out = expand_str(&format!("{attr} struct Hi;")).unwrap();
+            assert!(out.contains(":: kinds :: guatiao ::"), "{out}");
+            let rest = out.replace(":: kinds :: guatiao", "");
+            assert!(
+                !rest.contains(":: guatiao"),
+                "a path is still rooted at `::guatiao`: {rest}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_form_lands_in_the_descriptor_s_meta() {
+        let out = expand_str("#[provider(Greeter, config, form = Settings)] struct Hi;").unwrap();
+        assert!(
+            out.contains(
+                "__meta . set_in (\"form\" , < Settings > :: __guatiao_form (alloc) ? , alloc) ?"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("builder . meta (__meta)"), "{out}");
+        let out = expand_str("#[provider(Greeter)] struct Hi;").unwrap();
+        assert!(!out.contains("meta"), "no form, no meta: {out}");
+    }
+
+    #[test]
+    fn provider_rejects_by_name() {
+        let cases: &[(&str, &str)] = &[
+            ("struct Hello;", "a provider needs `#[provider(..)]`"),
+            (
+                "#[provider()] struct Hello;",
+                "a provider names at least one kind",
+            ),
+            (
+                "#[provider(kinds())] struct Hello;",
+                "expected nested attribute",
+            ),
+            (
+                "#[provider(Greeter)] struct Hello<T>(T);",
+                "a provider cannot be generic",
+            ),
+            (
+                "#[provider(Greeter, new = A::a, new_with_host = A::b)] struct Hello;",
+                "`new` and `new_with_host` are two ways to build the one instance",
+            ),
+            (
+                "#[provider(Greeter, nam = \"x\")] struct Hello;",
+                "`nam` is not a provider option",
+            ),
+            (
+                "#[provider(Greeter, id = \"a\", id = \"b\")] struct Hello;",
+                "`id` is given twice",
+            ),
+            (
+                "#[provider(Greeter, id = 5)] struct Hello;",
+                "expected string literal",
+            ),
+            (
+                "#[provider(Greeter, config = C, available = Hello::ready)] struct Hello;",
+                "`available` asks the provider's default instance",
+            ),
+            (
+                "#[provider(Counter, Greeter, ::Counter)] struct Hello;",
+                "`Counter` is named twice",
+            ),
+            (
+                "#[provider(Greeter, form = A, form = B)] struct Hello;",
+                "`form` is given twice",
+            ),
+            (
+                "#[provider(kinds(k::Greeter), k::Greeter)] struct Hello;",
+                "`k::Greeter` is named twice",
+            ),
+        ];
+        for (item, expected) in cases {
+            let err = expand_str(item).expect_err(&format!("{item} must be refused"));
+            assert!(
+                err.contains(expected),
+                "for `{item}` expected a message containing `{expected}`, got `{err}`"
+            );
+        }
+    }
+}

@@ -1,0 +1,106 @@
+{
+  "kinds": [
+    {
+      "name": "agent_provider",
+      "floor_hash": 1182182788,
+      "object": false,
+      "doc": "Starts or resumes agent sessions. A provider owns whatever process it runs.",
+      "slots": [
+        {
+          "name": "start",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "agent_session"
+          },
+          "doc": "Starts a session with context established before its first message.\n\nIt may block until the harness runs; the caller gives it a thread and a time limit."
+        },
+        {
+          "name": "resume",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "agent_session"
+          },
+          "doc": "Reattaches to a session this provider issued, as long as it still exists. The default: this\nprovider resumes nothing."
+        }
+      ]
+    },
+    {
+      "name": "agent_session",
+      "floor_hash": 1414216972,
+      "object": true,
+      "doc": "One provider-owned, resumable agent operation.\n\nEvery method may be called while another runs, from another thread: `next_event` blocks for its\ntimeout, and `interrupt` and `close` have to reach it.",
+      "slots": [
+        {
+          "name": "session_id",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The provider-issued session identity, once the provider has one."
+        },
+        {
+          "name": "send_message",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "message",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Submits a message to the running operation."
+        },
+        {
+          "name": "next_event",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "timeout_ms",
+              "type": "i64"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Reads one event, or returns `None` when `timeout_ms` expires.\n\nA harness's exit must be reported as a `completed` or `failed` event, the `failed` text saying how\nit ended and what it wrote last: a provider that only returns `None` after end-of-file leaves its\nconsumer waiting forever. A method that takes much longer than `timeout_ms` to return counts as\nhung."
+        },
+        {
+          "name": "interrupt",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "doc": "Asks the provider to interrupt the running turn, which then ends with an event as any turn does."
+        },
+        {
+          "name": "close",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "doc": "Closes the operation and releases what it holds. It returns once the harness has exited, or after a\nshort wait when that cannot be told, since the caller may remove the working directory next."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+[workspace]
+members = ["testharness"]
+exclude = ["libpam-sys"]
+
+[workspace.package]
+license = "MIT"
+version = "0.1.2"
+authors = ["Paul Fisher <paul@pfish.zone>"]
+edition = "2021"
+rust-version = "1.75.0"
+repository = "https://code.pfish.zone/crates/nonstick/"
+
+[package]
+name = "nonstick"
+description = "🍳 Safe Rust bindings for PAM applications and modules."
+readme = "README.md"
+keywords = ["pam", "ffi", "authentication"]
+categories = [
+    "api-bindings",
+    "authentication",
+    "os::unix-apis",
+]
+license.workspace = true
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+
+targets = [
+    "x86_64-apple-darwin",
+    "x86_64-unknown-freebsd",
+    "x86_64-unknown-illumos",
+]
+
+[features]
+default = ["link"]
+
+# Enable this to actually link against your system's PAM library.
+#
+# This will fail if you have extensions enabled that are not compatible
+# with your system's PAM.
+link = ["dep:libc", "dep:libpam-sys", "dep:libpam-sys-helpers"]
+
+# Extensions to PAM that are shared by Linux-PAM and OpenPAM
+# (i.e., most PAM installations).
+basic-ext = []
+# Extensions to PAM that are supported by Linux-PAM.
+linux-pam-ext = []
+# Extensions to PAM that are supported by OpenPAM.
+openpam-ext = []
+# Extensions to PAM that are supported by Sun's PAM.
+sun-ext = []
+
+[dependencies]
+bitflags = "2.9.0"
+libc = { optional = true, version = "0.2" }
+libpam-sys = { optional = true, version = "0.2.0", path = "libpam-sys" }
+libpam-sys-helpers = { optional = true, version = "0.2.0", path = "libpam-sys/libpam-sys-helpers" }
+libpam-sys-impls = { version = "0.2.0", path = "libpam-sys/libpam-sys-impls" }
+
+[build-dependencies]
+libpam-sys-impls = { version = "0.2.0", path = "libpam-sys/libpam-sys-impls" }

@@ -1,0 +1,42 @@
+# coqui-acp/crates/coqui-acp at 374534143b419d4f94f63d286db508642bdfdc1a, with what it inherits written out.
+[package]
+name = "coqui-acp"
+description = "Drive any Agent Client Protocol agent: the connect, resume and turn state machine, permission deciding and line transports above the protocol's own SDK"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-acp"
+homepage = "https://boriken-dev.github.io/coqui-acp/"
+readme = "README.md"
+keywords = ["acp", "agent", "client", "json-rpc"]
+categories = ["network-programming"]
+exclude = [".*", "*.local.*"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[dependencies]
+[dependencies.agent-client-protocol]
+version = "3.6"
+default-features = false
+[dependencies.futures]
+version = "0.3"
+[dependencies.serde_json]
+version = "1"
+features = ["preserve_order"]
+[dev-dependencies]
+[dev-dependencies.proptest]
+version = "1"
+default-features = false
+features = ["std"]
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

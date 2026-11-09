@@ -1,0 +1,1000 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! One instance of a guest: its store and what the store keeps, the
+//! imports the guest calls, entering it under the limits, and naming why
+//! it stopped.
+
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use core::cell::RefCell;
+use std::sync::Mutex;
+use std::time::Instant;
+
+use guatiao::library::ProviderError;
+use guatiao::library::kind::{
+    Answer, AnswerType, ArgType, Caller as KindCaller, Pass, RawObject, Scalar,
+};
+use guatiao::value::convert::{FromValue, TryAsRef};
+use guatiao::value::wire;
+use guatiao::{Buffer, Status, Value};
+use guatiao_bridge::{
+    BridgeError, Held, Kinds, Limit, Limits, ObjectHome, PreparedArg, PreparedArgs,
+};
+use guatiao_libffi::Libffi;
+use wasmtime::{
+    Caller, Engine, Instance, Linker, Memory, Module, ResourceLimiter, Store, StoreContextMut,
+    Trap, TypedFunc, UpdateDeadline,
+};
+
+use crate::abi::{self, export, import};
+use crate::budget::{self, Refused, Undecoded};
+use crate::meter;
+use crate::wasi::WasiState;
+
+/// The deepest a guest's own frames go: wasmtime's `max_wasm_stack`.
+pub(crate) const WASM_STACK: usize = 512 << 10;
+/// What the host code a guest's imports run, below its frames, may use.
+const HOST_STACK: usize = 512 << 10;
+/// The stack an entry runs on when its caller's has too little left.
+const SEGMENT: usize = 4 << 20;
+
+/// Runs `f`, which enters a guest, where at least a guest's stack and the
+/// host's below it are left: on the caller's stack, or on a segment of its
+/// own. wasmtime bounds a guest's frames from where it is entered, so a
+/// caller with less left would overflow the native stack, not trap.
+pub(crate) fn with_stack<R>(f: impl FnOnce() -> R) -> R {
+    stacker::maybe_grow(WASM_STACK + HOST_STACK, SEGMENT, f)
+}
+
+/// Bytes the host copies for a guest per unit of fuel it charges.
+const BYTES_PER_FUEL: u64 = 8;
+
+/// The kinds a source was given, and a caller per object kind, made once.
+pub(crate) struct Shared {
+    pub(crate) kinds: Kinds,
+    callers: Mutex<BTreeMap<String, Arc<KindCaller>>>,
+}
+
+impl Shared {
+    pub(crate) fn new(kinds: Kinds) -> Shared {
+        Shared {
+            kinds,
+            callers: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /// What calls a table of the kind named.
+    pub(crate) fn caller(&self, kind: &str) -> Result<Arc<KindCaller>, ProviderError> {
+        let mut callers = self
+            .callers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(c) = callers.get(kind) {
+            return Ok(Arc::clone(c));
+        }
+        let described = self
+            .kinds
+            .get(kind)
+            .cloned()
+            .ok_or_else(|| ProviderError::from(BridgeError::UnknownKind(kind.to_string())))?;
+        let made = Arc::new(
+            KindCaller::new(described, &Libffi)
+                .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &e.to_string()))?,
+        );
+        callers.insert(kind.to_string(), Arc::clone(&made));
+        Ok(made)
+    }
+}
+
+pub(crate) struct HostObject {
+    pub(crate) held: Held,
+    pub(crate) caller: Arc<KindCaller>,
+}
+
+/// What an argument of the current call may be written back as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Writable {
+    No,
+    Tree,
+    Buffer,
+}
+
+/// A store's data: the limiter's count, what the guest answered and wrote
+/// back during the current call, the host's objects it holds, and what
+/// stopped it.
+pub(crate) struct State {
+    memory_limit: Option<usize>,
+    memory_bytes: usize,
+    table_entries: usize,
+    pub(crate) memory_hit: bool,
+    /// Tables grew past what the host holds for them with no memory limit.
+    tables_past: bool,
+    /// The bytes the host takes from the guest at once, and decodes.
+    pub(crate) budget: u64,
+    /// Bytes past the budget the guest tried to hand over.
+    pub(crate) too_large: Option<u64>,
+    fuel: bool,
+    pub(crate) out_of_fuel: bool,
+    time: Option<core::time::Duration>,
+    deadline: Option<Instant>,
+    pub(crate) timed_out: bool,
+    pub(crate) answer: Option<Vec<u8>>,
+    result: Vec<u8>,
+    pub(crate) writable: Vec<Writable>,
+    pub(crate) written: Vec<(usize, Value)>,
+    /// The host's objects the guest holds, by handle. Shared only while a
+    /// call into one of them is prepared: its arguments' [`Home`]s.
+    pub(crate) handles: RefCell<BTreeMap<u64, HostObject>>,
+    next_handle: u64,
+    pub(crate) wasi: WasiState,
+    shared: Arc<Shared>,
+}
+
+impl State {
+    pub(crate) fn new(limits: &Limits, shared: Arc<Shared>) -> State {
+        State {
+            memory_limit: limits
+                .memory
+                .map(|m| usize::try_from(m).unwrap_or(usize::MAX)),
+            memory_bytes: 0,
+            table_entries: 0,
+            memory_hit: false,
+            tables_past: false,
+            budget: budget::of(limits),
+            too_large: None,
+            fuel: limits.operations.is_some(),
+            out_of_fuel: false,
+            time: limits.time,
+            deadline: None,
+            timed_out: false,
+            answer: None,
+            result: Vec::new(),
+            writable: Vec::new(),
+            written: Vec::new(),
+            handles: RefCell::new(BTreeMap::new()),
+            next_handle: 0,
+            wasi: WasiState::new(),
+            shared,
+        }
+    }
+
+    /// The handle the last object held was given.
+    pub(crate) fn next_handle(&self) -> u64 {
+        self.next_handle
+    }
+
+    /// Holds an object for the guest, answering its handle.
+    pub(crate) fn hold(&mut self, held: Held, caller: Arc<KindCaller>) -> u64 {
+        self.next_handle += 1;
+        self.handles
+            .get_mut()
+            .insert(self.next_handle, HostObject { held, caller });
+        self.next_handle
+    }
+}
+
+/// What the host keeps per table entry, counted against the memory limit.
+const TABLE_ENTRY: usize = 8;
+/// The most tables a guest may have: compilers emit one.
+pub(crate) const MOST_TABLES: usize = 4;
+
+impl State {
+    /// Whether memory and tables of these sizes fit: within the memory
+    /// limit together, and without one the tables within
+    /// [`budget::UNLIMITED`], since wasmtime keeps a table's entries on
+    /// the host's heap.
+    fn fits(&mut self, memory: usize, entries: usize) -> bool {
+        let tables = entries.saturating_mul(TABLE_ENTRY);
+        match self.memory_limit {
+            Some(limit) if memory.saturating_add(tables) > limit => {
+                self.memory_hit = true;
+                false
+            }
+            None if tables as u64 > budget::UNLIMITED => {
+                self.tables_past = true;
+                false
+            }
+            _ => true,
+        }
+    }
+}
+
+/// Whether growing to `desired` passes the module's own `maximum`: wasmtime
+/// asks the limiter before it checks that, then fails the grow (-1 to the
+/// guest), so such a grow is refused here and counts nothing.
+fn past(desired: usize, maximum: Option<usize>) -> bool {
+    maximum.is_some_and(|m| desired > m)
+}
+
+impl ResourceLimiter for State {
+    fn memory_growing(
+        &mut self,
+        _current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        if past(desired, maximum) {
+            return Ok(false);
+        }
+        if !self.fits(desired, self.table_entries) {
+            return Err(wasmtime::Error::msg("the memory limit"));
+        }
+        self.memory_bytes = desired;
+        Ok(true)
+    }
+
+    fn table_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        if past(desired, maximum) {
+            return Ok(false);
+        }
+        let entries = self
+            .table_entries
+            .saturating_add(desired.saturating_sub(current));
+        if !self.fits(self.memory_bytes, entries) {
+            return Err(wasmtime::Error::msg("the memory limit"));
+        }
+        self.table_entries = entries;
+        Ok(true)
+    }
+
+    fn instances(&self) -> usize {
+        1
+    }
+
+    fn tables(&self) -> usize {
+        MOST_TABLES
+    }
+
+    fn memories(&self) -> usize {
+        1
+    }
+}
+
+/// Charges `fuel` for host work a guest asked for, when fuel is counted.
+pub(crate) fn charge(caller: &mut Caller<'_, State>, fuel: u64) -> wasmtime::Result<()> {
+    if !caller.data().fuel || fuel == 0 {
+        return Ok(());
+    }
+    let left = caller.get_fuel()?;
+    match left.checked_sub(fuel) {
+        Some(rest) => caller.set_fuel(rest),
+        None => {
+            caller.set_fuel(0)?;
+            caller.data_mut().out_of_fuel = true;
+            Err(wasmtime::Error::msg("the operations limit"))
+        }
+    }
+}
+
+/// Stops the guest once its call's time is up: host work runs between
+/// the instructions epochs interrupt.
+pub(crate) fn in_time(caller: &mut Caller<'_, State>) -> wasmtime::Result<()> {
+    if let Some(deadline) = caller.data().deadline
+        && Instant::now() > deadline
+    {
+        caller.data_mut().timed_out = true;
+        return Err(wasmtime::Error::msg("the time limit"));
+    }
+    Ok(())
+}
+
+// --- the imports -------------------------------------------------------------
+
+fn memory_of(caller: &mut Caller<'_, State>) -> wasmtime::Result<Memory> {
+    caller
+        .get_export(export::MEMORY)
+        .and_then(|e| e.into_memory())
+        .ok_or_else(|| wasmtime::Error::msg("the guest exports no memory"))
+}
+
+/// `len` bytes of the guest's memory at `ptr`, copied and charged for; a
+/// range outside it, or past the budget, stops the guest.
+fn bytes_at(caller: &mut Caller<'_, State>, ptr: i32, len: i32) -> wasmtime::Result<Vec<u8>> {
+    let n = u64::from(len as u32);
+    if n > caller.data().budget {
+        caller.data_mut().too_large = Some(n);
+        return Err(wasmtime::Error::msg("more bytes than the host takes"));
+    }
+    charge(caller, n / BYTES_PER_FUEL)?;
+    let memory = memory_of(caller)?;
+    let start = ptr as u32 as usize;
+    let bytes = start
+        .checked_add(len as u32 as usize)
+        .and_then(|end| memory.data(&*caller).get(start..end))
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| wasmtime::Error::msg("the guest passed bytes outside its memory"))?;
+    in_time(caller)?;
+    Ok(bytes)
+}
+
+/// Bytes a guest handed over, decoded within the budget and charged for.
+fn decoded(
+    caller: &mut Caller<'_, State>,
+    bytes: &[u8],
+) -> wasmtime::Result<Result<Value, Undecoded>> {
+    let budget = caller.data().budget;
+    match budget::check(bytes, budget) {
+        Ok(fuel) => charge(caller, fuel)?,
+        Err(refused) => return Ok(Err(Undecoded::Refused(refused))),
+    }
+    let value = wire::decode(bytes).map_err(Undecoded::Malformed);
+    in_time(caller)?;
+    Ok(value)
+}
+
+fn code(status: Status) -> i32 {
+    u32::from(status) as i32
+}
+
+fn write_back(
+    caller: &mut Caller<'_, State>,
+    index: i32,
+    ptr: i32,
+    len: i32,
+) -> wasmtime::Result<i32> {
+    let bytes = bytes_at(caller, ptr, len)?;
+    let Some(kind) = usize::try_from(index)
+        .ok()
+        .and_then(|i| caller.data().writable.get(i).copied())
+    else {
+        return Ok(code(Status::GUATIAO_ERR_NOT_FOUND));
+    };
+    let value = match decoded(caller, &bytes)? {
+        Ok(value) => value,
+        Err(Undecoded::Refused(_)) => return Ok(code(Refused::STATUS)),
+        Err(Undecoded::Malformed(_)) => return Ok(code(Status::GUATIAO_ERR_BAD_VALUE)),
+    };
+    let state = caller.data_mut();
+    let fits = match kind {
+        Writable::No => false,
+        Writable::Tree => true,
+        Writable::Buffer => TryAsRef::<[u8]>::try_as_ref(&value).is_some(),
+    };
+    if !fits {
+        return Ok(code(Status::GUATIAO_ERR_WRONG_KIND));
+    }
+    let index = index as usize;
+    state.written.retain(|(i, _)| *i != index);
+    state.written.push((index, value));
+    Ok(0)
+}
+
+/// The handle a guest handed an object over from, while the call it was
+/// handed to is prepared: a call that never takes it puts it back there.
+struct Home<'a> {
+    handles: &'a RefCell<BTreeMap<u64, HostObject>>,
+    handle: u64,
+    caller: Arc<KindCaller>,
+}
+
+impl ObjectHome for Home<'_> {
+    fn give_back(self, object: RawObject) {
+        // No borrow is held while a call's arguments are let go; were one
+        // held, the object would be dropped, as a home that cannot take it.
+        if let Ok(mut handles) = self.handles.try_borrow_mut() {
+            handles.insert(
+                self.handle,
+                HostObject {
+                    held: Held::Object(Some(object)),
+                    caller: self.caller,
+                },
+            );
+        }
+    }
+}
+
+/// One argument of a host object's slot, from the value a guest sent.
+type Prepared<'a> = PreparedArg<(), (), Home<'a>>;
+
+fn unsupported(why: String) -> ProviderError {
+    ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, &why)
+}
+
+fn bad(why: String) -> ProviderError {
+    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &why)
+}
+
+/// One argument; an object handed over is taken out of `handles`, with
+/// the [`Home`] it goes back to.
+fn prepare<'a>(
+    handles: &'a RefCell<BTreeMap<u64, HostObject>>,
+    ty: &ArgType,
+    value: Value,
+    what: &str,
+) -> Result<Prepared<'a>, ProviderError> {
+    let scalar = |ok: Option<Prepared<'a>>| ok.ok_or_else(|| bad(format!("{what} does not fit")));
+    Ok(match ty {
+        ArgType::Scalar(Scalar::Bool) => scalar(bool::from_value(&value).ok().map(Prepared::Bool))?,
+        ArgType::Scalar(Scalar::F32 | Scalar::F64) => {
+            scalar(f64::from_value(&value).ok().map(Prepared::Float))?
+        }
+        ArgType::Scalar(Scalar::U8 | Scalar::U16 | Scalar::U32 | Scalar::U64 | Scalar::Usize) => {
+            scalar(u64::from_value(&value).ok().map(Prepared::Uint))?
+        }
+        ArgType::Scalar(_) => scalar(i64::from_value(&value).ok().map(Prepared::Int))?,
+        ArgType::Str => Prepared::Str(
+            TryAsRef::<str>::try_as_ref(&value)
+                .ok_or_else(|| bad(format!("{what} is text")))?
+                .to_string(),
+        ),
+        ArgType::Bytes => Prepared::Bytes(
+            TryAsRef::<[u8]>::try_as_ref(&value)
+                .ok_or_else(|| bad(format!("{what} is bytes")))?
+                .to_vec(),
+        ),
+        ArgType::Tree {
+            tree,
+            pass,
+            nullable,
+        } => {
+            if *pass == Pass::Lent {
+                return Err(unsupported(format!(
+                    "{what} is lent, which a guest cannot lend: pass a value"
+                )));
+            }
+            let is_null = matches!(value.tag(), Ok(guatiao::Tag::GUATIAO_NULL));
+            if is_null && *nullable && *pass == Pass::Borrowed {
+                Prepared::Value(None)
+            } else {
+                Prepared::tree(value, *tree, *pass, None, what).map_err(bad)?
+            }
+        }
+        ArgType::Object {
+            kind,
+            pass: Pass::Taken,
+        } => {
+            let handle = u64::from_value(&value)
+                .map_err(|_| bad(format!("{what} is an object's handle")))?;
+            let mut map = handles.borrow_mut();
+            let same = map.get(&handle).is_some_and(|h| {
+                matches!(h.held, Held::Object(Some(_))) && h.caller.kind().name() == kind
+            });
+            if !same {
+                return Err(bad(format!(
+                    "{what} is a `{kind}` the guest owns, which handle {handle} is not"
+                )));
+            }
+            match map.remove(&handle) {
+                Some(HostObject {
+                    held: Held::Object(Some(object)),
+                    caller,
+                }) => Prepared::Object(
+                    Some(object),
+                    Home {
+                        handles,
+                        handle,
+                        caller,
+                    },
+                ),
+                _ => unreachable!("checked just above"),
+            }
+        }
+        _ => {
+            return Err(unsupported(format!(
+                "{what} has a type a guest cannot pass to the host"
+            )));
+        }
+    })
+}
+
+/// A host object's answer as the bytes a guest reads: nothing for none.
+fn answered(
+    state: &mut State,
+    answer_type: Option<&AnswerType>,
+    answer: Answer,
+) -> Result<Vec<u8>, ProviderError> {
+    let value = match answer {
+        Answer::Nothing => return Ok(Vec::new()),
+        Answer::Bool(b) => Value::from(b),
+        Answer::Int(n) => Value::from(n),
+        Answer::Uint(n) => Value::from(n),
+        Answer::Float(x) => Value::try_from(x)
+            .map_err(|_| bad("the answer is a float that is not finite".to_string()))?,
+        Answer::Text(t) => Value::from(t.as_str()),
+        Answer::Value(v) => v,
+        Answer::Map(m) => Value::from(m),
+        Answer::List(l) => Value::from(l),
+        Answer::Object(object) => {
+            let Some(AnswerType::Object { kind }) = answer_type else {
+                return Err(bad(
+                    "an object answered where the slot names none".to_string()
+                ));
+            };
+            let caller = state.shared.caller(kind)?;
+            Value::from(state.hold(Held::Object(Some(object)), caller))
+        }
+        _ => return Err(unsupported("an answer a guest cannot read".to_string())),
+    };
+    wire::to_bytes(&value).map_err(|e| bad(e.to_string()))
+}
+
+/// Calls a slot of a host object the guest holds, with the request it sent.
+fn call_object(
+    state: &mut State,
+    handle: u64,
+    request: Result<Value, Undecoded>,
+) -> Result<Vec<u8>, ProviderError> {
+    let Some(mut object) = state.handles.get_mut().remove(&handle) else {
+        return Err(ProviderError::new(
+            Status::GUATIAO_ERR_GONE,
+            &format!("no object has handle {handle}"),
+        ));
+    };
+    let outcome = (|| {
+        let request = request.map_err(|undecoded| match undecoded {
+            Undecoded::Refused(refused) => {
+                ProviderError::new(Refused::STATUS, &refused.words("the request"))
+            }
+            Undecoded::Malformed(e) => bad(format!("the request is not a value: {e}")),
+        })?;
+        let (method, args) = abi::read_request(request).map_err(bad)?;
+        let HostObject { held, caller } = &mut object;
+        let kind = caller.kind();
+        let (slot, described) = kind.slot(&method).ok_or_else(|| {
+            ProviderError::new(
+                Status::GUATIAO_ERR_NOT_FOUND,
+                &format!("`{}` has no slot `{method}`", kind.name()),
+            )
+        })?;
+        if args.len() != described.args().len() {
+            return Err(bad(format!(
+                "`{method}` takes {} arguments, not {}",
+                described.args().len(),
+                args.len()
+            )));
+        }
+        // However the call ends, what it did not take goes back to its
+        // handle when `prepared` drops.
+        let mut prepared = PreparedArgs::with_capacity(args.len());
+        for (value, arg) in args.into_iter().zip(described.args()) {
+            let what = format!("`{method}`'s argument `{}`", arg.name());
+            prepared.push(prepare(&state.handles, arg.ty(), value, &what)?);
+        }
+        let answer = Prepared::with_args(&mut prepared, |args| held.call(caller, slot, args));
+        drop(prepared);
+        answered(state, described.answer(), answer?)
+    })();
+    state.handles.get_mut().insert(handle, object);
+    outcome
+}
+
+/// Adds the `guatiao` imports to `linker`.
+pub(crate) fn add_imports(linker: &mut Linker<State>) -> wasmtime::Result<()> {
+    let module = abi::IMPORT_MODULE;
+    linker.func_wrap(
+        module,
+        import::ANSWER,
+        |mut caller: Caller<'_, State>, ptr: i32, len: i32| -> wasmtime::Result<()> {
+            let bytes = bytes_at(&mut caller, ptr, len)?;
+            // Decoded once the call returns: charged now, while the
+            // guest's limits still run.
+            if let Ok(fuel) = budget::check(&bytes, caller.data().budget) {
+                charge(&mut caller, fuel)?;
+                in_time(&mut caller)?;
+            }
+            caller.data_mut().answer = Some(bytes);
+            Ok(())
+        },
+    )?;
+    linker.func_wrap(
+        module,
+        import::WRITE_BACK,
+        |mut caller: Caller<'_, State>, index: i32, ptr: i32, len: i32| {
+            write_back(&mut caller, index, ptr, len)
+        },
+    )?;
+    linker.func_wrap(
+        module,
+        import::OBJECT_CALL,
+        |mut caller: Caller<'_, State>, handle: i64, ptr: i32, len: i32| -> wasmtime::Result<i32> {
+            let bytes = bytes_at(&mut caller, ptr, len)?;
+            let request = decoded(&mut caller, &bytes)?;
+            let state = caller.data_mut();
+            let outcome = call_object(state, handle as u64, request);
+            Ok(match outcome {
+                Ok(bytes) => {
+                    state.result = bytes;
+                    0
+                }
+                Err(e) => {
+                    state.result = e.message().as_bytes().to_vec();
+                    code(e.status)
+                }
+            })
+        },
+    )?;
+    linker.func_wrap(
+        module,
+        import::RESULT,
+        |mut caller: Caller<'_, State>, ptr: i32, cap: i32| -> wasmtime::Result<i32> {
+            let n = caller.data().result.len().min(cap as u32 as usize);
+            charge(&mut caller, n as u64 / BYTES_PER_FUEL)?;
+            let memory = memory_of(&mut caller)?;
+            let (data, state) = memory.data_and_store_mut(&mut caller);
+            let start = ptr as u32 as usize;
+            let into = start
+                .checked_add(n)
+                .and_then(|end| data.get_mut(start..end))
+                .ok_or_else(|| wasmtime::Error::msg("the guest passed bytes outside its memory"))?;
+            into.copy_from_slice(&state.result[..n]);
+            Ok(i32::try_from(state.result.len()).unwrap_or(i32::MAX))
+        },
+    )?;
+    linker.func_wrap(
+        meter::MODULE,
+        meter::BULK,
+        // Fuel only: compilers emit `memory.copy` for every small copy, and
+        // epochs interrupt between bulk instructions as between any.
+        |mut caller: Caller<'_, State>, len: i32| -> wasmtime::Result<i32> {
+            charge(&mut caller, u64::from(len as u32) / BYTES_PER_FUEL)?;
+            Ok(len)
+        },
+    )?;
+    linker.func_wrap(
+        module,
+        import::DROP,
+        |mut caller: Caller<'_, State>, handle: i64| {
+            let gone = caller.data_mut().handles.get_mut().remove(&(handle as u64));
+            drop(gone);
+        },
+    )?;
+    Ok(())
+}
+
+// --- a live instance ------------------------------------------------------------
+
+/// An instance of a guest, ready for calls.
+pub(crate) struct Live {
+    pub(crate) store: Store<State>,
+    memory: Memory,
+    alloc: TypedFunc<i32, i32>,
+    declare: TypedFunc<(), i32>,
+    call: TypedFunc<(i32, i64, i32, i32), i32>,
+    release: Option<TypedFunc<i64, ()>>,
+    create: Option<TypedFunc<(i64, i32, i32), i32>>,
+    destroy: Option<TypedFunc<i64, ()>>,
+    available: Option<TypedFunc<i64, i32>>,
+}
+
+/// A guest's exports, found once.
+struct Funcs {
+    memory: Memory,
+    alloc: TypedFunc<i32, i32>,
+    declare: TypedFunc<(), i32>,
+    call: TypedFunc<(i32, i64, i32, i32), i32>,
+    release: Option<TypedFunc<i64, ()>>,
+    create: Option<TypedFunc<(i64, i32, i32), i32>>,
+    destroy: Option<TypedFunc<i64, ()>>,
+    available: Option<TypedFunc<i64, i32>>,
+}
+
+impl Funcs {
+    fn of(
+        store: &mut Store<State>,
+        instance: &Instance,
+        memory: Memory,
+    ) -> wasmtime::Result<Funcs> {
+        Ok(Funcs {
+            memory,
+            alloc: instance.get_typed_func(&mut *store, export::ALLOC)?,
+            declare: instance.get_typed_func(&mut *store, export::DECLARE)?,
+            call: instance.get_typed_func(&mut *store, export::CALL)?,
+            release: instance.get_typed_func(&mut *store, export::RELEASE).ok(),
+            create: instance.get_typed_func(&mut *store, export::CREATE).ok(),
+            destroy: instance.get_typed_func(&mut *store, export::DESTROY).ok(),
+            available: instance.get_typed_func(&mut *store, export::AVAILABLE).ok(),
+        })
+    }
+}
+
+/// Why entering a guest stopped.
+pub(crate) struct Stopped(pub(crate) wasmtime::Error);
+
+impl From<wasmtime::Error> for Stopped {
+    fn from(e: wasmtime::Error) -> Stopped {
+        Stopped(e)
+    }
+}
+
+/// At each epoch tick: stops the guest once its call's deadline has passed
+/// by the clock, else looks again at the next tick. A tick is when to
+/// look, not a measure of time: the ticker's sleep runs long where the
+/// system timer is coarse (15.6 ms on Windows by default), and a call
+/// starting elsewhere wakes it early.
+fn time_check(mut store: StoreContextMut<'_, State>) -> wasmtime::Result<UpdateDeadline> {
+    let state = store.data_mut();
+    if state.deadline.is_some_and(|d| Instant::now() > d) {
+        state.timed_out = true;
+        return Err(Trap::Interrupt.into());
+    }
+    Ok(UpdateDeadline::Continue(1))
+}
+
+/// Sets the limits for one entry into a guest: fuel and a deadline, each
+/// only when the engine counts it.
+pub(crate) fn arm(store: &mut Store<State>, limits: &Limits) -> wasmtime::Result<()> {
+    if let Some(operations) = limits.operations {
+        store.set_fuel(operations)?;
+    }
+    if limits.time.is_some() {
+        // `time_check` at the next tick, and at every one after.
+        store.set_epoch_deadline(1);
+    }
+    let state = store.data_mut();
+    state.deadline = state.time.map(|t| Instant::now() + t);
+    Ok(())
+}
+
+impl Live {
+    /// Instantiates `module`: its `_initialize`, then its ABI version,
+    /// each under the limits.
+    pub(crate) fn new(
+        engine: &Engine,
+        linker: &Linker<State>,
+        module: &Module,
+        limits: &Limits,
+        shared: Arc<Shared>,
+    ) -> Result<Live, (Stopped, Store<State>)> {
+        let mut store = Store::new(engine, State::new(limits, shared));
+        store.limiter(|state| state);
+        if limits.time.is_some() {
+            store.epoch_deadline_callback(time_check);
+        }
+        let made = Live::start(&mut store, linker, module, limits)
+            .and_then(|(instance, memory)| Funcs::of(&mut store, &instance, memory));
+        match made {
+            Ok(funcs) => Ok(Live {
+                store,
+                memory: funcs.memory,
+                alloc: funcs.alloc,
+                declare: funcs.declare,
+                call: funcs.call,
+                release: funcs.release,
+                create: funcs.create,
+                destroy: funcs.destroy,
+                available: funcs.available,
+            }),
+            Err(e) => Err((Stopped(e), store)),
+        }
+    }
+
+    fn start(
+        store: &mut Store<State>,
+        linker: &Linker<State>,
+        module: &Module,
+        limits: &Limits,
+    ) -> wasmtime::Result<(Instance, Memory)> {
+        arm(store, limits)?;
+        let instance = linker.instantiate(&mut *store, module)?;
+        if let Ok(init) = instance.get_typed_func::<(), ()>(&mut *store, export::INITIALIZE) {
+            arm(store, limits)?;
+            init.call(&mut *store, ())?;
+        }
+        let abi = instance.get_typed_func::<(), i32>(&mut *store, export::ABI)?;
+        arm(store, limits)?;
+        let version = abi.call(&mut *store, ())?;
+        if version != abi::VERSION {
+            return Err(wasmtime::Error::msg(format!(
+                "it speaks guatiao ABI {version}, and this source ABI {}",
+                abi::VERSION
+            )));
+        }
+        let memory = instance
+            .get_memory(&mut *store, export::MEMORY)
+            .ok_or_else(|| wasmtime::Error::msg("it exports no memory"))?;
+        Ok((instance, memory))
+    }
+
+    /// The guest's declaration, as it answered it.
+    pub(crate) fn declare(&mut self, limits: &Limits) -> Result<(i32, Vec<u8>), Stopped> {
+        self.store.data_mut().answer = None;
+        arm(&mut self.store, limits)?;
+        let status = self.declare.call(&mut self.store, ())?;
+        Ok((
+            status,
+            self.store.data_mut().answer.take().unwrap_or_default(),
+        ))
+    }
+
+    /// `bytes` copied into memory the guest's `guatiao_guest_alloc`
+    /// answered, armed for one entry: where they are and their length.
+    fn hand_in(&mut self, limits: &Limits, bytes: &[u8]) -> Result<(i32, i32), Stopped> {
+        let len = i32::try_from(bytes.len())
+            .map_err(|_| wasmtime::Error::msg("the request is larger than a guest can hold"))?;
+        self.store.data_mut().answer = None;
+        arm(&mut self.store, limits)?;
+        let at = self.alloc.call(&mut self.store, len)?;
+        self.memory
+            .write(&mut self.store, at as u32 as usize, bytes)
+            .map_err(|_| wasmtime::Error::msg("the guest answered memory it does not have"))?;
+        Ok((at, len))
+    }
+
+    /// Runs one call: `request` copied into the guest's memory, then
+    /// `guatiao_guest_call` on `target` of the sort `object` names (0 a
+    /// provider, 1 an object, 2 an instance). Answers its status and
+    /// answer bytes.
+    pub(crate) fn call(
+        &mut self,
+        limits: &Limits,
+        object: i32,
+        target: i64,
+        request: &[u8],
+    ) -> Result<(i32, Option<Vec<u8>>), Stopped> {
+        let (at, len) = self.hand_in(limits, request)?;
+        let status = self.call.call(&mut self.store, (object, target, at, len))?;
+        Ok((status, self.store.data_mut().answer.take()))
+    }
+
+    /// Builds an instance of the provider at `provider` from the
+    /// configuration's wire bytes: `guatiao_guest_create`'s status and
+    /// answer bytes.
+    pub(crate) fn create(
+        &mut self,
+        limits: &Limits,
+        provider: i64,
+        config: &[u8],
+    ) -> Result<(i32, Option<Vec<u8>>), Stopped> {
+        let create = self
+            .create
+            .clone()
+            .ok_or_else(|| wasmtime::Error::msg("it exports no guatiao_guest_create"))?;
+        let (at, len) = self.hand_in(limits, config)?;
+        let status = create.call(&mut self.store, (provider, at, len))?;
+        Ok((status, self.store.data_mut().answer.take()))
+    }
+
+    /// Tells the guest an instance it built was dropped.
+    pub(crate) fn destroy(&mut self, limits: &Limits, instance: i64) -> Result<(), Stopped> {
+        if let Some(destroy) = &self.destroy {
+            arm(&mut self.store, limits)?;
+            destroy.call(&mut self.store, instance)?;
+        }
+        Ok(())
+    }
+
+    /// Asks whether the provider at `provider` can run:
+    /// `guatiao_guest_available`'s status and answer bytes.
+    pub(crate) fn available(
+        &mut self,
+        limits: &Limits,
+        provider: i64,
+    ) -> Result<(i32, Option<Vec<u8>>), Stopped> {
+        let available = self
+            .available
+            .clone()
+            .ok_or_else(|| wasmtime::Error::msg("it exports no guatiao_guest_available"))?;
+        self.store.data_mut().answer = None;
+        arm(&mut self.store, limits)?;
+        let status = available.call(&mut self.store, provider)?;
+        Ok((status, self.store.data_mut().answer.take()))
+    }
+
+    /// Tells the guest an object it answered was destroyed.
+    pub(crate) fn release(&mut self, limits: &Limits, object: i64) -> Result<(), Stopped> {
+        if let Some(release) = &self.release {
+            arm(&mut self.store, limits)?;
+            release.call(&mut self.store, object)?;
+        }
+        Ok(())
+    }
+}
+
+// --- why it stopped -------------------------------------------------------------
+
+/// The first line of what a stopped guest last said: what it wrote to fd
+/// 2, else an answer it gave before stopping (a Rust guest's panic).
+fn last_words(state: &State) -> Option<String> {
+    let said = if state.wasi.stderr.is_empty() {
+        state.answer.as_deref()?
+    } else {
+        &state.wasi.stderr
+    };
+    let text = core::str::from_utf8(said).ok()?;
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(line.chars().take(300).collect())
+}
+
+/// Why `id`'s guest stopped, as the error its caller gets.
+pub(crate) fn stopped(
+    id: &str,
+    error: &wasmtime::Error,
+    state: &State,
+    limits: &Limits,
+) -> ProviderError {
+    let limit = |limit: Limit, at: Option<u64>| {
+        ProviderError::from(BridgeError::Limit {
+            limit,
+            at: at.unwrap_or(0),
+        })
+    };
+    if state.memory_hit {
+        return limit(Limit::Memory, limits.memory);
+    }
+    if state.tables_past {
+        return ProviderError::new(
+            Status::GUATIAO_ERR_ALLOC,
+            &format!(
+                "{id}'s tables would take more than {} bytes on the host, the most without a memory limit",
+                budget::UNLIMITED
+            ),
+        );
+    }
+    if let Some(n) = state.too_large {
+        return ProviderError::new(
+            Status::GUATIAO_ERR_ALLOC,
+            &format!(
+                "{id} handed the host {n} bytes at once, more than it takes ({}: the memory limit, or {} without one)",
+                state.budget,
+                budget::UNLIMITED
+            ),
+        );
+    }
+    if state.out_of_fuel {
+        return limit(Limit::Operations, limits.operations);
+    }
+    if state.timed_out {
+        return limit(
+            Limit::Time,
+            limits
+                .time
+                .map(|t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX)),
+        );
+    }
+    let words = last_words(state)
+        .map(|w| format!(": {w}"))
+        .unwrap_or_default();
+    let message = match error.downcast_ref::<Trap>() {
+        Some(Trap::OutOfFuel) => return limit(Limit::Operations, limits.operations),
+        Some(Trap::Interrupt) => {
+            return limit(
+                Limit::Time,
+                limits
+                    .time
+                    .map(|t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX)),
+            );
+        }
+        Some(trap) => format!("{id} trapped ({trap}){words}"),
+        None => match state.wasi.exited {
+            Some(code) => format!("{id} exited with {code}{words}"),
+            // A host function's own words, under wasmtime's backtrace.
+            None => {
+                let first = error.root_cause().to_string();
+                format!("{id}: {}{words}", first.lines().next().unwrap_or(""))
+            }
+        },
+    };
+    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &message)
+}
+
+/// A refusal a guest answered: its status (internal for one guatiao does
+/// not define) and its words.
+pub(crate) fn refused(id: &str, status: i32, words: Option<Vec<u8>>) -> ProviderError {
+    let words = words
+        .map(|w| {
+            String::from_utf8_lossy(&w)
+                .chars()
+                .take(1000)
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    match abi::status_of(status) {
+        Some(known) => ProviderError::new(known, &words),
+        None => ProviderError::new(
+            Status::GUATIAO_ERR_INTERNAL,
+            &format!("{id} answered status {status}, which guatiao does not define: {words}"),
+        ),
+    }
+}
+
+/// The bytes of a buffer argument, as a guest receives them.
+pub(crate) fn buffer_value(bytes: &[u8]) -> Value {
+    Value::from(Buffer::from(bytes))
+}

@@ -1,0 +1,170 @@
+pub mod anycfg
+#[non_exhaustive] pub enum anycfg::Error
+pub anycfg::Error::Conversion
+pub anycfg::Error::Conversion::message: core::option::Option<alloc::string::String>
+pub anycfg::Error::Conversion::path: core::option::Option<alloc::string::String>
+pub anycfg::Error::File
+pub anycfg::Error::File::cause: alloc::boxed::Box<anycfg::Error>
+pub anycfg::Error::File::path: std::path::PathBuf
+pub anycfg::Error::HomeUnavailable
+pub anycfg::Error::InvalidConfigName
+pub anycfg::Error::InvalidRegistration
+pub anycfg::Error::InvalidUtf8
+pub anycfg::Error::InvalidUtf8::offset: usize
+pub anycfg::Error::Io(core::io::error::Error)
+pub anycfg::Error::MergeShape
+pub anycfg::Error::NoDefaultFormat
+pub anycfg::Error::NoSources
+pub anycfg::Error::NotFound
+pub anycfg::Error::NotFound::path: std::path::PathBuf
+pub anycfg::Error::NotFound::variable: core::option::Option<alloc::string::String>
+pub anycfg::Error::Parse
+pub anycfg::Error::Parse::column: core::option::Option<usize>
+pub anycfg::Error::Parse::format: alloc::string::String
+pub anycfg::Error::Parse::line: core::option::Option<usize>
+pub anycfg::Error::Parse::message: core::option::Option<alloc::string::String>
+pub anycfg::Error::Serialize
+pub anycfg::Error::Serialize::format: alloc::string::String
+pub anycfg::Error::Serialize::message: core::option::Option<alloc::string::String>
+pub anycfg::Error::Source
+pub anycfg::Error::Source::cause: alloc::boxed::Box<anycfg::Error>
+pub anycfg::Error::Source::index: usize
+pub anycfg::Error::TooDeep
+pub anycfg::Error::TooDeep::limit: usize
+pub anycfg::Error::TooLarge
+pub anycfg::Error::TooLarge::limit: usize
+pub anycfg::Error::UnsupportedExtension
+pub anycfg::Error::UnsupportedExtension::extension: alloc::string::String
+pub anycfg::Error::UnsupportedExtension::registered: alloc::vec::Vec<alloc::string::String>
+pub anycfg::Error::UnsupportedFormat
+pub anycfg::Error::UnsupportedFormat::registered: alloc::vec::Vec<alloc::string::String>
+impl core::convert::From<core::io::error::Error> for anycfg::Error
+pub fn anycfg::Error::from(core::io::error::Error) -> Self
+impl core::error::Error for anycfg::Error
+pub fn anycfg::Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for anycfg::Error
+pub fn anycfg::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum anycfg::Merge
+pub anycfg::Merge::Deep
+pub anycfg::Merge::Replace
+pub anycfg::Merge::Shallow
+pub struct anycfg::Callbacks<V, D, E>
+impl<V, D, E> anycfg::Callbacks<V, D, E>
+pub fn anycfg::Callbacks<V, D, E>::new(D, E) -> Self
+impl<V, D, E> anycfg::Codec<V> for anycfg::Callbacks<V, D, E> where D: core::ops::function::Fn(&[u8]) -> core::result::Result<V, anycfg::CodecError>, E: core::ops::function::Fn(&V) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::CodecError>
+pub fn anycfg::Callbacks<V, D, E>::decode(&self, &[u8]) -> core::result::Result<V, anycfg::CodecError>
+pub fn anycfg::Callbacks<V, D, E>::encode(&self, &V) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::CodecError>
+impl<V, D, E> core::fmt::Debug for anycfg::Callbacks<V, D, E>
+pub fn anycfg::Callbacks<V, D, E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct anycfg::CodecError
+pub anycfg::CodecError::column: core::option::Option<usize>
+pub anycfg::CodecError::line: core::option::Option<usize>
+pub anycfg::CodecError::message: core::option::Option<alloc::string::String>
+impl anycfg::CodecError
+pub fn anycfg::CodecError::at_offset(&[u8], usize) -> Self
+pub fn anycfg::CodecError::column(self, usize) -> Self
+pub fn anycfg::CodecError::line(self, usize) -> Self
+pub fn anycfg::CodecError::message(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn anycfg::CodecError::new() -> Self
+impl core::error::Error for anycfg::CodecError
+impl core::fmt::Display for anycfg::CodecError
+pub fn anycfg::CodecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct anycfg::Detection<'a>
+pub anycfg::Detection::format: &'a str
+pub anycfg::Detection::lines_removed: usize
+pub anycfg::Detection::payload: &'a [u8]
+pub struct anycfg::Formats<V>
+impl<V> anycfg::Formats<V>
+pub fn anycfg::Formats<V>::detect<'a>(&'a self, &'a [u8], anycfg::Options<'_>) -> core::result::Result<anycfg::Detection<'a>, anycfg::Error>
+pub fn anycfg::Formats<V>::from_reader(&self, impl alloc::io::read::Read, anycfg::Options<'_>) -> core::result::Result<V, anycfg::Error>
+pub fn anycfg::Formats<V>::from_reader_typed<T>(&self, impl alloc::io::read::Read, anycfg::Options<'_>) -> core::result::Result<T, anycfg::Error> where V: for<'de> serde_core::de::Deserializer<'de>, T: serde_core::de::DeserializeOwned
+pub fn anycfg::Formats<V>::from_slice(&self, &[u8], anycfg::Options<'_>) -> core::result::Result<V, anycfg::Error>
+pub fn anycfg::Formats<V>::from_slice_typed<T>(&self, &[u8], anycfg::Options<'_>) -> core::result::Result<T, anycfg::Error> where V: for<'de> serde_core::de::Deserializer<'de>, T: serde_core::de::DeserializeOwned
+pub fn anycfg::Formats<V>::from_str(&self, &str, anycfg::Options<'_>) -> core::result::Result<V, anycfg::Error>
+pub fn anycfg::Formats<V>::from_str_typed<T>(&self, &str, anycfg::Options<'_>) -> core::result::Result<T, anycfg::Error> where V: for<'de> serde_core::de::Deserializer<'de>, T: serde_core::de::DeserializeOwned
+pub fn anycfg::Formats<V>::load(&self, impl core::convert::AsRef<std::path::Path>, anycfg::Options<'_>) -> core::result::Result<V, anycfg::Error>
+pub fn anycfg::Formats<V>::load_typed<T>(&self, impl core::convert::AsRef<std::path::Path>, anycfg::Options<'_>) -> core::result::Result<T, anycfg::Error> where V: for<'de> serde_core::de::Deserializer<'de>, T: serde_core::de::DeserializeOwned
+pub fn anycfg::Formats<V>::new() -> Self
+pub fn anycfg::Formats<V>::register<C, I, S>(&mut self, &str, I, C) -> core::result::Result<(), anycfg::Error> where C: anycfg::Codec<V> + core::marker::Send + core::marker::Sync + 'static, I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn anycfg::Formats<V>::register_auto<I, S>(&mut self, I, &str) -> core::result::Result<(), anycfg::Error> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn anycfg::Formats<V>::register_extension(&mut self, &str, &str) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::Formats<V>::register_marker(&mut self, &str, &[u8]) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::Formats<V>::set_default(&mut self, &str) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::Formats<V>::to_auto_vec(&self, &V, &str, &str) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::Error>
+pub fn anycfg::Formats<V>::to_auto_vec_typed<T, S>(&self, &T, &str, &str, S) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::Error> where T: serde_core::ser::Serialize + ?core::marker::Sized, S: serde_core::ser::Serializer<Ok = V>
+pub fn anycfg::Formats<V>::to_string(&self, &V, &str) -> core::result::Result<alloc::string::String, anycfg::Error>
+pub fn anycfg::Formats<V>::to_vec(&self, &V, &str) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::Error>
+pub fn anycfg::Formats<V>::to_vec_typed<T, S>(&self, &T, &str, S) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::Error> where T: serde_core::ser::Serialize + ?core::marker::Sized, S: serde_core::ser::Serializer<Ok = V>
+pub fn anycfg::Formats<V>::to_writer(&self, impl core::io::write::Write, &V, &str) -> core::result::Result<(), anycfg::Error>
+impl<V> core::default::Default for anycfg::Formats<V>
+pub fn anycfg::Formats<V>::default() -> Self
+impl<V> core::fmt::Debug for anycfg::Formats<V>
+pub fn anycfg::Formats<V>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct anycfg::Loader<'f, V>
+impl<'f, V> anycfg::Loader<'f, V>
+pub fn anycfg::Loader<'f, V>::default_format(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn anycfg::Loader<'f, V>::load<'a, I, S, M>(&self, I, &M) -> core::result::Result<V, anycfg::Error> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<core::option::Option<anycfg::Source<'a>>>, M: anycfg::MergeValues<V>
+pub fn anycfg::Loader<'f, V>::load_as<'a, I, S, M, T, F>(&self, I, &M, F) -> core::result::Result<T, anycfg::Error> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<core::option::Option<anycfg::Source<'a>>>, M: anycfg::MergeValues<V>, F: core::ops::function::FnOnce(V) -> core::result::Result<T, anycfg::CodecError>
+pub fn anycfg::Loader<'f, V>::load_or<'a, I, S, M>(&self, I, &M, V) -> core::result::Result<V, anycfg::Error> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<core::option::Option<anycfg::Source<'a>>>, M: anycfg::MergeValues<V>
+pub fn anycfg::Loader<'f, V>::load_typed<'a, I, S, M, T>(&self, I, &M) -> core::result::Result<T, anycfg::Error> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<core::option::Option<anycfg::Source<'a>>>, M: anycfg::MergeValues<V>, V: for<'de> serde_core::de::Deserializer<'de>, T: serde_core::de::DeserializeOwned
+pub fn anycfg::Loader<'f, V>::max_depth(self, usize) -> Self
+pub fn anycfg::Loader<'f, V>::max_source_bytes(self, usize) -> Self
+pub fn anycfg::Loader<'f, V>::max_total_bytes(self, usize) -> Self
+pub fn anycfg::Loader<'f, V>::merge(self, anycfg::Merge) -> Self
+pub fn anycfg::Loader<'f, V>::new(&'f anycfg::Formats<V>, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct anycfg::Options<'a>
+pub anycfg::Options::default_format: core::option::Option<&'a str>
+pub anycfg::Options::format: core::option::Option<&'a str>
+pub anycfg::Options::max_bytes: usize
+pub anycfg::Options::max_depth: usize
+pub anycfg::Options::name: core::option::Option<&'a str>
+impl<'a> anycfg::Options<'a>
+pub fn anycfg::Options<'a>::default_format(self, &'a str) -> Self
+pub fn anycfg::Options<'a>::format(self, &'a str) -> Self
+pub fn anycfg::Options<'a>::max_bytes(self, usize) -> Self
+pub fn anycfg::Options<'a>::max_depth(self, usize) -> Self
+pub fn anycfg::Options<'a>::name(self, &'a str) -> Self
+pub fn anycfg::Options<'a>::new() -> Self
+impl core::default::Default for anycfg::Options<'_>
+pub fn anycfg::Options<'_>::default() -> Self
+pub struct anycfg::ReplaceValues
+impl<V> anycfg::MergeValues<V> for anycfg::ReplaceValues
+pub fn anycfg::ReplaceValues::merge(&self, &mut V, V, anycfg::Merge, usize) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::ReplaceValues::validate(&self, &V, usize) -> core::result::Result<(), anycfg::Error>
+pub struct anycfg::Search
+impl anycfg::Search
+pub fn anycfg::Search::explicit(self, core::option::Option<&std::path::Path>) -> Self
+pub fn anycfg::Search::find(&self) -> core::result::Result<core::option::Option<std::path::PathBuf>, anycfg::Error>
+pub fn anycfg::Search::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn anycfg::Search::variable(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct anycfg::Source<'a>
+impl<'a> anycfg::Source<'a>
+pub fn anycfg::Source<'a>::bytes(&'a [u8]) -> Self
+pub fn anycfg::Source<'a>::format(self, &'a str) -> Self
+pub fn anycfg::Source<'a>::name(self, &'a str) -> Self
+pub fn anycfg::Source<'a>::path(&'a std::path::Path) -> Self
+pub fn anycfg::Source<'a>::reader(impl alloc::io::read::Read + 'a) -> Self
+pub fn anycfg::Source<'a>::text(&'a str) -> Self
+impl core::fmt::Debug for anycfg::Source<'_>
+pub fn anycfg::Source<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const anycfg::DEFAULT_MAX_DEPTH: usize
+pub const anycfg::DEFAULT_MAX_SOURCE_BYTES: usize
+pub const anycfg::DEFAULT_MAX_TOTAL_BYTES: usize
+pub trait anycfg::Codec<V>
+pub fn anycfg::Codec::decode(&self, &[u8]) -> core::result::Result<V, anycfg::CodecError>
+pub fn anycfg::Codec::encode(&self, &V) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::CodecError>
+impl<V, D, E> anycfg::Codec<V> for anycfg::Callbacks<V, D, E> where D: core::ops::function::Fn(&[u8]) -> core::result::Result<V, anycfg::CodecError>, E: core::ops::function::Fn(&V) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::CodecError>
+pub fn anycfg::Callbacks<V, D, E>::decode(&self, &[u8]) -> core::result::Result<V, anycfg::CodecError>
+pub fn anycfg::Callbacks<V, D, E>::encode(&self, &V) -> core::result::Result<alloc::vec::Vec<u8>, anycfg::CodecError>
+pub trait anycfg::MergeValues<V>
+pub fn anycfg::MergeValues::merge(&self, &mut V, V, anycfg::Merge, usize) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::MergeValues::validate(&self, &V, usize) -> core::result::Result<(), anycfg::Error>
+impl<V, F> anycfg::MergeValues<V> for F where F: core::ops::function::Fn(&mut V, V, anycfg::Merge, usize) -> core::result::Result<(), anycfg::Error>
+pub fn F::merge(&self, &mut V, V, anycfg::Merge, usize) -> core::result::Result<(), anycfg::Error>
+pub fn F::validate(&self, &V, usize) -> core::result::Result<(), anycfg::Error>
+impl<V> anycfg::MergeValues<V> for anycfg::ReplaceValues
+pub fn anycfg::ReplaceValues::merge(&self, &mut V, V, anycfg::Merge, usize) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::ReplaceValues::validate(&self, &V, usize) -> core::result::Result<(), anycfg::Error>
+pub fn anycfg::default_configs(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<[core::option::Option<std::path::PathBuf>; 2], anycfg::Error>
+pub fn anycfg::system_config_path(core::option::Option<&std::path::Path>) -> std::path::PathBuf
+pub fn anycfg::user_config_path(core::option::Option<&std::path::Path>) -> core::result::Result<std::path::PathBuf, anycfg::Error>

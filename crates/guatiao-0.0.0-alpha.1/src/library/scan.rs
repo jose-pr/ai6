@@ -1,0 +1,973 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Finding libraries in a directory **without running any of them**.
+//!
+//! # Why this reads bytes instead of loading
+//!
+//! Whether a file is a guatiao library is decided by one question: does it
+//! export [`ENTRY_SYMBOL`]? The obvious way to ask is to map it and look
+//! the symbol up — and that is the thing this module exists to avoid.
+//!
+//! **Mapping a shared library runs its static initialisers**, which is
+//! arbitrary code executing before the caller gets control, and which can
+//! and does abort the process. The directory beside an executable is full
+//! of things that are not plugins: the application's own libraries, a UI
+//! toolkit, a C runtime, whatever an installer dropped there. A scan that
+//! maps all of them to find out runs all of their startup code.
+//!
+//! So the export table is read as **data**. The file is opened, its bytes
+//! are parsed as PE, ELF or Mach-O, and the symbol names are compared.
+//! Nothing in the file executes. Only a file that actually declares the
+//! entry symbol is then mapped, by [`Registry::load_file`].
+//!
+//! That is what lets both rules hold at once: a candidate that is not a
+//! library is **reported** rather than silently dropped, and nothing is
+//! loaded speculatively.
+//!
+//! # What this deliberately does not do
+//!
+//! No name filter. Matching on a prefix once dropped every plugin on a
+//! platform whose libraries are named `lib*`, and a filename is not
+//! evidence of anything: the export table is.
+//!
+//! No recursion, and no environment variable. Which directories to search
+//! is a host's policy, not a library's — [`scan_dir`] takes one directory
+//! and answers for it, and [`scan_path`] takes the list a host assembled
+//! from wherever its policy says.
+
+#![forbid(unsafe_code)]
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use super::raw::{DECLARES_SYMBOL, ENTRY_SYMBOL};
+use super::registry::{LoadError, Loading, Registry, Skipped};
+
+/// What a scan found.
+///
+/// Three lists rather than one `Result`, because the three outcomes need
+/// different handling: loaded is the answer, skipped is information a
+/// person may want when a plugin they expected is missing, and failed is
+/// something to report.
+#[derive(Debug, Default)]
+pub struct LoadReport {
+    /// Files that loaded, in the order they were read, each with the
+    /// library key the registry filed it under: what
+    /// [`Registry::retire`] takes, and what tells a host which providers
+    /// came from this scan (each [`Provider::from`](super::Provider::from)
+    /// is the path).
+    pub loaded: Vec<(PathBuf, String)>,
+    /// Files passed over, and why. **Never an error**: a directory of
+    /// libraries may hold anything.
+    pub skipped: Vec<(PathBuf, Skipped)>,
+    /// Files that looked like libraries and could not be used.
+    pub failed: Vec<(PathBuf, LoadError)>,
+    /// Entries of a search path that could not be read at all: a
+    /// directory that does not exist, or one this process may not list.
+    /// Reported rather than dropped, for the same reason a skip is — a
+    /// person looking for a plugin that did not appear needs to see that
+    /// the place was considered. Empty for a single-directory scan, which
+    /// answers that with its `Err` instead.
+    pub unreadable: Vec<(PathBuf, std::io::Error)>,
+}
+
+impl LoadReport {
+    /// Whether nothing loaded. Skips, failures and unreadable entries do
+    /// not count: a scan that passed over every file it saw is empty, and
+    /// says why in the other three lists.
+    pub fn is_empty(&self) -> bool {
+        self.loaded.is_empty()
+    }
+
+    /// Takes everything `other` found onto the end of this report.
+    pub fn absorb(&mut self, other: LoadReport) {
+        self.loaded.extend(other.loaded);
+        self.skipped.extend(other.skipped);
+        self.failed.extend(other.failed);
+        self.unreadable.extend(other.unreadable);
+    }
+}
+
+/// Where a host looks: directories or files, in order, each once.
+///
+/// A host's search path is routinely the same place twice — an
+/// environment variable pointing at the directory beside the executable,
+/// which the host also adds by itself — so an entry is kept by the place
+/// it names and the first spelling wins. [`SearchPath::parse`] splits on
+/// the platform's own list separator (`;` on Windows, where a path carries
+/// a `:` of its own; `:` elsewhere) and drops empty parts, so a trailing
+/// or doubled separator costs nothing.
+///
+/// Accumulating is the host's choice: parse what the environment says,
+/// then [`push`](SearchPath::push) the place adjacency finds, and the
+/// override is added to the default rather than replacing it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchPath {
+    entries: Vec<PathBuf>,
+}
+
+impl SearchPath {
+    /// The character between entries: `;` on Windows, `:` elsewhere.
+    pub const SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
+
+    /// No entries.
+    pub fn new() -> SearchPath {
+        SearchPath::default()
+    }
+
+    /// Splits `spec` on [`SEPARATOR`](SearchPath::SEPARATOR), trimming
+    /// each part and dropping the empty ones.
+    pub fn parse(spec: &str) -> SearchPath {
+        let mut path = SearchPath::new();
+        for part in spec.split(Self::SEPARATOR) {
+            let part = part.trim();
+            if !part.is_empty() {
+                path.push(part);
+            }
+        }
+        path
+    }
+
+    /// Appends `entry`, unless an earlier entry names the same place.
+    ///
+    /// Sameness is by canonical path when the entry exists — so a
+    /// relative spelling and an absolute one of one directory are one
+    /// entry — and by the text as written when it does not.
+    pub fn push(&mut self, entry: impl Into<PathBuf>) {
+        let entry = entry.into();
+        let place = same_place(&entry);
+        if self.entries.iter().any(|e| same_place(e) == place) {
+            return;
+        }
+        self.entries.push(entry);
+    }
+
+    /// [`push`](SearchPath::push), for building one in an expression.
+    pub fn with(mut self, entry: impl Into<PathBuf>) -> SearchPath {
+        self.push(entry);
+        self
+    }
+
+    /// The entries, in the order given, each once.
+    pub fn entries(&self) -> &[PathBuf] {
+        &self.entries
+    }
+
+    /// Whether there is nowhere to look.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// A path resolved for comparison: canonical when it exists, as written
+/// when it does not. A place that does not exist cannot be the same
+/// place as one that does.
+fn same_place(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The binary inside an Apple bundle, or `None` for anything else.
+///
+/// `Name.framework` is a DIRECTORY, and the library is the extension-less
+/// file `Name` inside it — flat on iOS, and on macOS behind
+/// `Versions/Current/`, which this follows when the flat file is absent.
+/// A scan that took only files would walk straight past every framework,
+/// and a search path naming one would have nothing to open.
+///
+/// Pure path logic, so it answers on every platform and is testable on
+/// all of them; whether the binary it names can be mapped is the
+/// loader's business.
+pub fn bundle_binary(path: &Path) -> Option<PathBuf> {
+    if !path.is_dir()
+        || !path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("framework"))
+    {
+        return None;
+    }
+    let name = path.file_stem()?;
+    let flat = path.join(name);
+    if flat.is_file() {
+        return Some(flat);
+    }
+    let versioned = path.join("Versions").join("Current").join(name);
+    versioned.is_file().then_some(versioned)
+}
+
+/// What in a directory is worth probing: a file carrying the platform's
+/// own library extension, or a bundle whose binary is inside it.
+///
+/// The extension and nothing else. A file without it cannot be mapped on
+/// this platform whatever it contains, so it is not a candidate rather
+/// than a skip — and that one rule rejects a build's byproducts (`.pdb`,
+/// `.lib`, `.exp`, `.d`) and a library somebody disabled by renaming it,
+/// with no list to maintain.
+pub(crate) fn candidate(path: PathBuf) -> Option<PathBuf> {
+    if path.is_file() {
+        return has_library_extension(&path).then_some(path);
+    }
+    bundle_binary(&path)
+}
+
+fn has_library_extension(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(std::env::consts::DLL_EXTENSION))
+}
+
+/// Whether a file on disk declares the entry symbol, decided without
+/// executing it.
+///
+/// `Ok(true)` means the symbol is in the export table. `Ok(false)` means
+/// the file parsed and the symbol is not there. `Err` means the bytes
+/// could not be read or parsed at all, which is neither — a text file with
+/// a `.so` extension is not a broken library, it is not a library.
+///
+/// [`probe`] answers this and what the library declares in one read.
+pub fn declares_entry_symbol(path: &Path) -> Result<bool, std::io::Error> {
+    probe(path).map(|p| p.entry)
+}
+
+/// The most bytes a declaration may span. A declaration is a handful of
+/// short strings; a file claiming more is refused rather than read.
+const DECLARES_WINDOW: usize = 4096;
+
+/// What one file says about itself, read as data.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Probe {
+    /// Whether it exports the entry symbol: whether it is a library.
+    pub entry: bool,
+    /// What it declares, empty when it declares nothing.
+    pub declared: Declared,
+}
+
+/// A library's declarations: `key=value` pairs, in the order written.
+///
+/// Empty for a library that declares nothing, which a plain scan loads
+/// as before. What a rule matches against before anything is mapped.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Declared {
+    pairs: Vec<(String, String)>,
+}
+
+impl Declared {
+    /// Every pair, in the order written.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.pairs.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+
+    /// Whether `key=value` was declared.
+    pub fn has(&self, key: &str, value: &str) -> bool {
+        self.pairs.iter().any(|(k, v)| k == key && v == value)
+    }
+
+    /// Every value declared under `key`.
+    pub fn values<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.pairs
+            .iter()
+            .filter(move |(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Every kind declared: the values of `kind`.
+    pub fn kinds(&self) -> impl Iterator<Item = &str> {
+        self.values("kind")
+    }
+
+    /// Whether nothing was declared.
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty()
+    }
+
+    /// Parses the bytes of a declaration: `key=value` strings separated
+    /// by NUL and ended by an empty string. `None` when the terminator is
+    /// missing from the window, which is a malformed declaration.
+    ///
+    /// Public so a host can check its rules against a declaration it
+    /// wrote by hand, with no file involved.
+    pub fn parse(bytes: &[u8]) -> Option<Declared> {
+        let mut pairs = Vec::new();
+        let mut rest = bytes;
+        loop {
+            let end = rest.iter().position(|&b| b == 0)?;
+            if end == 0 {
+                return Some(Declared { pairs });
+            }
+            // A pair that is not UTF-8 is dropped; the rest still count.
+            if let Ok(text) = core::str::from_utf8(&rest[..end]) {
+                let (key, value) = text.split_once('=').unwrap_or((text, ""));
+                let pair = (key.to_string(), value.to_string());
+                if !pairs.contains(&pair) {
+                    pairs.push(pair);
+                }
+            }
+            rest = &rest[end + 1..];
+        }
+    }
+}
+
+/// Reads what a file says about itself, without executing it.
+///
+/// `Ok` means the file parsed as PE, ELF or Mach-O and its export table
+/// was readable; `entry` says whether it is a library and `declared` what
+/// it declares. `Err` means the bytes could not be read or parsed, the
+/// export table could not be read, or a declaration was present and
+/// malformed — a file that is not examinable. A universal (fat) Mach-O is
+/// probed through the slice for the architecture this build runs on, the
+/// one the loader would map; a fat file with no such slice is `Err`.
+///
+/// # What it costs
+///
+/// The file is read on demand, not whole: its headers, its export and
+/// dynamic symbol tables, and the declaration, which is clamped to the
+/// section it lives in and to 4 KiB because the bytes are an untrusted
+/// file's.
+pub fn probe(path: &Path) -> Result<Probe, std::io::Error> {
+    let cache = object::ReadCache::new(std::fs::File::open(path)?);
+    match object::FileKind::parse(&cache) {
+        Ok(object::FileKind::MachOFat32) => {
+            let fat = object::read::macho::MachOFatFile32::parse(&cache).map_err(|_| unparsed())?;
+            probe_slice(&cache, fat.arches())
+        }
+        Ok(object::FileKind::MachOFat64) => {
+            let fat = object::read::macho::MachOFatFile64::parse(&cache).map_err(|_| unparsed())?;
+            probe_slice(&cache, fat.arches())
+        }
+        _ => probe_object(&cache),
+    }
+}
+
+fn unparsed() -> std::io::Error {
+    std::io::Error::new(
+        io::ErrorKind::InvalidData,
+        "not an object file this build can parse",
+    )
+}
+
+/// The Mach-O CPU type of the architecture this build runs on, or `None`
+/// for one Mach-O does not name.
+fn running_cputype() -> Option<object::macho::CpuType> {
+    use object::macho;
+    if cfg!(target_arch = "aarch64") {
+        Some(macho::CPU_TYPE_ARM64)
+    } else if cfg!(target_arch = "x86_64") {
+        Some(macho::CPU_TYPE_X86_64)
+    } else if cfg!(target_arch = "x86") {
+        Some(macho::CPU_TYPE_X86)
+    } else if cfg!(target_arch = "arm") {
+        Some(macho::CPU_TYPE_ARM)
+    } else {
+        None
+    }
+}
+
+/// Probes the slice of a universal file the loader would map here.
+fn probe_slice<R: object::read::ReadCacheOps, A: object::read::macho::FatArch>(
+    cache: &object::ReadCache<R>,
+    arches: &[A],
+) -> Result<Probe, std::io::Error> {
+    let want = running_cputype();
+    let Some(arch) = arches.iter().find(|a| Some(a.cputype()) == want) else {
+        return Err(std::io::Error::new(
+            io::ErrorKind::InvalidData,
+            "a universal file with no slice for this architecture",
+        ));
+    };
+    let (offset, size) = arch.file_range();
+    probe_object(cache.range(offset, size))
+}
+
+/// [`probe`] over one object file's bytes.
+fn probe_object<'data, R: object::ReadRef<'data>>(data: R) -> Result<Probe, std::io::Error> {
+    use object::{Object, ObjectSection, ObjectSymbol};
+
+    let file = object::File::parse(data).map_err(|_| unparsed())?;
+
+    // The symbols as they are written in the export table, without the
+    // trailing NUL the `dlsym` constants carry.
+    let entry = &ENTRY_SYMBOL[..ENTRY_SYMBOL.len() - 1];
+    let declares = &DECLARES_SYMBOL[..DECLARES_SYMBOL.len() - 1];
+
+    // `exports()` is the direct question and is what PE answers well. ELF
+    // and Mach-O also answer through the dynamic symbol table, and a
+    // stripped-but-dynamic library lists it there, so both are consulted.
+    // An export may be identified by ORDINAL rather than by name, in which
+    // case there is nothing to compare.
+    // Mach-O writes a C symbol with a leading underscore.
+    let macho = file.format() == object::BinaryFormat::MachO;
+    fn plain(name: &[u8], macho: bool) -> &[u8] {
+        match name.strip_prefix(b"_") {
+            Some(rest) if macho => rest,
+            _ => name,
+        }
+    }
+    let mut has_entry = false;
+    let mut declares_at: Option<u64> = None;
+    // A table that cannot be read says nothing about the symbol, which is
+    // not the same as saying it is absent.
+    let exports = file.exports().map_err(|_| {
+        std::io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the export table could not be read",
+        )
+    })?;
+    for export in exports.flatten() {
+        let Some(name) = export.name().into_name() else {
+            continue;
+        };
+        let name = plain(name, macho);
+        if name == entry {
+            has_entry = true;
+        } else if name == declares
+            && let object::ExportTarget::Address { address } = export.target()
+        {
+            declares_at = Some(address);
+        }
+    }
+    for symbol in file.dynamic_symbols() {
+        // An import names the symbol too: only a definition is an export.
+        if symbol.is_undefined() || symbol.address() == 0 {
+            continue;
+        }
+        if let Ok(name) = symbol.name_bytes() {
+            let name = plain(name, macho);
+            if name == entry {
+                has_entry = true;
+            } else if name == declares && declares_at.is_none() {
+                declares_at = Some(symbol.address());
+            }
+        }
+    }
+
+    let mut declared = Declared::default();
+    if let Some(address) = declares_at {
+        // The section the address falls in, and from there no more than
+        // the window, the section's end and its bytes in the file allow:
+        // only those bytes are read.
+        let section = file
+            .sections()
+            .find(|s| address >= s.address() && address < s.address().saturating_add(s.size()));
+        let window = section.and_then(|s| {
+            let into = address - s.address();
+            let (start, in_file) = s.file_range()?;
+            let len = in_file
+                .checked_sub(into)?
+                .min(s.size() - into)
+                .min(DECLARES_WINDOW as u64);
+            data.read_bytes_at(start.checked_add(into)?, len).ok()
+        });
+        match window.and_then(Declared::parse) {
+            Some(found) => declared = found,
+            None => {
+                return Err(std::io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "the declaration is not readable as data or is not terminated",
+                ));
+            }
+        }
+    }
+    Ok(Probe {
+        entry: has_entry,
+        declared,
+    })
+}
+
+/// Where a library file's code and data sit, at the addresses it was
+/// linked at: what the loader measures a mapped image's pointers against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Layout {
+    /// The entry symbol's address.
+    pub(crate) entry: u64,
+    /// From the lowest mapped segment's start to the highest one's end.
+    pub(crate) span: (u64, u64),
+    /// Every executable section, as `(start, end)`.
+    pub(crate) code: Vec<(u64, u64)>,
+}
+
+/// The layout of the library file at `path`, read as [`probe`] reads it
+/// (a universal Mach-O through this architecture's slice), or `None` when
+/// it cannot be read, names no entry symbol, or has no executable section.
+pub(crate) fn layout(path: &Path) -> Option<Layout> {
+    let cache = object::ReadCache::new(std::fs::File::open(path).ok()?);
+    match object::FileKind::parse(&cache) {
+        Ok(object::FileKind::MachOFat32) => {
+            let fat = object::read::macho::MachOFatFile32::parse(&cache).ok()?;
+            layout_slice(&cache, fat.arches())
+        }
+        Ok(object::FileKind::MachOFat64) => {
+            let fat = object::read::macho::MachOFatFile64::parse(&cache).ok()?;
+            layout_slice(&cache, fat.arches())
+        }
+        _ => layout_object(&cache),
+    }
+}
+
+fn layout_slice<R: object::read::ReadCacheOps, A: object::read::macho::FatArch>(
+    cache: &object::ReadCache<R>,
+    arches: &[A],
+) -> Option<Layout> {
+    let want = running_cputype();
+    let arch = arches.iter().find(|a| Some(a.cputype()) == want)?;
+    let (offset, size) = arch.file_range();
+    layout_object(cache.range(offset, size))
+}
+
+fn layout_object<'data, R: object::ReadRef<'data>>(data: R) -> Option<Layout> {
+    use object::{Object, ObjectSection, ObjectSegment, ObjectSymbol, SectionKind};
+
+    let file = object::File::parse(data).ok()?;
+    let macho = file.format() == object::BinaryFormat::MachO;
+    let wanted = &ENTRY_SYMBOL[..ENTRY_SYMBOL.len() - 1];
+    let is_entry = |name: &[u8]| match name.strip_prefix(b"_") {
+        Some(rest) if macho => rest == wanted,
+        _ => name == wanted,
+    };
+    let from_exports = file.exports().ok().and_then(|exports| {
+        exports.into_iter().flatten().find_map(|export| {
+            let name = export.name().into_name()?;
+            match export.target() {
+                object::ExportTarget::Address { address } if is_entry(name) => Some(address),
+                _ => None,
+            }
+        })
+    });
+    let entry = from_exports.or_else(|| {
+        file.dynamic_symbols()
+            .filter(|s| !s.is_undefined() && s.address() != 0)
+            .find(|s| s.name_bytes().is_ok_and(is_entry))
+            .map(|s| s.address())
+    })?;
+
+    let mut span: Option<(u64, u64)> = None;
+    for segment in file.segments() {
+        let (start, size) = (segment.address(), segment.size());
+        let Some(end) = start.checked_add(size).filter(|_| size > 0) else {
+            continue;
+        };
+        span = Some(match span {
+            Some((lo, hi)) => (lo.min(start), hi.max(end)),
+            None => (start, end),
+        });
+    }
+    let code: Vec<(u64, u64)> = file
+        .sections()
+        .filter(|s| s.kind() == SectionKind::Text && s.size() > 0)
+        .filter_map(|s| Some((s.address(), s.address().checked_add(s.size())?)))
+        .collect();
+    if code.is_empty() {
+        return None;
+    }
+    Some(Layout {
+        entry,
+        span: span?,
+        code,
+    })
+}
+
+/// Rules a host applies to what a library declares, before mapping it.
+///
+/// Each rule is `KEY=VALUE` or `!KEY=VALUE`. A positive rule skips a file
+/// that does NOT declare the pair; a negative one skips a file that does.
+/// A file declaring nothing passes every negative rule and fails every
+/// positive one. The rule that skipped a file is what
+/// [`Skipped::Filtered`] names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanRules {
+    rules: Vec<(bool, String, String, String)>,
+}
+
+/// A rule that is not `[!]KEY=VALUE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleError {
+    /// The rule as written.
+    pub rule: String,
+}
+
+impl core::fmt::Display for RuleError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "`{}` is not a scan rule; a rule is `KEY=VALUE` to require a declaration or \
+             `!KEY=VALUE` to skip one",
+            self.rule
+        )
+    }
+}
+
+impl core::error::Error for RuleError {}
+
+impl ScanRules {
+    /// Parses each rule, refusing the first that is not `[!]KEY=VALUE`.
+    pub fn parse<S: AsRef<str>>(rules: &[S]) -> Result<ScanRules, RuleError> {
+        let mut parsed = Vec::with_capacity(rules.len());
+        for rule in rules {
+            let text = rule.as_ref().trim();
+            if text.is_empty() {
+                continue;
+            }
+            let (require, body) = match text.strip_prefix('!') {
+                Some(body) => (false, body),
+                None => (true, text),
+            };
+            let Some((key, value)) = body.split_once('=') else {
+                return Err(RuleError {
+                    rule: text.to_string(),
+                });
+            };
+            if key.is_empty() || key.contains('!') {
+                return Err(RuleError {
+                    rule: text.to_string(),
+                });
+            }
+            parsed.push((
+                require,
+                key.to_string(),
+                value.to_string(),
+                text.to_string(),
+            ));
+        }
+        Ok(ScanRules { rules: parsed })
+    }
+
+    /// `Ok` when every rule allows `declared`, else the rule that did not.
+    pub fn check(&self, declared: &Declared) -> Result<(), &str> {
+        for (require, key, value, text) in &self.rules {
+            if declared.has(key, value) != *require {
+                return Err(text);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether any rule was given.
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+}
+
+/// The order a scan visits file names in.
+///
+/// It decides **which build wins** when a host's library template gives
+/// two files one key: the first to claim it keeps it, so the order is the
+/// policy. Nothing here parses a version — ordering one is a host's job,
+/// with the semver library it already has — but a directory whose names
+/// carry versions sorts usefully on the bytes alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Order {
+    /// By name, ascending. The default, and what two runs of a scan must
+    /// agree on for a report to be reproducible.
+    #[default]
+    Ascending,
+    /// By name, descending: the highest-sorting name is offered first and,
+    /// under a `%id` library key, is the one that loads.
+    ///
+    /// **Byte order, not version order.** `libfoo-1.2.0` sorts ABOVE
+    /// `libfoo-1.10.0`, because `2` is above `1` at the byte where they
+    /// first differ, so a descending scan loads 1.2.0 and skips the newer
+    /// build. It agrees with semver only while every version component has
+    /// the same number of digits. A host that needs the newest scans with
+    /// a library key of `%id@%version`, loads every build, and picks with
+    /// a version-aware comparison of [`Loaded::version`](super::Loaded).
+    Descending,
+}
+
+/// Loads every guatiao library in one directory, and reports the rest.
+///
+/// Visits names ascending. [`scan_dir_ordered`] takes the order.
+pub fn scan_dir(registry: &mut Registry, dir: &Path) -> Result<LoadReport, std::io::Error> {
+    scan_dir_ordered(registry, dir, Order::Ascending)
+}
+
+/// The same, in a stated order.
+///
+/// Not recursive, and it opens nothing that has not already been shown to
+/// declare the entry symbol. See this module's header for why that matters
+/// more than it sounds like it should.
+///
+/// Files are visited in a **sorted** order whichever is asked for, so two
+/// runs on the same directory report the same thing and the same build
+/// wins each time.
+pub fn scan_dir_ordered(
+    registry: &mut Registry,
+    dir: &Path,
+    order: Order,
+) -> Result<LoadReport, std::io::Error> {
+    scan_dir_with(registry, dir, order, |_| Ok(()))
+}
+
+/// The same, applying `rules` to what each library declares before it is
+/// mapped. A file a rule refuses is reported as
+/// [`Skipped::Filtered`] naming the rule.
+pub fn scan_dir_rules(
+    registry: &mut Registry,
+    dir: &Path,
+    order: Order,
+    rules: &ScanRules,
+) -> Result<LoadReport, std::io::Error> {
+    scan_dir_with(registry, dir, order, |declared| {
+        rules.check(declared).map_err(str::to_string)
+    })
+}
+
+/// The same, with a filter of the host's own: called with what each
+/// library declares, **before it is mapped**; `Err(why)` skips it as
+/// [`Skipped::Filtered`] naming `why`.
+pub fn scan_dir_with(
+    registry: &mut Registry,
+    dir: &Path,
+    order: Order,
+    mut filter: impl FnMut(&Declared) -> Result<(), String>,
+) -> Result<LoadReport, std::io::Error> {
+    let mut report = LoadReport::default();
+
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter_map(candidate)
+        .collect();
+    candidates.sort();
+    if order == Order::Descending {
+        candidates.reverse();
+    }
+
+    for path in candidates {
+        consider(registry, path, &mut report, &mut filter);
+    }
+    Ok(report)
+}
+
+/// Probes one candidate, applies the filter, and loads it — recording the
+/// outcome, whichever it is, on `report`.
+fn consider(
+    registry: &mut Registry,
+    path: PathBuf,
+    report: &mut LoadReport,
+    filter: &mut impl FnMut(&Declared) -> Result<(), String>,
+) {
+    if let Err(why) = admit(&path, filter) {
+        report.skipped.push((path, why));
+        return;
+    }
+
+    match registry.load_file(&path) {
+        Ok(Loading::Loaded(one)) => {
+            let key = one.key.to_string();
+            report.loaded.push((path, key));
+        }
+        Ok(Loading::Skipped(why)) => report.skipped.push((path, why)),
+        Err(e) => report.failed.push((path, e)),
+    }
+}
+
+/// Whether a file is a library worth mapping, decided from its bytes
+/// alone: a source, a file with no entry symbol, one `filter` refuses and
+/// one that cannot be read are each the skip that says so.
+pub(crate) fn admit(
+    path: &Path,
+    filter: &mut impl FnMut(&Declared) -> Result<(), String>,
+) -> Result<(), Skipped> {
+    let probed = match probe(path) {
+        Ok(probed) => probed,
+        // Unreadable, unparseable, or a malformed declaration. Reported,
+        // because a person looking for a plugin that did not appear needs
+        // to see the file was considered.
+        Err(_) => return Err(Skipped::NotExaminable),
+    };
+    if let Some(serves) = probed.declared.values("source").next() {
+        return Err(Skipped::Source {
+            serves: serves.to_string(),
+        });
+    }
+    if !probed.entry {
+        return Err(Skipped::NoEntrySymbol);
+    }
+    filter(&probed.declared).map_err(|by| Skipped::Filtered { by })
+}
+
+/// Loads every library along a search path, and reports the rest.
+///
+/// A directory entry is scanned as [`scan_dir_rules`] is, in `order`. A
+/// file entry is probed and loaded on its own, under the same rules and
+/// with the same reporting: naming a file is asking for it, so its
+/// extension is not checked, but what it declares still is. A bundle is
+/// its binary (see [`bundle_binary`]). An entry that cannot be read at
+/// all — missing, or not listable — goes under [`LoadReport::unreadable`]
+/// and the rest of the path is still walked, because a search path
+/// routinely names a place that does not exist on this machine.
+///
+/// One report for the whole path, in the order the entries were given. A
+/// library reachable twice loads once and is [`Skipped::AlreadyLoaded`]
+/// the second time, naming the first — which is what a host wants to see
+/// when an override points at the directory adjacency already found.
+pub fn scan_path(
+    registry: &mut Registry,
+    path: &SearchPath,
+    order: Order,
+    rules: &ScanRules,
+) -> LoadReport {
+    scan_path_with(registry, path, order, |declared| {
+        rules.check(declared).map_err(str::to_string)
+    })
+}
+
+/// The same, with a filter of the host's own in place of rules: called
+/// with what each library declares, **before it is mapped**; `Err(why)`
+/// skips it as [`Skipped::Filtered`] naming `why`.
+///
+/// What a rule cannot say, a closure can: "any kind of mine", a prefix,
+/// one of several.
+pub fn scan_path_with(
+    registry: &mut Registry,
+    path: &SearchPath,
+    order: Order,
+    mut filter: impl FnMut(&Declared) -> Result<(), String>,
+) -> LoadReport {
+    let mut report = LoadReport::default();
+    for entry in path.entries() {
+        let entry = bundle_binary(entry).unwrap_or_else(|| entry.clone());
+        if entry.is_dir() {
+            match scan_dir_with(registry, &entry, order, &mut filter) {
+                Ok(found) => report.absorb(found),
+                Err(e) => report.unreadable.push((entry, e)),
+            }
+        } else if entry.is_file() {
+            consider(registry, entry, &mut report, &mut filter);
+        } else {
+            report
+                .unreadable
+                .push((entry, std::io::Error::from(io::ErrorKind::NotFound)));
+        }
+    }
+    report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh directory in the temp dir for one test, removed when the
+    /// test ends, failed or not.
+    struct Scratch(PathBuf);
+
+    impl core::ops::Deref for Scratch {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(name: &str) -> Scratch {
+        let dir = std::env::temp_dir().join(format!("guatiao-scan-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        Scratch(dir)
+    }
+
+    #[test]
+    fn a_search_path_splits_on_the_platform_separator_and_keeps_each_place_once() {
+        let sep = SearchPath::SEPARATOR;
+        let dir = scratch("split");
+        let a = dir.join("a");
+        let b = dir.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        // A doubled separator, a blank part, and `a` spelled twice --
+        // once through its own parent, which canonicalises to the same
+        // place.
+        let spec = format!(
+            "{}{sep}{sep} {sep}{}{sep}{}",
+            a.display(),
+            b.display(),
+            dir.join("b").join("..").join("a").display()
+        );
+        let path = SearchPath::parse(&spec);
+        assert_eq!(path.entries(), [a.clone(), b.clone()]);
+
+        // A place that does not exist is kept as written, and once.
+        let path = path.with(dir.join("nowhere")).with(dir.join("nowhere"));
+        assert_eq!(path.entries().len(), 3);
+        assert!(SearchPath::parse("").is_empty());
+        assert!(SearchPath::parse(&format!("{sep}{sep}")).is_empty());
+    }
+
+    #[test]
+    fn a_bundle_resolves_to_the_binary_inside_it() {
+        let dir = scratch("bundle");
+        let flat = dir.join("Flat.framework");
+        std::fs::create_dir_all(&flat).unwrap();
+        std::fs::write(flat.join("Flat"), b"").unwrap();
+        assert_eq!(bundle_binary(&flat), Some(flat.join("Flat")));
+
+        let versioned = dir.join("Deep.framework");
+        std::fs::create_dir_all(versioned.join("Versions").join("Current")).unwrap();
+        std::fs::write(versioned.join("Versions").join("Current").join("Deep"), b"").unwrap();
+        assert_eq!(
+            bundle_binary(&versioned),
+            Some(versioned.join("Versions").join("Current").join("Deep"))
+        );
+
+        // A bundle with no binary, a directory that is not a bundle, and
+        // a plain file spelled like one: none is a bundle.
+        let empty = dir.join("Empty.framework");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(bundle_binary(&empty), None);
+        assert_eq!(bundle_binary(&dir), None);
+        let file = dir.join("File.framework");
+        std::fs::write(&file, b"").unwrap();
+        assert_eq!(bundle_binary(&file), None);
+        assert_eq!(bundle_binary(&dir.join("missing.framework")), None);
+    }
+
+    #[test]
+    fn a_declaration_is_pairs_ended_by_an_empty_string() {
+        let d = Declared::parse(b"kind=greeter\0kind=writer\0VIEWER=1\0\0trailing")
+            .expect("terminated");
+        assert_eq!(d.kinds().collect::<Vec<_>>(), ["greeter", "writer"]);
+        assert!(d.has("VIEWER", "1"));
+        assert!(!d.has("VIEWER", "0"));
+        assert_eq!(d.iter().count(), 3, "nothing past the terminator counts");
+    }
+
+    #[test]
+    fn a_declaration_without_its_terminator_is_refused() {
+        assert_eq!(Declared::parse(b"kind=greeter\0kind=wr"), None);
+        assert_eq!(Declared::parse(b""), None);
+        assert!(Declared::parse(b"\0").expect("empty").is_empty());
+    }
+
+    #[test]
+    fn a_pair_that_is_not_utf8_is_dropped_and_a_repeat_counted_once() {
+        let d = Declared::parse(b"kind=a\0\xff\xfe=x\0kind=a\0\0").expect("terminated");
+        assert_eq!(d.kinds().collect::<Vec<_>>(), ["a"]);
+    }
+
+    #[test]
+    fn rules_are_key_value_with_an_optional_bang() {
+        let rules =
+            ScanRules::parse(&["!VIEWER=1", " kind=session-backend ", ""]).expect("two rules");
+        let backend = Declared::parse(b"kind=session-backend\0\0").unwrap();
+        let viewer = Declared::parse(b"kind=session-backend\0VIEWER=1\0\0").unwrap();
+        let silent = Declared::default();
+        assert_eq!(rules.check(&backend), Ok(()));
+        assert_eq!(rules.check(&viewer), Err("!VIEWER=1"));
+        assert_eq!(
+            rules.check(&silent),
+            Err("kind=session-backend"),
+            "a library declaring nothing passes every `!` rule and fails every positive one"
+        );
+        assert!(ScanRules::parse::<&str>(&[]).unwrap().is_empty());
+        for bad in ["nonsense", "=x", "!", "a!b=c"] {
+            let e = ScanRules::parse(&[bad]).unwrap_err();
+            assert_eq!(e.rule, bad);
+            assert!(e.to_string().contains(bad), "{e}");
+        }
+    }
+}

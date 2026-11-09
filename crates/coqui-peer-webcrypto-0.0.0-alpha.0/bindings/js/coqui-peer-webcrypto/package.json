@@ -1,0 +1,21 @@
+{
+  "name": "@boriken/coqui-peer-webcrypto",
+  "version": "0.0.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "The WebCrypto method of coqui-peer: a mutual P-256 key proof ending in an encrypted session",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Boriken-Dev/coqui-peer-webcrypto.git",
+    "directory": "bindings/js/coqui-peer-webcrypto"
+  },
+  "exports": "./src/index.mjs",
+  "files": ["src/", "AGENTS.md", "README.md"],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

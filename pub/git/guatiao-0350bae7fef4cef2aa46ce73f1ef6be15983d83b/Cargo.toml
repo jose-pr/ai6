@@ -1,0 +1,88 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/guatiao",
+    "crates/guatiao-derive",
+    "crates/guatiao-serde",
+    "crates/guatiao-intake",
+    "crates/guatiao-bridge",
+    "crates/guatiao-libffi",
+    "crates/guatiao-source-remote",
+    "crates/guatiao-channel",
+    "examples/hello_library",
+    "examples/greeter_kind",
+    "examples/derived_greeter",
+    "examples/source_library",
+    "examples/greeter_host",
+    "examples/greeter_caller",
+    "examples/app_library",
+    "examples/app_host",
+    "examples/remote_pool",
+    "examples/channel_echo",
+    "examples/channel_echo/kind",
+    "examples/wire_over_webtransport/server",
+    "benchmarks",
+    "benchmarks/remote",
+]
+# Each its own workspace: the page builds only for wasm32, the Python
+# bridge needs a Python to link against, which nothing else here does,
+# the Lua crates choose one Lua each, by exclusive features, the
+# JavaScript source compiles QuickJS, the Rhai source builds Rhai and
+# libffi, and the WebAssembly source, its Rust guest crate and example
+# build wasmtime or for wasm32, which nothing else here needs; the RDMA
+# transport's device tests need an RDMA device and fail without one.
+exclude = [
+    "examples/wire_over_webtransport/client",
+    "crates/guatiao-source-py",
+    "crates/guatiao-source-lua",
+    "crates/guatiao-source-js",
+    "crates/guatiao-source-wasm",
+    "crates/guatiao-source-wasm/guest",
+    "examples/wasm_greeter_rust",
+    "crates/guatiao-source-remote/rdma-tests",
+    "crates/guatiao-source-rhai",
+    "bindings/lua/guatiao",
+]
+
+# Four crates plus the examples. `guatiao-derive` exists only
+# because a proc-macro crate cannot be anything else, and is reached
+# through `guatiao = { features = ["derive"] }` rather than named in a
+# consumer's manifest. `guatiao-serde` is separate for the opposite
+# reason: it is the one crate here that resolves dependencies, and the core
+# stays free of them. `guatiao-intake` is separate because only a consumer
+# that draws a screen needs it.
+#
+# Everything a consumer names -- the value model, the C type vocabulary,
+# the schema, the envelope, the loader -- is in `guatiao`. The examples are
+# real: two cdylibs the test suite builds and loads (`hello_library` by
+# hand, `derived_greeter` from the derives), the kind crate both compile
+# against (`greeter_kind`), and a host program that scans for them and
+# builds one from a configuration (`greeter_host`); an envelope is not
+# something prose can demonstrate. `benchmarks` times the loader and kind
+# paths over those same libraries, run by hand, never published.
+
+# Every path that needs `std` says so: what `core` or `alloc` also holds is
+# spelled that way, in tests and build scripts too.
+[workspace.lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
+
+[workspace.package]
+version = "0.0.0-alpha.1"
+edition = "2024"
+# MSRV: the lowest toolchain every step of the test workflow has been run
+# on. Let chains, used throughout, set a floor of 1.88 by themselves; 1.88
+# itself has not been run, so the declared value is the verified one.
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+license = "MPL-2.0"
+
+# Publishable. Each example says `publish = false` itself, so only the four
+# crates can reach a registry.
+publish = true
+
+# Dependencies build without debug info; the workspace's own crates keep it.
+# Most of a debug target directory is otherwise dependencies' `.pdb` files.
+[profile.dev.package."*"]
+debug = false

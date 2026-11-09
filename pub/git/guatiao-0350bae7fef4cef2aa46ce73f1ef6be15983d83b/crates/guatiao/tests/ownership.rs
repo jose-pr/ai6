@@ -1,0 +1,635 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Owning a tree without copying one that is already this binary's:
+//! `is_local`, `into_local`, `into_alloc`, `make_local_in` and
+//! `FromValue for Value`.
+//!
+//! Two counts: this thread's heap allocations, which is where a local
+//! tree lives, and a counting arena standing for an allocator that is not
+//! this binary's (a host's, a library's, a caller's).
+
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
+use core::cell::Cell;
+use core::ffi::c_void;
+
+use guatiao::value::alloc::{Alloc, AllocError, Allocator, rust_alloc};
+use guatiao::{Buffer, FromValue, List, Map, Text, TryAsRef, Value, ValueError};
+
+// --- this thread's heap ----------------------------------------------------
+
+/// Counts this thread's heap allocations; not installed under Miri, where
+/// `System` reads a block header outside the `Box` the harness frees.
+#[cfg_attr(miri, allow(dead_code))]
+struct PerThread;
+
+std::thread_local! {
+    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+// SAFETY: every call is forwarded to the system allocator unchanged.
+unsafe impl core::alloc::GlobalAlloc for PerThread {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        let _ = ALLOCATIONS.try_with(|n| n.set(n.get() + 1));
+        // SAFETY: forwarded.
+        unsafe { std::alloc::System.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        // SAFETY: forwarded.
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
+    }
+}
+
+#[cfg(not(miri))]
+#[global_allocator]
+static HEAP: PerThread = PerThread;
+
+/// `f`'s answer and how many heap allocations it made on this thread;
+/// `None` under Miri, where nothing counts them.
+fn allocations<R>(f: impl FnOnce() -> R) -> (R, Option<usize>) {
+    let before = ALLOCATIONS.with(Cell::get);
+    let r = f();
+    let made = ALLOCATIONS.with(Cell::get) - before;
+    (r, (!cfg!(miri)).then_some(made))
+}
+
+// --- an allocator that is not this binary's --------------------------------
+
+#[derive(Default)]
+struct Arena {
+    allocs: Cell<usize>,
+    outstanding: Cell<isize>,
+    /// Refuse every allocation from the Nth on, counting from 1; 0 never.
+    fail_at: Cell<usize>,
+}
+
+unsafe extern "C" fn arena_alloc(ctx: *mut c_void, size: usize, align: usize) -> *mut c_void {
+    // SAFETY: `ctx` is the `&Arena` the vtable was built over, which
+    // outlives every call made through it.
+    let a = unsafe { &*(ctx as *const Arena) };
+    a.allocs.set(a.allocs.get() + 1);
+    if a.fail_at.get() != 0 && a.allocs.get() >= a.fail_at.get() {
+        return core::ptr::null_mut();
+    }
+    a.outstanding.set(a.outstanding.get() + 1);
+    let real = rust_alloc().alloc.expect("the rust allocator has an alloc");
+    // SAFETY: forwarding an unchanged request.
+    unsafe { real(core::ptr::null_mut(), size, align) }
+}
+
+unsafe extern "C" fn arena_free(ctx: *mut c_void, p: *mut c_void, size: usize, align: usize) {
+    // SAFETY: as above.
+    let a = unsafe { &*(ctx as *const Arena) };
+    a.outstanding.set(a.outstanding.get() - 1);
+    let real = rust_alloc().free.expect("the rust allocator has a free");
+    // SAFETY: forwarding the same block with the same layout.
+    unsafe { real(core::ptr::null_mut(), p, size, align) }
+}
+
+/// Runs `body` with an arena and checks it holds nothing afterwards.
+fn with_arena(body: impl FnOnce(Alloc, &Arena)) {
+    let arena = Arena::default();
+    let vtable = Allocator {
+        struct_size: size_of::<Allocator>() as u32,
+        ctx: (&arena as *const Arena).cast_mut().cast(),
+        alloc: Some(arena_alloc),
+        free: Some(arena_free),
+        release: None,
+    };
+    // SAFETY: a complete vtable that outlives the closure.
+    let alloc = unsafe { Alloc::from_raw(&vtable) }.expect("a complete vtable");
+    body(alloc, &arena);
+    assert_eq!(arena.outstanding.get(), 0, "the arena holds nothing after");
+}
+
+/// `{"name": "x", "tags": ["a", b"z"], "inner": {"n": 1}}`, every
+/// container and key built through `alloc`.
+fn tree_in(alloc: Alloc) -> Map {
+    let mut tags = List::new_in(alloc);
+    tags.push_in(Text::new_in(alloc, "a").unwrap(), alloc)
+        .unwrap();
+    tags.push_in(Buffer::new_in(alloc, b"z").unwrap(), alloc)
+        .unwrap();
+    let mut inner = Map::new_in(alloc);
+    inner
+        .set_in("n", guatiao::Number::new_in(alloc, "1").unwrap(), alloc)
+        .unwrap();
+    let mut map = Map::new_in(alloc);
+    map.set_in("name", Text::new_in(alloc, "x").unwrap(), alloc)
+        .unwrap();
+    map.set_in("tags", tags, alloc).unwrap();
+    map.set_in("inner", inner, alloc).unwrap();
+    map
+}
+
+fn first_entry(map: &Map) -> *const guatiao::Entry {
+    map.entries().as_ptr()
+}
+
+// --- already local: handed back -------------------------------------------
+
+#[test]
+fn a_local_tree_is_handed_back_without_allocating() {
+    let map = tree_in(Alloc::rust());
+    assert!(map.is_local());
+    let at = first_entry(&map);
+    let (map, made) = allocations(|| map.into_local());
+    assert_eq!(first_entry(&map), at, "the same storage, not a copy");
+    assert!(made.is_none_or(|n| n == 0), "{made:?} allocations");
+
+    let value = Value::from(map);
+    assert!(value.is_local());
+    let (value, made) = allocations(|| value.into_local());
+    assert!(made.is_none_or(|n| n == 0), "{made:?} allocations");
+    let map: &Map = value.try_as_ref().unwrap();
+    assert_eq!(first_entry(map), at);
+
+    let (again, made) = allocations(|| value.into_alloc(Alloc::rust()));
+    assert!(made.is_none_or(|n| n == 0), "{made:?} allocations");
+    let map: &Map = again.as_ref().unwrap().try_as_ref().unwrap();
+    assert_eq!(first_entry(map), at);
+
+    let text = Text::new("kept");
+    let at = text.as_ptr();
+    let (text, made) = allocations(|| text.into_local());
+    assert_eq!((text.as_ptr(), made.unwrap_or(0)), (at, 0));
+    let buffer = Buffer::new(b"kept");
+    let at = buffer.as_ptr();
+    let (buffer, made) = allocations(|| buffer.into_local());
+    assert_eq!((buffer.as_ptr(), made.unwrap_or(0)), (at, 0));
+    let list: List = ["a", "b"].into_iter().collect();
+    let at = list.as_ptr();
+    let (list, made) = allocations(|| list.into_local());
+    assert_eq!((list.as_ptr(), made.unwrap_or(0)), (at, 0));
+}
+
+#[test]
+fn a_value_that_owns_nothing_is_local() {
+    for v in [Value::null(), Value::absent(), Value::from(true)] {
+        assert!(v.is_local());
+    }
+    assert!(Value::from(5900i64).is_local(), "a number built here");
+    assert!(Map::new().is_local() && List::new().is_local());
+}
+
+// --- elsewhere: copied, the original freed through its own ------------------
+
+#[test]
+fn a_tree_in_another_allocator_is_copied_and_the_original_freed() {
+    with_arena(|arena, counter| {
+        let map = tree_in(arena);
+        let expected = Value::from(map.clone());
+        assert!(!map.is_local());
+        assert!(counter.outstanding.get() > 0);
+
+        let local = map.into_local();
+        assert_eq!(counter.outstanding.get(), 0, "the original went back");
+        assert!(local.is_local());
+        assert_eq!(Value::from(local), expected);
+
+        let value = Value::from(tree_in(arena));
+        let local = value.into_local();
+        assert_eq!(counter.outstanding.get(), 0);
+        assert!(local.is_local());
+        assert_eq!(local, expected);
+
+        // And the other way: a local tree into the arena.
+        let blocks = counter.allocs.get();
+        let homed = local.into_alloc(arena).unwrap();
+        assert!(counter.allocs.get() > blocks, "copied into the arena");
+        assert!(!homed.is_local());
+        assert_eq!(homed.alloc().unwrap().as_raw(), arena.as_raw());
+        let blocks = counter.allocs.get();
+        let homed = homed.into_alloc(arena).unwrap();
+        assert_eq!(counter.allocs.get(), blocks, "already there: kept");
+        assert_eq!(homed, expected);
+    });
+}
+
+#[test]
+fn a_mixed_tree_is_copied_whole() {
+    with_arena(|arena, counter| {
+        let mut map = Map::new();
+        map.set("local", "yes");
+        map.set_in("there", Text::new_in(arena, "no").unwrap(), arena)
+            .unwrap();
+        assert!(!map.is_local(), "one string elsewhere is enough");
+        let local = map.into_local();
+        assert!(local.is_local());
+        assert_eq!(counter.outstanding.get(), 0);
+
+        // A key alone in the arena counts too.
+        let mut map = Map::new_in(arena);
+        map.set_in("k", true, arena).unwrap();
+        let mut outer = Map::new();
+        outer.set("inner", map);
+        assert!(!outer.is_local());
+        assert!(outer.into_local().is_local());
+    });
+}
+
+/// Past the depth judged on the thread's stack, the answer is the same.
+#[test]
+fn a_deep_tree_is_judged_whole() {
+    with_arena(|arena, _| {
+        let nest = |leaf: Value| {
+            (0..40).fold(leaf, |inner, _| {
+                let mut list = List::new();
+                list.push(inner);
+                Value::from(list)
+            })
+        };
+        assert!(nest(Value::from("here")).is_local());
+        let deep = nest(Value::from(Text::new_in(arena, "there").unwrap()));
+        assert!(!deep.is_local(), "the one foreign leaf is found");
+        assert!(deep.into_local().is_local());
+    });
+}
+
+#[test]
+fn a_literal_holding_no_allocator_is_copied() {
+    static BYTES: [u8; 3] = *b"lit";
+    // SAFETY: three UTF-8 bytes that live for the program, not owned.
+    let lit = unsafe { Text::from_raw_parts(BYTES.as_ptr().cast_mut(), 3, 0, core::ptr::null()) };
+    assert!(!lit.is_local());
+    let local = lit.into_local();
+    assert!(local.is_local());
+    assert_eq!(&*local, "lit");
+    assert_ne!(local.as_ptr(), BYTES.as_ptr());
+}
+
+// --- refusals ---------------------------------------------------------------
+
+#[test]
+fn a_refusing_allocator_is_reported_and_the_original_freed() {
+    with_arena(|arena, counter| {
+        counter.fail_at.set(counter.allocs.get() + 2);
+        let err = tree_in(Alloc::rust()).into_alloc(arena).unwrap_err();
+        assert_eq!(err, ValueError::Alloc(AllocError::Failed));
+        assert_eq!(counter.outstanding.get(), 0, "the partial copy went back");
+    });
+}
+
+#[test]
+fn content_this_build_refuses_is_an_error_or_a_panic() {
+    with_arena(|arena, _| {
+        // A STRING whose bytes are not UTF-8, as only a foreign producer
+        // can write one.
+        let bad = || {
+            let (ptr, len, cap, a) = Buffer::new_in(arena, b"caf\xe9").unwrap().into_raw_parts();
+            // SAFETY: a STRING tag over a text arm whose storage is
+            // consistent; its bytes are what is under test.
+            unsafe {
+                Value::from_raw_parts(
+                    u32::from(guatiao::Tag::GUATIAO_STRING),
+                    guatiao::Payload::text(Text::from_raw_parts(ptr, len, cap, a)),
+                )
+            }
+        };
+        assert!(!bad().is_local());
+        let err = bad().into_alloc(Alloc::rust()).unwrap_err();
+        assert_eq!(err, ValueError::NotUtf8);
+        assert!(Value::from_value(&bad()).is_err());
+        let node = bad();
+        let caught = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| node.into_local()));
+        assert!(caught.is_err(), "into_local panics, as clone does");
+    });
+}
+
+// --- FromValue for Value -----------------------------------------------------
+
+#[test]
+fn reading_a_value_copies_it_into_this_binarys_allocator() {
+    with_arena(|arena, _| {
+        let tree = Value::from(tree_in(arena));
+        let copy = Value::from_value(&tree).unwrap();
+        assert!(copy.is_local());
+        assert_eq!(copy, tree);
+
+        assert_eq!(Option::<Value>::from_value(&Value::null()).unwrap(), None);
+        let read = Option::<Value>::from_value(&tree).unwrap().unwrap();
+        assert!(read.is_local());
+
+        let by_key = BTreeMap::<String, Value>::from_value(&tree).unwrap();
+        assert_eq!(by_key.len(), 3);
+        assert!(by_key.values().all(Value::is_local));
+        let list: &Map = tree.try_as_ref().unwrap();
+        let tags = Vec::<Value>::from_value(list.get("tags").unwrap()).unwrap();
+        assert_eq!(tags.len(), 2);
+    });
+}
+
+// --- moving what a container holds ------------------------------------------
+
+/// `extend` with another map moves each value in as it is (only the keys
+/// are written again), and `remove` then `try_from` hands one back owned:
+/// carrying entries from one map to another copies no tree.
+#[test]
+fn entries_move_between_maps_without_copying_their_values() {
+    let mut from = Map::new();
+    from.set("tags", ["a", "b"].into_iter().collect::<List>());
+    let tags_at = TryAsRef::<List>::try_as_ref(from.get("tags").unwrap())
+        .unwrap()
+        .as_ptr();
+    let mut into = Map::new();
+    into.set("name", "x");
+    into.extend(from);
+    let moved: &List = into.get("tags").and_then(TryAsRef::try_as_ref).unwrap();
+    assert_eq!(moved.as_ptr(), tags_at, "the list itself, not a copy");
+    let list = List::try_from(into.remove("tags").unwrap()).unwrap();
+    assert_eq!(list.as_ptr(), tags_at);
+}
+
+// --- make_local_in: moving a tree's storage where it stands --------------------
+
+#[test]
+fn a_tree_already_there_is_left_as_it_is_and_nothing_allocated() {
+    let mut map = tree_in(Alloc::rust());
+    let at = first_entry(&map);
+    let (moved, made) = allocations(|| map.make_local_in(Alloc::rust()));
+    moved.expect("nothing to move");
+    assert!(made.is_none_or(|n| n == 0), "{made:?} allocations");
+    assert_eq!(first_entry(&map), at, "the same storage");
+    with_arena(|arena, counter| {
+        let mut map = tree_in(arena);
+        let before = counter.allocs.get();
+        map.make_local_in(arena).expect("nothing to move");
+        assert_eq!(counter.allocs.get(), before, "the arena was not asked");
+    });
+}
+
+#[test]
+fn a_tree_in_another_allocator_moves_home_and_its_blocks_are_freed() {
+    with_arena(|arena, counter| {
+        let mut map = tree_in(arena);
+        let expected = tree_in(Alloc::rust());
+        map.make_local_in(Alloc::rust()).expect("moved");
+        assert_eq!(counter.outstanding.get(), 0, "every arena block was freed");
+        assert!(map.is_local());
+        assert_eq!(map, expected, "the same tree");
+    });
+}
+
+/// What a callee adds to a caller's map: only the added parts move; the
+/// caller's own array and entries stay where they are.
+#[test]
+fn only_the_parts_another_allocator_made_move() {
+    with_arena(|arena, counter| {
+        let mut map = Map::new();
+        map.set("host", "10.0.0.1");
+        map.set("port", 5900);
+        // Room for the next entry, so adding one does not grow the array.
+        map.set("spare", 0);
+        map.remove("spare");
+        let at = first_entry(&map);
+        let host_at = TryAsRef::<str>::try_as_ref(map.get("host").unwrap())
+            .unwrap()
+            .as_ptr();
+        map.set("added", tree_in(arena));
+        assert_eq!(first_entry(&map), at, "the array did not grow");
+        map.make_local_in(Alloc::rust()).expect("moved");
+        assert_eq!(
+            counter.outstanding.get(),
+            0,
+            "the added tree left the arena"
+        );
+        assert_eq!(first_entry(&map), at, "the caller's array stayed");
+        let host = TryAsRef::<str>::try_as_ref(map.get("host").unwrap()).unwrap();
+        assert_eq!(host.as_ptr(), host_at, "and so did its leaves");
+        assert!(map.is_local());
+        assert_eq!(
+            TryAsRef::<Map>::try_as_ref(map.get("added").unwrap()),
+            Some(&tree_in(Alloc::rust()))
+        );
+    });
+}
+
+#[test]
+fn a_value_and_a_list_move_too() {
+    with_arena(|arena, counter| {
+        let mut value = Value::from(tree_in(arena));
+        value.make_local_in(Alloc::rust()).expect("moved");
+        assert!(value.is_local());
+        let mut list = List::new_in(arena);
+        list.push_in(tree_in(arena), arena).unwrap();
+        list.push_in(Text::new_in(arena, "t").unwrap(), arena)
+            .unwrap();
+        list.make_local_in(Alloc::rust()).expect("moved");
+        assert!(list.is_local());
+        assert_eq!(counter.outstanding.get(), 0);
+        let mut text = Text::new_in(arena, "leaf").unwrap();
+        text.make_local_in(Alloc::rust()).expect("moved");
+        let mut buffer = Buffer::new_in(arena, b"leaf").unwrap();
+        buffer.make_local_in(Alloc::rust()).expect("moved");
+        assert!(text.is_local() && buffer.is_local());
+        assert_eq!(counter.outstanding.get(), 0);
+        // A scalar owns nothing, so there is nothing to move.
+        let mut five = Value::from(5i64);
+        five.make_local_in(arena).expect("nothing to move");
+    });
+}
+
+/// The C export over `make_local_in`: what a C caller of a table that
+/// ignored the carrier calls on the answer.
+#[test]
+fn the_c_export_moves_a_tree_home_and_refuses_nulls() {
+    use guatiao::exports::value::guatiao_value_make_local;
+    use guatiao::value::status::Status;
+    with_arena(|arena, counter| {
+        let home = Alloc::rust();
+        let mut value = Value::from(tree_in(arena));
+        // SAFETY: a well-formed value nobody else holds; the allocator is
+        // a complete vtable, or null.
+        unsafe {
+            assert_eq!(
+                guatiao_value_make_local(core::ptr::null_mut(), home.as_raw()),
+                Status::GUATIAO_ERR_NULL
+            );
+            assert_eq!(
+                guatiao_value_make_local(&mut value, core::ptr::null()),
+                Status::GUATIAO_ERR_ALLOC
+            );
+            assert!(counter.outstanding.get() > 0, "a refusal moves nothing");
+            assert_eq!(
+                guatiao_value_make_local(&mut value, home.as_raw()),
+                Status::GUATIAO_OK
+            );
+        }
+        assert_eq!(counter.outstanding.get(), 0, "every arena block was freed");
+        assert!(value.is_local());
+        assert_eq!(value, Value::from(tree_in(home)));
+
+        let mut value = Value::from(tree_in(home));
+        counter.fail_at.set(counter.allocs.get() + 2);
+        // SAFETY: as above.
+        let refused = unsafe { guatiao_value_make_local(&mut value, arena.as_raw()) };
+        assert_eq!(refused, Status::GUATIAO_ERR_ALLOC);
+        assert_eq!(value, Value::from(tree_in(home)), "whole after a refusal");
+        drop(value);
+    });
+}
+
+/// `map` with its first key replaced by one that is not UTF-8, built
+/// through `alloc`, as only a foreign writer leaves one.
+fn with_bad_first_key(map: Map, alloc: Alloc) -> Map {
+    let (ptr, len, cap, a) = map.into_raw_parts();
+    assert!(len > 0);
+    let (kp, kl, kc, ka) = Buffer::new_in(alloc, b"\xffname").unwrap().into_raw_parts();
+    // SAFETY: an entry is `repr(C)` with its key first; the old key is
+    // freed before a key with consistent storage is written over it. The
+    // key is not UTF-8 on purpose, which only a foreign writer may leave.
+    unsafe {
+        let slot = ptr.cast::<Text>();
+        core::ptr::drop_in_place(slot);
+        core::ptr::write(slot, Text::from_raw_parts(kp, kl, kc, ka));
+        Map::from_raw_parts(ptr, len, cap, a)
+    }
+}
+
+/// What a caller of a kind table runs on a lent map: moved home, and a
+/// key the slot wrote that is not UTF-8 removed, freed and reported.
+#[test]
+fn the_c_export_settles_a_lent_map_and_removes_a_key_that_is_not_utf8() {
+    use guatiao::exports::value::guatiao_map_settle_lent;
+    use guatiao::value::status::Status;
+    with_arena(|arena, counter| {
+        let home = Alloc::rust();
+        let rest: Vec<String> = tree_in(home).keys().skip(1).map(String::from).collect();
+        let mut list = Value::from(List::new());
+        let mut good = Value::from(tree_in(arena));
+        // SAFETY: well-formed values nobody else holds; the allocators are
+        // complete vtables, or null.
+        unsafe {
+            assert_eq!(
+                guatiao_map_settle_lent(core::ptr::null_mut(), home.as_raw()),
+                Status::GUATIAO_ERR_NULL
+            );
+            assert_eq!(
+                guatiao_map_settle_lent(&mut list, home.as_raw()),
+                Status::GUATIAO_ERR_WRONG_KIND
+            );
+            assert_eq!(
+                guatiao_map_settle_lent(&mut good, core::ptr::null()),
+                Status::GUATIAO_ERR_ALLOC
+            );
+            assert!(counter.outstanding.get() > 0, "a refusal moves nothing");
+            assert_eq!(
+                guatiao_map_settle_lent(&mut good, home.as_raw()),
+                Status::GUATIAO_OK
+            );
+        }
+        assert_eq!(counter.outstanding.get(), 0, "moved home");
+        assert_eq!(good, Value::from(tree_in(home)));
+
+        // A home refusing, every key text: the move's refusal, the map whole.
+        let mut whole = Value::from(tree_in(home));
+        counter.fail_at.set(counter.allocs.get() + 1);
+        // SAFETY: as above.
+        let settled = unsafe { guatiao_map_settle_lent(&mut whole, arena.as_raw()) };
+        counter.fail_at.set(0);
+        assert_eq!(settled, Status::GUATIAO_ERR_ALLOC);
+        assert_eq!(whole, Value::from(tree_in(home)), "whole after a refusal");
+        drop(whole);
+
+        let mut bad = Value::from(with_bad_first_key(tree_in(arena), arena));
+        // SAFETY: as above.
+        let settled = unsafe { guatiao_map_settle_lent(&mut bad, home.as_raw()) };
+        assert_eq!(settled, Status::GUATIAO_ERR_BAD_VALUE);
+        assert_eq!(
+            counter.outstanding.get(),
+            0,
+            "the entry freed, the rest moved"
+        );
+        let map = TryAsRef::<Map>::try_as_ref(&bad).expect("every key is text now");
+        assert_eq!(map.keys().collect::<Vec<_>>(), rest);
+        assert!(bad.is_local());
+
+        // A home refusing as well: the key is still removed and reported.
+        let mut bad = Value::from(with_bad_first_key(tree_in(home), home));
+        counter.fail_at.set(counter.allocs.get() + 1);
+        // SAFETY: as above.
+        let settled = unsafe { guatiao_map_settle_lent(&mut bad, arena.as_raw()) };
+        counter.fail_at.set(0);
+        assert_eq!(settled, Status::GUATIAO_ERR_BAD_VALUE);
+        let map = TryAsRef::<Map>::try_as_ref(&bad).expect("every key is text now");
+        assert_eq!(map.keys().collect::<Vec<_>>(), rest);
+        drop(bad);
+    });
+}
+
+/// Past the depth judged on the thread's stack, the walk still reaches
+/// the leaf.
+#[test]
+fn a_deep_tree_moves_whole() {
+    with_arena(|arena, counter| {
+        let mut deep = (0..40).fold(
+            Value::from(Text::new_in(arena, "there").unwrap()),
+            |inner, _| {
+                let mut list = List::new_in(arena);
+                list.push_in(inner, arena).unwrap();
+                Value::from(list)
+            },
+        );
+        deep.make_local_in(Alloc::rust()).expect("moved");
+        assert!(deep.is_local());
+        assert_eq!(counter.outstanding.get(), 0);
+    });
+}
+
+/// Storage is moved, content is not read: a STRING that is not UTF-8
+/// moves as it is, and its door still refuses it.
+#[test]
+fn content_is_moved_as_it_is() {
+    with_arena(|arena, counter| {
+        let (ptr, len, cap, a) = Buffer::new_in(arena, b"caf\xe9").unwrap().into_raw_parts();
+        // SAFETY: a STRING tag over a text arm whose storage is consistent;
+        // its bytes are what is under test.
+        let mut bad = unsafe {
+            Value::from_raw_parts(
+                u32::from(guatiao::Tag::GUATIAO_STRING),
+                guatiao::Payload::text(Text::from_raw_parts(ptr, len, cap, a)),
+            )
+        };
+        bad.make_local_in(Alloc::rust()).expect("moved");
+        assert_eq!(counter.outstanding.get(), 0);
+        assert!(TryAsRef::<str>::try_as_ref(&bad).is_none(), "still refused");
+    });
+}
+
+/// A home allocator refusing part-way leaves a whole tree, every block
+/// moved or where it was, and all of it freed with the tree.
+#[test]
+fn a_refusal_part_way_leaves_the_tree_whole() {
+    with_arena(|arena, counter| {
+        counter.fail_at.set(counter.allocs.get() + 3);
+        let mut map = tree_in(Alloc::rust());
+        let err = map.make_local_in(arena).unwrap_err();
+        assert_eq!(err, ValueError::Alloc(AllocError::Failed));
+        assert!(counter.outstanding.get() > 0, "some blocks moved first");
+        assert_eq!(map, tree_in(Alloc::rust()), "the same tree");
+        drop(map);
+    });
+}
+
+/// A literal's array (`cap == 0`) is moved before anything is written
+/// into its entries, so read-only storage is never written.
+#[test]
+fn a_literal_array_is_moved_before_its_elements_are() {
+    with_arena(|arena, counter| {
+        let items = [Value::from(Text::new_in(arena, "a").unwrap())];
+        let items = core::mem::ManuallyDrop::new(items);
+        // SAFETY: one initialised element this test never drops itself,
+        // not owned by the list (`cap == 0`), recording Rust's allocator.
+        let mut list = unsafe {
+            List::from_raw_parts(items.as_ptr().cast_mut(), 1, 0, Alloc::rust().as_raw())
+        };
+        list.make_local_in(Alloc::rust()).expect("moved");
+        assert_ne!(list.as_ptr(), items.as_ptr(), "the array was copied out");
+        assert!(list.is_local());
+        drop(list);
+        assert_eq!(counter.outstanding.get(), 0);
+    });
+}

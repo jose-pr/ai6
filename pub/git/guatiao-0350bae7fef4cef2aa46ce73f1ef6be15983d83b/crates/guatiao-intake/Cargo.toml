@@ -1,0 +1,59 @@
+[package]
+name = "guatiao-intake"
+# A build script key, not a native library: it lets `build.rs` publish
+# where the committed header lives, so a consumer's own build script reads
+# `DEP_GUATIAO_INTAKE_INCLUDE` and copies `guatiao_intake.h` beside its own
+# header -- the arrangement `guatiao` itself has.
+links = "guatiao-intake"
+description = "Taking a guatiao value in from a person: the path grammar, flat key-to-text storage, checking a store of text, and how a schema is shown -- sections, widget hints and conditional visibility"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+license.workspace = true
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+
+# docs.rs documents every feature.
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+name = "guatiao_intake"
+# A cdylib as well, because the `extern "C"` surface has to be IN an
+# artifact for a C or Python host to load. An rlib exports nothing.
+crate-type = ["rlib", "cdylib"]
+path = "src/lib.rs"
+
+[features]
+# Renders `include/guatiao_intake.h` from the Rust that declares it. NOT the
+# `extern "C"` surface, which is always compiled -- this is about the file
+# that DECLARES it, which is committed and which most builds only read.
+c-header = ["dep:cbindgen"]
+# `#[derive(Form)]`, re-exported from the crate root beside the `Screen`
+# trait it implements, and `guatiao`'s own derives with it, since a form
+# is declared beside a schema.
+derive = ["dep:guatiao-derive", "guatiao/derive"]
+
+[dependencies]
+# The only dependency, and deliberately so: a form is read against a
+# schema, and a schema is a value. Nothing here parses or prints a
+# document; `guatiao-serde` does that for a form exactly as it does for
+# any other value.
+guatiao = { path = "../guatiao", version = "=0.0.0-alpha.1" }
+# The proc-macro half of `derive`, with only the form derive turned on.
+guatiao-derive = { path = "../guatiao-derive", version = "=0.0.0-alpha.1", optional = true, features = ["form"] }
+
+[dev-dependencies]
+# A provider carrying a form, registered as a linked library: the test
+# that `#[provider(.., form = ..)]` and this crate agree on the key.
+guatiao = { path = "../guatiao", features = ["provider", "load"] }
+
+[build-dependencies]
+# Optional, enabled only by `c-header`, so an ordinary build renders
+# nothing and pulls in no generator.
+cbindgen = { version = "0.29", optional = true }
+
+[lints]
+workspace = true

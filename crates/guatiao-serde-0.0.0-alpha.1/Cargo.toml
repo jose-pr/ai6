@@ -1,0 +1,67 @@
+# guatiao/crates/guatiao-serde at 0350bae7fef4cef2aa46ce73f1ef6be15983d83b, with what it inherits written out.
+[package]
+name = "guatiao-serde"
+description = "serde for guatiao values -- one Serialize/DeserializeSeed pair, so every serde data format can carry one"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+publish = true
+license = "MPL-2.0"
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[lib]
+name = "guatiao_serde"
+crate-type = ["rlib", "cdylib"]
+path = "src/lib.rs"
+[features]
+default = ["json"]
+json = ["dep:serde_json", "serde_json/raw_value"]
+exact-numbers = ["json", "serde_json/arbitrary_precision"]
+toml = ["dep:toml"]
+yaml = ["dep:serde-saphyr"]
+c-header = ["dep:cbindgen"]
+[dependencies]
+[dependencies.guatiao]
+path = "../guatiao"
+version = "=0.0.0-alpha.1"
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["std"]
+[dependencies.serde_json]
+version = "1"
+optional = true
+[dependencies.toml]
+version = "1"
+optional = true
+features = ["preserve_order"]
+[dependencies.serde-saphyr]
+version = "1"
+optional = true
+[build-dependencies]
+[build-dependencies.cbindgen]
+version = "0.29"
+optional = true
+[dev-dependencies]
+rmp-serde = "1"
+boon = "0.6"
+toml = "1"
+[dev-dependencies.serde_json]
+version = "1"
+features = ["raw_value"]
+[dev-dependencies.serde]
+version = "1"
+features = ["derive"]
+[dev-dependencies.guatiao]
+path = "../guatiao"
+features = ["derive"]
+[lints]
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

@@ -1,0 +1,8 @@
+# Every text file is LF on every platform; pub/, cdn/ and crates/ below are third-party bytes.
+* text=auto eol=lf
+
+# Third-party bytes, kept exactly as pub wrote them.
+pub/** -text
+cdn/** -text
+# Checked against SHA-256 sums, which any conversion would break.
+crates/** -text

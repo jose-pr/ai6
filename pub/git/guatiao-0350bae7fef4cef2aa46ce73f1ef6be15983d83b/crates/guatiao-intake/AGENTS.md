@@ -1,0 +1,459 @@
+# guatiao-intake — shipped API header
+
+How a guatiao schema is shown: sections, widget hints and conditional
+visibility, as a **value beside the schema**. Depends on `guatiao` and
+nothing else; the `derive` feature adds `#[derive(Form)]`.
+
+## The document
+
+```text
+form     := { "sections": [section, …], "fields": { <path>: hints, … } }
+section  := { "id": text, "title": text, "description": text }
+hints    := { "widget": text, "placeholder": text, "unit": text,
+              "visibleWhen": { "field": <path>, "equals": <value> }
+                           | { "field": <path>, "in": [<value>, …] },
+              "form": form }        // a field that HAS members
+```
+
+- Every key is optional except a section's `id`. **An empty map is a
+  complete form.**
+- **A path is a flat key**, and the grammar is the one in `path`: a dot
+  is a member (`connection.tls.ca`), a bracket is a list position or a
+  map key (`agent[0].name`, `env[PATH]`), and which one a bracket means
+  is decided by what it is applied to. `flat::resolve` and
+  `guatiao_intake_resolve` take exactly this.
+- **Sections are listed in display order.** Which section a field is in
+  is the schema's `x-section`; the form only says what a section is called.
+  **`x-section`, `x-order` and `x-advanced` are this crate's keys**, in
+  its own `vocab` — `guatiao` does not name them, because how to group
+  and order controls is an opinion it does not hold; it carries them as
+  annotations like any key it does not know. They sit on the **schema**,
+  beside the field, not in the form document. `FormBuilder` and
+  `FormFieldBuilder` write them, `FormField` reads them back off a
+  `FieldRef`, and C gets them from `guatiao_intake.h` as
+  `GUATIAO_INTAKE_KEY_X_SECTION` and its two siblings.
+- **`x-sensitive` is not ours.** It stays on `guatiao`'s
+  `FieldBuilder::sensitive`, because "never print this value" is obeyed
+  by a log and a crash dump as much as by a form.
+- **The default section's id is `""`**, which is what a field with no
+  `x-section` reads as. A field naming a section the form does not declare
+  joins it too.
+- **Widget names are an open set.** Suggestions in `vocab::widget`
+  (`text`, `textarea`, `password`, `number`, `slider`, `checkbox`,
+  `toggle`, `select`, `radio`); a renderer shows an unknown one as its
+  default for the kind.
+- **A field with members may carry a form of its own**, under `form`,
+  and it is a complete form document — the same shape as the top level.
+  Its paths are **relative to that field**: a form under `connection`
+  names `tls.ca`. Given to a field whose kind has no members, `check`
+  refuses it; there would be nothing for its paths to name. A **variant**
+  is refused too, and that one is a judgement: its members differ by arm,
+  so there is no one schema the sub-form could be checked against, and a
+  form already reaches an arm's fields with `owner.member`.
+- **A condition inside a sub-form may only name that form's own
+  fields.** Not a rule written twice: the sub-form is checked against the
+  member schema, so anything outside it is simply not a field. A window
+  whose contents depended on something the window does not show would be
+  a window a person cannot satisfy.
+- Widgets for one: `dialog` (a window of its own) and `group` (inline,
+  which is what a renderer does with no widget at all — it is there for a
+  form that wants to say so beside one that says `dialog`).
+- **`#[form(form)]` assigns a member's own screen** as that field's
+  form, and `#[form(form = Ty)]` names the type when the field's own is
+  not a screen — a `Vec<Agent>` is not one and `Agent` is. It is
+  refused beside `nested`: those are two presentations of one member.
+- **A form can be made out of a schema alone**, and `form_for` is the
+  question a renderer asks: the assigned form if somebody wrote one,
+  otherwise the one the schema implies. A created form carries **one
+  section per distinct `x-section`, in first-appearance order, ids
+  only** — what a section is *called* is a form's business and a schema
+  has no opinion — plus each member's own created form where there is
+  something in it. It says nothing about widgets, with one exception: a
+  text field the schema marks a secret (`x-sensitive` or `writeOnly`)
+  gets `widget: "password"`, since the schema has said it is one; any
+  other widget would be this crate guessing. For a schema that
+  groups nothing the answer is `{}`, which is a complete form and
+  exactly as informative as the schema was.
+- Anything else is an **annotation**: carried, never interpreted.
+- A value's own read-only-ness is **not** a form hint. It is a statement
+  about the value, and JSON Schema's `readOnly` in the schema says it:
+  `FieldBuilder::read_only` writes it and `FieldRef::is_read_only` reads
+  it. `deprecated` and `examples` sit beside it the same way.
+
+## What else lives here
+
+Three things that are **not** about drawing, and are here because they
+are decisions a consumer makes about a schema rather than facts about
+the struct:
+
+```rust
+// naming one place inside a value: `agent[1].name[home].host`
+path::parse(text) -> Result<Path, PathError>    // every refusal says its byte offset
+path::get(&value, path) -> Option<&Value>  /  path::get_mut(..)
+Segment::{Field(&str), Index(usize), Key(Cow<str>)}
+// C: guatiao_intake_path_get(value, path) -> const guatiao_value*  (borrowed, null when absent)
+
+// projecting a value onto flat `key -> text` storage
+flatten(field, &value, &mut BTreeMap<String, String>) -> bool
+                       // false: the shape contradicts the kind, or the value has
+                       // MAX_DEPTH (128) or more containers nested (not written);
+                       // a union (an untagged enum) stores a scalar arm as its
+                       // text and answers false for a list or map arm
+unflatten(alloc, field, &store) -> Option<Value>
+resolve(schema, key) -> Option<FieldRef>         // for the schema alone
+resolve_in(schema, key, selected) -> Result<FieldRef, ValidationError>
+keys(field) -> Vec<String>                       // its own key and its arms' members'; a container
+                                                 // member's leaves are below these, not listed
+split(key) -> Option<(&str, Cow<str>)>           // (owner key, last segment's name)
+is_sensitive(schema, key) -> bool
+clear_under(&mut store, path)                    // everything AT or UNDER it
+SEPARATOR = '.'
+
+// checking a whole store of text
+validate_texts(schema, &BTreeMap<String, String>) -> Result<(), ValidationError>
+```
+
+**The grammar**: a `.` is a field, `[0]` a list position **or** a map
+key, `[name]` a map key, `["a.b"]` a map key that would otherwise read
+as something else. Which one a bracket means is decided where it is
+applied, not by how it is written -- so `env[PATH]` needs no ceremony
+and `["1"]` is the escape for a key that looks like a position. A path
+is rootless: no leading `.`, no `$`.
+
+**One spelling means one thing, and the parser refuses the near misses**:
+`a[0]b` and `a["x"]y` (a segment after a bracket needs a `.`), `a.[0]` (a
+`.` is followed by a name), and `[a[b]` (a bare bracket holds no `[`;
+`["a[b]"]` is that key) are `PathError`s (`MissingSeparator`,
+`EmptyField`, `UnclosedIndex`). A position is digits **without a leading
+zero**: `[01]` is the key `01`, not position 1, and a number too large for
+a `usize` is a key too.
+
+**The store spells a key the way `named` does**: `owner.member`, or
+`owner[a.b]` when the member's name holds a `.`, a bracket or nothing; a
+top-level field called `a.b` is stored under `[a.b]`, so it never shares a
+key with the member `b` of a field `a`. `keys` spells its keys as
+`flatten` does (a member that is a container writes below its key, which
+`keys` does not list) and `split` reads the key with the path grammar. A
+store key off the grammar (`agent.[0]`) is not found by `unflatten` and
+`validate_texts` refuses it as undeclared.
+
+**Reading takes every spelling the grammar reads** for an open map's key
+(`env[01]`, `env["01"]`, `env.PATH`); where two spellings of one key are
+both present, the one `flatten` writes wins and the other is ignored. A
+top-level field holding a `.` or a bracket is read under `[a.b]` alone:
+a store key `x.y[k]` reaches no field `x.y`, and `unflatten` does not read
+`a.b` as the field `a.b`.
+
+```rust
+// can this name be written as it stands?
+path::is_bare_name(name) -> bool    // a Field segment: non-empty, no `.` `[` `]`
+path::needs_quoting(key) -> bool    // a bracket key: empty, leading `"`, a
+                                    // bracket, or a position (digits, no
+                                    // leading zero, fits a usize)
+```
+
+**Ask `is_bare_name` when your own surface cannot quote.** A schema may
+declare a field whose key holds a `.`, because this grammar can still
+reach it (`["a.b"]`) -- so this crate does not refuse one. A consumer
+whose keys travel as bare text (a URI query, a flat store keyed by dotted
+path) has no such escape, and should refuse the key where it enters
+rather than discover it at the far end. Asking the grammar beats
+`key.contains('.')`: the rule is wider than that one character, and it
+stays correct when the grammar moves.
+
+`validate_text` (one text, one field) stays in `guatiao`: that one asks
+about the schema alone.
+
+## The whole surface
+
+```rust
+// `use guatiao_intake::prelude::*;` -- both crates' halves of a
+// declaration at once: guatiao's builders and reading views, this crate's
+// extension traits, `Form`/`Section`/`Hints`, `check`/`layout`/
+// `is_visible`. It re-exports and adds nothing.
+
+// declaring, beside the schema: these EXTEND `guatiao`'s builders, which
+// write JSON Schema's own `title`, `description` and nothing presentational
+trait FormBuilder: guatiao::schema::Extras {   // SchemaBuilder, FieldBuilder, ArmBuilder
+    fn section(self, id: &str) -> Self;        // x-section
+}
+trait FormFieldBuilder: FormBuilder {          // FieldBuilder only
+    fn order(self, order: i64) -> Self;        // x-order
+    fn advanced(self) -> Self;                 // x-advanced
+}
+trait FormField<'a> {                          // reading, on guatiao's FieldRef<'a>
+    fn section(&self) -> &'a str;              // "" when unset
+    fn order(&self) -> i64;                    // 0 means "no ordering information"
+    fn is_advanced(&self) -> bool;
+}
+// The lifetime is the SCHEMA's, not the view's: a caller holding a
+// `FieldRef` past the borrow still holds the text it read.
+
+// building (names no allocator; `_in` forms name one; errors collected)
+Form::new() / Form::new_in(Alloc) -> Form
+  .section(Section) / .field(path: &str, Hints) / .option(key, impl Into<Value>)
+  .finish() -> Result<Value, ValueError>
+Section::new(id) / Section::new_in(Alloc, id) -> Section
+  .label(&str)   // written as `title`
+  .help(&str)    // written as `description`
+  .option(key, impl Into<Value>)
+Hints::new() / Hints::new_in(Alloc) -> Hints
+  .widget(&str) / .placeholder(&str) / .unit(&str)
+  .visible_when(path: &str, equals: impl Into<Value>)
+  .visible_when_in(path: &str, values: impl IntoIterator<Item: Into<Value>>)
+  .form(Form)                        // a field that has members; paths RELATIVE
+  .form_value(Result<Value, ValueError>)   // the same, for generated code
+  .option(key, impl Into<Value>)
+
+// the form a schema implies, for when nobody wrote one
+for_schema(SchemaRef, Alloc) -> Result<Value, ValueError>
+for_field(FieldRef, Alloc) -> Option<Result<Value, ValueError>>   // None: no members
+form_for(FormRef, SchemaRef, path, Alloc) -> Option<Result<Value, ValueError>>
+                                   // assigned wins; else what the schema implies
+provider_form(Option<&Value>, Option<&Map>, Alloc) -> Result<Option<Value>, ValueError>
+                                   // a provider's (schema, meta): meta["form"] wins; else what
+                                   // the schema implies; Ok(None) with neither; what is not a
+                                   // map is skipped, as reading the key by hand skips it
+// C: guatiao_intake_for_schema(schema, alloc, out)
+//    guatiao_intake_form_for(form, schema, path, alloc, out)
+//    guatiao_intake_provider_form(schema, meta, alloc, out)   -- either may be null or ABSENT
+//      -- nothing to show it with leaves `out` ABSENT and answers OK
+
+// reading (borrowed views; skip what is malformed)
+FormRef::new(&Value) -> Option<FormRef>
+  .sections() -> impl Iterator<Item = SectionRef>
+  .section(id) -> Option<SectionRef>
+  .hints(path) -> HintsRef                     // empty when none
+  .fields() -> impl Iterator<Item = (&str, HintsRef)>
+  .extra(key) -> Option<&Value>  /  .as_value() -> &Value
+SectionRef: .id() .label() .help() -> &str     // "" when absent
+            .extra(key) -> Option<&Value>  .as_value() -> &Value
+HintsRef:   .is_empty() -> bool  .widget() .placeholder() .unit() -> &str
+            .visible_when() -> Option<Condition>
+            .form() -> Option<FormRef>     // what a renderer nests by
+            .extra(key) -> Option<&Value>
+            .as_value() -> Option<&Value>      // None when the form says nothing
+Condition:  .field() -> &str
+            .values() -> &[Value]          // every value that meets it: the question to ask
+            .equals() -> Option<&Value>    // only when written with `equals`
+
+// a type's default screen (`derive` feature); the trait is `Screen`
+// because `Form` is the builder
+#[derive(Schema, Form)]
+#[form(section(id = "net", label = "Network", help = ".."), section(id = "login"))]  // display order
+struct T {
+    #[schema(section = "net")] host: String,              // WHICH section stays the schema's
+    #[form(widget = "password")] token: String,
+    #[form(placeholder = "..", visible_when(field = "verify", equals = true))] ca: Option<String>,
+    #[form(visible_when(field = "mode", in("tls", "mtls")))] key: Option<String>,  // any of several
+    #[form(unit = "s")] keepalive: i64,                     // shown beside the number
+    #[form(nested)] auth: Auth,                           // `Auth: Screen`; its hints land under `auth.`
+    #[form(widget = "dialog", form)] tls: Tls,            // a form of its OWN, from `Tls: Screen`
+    #[form(form = Tls)] agents: Vec<Tls>,                 // when the FIELD's type is not a screen
+}
+// `nested` and `form` are the two presentations of one member and are
+// refused together: flattened into this screen, or given a screen of
+// its own.
+trait Screen { fn form(Alloc) -> Result<Value, ValueError>; fn hints(prefix: &str, into: Form) -> Form; }
+#[form(crate = ::acme_kinds::guatiao_intake)]  // on the type: a re-export of this crate; guatiao is reached through it
+T::form(alloc)                                 // sections, then hints at the root
+PROVIDER_FORM_KEY = "form"                     // #[provider(.., form = T)] writes T::form into a descriptor's meta here;
+                                               // a host: offer.meta().and_then(|m| m.get(PROVIDER_FORM_KEY)).and_then(FormRef::new)
+Auth::hints("session.auth.", Form::new())      // a member's hints under a prefix; no sections
+Form::alloc() -> Alloc                          // the builder's allocator, for hints built beside it
+
+// the judgement
+check(SchemaRef, FormRef) -> Result<(), FormError>
+layout(SchemaRef, FormRef) -> Vec<Group>       // Group { section: Option<SectionRef>, fields: Vec<Placed> }
+                                               // Placed { field: FieldRef, hints: HintsRef }
+is_visible(SchemaRef, FormRef, path: &str, values: &Value) -> Result<bool, FormError>
+
+FormError = Malformed { at, expected } | UnknownField { at, path }
+          | DuplicateSection { id } | ConditionRefused { at, field, expected }
+          | CyclicCondition { path }              // #[non_exhaustive]
+
+// the keys a form is written with: `pub mod vocab`
+vocab::{SECTIONS, FIELDS}                         // the form
+vocab::{ID, TITLE, DESCRIPTION, DEFAULT_SECTION}  // a section; DEFAULT_SECTION is ""
+vocab::{WIDGET, PLACEHOLDER, UNIT, VISIBLE_WHEN}        // a field's hints
+vocab::{FIELD, EQUALS, IN}                        // a condition
+vocab::widget::{TEXT, TEXTAREA, PASSWORD, NUMBER, SLIDER,
+                CHECKBOX, TOGGLE, SELECT, RADIO}  // suggestions, an open set
+```
+
+**`is_visible` answers a `Result`**: a path the schema does not declare —
+including one a condition reads — is the same `UnknownField` `check`
+gives it, rather than `true` for a field that does not exist.
+
+## A provider's form, read back by a host
+
+`#[provider(.., form = T)]` writes `T::form` into the descriptor's `meta`
+under `PROVIDER_FORM_KEY` (`"form"`). A host reads it beside the
+configuration schema and checks the one against the other before showing
+it: a form a library wrote is data like any other.
+
+```rust
+let offer = registry.offer::<dyn Dial>("acme_dialer").expect("filed")?;
+let form = offer.meta().and_then(|m| m.get(PROVIDER_FORM_KEY)).and_then(FormRef::new);
+let schema = offer.config_schema().and_then(SchemaRef::new);
+if let (Some(form), Some(schema)) = (form, schema) {
+    check(schema, form)?;                       // then layout / is_visible
+}
+```
+
+```c
+guatiao_value meta = {0};
+guatiao_registry_provider_meta(reg, guatiao_cstr("acme_dialer"), &alloc, &meta);  /* a copy */
+const guatiao_value *form = guatiao_map_find(&meta, guatiao_cstr(GUATIAO_INTAKE_PROVIDER_FORM_KEY));
+const guatiao_value *schema = guatiao_registry_provider_config(reg, guatiao_cstr("acme_dialer"));
+guatiao_intake_check(schema, form, &alloc, &why);  /* GUATIAO_OK: it fits */
+guatiao_value_free(&meta);
+```
+
+`guatiao_registry_provider_meta` (in `guatiao.h`) leaves `out` ABSENT for
+a provider that declares no `meta`, and `guatiao_map_find` then answers
+NULL. The bindings read it the same way: `Registry.provider_meta` and
+`intake.PROVIDER_FORM_KEY` in Python, `providerMeta` and
+`intake.providerFormKey` in Dart and Node.
+
+**A provider that declares no form is still shown with one**: the form
+its schema implies. `provider_form` is that rule, for every provider a
+registry lists and before any is built; it does not check the form
+against the schema (`check` does).
+
+```rust
+for provider in registry.all() {
+    let form = provider_form(provider.config_schema(), provider.meta(), Alloc::rust())?;
+    // None: it takes no configuration and declares no form
+}
+```
+
+```c
+/* one entry of guatiao_registry_catalog's list */
+guatiao_intake_provider_form(guatiao_map_find(entry, guatiao_cstr("config")),
+                             guatiao_map_find(entry, guatiao_cstr("meta")), &alloc, &form);
+```
+
+Python: `intake.provider_form(entry.get("config"), entry.get("meta"))`
+over an entry of `Registry.catalog()`, a dict or a `Value` each.
+
+## Which word belongs to which layer
+
+Three vocabularies meet here, and a rename that does not respect the
+boundary compiles right up until it does not:
+
+| written as | where | why that word |
+| --- | --- | --- |
+| `title` / `description` | `SchemaBuilder`, `FieldBuilder`, `ArmBuilder` (in `guatiao`) | JSON Schema's own keywords; a schema describes the struct |
+| `label` / `help` | `Section`, `SectionRef` (here) | a section is a form's own thing, and those are form words -- both land as `title`/`description` inside the section's map |
+| `label` | one enum choice (`#[schema(label = "..")]`, `ChoiceRef::label`) | a choice is not a subschema: its text is one entry in `x-enum-labels` |
+
+So **`Section::label` is not a schema `title` that somebody forgot to
+rename**, and a sweep over `.label(` that does not tell the three apart
+will break the other two. Downstream, four such over-renames were caught
+by the compiler on one migration; it catches them because the method
+simply does not exist, which is the argument for keeping the names
+distinct.
+
+## The rules the judgement applies
+
+- **`check`** refuses: a path that resolves to no field, a section id
+  declared twice, a key of the wrong shape (named by its location, e.g.
+  `fields["port"].widget`), a condition holding both `equals` and `in`,
+  neither, or an empty `in`, a condition naming any value the referenced
+  field would never hold -- **every** value of an `in`, not just one --
+  a `unit` on anything but an integer, a real number or a union with
+  exactly one numeric arm (the unit is that arm's), and a field whose
+  conditions lead back to itself. A
+  section a field names but the form does not declare is **not** an error.
+  **No error quotes a value**: a condition's `equals` is something a field
+  could hold, and a field can be a secret.
+- **`layout`** puts the default section first unless the form declares
+  `""` somewhere else; then the declared sections in order; a section
+  nothing is in is left out. Within a group, fields with an explicit
+  `x-order` come first, lowest first, and the rest keep the schema's
+  order. **Top-level fields only**: an arm's fields are shown with their
+  variant, and their hints are `hints("owner.member")`. Visibility is not
+  applied — it needs values.
+- **`is_visible`**: no condition is shown. A condition is met when the
+  field it reads is **itself shown** and holds `equals`, or any one of
+  `in`'s values, so hiding a field
+  hides everything that waits on it. A field holding nothing reads as its
+  schema `default`; with no default the condition is not met. A variant
+  named by its own key reads as its **discriminant**, so `equals` is an arm
+  name. An `owner.member` path is read **only while the arm that declares
+  `member` is the one picked** — a variant's value is one map, so moving
+  between arms leaves keys behind and a stale one is not what the field
+  holds. A top-level field may be named by its store spelling (`[a.b]`,
+  `["a.b"]`) as well as its key, and is the same field, its own condition
+  included. A cycle is never shown. A path the schema does not declare is
+  an error. `values` is shaped like the schema's values: a variant's value is
+  a map carrying its tag.
+
+## From C (`include/guatiao_intake.h`)
+
+Where the header is, for a consumer's own build script:
+`DEP_GUATIAO_INTAKE_INCLUDE` (this crate says `links = "guatiao-intake"` and
+its `build.rs` publishes `include=`), the arrangement `guatiao` has with
+`DEP_GUATIAO_INCLUDE`. Copy the file beside your own header from there
+rather than hard-coding a path into a checkout.
+
+```c
+guatiao_status guatiao_intake_check(const guatiao_value *schema, const guatiao_value *form,
+                                  const guatiao_alloc *alloc, guatiao_value *out_error);
+guatiao_status guatiao_intake_layout(const guatiao_value *schema, const guatiao_value *form,
+                                   const guatiao_alloc *alloc, guatiao_value *out);
+guatiao_status guatiao_intake_is_visible(const guatiao_value *schema, const guatiao_value *form,
+                                       guatiao_str key, const guatiao_value *values, bool *out);
+#define GUATIAO_INTAKE_PROVIDER_FORM_KEY "form"   /* where a provider's meta carries its form */
+```
+
+- `_check`: `GUATIAO_ERR_BAD_VALUE` on a misfit; `out_error` (may be null)
+  gets `{ kind, at, path | id | field, expected, message }`, where `kind`
+  is `malformed`, `unknown_field`, `duplicate_section`,
+  `condition_refused` or `cyclic_condition`.
+- `_layout`: a list of `{ "section": <the section's map, or null>,
+  "fields": [key, …] }`. **Keys, not copies** — a field's schema is one
+  `guatiao_intake_resolve` away and its hints are in the form you passed.
+- `_is_visible`: the answer through `out`.
+- `_is_visible`: `GUATIAO_ERR_NOT_FOUND` when `key`, or a key a condition
+  reads, names no field the schema declares — and `out` is then not
+  written.
+- Every function: `GUATIAO_ERR_NULL` for a null required pointer, checked
+  before anything else happens; `GUATIAO_ERR_WRONG_KIND` when the schema
+  or form is not a map; **`GUATIAO_ERR_ALLOC` for an allocator that is
+  null or cannot allocate**, the same status `guatiao-serde` gives; and
+  `GUATIAO_ERR_INTERNAL` if a panic was caught. Results are built through
+  `alloc` and freed with `guatiao_value_free`.
+
+## Gotchas
+
+- `equals` is compared **structurally**, as `==` on `guatiao::Value`
+  does. A number is its text, so `443` and `443.0` are different values.
+- **A condition compares; it does not evaluate a schema.** `in` covers
+  "any of these values", which is what every surveyed form needed. A
+  condition that is itself a JSON Schema (JSON Forms' rules) was weighed
+  and left out: `check` would have to judge a subschema against a field,
+  and nobody has a case `in` cannot express.
+- `visibleWhen` is for what a variant cannot say. "These fields exist only
+  for this arm" is already a variant, and hiding them again with a
+  condition would give two sources of truth for one rule.
+- `Form::field` twice with one path **replaces**, the way `set` does.
+- **`#[derive(Form)]` is one screen, the type's default.** A second
+  screen is a form built or read as a value, and a form beside the derived
+  one overrides it key for key. Keys follow `#[map(rename)]`; a
+  `#[map(skip)]` field cannot carry hints; `#[form(section = ..)]` on a
+  field is refused (that is `#[schema(section)]`); an enum of unit
+  variants is refused (a choice has no fields to place); a tagged enum
+  places its arm fields, composed under `owner.` by the owner's `nested`.
+- `HintsRef::as_value` answers `Option<&Value>` — `None` when the form
+  says nothing about the field — where `FormRef` and `SectionRef` answer a
+  plain `&Value`.
+- **`resolve` and `resolve_in` are the common entry points**, not
+  `flatten`/`unflatten`: naming one place is what a consumer does per
+  keystroke, where projecting a whole tree happens when a store is
+  loaded or saved. The one real consumer of this crate uses the first
+  pair and neither of the second.
+- **`unsafe` lives in `src/exports.rs` and `src/exports_flat.rs`**,
+  checked by `tests/unsafe_stays_in_exports.rs`; every other module carries
+  `#![forbid(unsafe_code)]`.

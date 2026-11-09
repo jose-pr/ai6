@@ -1,0 +1,876 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The exported functions, called from a C program that LINKS them.
+//!
+//! `c_consumer.rs` proves the header is readable with nothing linked,
+//! which is the headline claim. This proves the other half: that the
+//! functions a consumer has to link are actually in an artifact's export
+//! table and actually callable across the boundary.
+//!
+//! It is a different axis from every other test here. `library_load`
+//! exercises descriptors, an entry symbol and a loader; this exercises
+//! none of them — just the C ABI, from C.
+//!
+//! # What it links
+//!
+//! `guatiao` itself. The crate is `crate-type = ["rlib", "cdylib"]`, so
+//! one package is both the Rust library and the artifact a C consumer
+//! links; an rlib exports nothing, and the cdylib is where the
+//! `#[unsafe(no_mangle)]` functions actually land.
+//!
+//! **`cargo test` does not build a cdylib for the package under test**,
+//! only for a dev-dependency, so this needs a `cargo build` first and
+//! says so when the artifact is missing. CI does the build.
+//!
+//! # Skipping
+//!
+//! With no C compiler this prints a stated skip and passes: a missing
+//! toolchain is an environment fact, and failing over it would make the
+//! suite red on machines where nothing is wrong. The header-drift check
+//! in `c_consumer.rs` is the one that never skips.
+
+use std::path::PathBuf;
+use std::process::Command;
+
+#[path = "support/c_compiler.rs"]
+mod c_compiler;
+
+/// The directory holding the built `guatiao` shared library.
+///
+/// Found from this test binary's own path for the reason `library_load`
+/// explains: an integration test gets no `OUT_DIR`, and shelling out to
+/// cargo from inside a cargo run fights the same target-directory lock.
+/// The cdylib is built by `cargo build`, not by `cargo test`, so this
+/// answers `None` rather than panicking and the caller states the skip.
+fn shared_library() -> Option<(PathBuf, PathBuf)> {
+    let exe = std::env::current_exe().expect("a test binary knows its own path");
+    let deps = exe.parent().expect("the test binary is in a directory");
+    let name = format!(
+        "{}guatiao{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    );
+    for dir in [
+        deps.to_path_buf(),
+        deps.parent().map(PathBuf::from).unwrap_or_default(),
+    ] {
+        let candidate = dir.join(&name);
+        if candidate.is_file() {
+            return Some((dir, candidate));
+        }
+    }
+    None
+}
+
+/// Where cargo put the example library, found the way `library_load` does.
+fn example_library() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let deps = exe.parent()?;
+    let name = format!(
+        "{}hello_library{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    );
+    for dir in [
+        deps.to_path_buf(),
+        deps.parent().map(PathBuf::from).unwrap_or_default(),
+    ] {
+        let candidate = dir.join(&name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// **A HOST written in C**, which is the claim the envelope rests on.
+///
+/// Everything else in this suite drives the registry from Rust. This one
+/// does not: a C program that links no Rust creates a registry, loads the
+/// example library, asks what serves a kind, reads the answer as an
+/// ordinary value tree, calls through the provider's table, and frees a
+/// tree the LIBRARY's allocator built.
+#[test]
+#[cfg_attr(
+    not(feature = "load"),
+    ignore = "the registry exports are in the artifact only with `load`"
+)]
+fn a_c_program_is_a_host() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest.join("tests/c_consumer/registry_consumer.c");
+    let include = manifest.join("include");
+    assert!(
+        source.exists(),
+        "the C source is missing: {}",
+        source.display()
+    );
+
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler found. See the other test here for why that is a skip.");
+        return;
+    };
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary. Run `cargo build -p guatiao --all-features` first — and \
+             note that the registry exports need the `load` feature, so a \
+             default build of the artifact does not have them."
+        );
+        return;
+    };
+    let Some(library) = example_library() else {
+        println!("skipped: the example library is not built beside this test binary.");
+        return;
+    };
+
+    let out = dir.join(if cfg!(windows) {
+        "guatiao_registry_consumer.exe"
+    } else {
+        "guatiao_registry_consumer"
+    });
+
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-o")
+        .arg(&out)
+        .arg(&source);
+    if cfg!(windows) {
+        compile.arg(dll.with_extension("dll.lib"));
+    } else {
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+    }
+
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the C host did not compile or link.\nIf the compile succeeded and the \
+         LINK failed, a registry symbol is missing from the artifact — which \
+         means it was built without the `load` feature.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let run = Command::new(&out)
+        .arg(&library)
+        .current_dir(&dir)
+        .output()
+        .expect("the host was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the C host failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the host exited 0 without reporting success.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}
+#[test]
+fn a_c_program_builds_and_frees_a_tree_through_the_exports() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest.join("tests/c_consumer/exports_consumer.c");
+    let include = manifest.join("include");
+    assert!(
+        source.exists(),
+        "the C source is missing: {}",
+        source.display()
+    );
+
+    let Some(cc) = c_compiler::find() else {
+        println!(
+            "skipped: no C compiler found (tried clang, the default LLVM \
+             install path, cc and gcc). This is what proves the exported \
+             symbols are callable from C, so it is worth having on at least \
+             one machine."
+        );
+        return;
+    };
+
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary. `cargo test` does not build a cdylib for the package \
+             under test; run `cargo build -p guatiao --all-features` first, \
+             which is what CI does."
+        );
+        return;
+    };
+
+    // Built INTO the directory holding the library, so the loader finds it
+    // beside the executable and no PATH or rpath has to be arranged.
+    let out = dir.join(if cfg!(windows) {
+        "guatiao_exports_consumer.exe"
+    } else {
+        "guatiao_exports_consumer"
+    });
+
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-o")
+        .arg(&out)
+        .arg(&source);
+
+    if cfg!(windows) {
+        // Link against the import library cargo emits beside the DLL.
+        let implib = dll.with_extension("dll.lib");
+        assert!(
+            implib.is_file(),
+            "no import library beside {}: expected {}",
+            dll.display(),
+            implib.display()
+        );
+        compile.arg(&implib);
+    } else {
+        // `-L` so the linker finds it now, and an rpath of `$ORIGIN` so
+        // the program finds it at run time without an environment
+        // variable, which is what makes this runnable from anywhere.
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+    }
+
+    let compiled = compile
+        .output()
+        .expect("the compiler answered --version, so it should run");
+    assert!(
+        compiled.status.success(),
+        "the C consumer did not compile or link against the exported \
+         symbols.\nIf the compile succeeded and the LINK failed, a symbol \
+         is missing from the artifact's export table — which is the thing \
+         this test exists to catch.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let run = Command::new(&out)
+        .current_dir(&dir)
+        .output()
+        .expect("the consumer was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the C consumer failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the consumer exited 0 without reporting success, which means it did \
+         not reach the end.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}
+
+/// A C caller keeps an answer past the unload of a library whose table
+/// ignored the carrier, by moving it home with `guatiao_value_make_local`.
+#[test]
+fn a_c_caller_moves_an_answer_home_before_the_unload() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let include = manifest.join("include");
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler found. See the test above for why that is a skip.");
+        return;
+    };
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary. Run `cargo build -p guatiao --all-features` first."
+        );
+        return;
+    };
+
+    let library = dir.join(if cfg!(windows) {
+        "guatiao_carrier_ignored.dll"
+    } else if cfg!(target_vendor = "apple") {
+        "libguatiao_carrier_ignored.dylib"
+    } else {
+        "libguatiao_carrier_ignored.so"
+    });
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-shared"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-o")
+        .arg(&library)
+        .arg(manifest.join("tests/c_consumer/carrier_ignored.c"));
+    if !cfg!(windows) {
+        compile.arg("-fPIC");
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the library did not compile.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let host = dir.join(if cfg!(windows) {
+        "guatiao_make_local_host.exe"
+    } else {
+        "guatiao_make_local_host"
+    });
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-o")
+        .arg(&host)
+        .arg(manifest.join("tests/c_consumer/make_local_host.c"));
+    if cfg!(windows) {
+        compile.arg(dll.with_extension("dll.lib"));
+    } else {
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+        if cfg!(target_os = "linux") {
+            compile.arg("-ldl");
+        }
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the host did not compile or link.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let run = Command::new(&host)
+        .arg(&library)
+        .current_dir(&dir)
+        .output()
+        .expect("the host was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the host failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the host exited 0 without reporting success.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}
+
+/// A C caller takes the wiping allocator and asks whether a tree lives
+/// there; and an allocator of its own wipes every block, because each one
+/// comes back to its `free` with the size it was allocated with.
+#[test]
+fn a_c_program_wipes_through_the_wiping_allocator_or_its_own() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let include = manifest.join("include");
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler found. See the tests above for why that is a skip.");
+        return;
+    };
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary. Run `cargo build -p guatiao --all-features` first."
+        );
+        return;
+    };
+    let host = dir.join(if cfg!(windows) {
+        "guatiao_wiping_host.exe"
+    } else {
+        "guatiao_wiping_host"
+    });
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-o")
+        .arg(&host)
+        .arg(manifest.join("tests/c_consumer/wiping_host.c"));
+    if cfg!(windows) {
+        compile.arg(dll.with_extension("dll.lib"));
+    } else {
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the host did not compile or link.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let run = Command::new(&host)
+        .current_dir(&dir)
+        .output()
+        .expect("the host was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the host failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the host exited 0 without reporting success.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}
+
+#[path = "vectors/read.rs"]
+mod vectors;
+
+/// `s` as a C string literal: printable ASCII as itself, everything else
+/// as three-digit octal, which no following character can extend.
+fn c_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for b in s.bytes() {
+        match b {
+            b'"' | b'\\' => {
+                out.push('\\');
+                out.push(b as char);
+            }
+            0x20..=0x7e => out.push(b as char),
+            _ => out.push_str(&format!("\\{b:03o}")),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// `tests/vectors/time.json` as C arrays, for `time_consumer.c`.
+fn time_vectors_header() -> String {
+    let doc = vectors::file();
+    let mut h = String::from(
+        "/* Generated from tests/vectors/time.json by tests/c_exports.rs. */\n\
+         typedef struct { const char *text; const char *canonical; long long fields[8];\n\
+         \x20                int field_count; long long refused_at; } text_vector;\n\
+         typedef struct { const char *start; const char *span; const char *result; } add_vector;\n",
+    );
+    for (form, name) in [
+        ("date", "DATE"),
+        ("time", "TIME"),
+        ("datetime", "DATETIME"),
+        ("timestamp", "TIMESTAMP"),
+        ("span", "SPAN"),
+    ] {
+        let cases = vectors::texts(&doc, form);
+        h.push_str(&format!("static const text_vector {name}_VECTORS[] = {{\n"));
+        for case in &cases {
+            let line = match &case.expect {
+                Ok((canonical, fields)) => {
+                    let mut f: Vec<String> = fields.iter().map(|n| format!("{n}LL")).collect();
+                    let count = f.len();
+                    f.resize(8, "0".into());
+                    format!(
+                        "  {{{}, {}, {{{}}}, {count}, -1}},\n",
+                        c_string(&case.text),
+                        c_string(canonical),
+                        f.join(", ")
+                    )
+                }
+                Err(at) => format!("  {{{}, NULL, {{0}}, 0, {at}}},\n", c_string(&case.text)),
+            };
+            h.push_str(&line);
+        }
+        h.push_str(&format!(
+            "}};\nstatic const size_t {name}_COUNT = {};\n",
+            cases.len()
+        ));
+    }
+    for (form, name) in [
+        ("date_add_span", "DATE_ADD"),
+        ("datetime_add_span", "DATETIME_ADD"),
+    ] {
+        let cases = vectors::additions(&doc, form);
+        h.push_str(&format!("static const add_vector {name}_VECTORS[] = {{\n"));
+        for case in &cases {
+            let result = case.result.as_deref().map_or("NULL".into(), c_string);
+            h.push_str(&format!(
+                "  {{{}, {}, {result}}},\n",
+                c_string(&case.start),
+                c_string(&case.span)
+            ));
+        }
+        h.push_str(&format!(
+            "}};\nstatic const size_t {name}_COUNT = {};\n",
+            cases.len()
+        ));
+    }
+    h
+}
+
+/// Every date, time, instant and span vector, read, written and applied
+/// by a C program through the exported functions: the vectors the Rust
+/// types and both bindings read too.
+#[test]
+fn a_c_program_reads_and_writes_every_time_vector() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest.join("tests/c_consumer/time_consumer.c");
+    let include = manifest.join("include");
+
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler found. See the other tests here for why that is a skip.");
+        return;
+    };
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary; run `cargo build -p guatiao --all-features` first."
+        );
+        return;
+    };
+
+    // The generated header goes beside the program, which is built into
+    // the library's directory for the reason the other tests give.
+    let generated = dir.join("guatiao_time_vectors");
+    std::fs::create_dir_all(&generated).expect("a directory for the generated header");
+    std::fs::write(generated.join("time_vectors.h"), time_vectors_header())
+        .expect("the generated header is written");
+    let out = dir.join(if cfg!(windows) {
+        "guatiao_time_consumer.exe"
+    } else {
+        "guatiao_time_consumer"
+    });
+
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-I")
+        .arg(&generated)
+        .arg("-o")
+        .arg(&out)
+        .arg(&source);
+    if cfg!(windows) {
+        compile.arg(dll.with_extension("dll.lib"));
+    } else {
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the C program did not compile or link.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let run = Command::new(&out)
+        .current_dir(&dir)
+        .output()
+        .expect("the program was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the C program failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the program exited 0 without reporting success.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}
+
+/// The wire bytes of a vector file's tree, as hex.
+fn tree_hex(tree: &serde_json::Value) -> String {
+    guatiao::value::wire::to_bytes(&vectors::tree(tree))
+        .expect("a vector's tree encodes")
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// `tests/vectors/wire.json` as C arrays, for `wire_consumer.c`.
+fn wire_vectors_header() -> String {
+    let doc = vectors::wire_file();
+    let mut h = String::from(
+        "/* Generated from tests/vectors/wire.json by tests/c_exports.rs. */\n\
+         typedef struct { int build; unsigned long long channel; const char *payload;\n\
+         \x20                const char *frame; } frame_vector;\n\
+         typedef struct { const char *frame; unsigned status; unsigned refusal; int kind;\n\
+         \x20                unsigned long long channel; size_t at; const char *tree;\n\
+         \x20                const char *key; } step_vector;\n\
+         static const frame_vector FRAME_VECTORS[] = {\n",
+    );
+    let frames = doc["frames"].as_array().expect("frames");
+    for f in frames {
+        let build = match f["build"].as_str().unwrap() {
+            "announce" => 0,
+            "send" => 1,
+            _ => 2,
+        };
+        let payload = f.get("tree").map_or(String::new(), tree_hex);
+        h.push_str(&format!(
+            "  {{{build}, {}ULL, {}, {}}},\n",
+            f["channel"].as_u64().unwrap(),
+            c_string(&payload),
+            c_string(f["hex"].as_str().unwrap())
+        ));
+    }
+    h.push_str(&format!(
+        "}};\nstatic const size_t FRAME_COUNT = {};\nstatic const step_vector STEP_VECTORS[] = {{\n",
+        frames.len()
+    ));
+    let steps = doc["conversation"].as_array().expect("a conversation");
+    for s in steps {
+        let (status, refusal) = match s["refusal"].as_str() {
+            None => (
+                "GUATIAO_OK".to_string(),
+                "GUATIAO_WIRE_ACCEPTED".to_string(),
+            ),
+            Some(r) => (
+                doc["statuses"][r].as_str().unwrap().to_string(),
+                format!("GUATIAO_WIRE_{}", r.to_uppercase()),
+            ),
+        };
+        let kind = match (s["event"].as_str(), s["kind"].as_i64()) {
+            (Some("schema"), _) => 0,
+            (Some("value"), _) => 1,
+            (Some(_), _) => 2,
+            (None, Some(k)) => k,
+            (None, None) => -1,
+        };
+        let tree = s
+            .get("tree")
+            .map_or("NULL".into(), |t| c_string(&tree_hex(t)));
+        let key = s["key"].as_str().map_or("NULL".into(), c_string);
+        h.push_str(&format!(
+            "  {{{}, {status}, {refusal}, {kind}, {}ULL, {}, {tree}, {key}}},\n",
+            c_string(s["frame"].as_str().unwrap()),
+            s["channel"].as_u64().unwrap_or(0),
+            s["at"].as_u64().unwrap_or(0),
+        ));
+    }
+    h.push_str(&format!(
+        "}};\nstatic const size_t STEP_COUNT = {};\n",
+        steps.len()
+    ));
+    h
+}
+
+/// The wire vectors' frames built, and their conversation received, by a
+/// C program through the exported functions, every refusal included.
+#[test]
+fn a_c_program_announces_sends_closes_and_receives() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest.join("tests/c_consumer/wire_consumer.c");
+    let include = manifest.join("include");
+
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler found. See the other tests here for why that is a skip.");
+        return;
+    };
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary; run `cargo build -p guatiao --all-features` first."
+        );
+        return;
+    };
+
+    let generated = dir.join("guatiao_wire_vectors");
+    std::fs::create_dir_all(&generated).expect("a directory for the generated header");
+    std::fs::write(generated.join("wire_vectors.h"), wire_vectors_header())
+        .expect("the generated header is written");
+    let out = dir.join(if cfg!(windows) {
+        "guatiao_wire_consumer.exe"
+    } else {
+        "guatiao_wire_consumer"
+    });
+
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-I")
+        .arg(&generated)
+        .arg("-o")
+        .arg(&out)
+        .arg(&source);
+    if cfg!(windows) {
+        compile.arg(dll.with_extension("dll.lib"));
+    } else {
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the C program did not compile or link.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let run = Command::new(&out)
+        .current_dir(&dir)
+        .output()
+        .expect("the program was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the C program failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the program exited 0 without reporting success.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}
+
+/// A JSON tree of `differences.json` as its wire bytes, in hex.
+fn json_hex(tree: &serde_json::Value) -> String {
+    guatiao::value::wire::to_bytes(&vectors::to_value(tree))
+        .expect("a vector's tree encodes")
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// `tests/vectors/differences.json` as C arrays, for
+/// `differences_consumer.c`.
+fn differences_vectors_header() -> String {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/vectors/differences.json"
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("the vector file is readable"))
+            .expect("the vector file is JSON");
+    let cases = doc["cases"].as_array().expect("cases");
+    let mut h = String::from(
+        "/* Generated from tests/vectors/differences.json by tests/c_exports.rs. */\n\
+         typedef struct { const char *name; const char *schema; const char *value;\n\
+         \x20                const char *baseline; size_t count; const char *keys[16];\n\
+         \x20                int sides[16]; } diff_vector;\n\
+         static const diff_vector DIFF_VECTORS[] = {\n",
+    );
+    for case in cases {
+        let expected = case["expected"].as_array().expect("expected");
+        assert!(expected.len() <= 16, "a case lists at most 16 differences");
+        let baseline = case
+            .get("baseline")
+            .map_or("NULL".to_string(), |b| c_string(&json_hex(b)));
+        let mut keys: Vec<String> = expected
+            .iter()
+            .map(|e| c_string(e["key"].as_str().expect("a key")))
+            .collect();
+        let mut sides: Vec<String> = expected
+            .iter()
+            .map(|e| {
+                let value = i32::from(e.get("value").is_some());
+                let base = i32::from(e.get("default").is_some());
+                (value | base << 1).to_string()
+            })
+            .collect();
+        // An empty initialiser is not C11.
+        if keys.is_empty() {
+            keys.push("NULL".into());
+            sides.push("0".into());
+        }
+        h.push_str(&format!(
+            "  {{{}, {}, {}, {baseline}, {}, {{{}}}, {{{}}}}},\n",
+            c_string(case["name"].as_str().expect("a name")),
+            c_string(&json_hex(&case["schema"])),
+            c_string(&json_hex(&case["value"])),
+            expected.len(),
+            keys.join(", "),
+            sides.join(", "),
+        ));
+    }
+    h.push_str(&format!(
+        "}};\nstatic const size_t DIFF_COUNT = {};\n",
+        cases.len()
+    ));
+    h
+}
+
+/// Every case of the differences vectors, run by a C program through
+/// `guatiao_schema_differences`: the vectors Rust and both bindings read.
+#[test]
+fn a_c_program_reads_every_differences_vector() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest.join("tests/c_consumer/differences_consumer.c");
+    let include = manifest.join("include");
+
+    let Some(cc) = c_compiler::find() else {
+        println!("skipped: no C compiler found. See the other tests here for why that is a skip.");
+        return;
+    };
+    let Some((dir, dll)) = shared_library() else {
+        println!(
+            "skipped: the guatiao shared library is not beside this test \
+             binary; run `cargo build -p guatiao --all-features` first."
+        );
+        return;
+    };
+
+    let generated = dir.join("guatiao_differences_vectors");
+    std::fs::create_dir_all(&generated).expect("a directory for the generated header");
+    std::fs::write(
+        generated.join("differences_vectors.h"),
+        differences_vectors_header(),
+    )
+    .expect("the generated header is written");
+    let out = dir.join(if cfg!(windows) {
+        "guatiao_differences_consumer.exe"
+    } else {
+        "guatiao_differences_consumer"
+    });
+
+    let mut compile = c_compiler::command(&cc);
+    compile
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg("-I")
+        .arg(&include)
+        .arg("-I")
+        .arg(&generated)
+        .arg("-o")
+        .arg(&out)
+        .arg(&source);
+    if cfg!(windows) {
+        compile.arg(dll.with_extension("dll.lib"));
+    } else {
+        compile
+            .arg(format!("-L{}", dir.display()))
+            .arg("-lguatiao")
+            .arg("-Wl,-rpath,$ORIGIN");
+    }
+    let compiled = compile.output().expect("the compiler runs");
+    assert!(
+        compiled.status.success(),
+        "the C program did not compile or link.\nstderr:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let run = Command::new(&out)
+        .current_dir(&dir)
+        .output()
+        .expect("the program was just built");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "the C program failed its own checks.\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        stdout.contains("all checks passed"),
+        "the program exited 0 without reporting success.\nstdout:\n{stdout}"
+    );
+    println!("{}", stdout.trim());
+}

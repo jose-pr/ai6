@@ -1,0 +1,523 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The keys a schema is written with: **JSON Schema's**.
+//!
+//! **A schema IS a value, and the value IS a JSON Schema.** It is a map,
+//! holding maps, carried by the same containers as everything else this
+//! crate moves — and the keys in it are the ones the 2020-12 specification
+//! already assigns. There is no second set of C structs for it, no second
+//! tagged union, no emitter and no parser.
+//!
+//! # Why these keys and not ours
+//!
+//! A vocabulary of our own would have to be translated by every consumer
+//! that wanted to hand a schema to anything else — a form generator, a
+//! validator, an editor's completion. Writing the specification's keys from
+//! the start means that translation does not exist: a schema this crate
+//! builds, written out by `guatiao-serde` in any format, is a document
+//! those tools already read.
+//!
+//! What we add, we add in the space the specification reserves for exactly
+//! that: a key outside its vocabulary is an annotation, carried and not
+//! interpreted, and `x-` prefixed by convention. Every key this crate
+//! invented is in [`EXTENSIONS`] and every one of them is prefixed.
+//!
+//! # The dialect
+//!
+//! [`DIALECT`], declared under [`SCHEMA`] on the document a
+//! [`SchemaBuilder`](super::SchemaBuilder) finishes — and only there,
+//! because a subschema is part of the same document and does not get to
+//! change dialect midway.
+//!
+//! 2020-12 rather than draft-07 or 2019-09: every keyword below is
+//! identical in all three but one. A tuple is 2020-12's [`PREFIX_ITEMS`]
+//! with `items: false`, which the older drafts spelled as an `items` list
+//! and `additionalItems`; the other differences (`definitions` vs `$defs`,
+//! `$ref` siblings, `dependencies`, `format`) touch nothing emitted here.
+//!
+//! # The shape
+//!
+//! ```text
+//! schema  := { "$schema", "type": "object", "title", "description",
+//!              "properties": { key: schema, … }, "required": [key, …] }
+//! schema  := { "type": "boolean" }
+//!          | { "type": "integer", "minimum", "maximum" }
+//!          | { "type": "number",  "minimum", "maximum" }
+//!          | { "type": "string" }
+//!          | { "type": "string", "enum": [value, …], "x-enum-labels": {…} }
+//!          | { "type": "bytes" }                        (ours)
+//!          | { "type": "array",  "items": schema }
+//!          | { "type": "array",  "items": schema, "uniqueItems": true }  (a set)
+//!          | { "type": "array",  "prefixItems": [schema, …], "items": false,
+//!              "minItems": n, "maxItems": n }            (a tuple)
+//!          | { "type": "object", "properties", "required" }
+//!          | { "type": "object", "additionalProperties": schema,
+//!              "propertyNames": schema }                 (keys are data)
+//!          | {}                                          (any value)
+//!          | { "type": "object", "x-variant-tag": key, "oneOf": [arm, …] }
+//!          | { "anyOf": [schema, …] }
+//!          | { "enum": [value, …] }        (any type; also "const", and
+//!                                           a "oneOf" of "const" arms)
+//!          | { "type": [T, "null"] }       (an optional T; also
+//!                                           { "anyOf": [schema, { "type": "null" }] })
+//! arm     := { "title", "description",
+//!              "properties": { <tag>: {"const": value}, … },
+//!              "required": [<tag>, …] }
+//! ```
+//!
+//! Plus, on any of them: `default`, `title`, `description` and
+//! [`X_SENSITIVE`]. A key that is not in this file is an **annotation**:
+//! carried, never interpreted, and named by whoever writes it.
+//!
+//! # An undeclared key is refused, and the document says so
+//!
+//! Every object the builders seal carries [`ADDITIONAL_PROPERTIES`]
+//! `: false` — a struct's document and each arm's subschema — so a general
+//! JSON Schema validator refuses exactly what [`validate`](super::validate)
+//! refuses. A key nobody declared is a misspelling worth reporting, and
+//! silently dropping one is how somebody ends up convinced a setting does
+//! nothing. A document from elsewhere that does not say is read as JSON
+//! Schema reads it, and accepts one.
+//!
+//! # Rules a reader must follow
+//!
+//! **An unrecognised `"type"` means skip that one field**, not reject the
+//! schema. Refusing the whole document because one field names a type
+//! this build does not know hides every field that would have rendered
+//! fine. This is the same rule as an unknown value tag.
+//!
+//! **An optional value reads as the value it holds.** `type: [T, "null"]`
+//! and `anyOf: [X, null]` are what serde-based generators write for an
+//! `Option`; the reader gives the `T` or the `X`, and
+//! [`FieldRef::is_nullable`](super::FieldRef::is_nullable) says null is
+//! accepted too. A `$ref` is read once [`inline_refs`](super::inline_refs)
+//! has replaced it; a shape this build does not read is skipped.
+//!
+//! **Presentation keys are optional; substance is not.** `title`,
+//! `description` and every `x-` key another crate hangs on a field may be
+//! missing and the schema is still correct and still useful. A consumer
+//! with no user interface ignores them. Never make a validation or type
+//! behaviour depend on one.
+//!
+//! **A missing `default` and a `default` of null are different things.**
+//! The first means the field has no default; the second means its default
+//! is nothing. Absence is the query answer, which is why the value model
+//! separates absent from null in the first place.
+//!
+//! **A name lives in one place.** A field's name is its key in
+//! [`PROPERTIES`] and appears nowhere inside the field, and whether it is
+//! required is a name in the owner's [`REQUIRED`] list and appears nowhere
+//! inside the field either. Both are JSON Schema's arrangement, and both
+//! are why a builder collects its fields and writes them at `finish`
+//! rather than appending as it goes.
+//!
+//! **A choice's label is keyed, never parallel.** [`X_ENUM_LABELS`] is a map
+//! from the value in [`ENUM`] to what a person is shown. The shape this
+//! refuses — a labels list beside the values list — lets the two drift in
+//! length or order, which shows a person one alternative while storing
+//! another. A map cannot drift, because the value is the key.
+
+#![forbid(unsafe_code)]
+
+// --- the document -----------------------------------------------------
+
+/// The dialect declaration, on the root document only.
+pub const SCHEMA: &str = "$schema";
+
+/// The dialect this crate writes: JSON Schema 2020-12.
+///
+/// The value of [`SCHEMA`], and the only line that would change to emit an
+/// older draft — every keyword here is spelled the same in draft-07 and
+/// 2019-09.
+pub const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+// --- any schema -------------------------------------------------------
+
+/// A reference to another schema: `{"$ref": "#/$defs/Name"}`.
+///
+/// **Read as a kind this build skips** ([`Kind::Unknown`](super::KindRef::Unknown)),
+/// because a borrowed view has no root to look the target up in.
+/// [`inline_refs`](super::inline_refs) replaces every local reference with
+/// the schema it names, and what it cannot resolve it leaves for the
+/// reader to skip.
+pub const REF: &str = "$ref";
+/// Where a document keeps the schemas its [`REF`]s name: a map from name
+/// to schema. Carried; [`inline_refs`](super::inline_refs) reads it.
+pub const DEFS: &str = "$defs";
+
+/// Which kind this is: one of the `TYPE_*` constants below, or a list of
+/// them in which `"null"` marks an optional value (`["string", "null"]`).
+pub const TYPE: &str = "type";
+/// A short human name. Optional.
+///
+/// What the Rust builders call `label`.
+pub const TITLE: &str = "title";
+/// Longer human prose. Optional.
+///
+/// What the Rust builders call `help`.
+pub const DESCRIPTION: &str = "description";
+/// The default value, of whatever kind this accepts.
+///
+/// **Absent and null are different.** No `default` key means there is no
+/// default; a `default` of null means the default is nothing.
+pub const DEFAULT: &str = "default";
+
+// --- an object --------------------------------------------------------
+
+/// The fields an object declares: a **map** from name to schema.
+///
+/// A map rather than a list, which is what JSON Schema says. **Declaration
+/// order survives**, because this crate's maps are insertion-ordered by
+/// contract — worth stating, since it is the one thing a JSON Schema
+/// consumer would not normally be able to rely on.
+///
+/// It does not make a lookup cheaper: a map here is an insertion-ordered
+/// association list, so finding a key is a scan either way.
+pub const PROPERTIES: &str = "properties";
+/// The names that must be given: a list of strings, on the **object**.
+///
+/// Not a flag on the field. A field and its requiredness are declared in
+/// two different places, which is JSON Schema's arrangement; the builders
+/// hide it by collecting `required()` calls and writing the list at
+/// `finish`.
+pub const REQUIRED: &str = "required";
+/// `additionalProperties`: written as `false` on every object the
+/// builders seal, so that a document refuses an undeclared key and says
+/// so. [`validate`](super::validate) refuses one under `false`, checks one
+/// against a schema here, and accepts one when the key is absent.
+pub const ADDITIONAL_PROPERTIES: &str = "additionalProperties";
+
+// --- an array ---------------------------------------------------------
+
+/// The schema every element of an array satisfies; on a tuple, every
+/// element past [`PREFIX_ITEMS`], and `false` when there may be none.
+pub const ITEMS: &str = "items";
+/// A tuple's elements, position by position: a list of schemas, the first
+/// for the element at 0. Written with `items: false` and [`MIN_ITEMS`] and
+/// [`MAX_ITEMS`] both the list's length, so a tuple is exactly that long.
+pub const PREFIX_ITEMS: &str = "prefixItems";
+/// `true` when no two elements of an array may be equal: a set. Numbers
+/// are equal by what they denote (`1` and `1.0`), everything else
+/// structurally.
+pub const UNIQUE_ITEMS: &str = "uniqueItems";
+
+// --- an object whose keys are data -------------------------------------
+
+/// The schema every key of an object satisfies, as text: what a map keyed
+/// by something other than text writes (`{"type": "string", "pattern":
+/// "^(0|[1-9][0-9]*)$"}` for an unsigned integer).
+pub const PROPERTY_NAMES: &str = "propertyNames";
+
+// --- a number ---------------------------------------------------------
+
+/// Inclusive lower bound of a numeric kind. Optional.
+pub const MINIMUM: &str = "minimum";
+/// Inclusive upper bound of a numeric kind. Optional.
+pub const MAXIMUM: &str = "maximum";
+/// Exclusive lower bound of a numeric kind: the value must be greater.
+/// Optional.
+pub const EXCLUSIVE_MINIMUM: &str = "exclusiveMinimum";
+/// Exclusive upper bound of a numeric kind: the value must be less.
+/// Optional.
+pub const EXCLUSIVE_MAXIMUM: &str = "exclusiveMaximum";
+/// A number must be an exact multiple of this, which is also the step a
+/// slider moves by. Optional; greater than zero, or it is ignored.
+///
+/// Exact for a whole-number step on an integer. On a real number it is
+/// checked to within a few ulps, because `0.3` is not a multiple of `0.1`
+/// in binary and a person typing it meant that it was.
+pub const MULTIPLE_OF: &str = "multipleOf";
+
+// --- strings -----------------------------------------------------------
+
+/// Fewest characters a string may hold. Optional.
+///
+/// **Counted in Unicode code points**, which is how JSON Schema counts
+/// them -- not bytes, and not what a person would call a character when
+/// an accent is a separate code point.
+pub const MIN_LENGTH: &str = "minLength";
+/// Most characters a string may hold, counted as [`MIN_LENGTH`] counts.
+/// Optional.
+pub const MAX_LENGTH: &str = "maxLength";
+/// A regular expression a string must match. Optional.
+///
+/// **Unanchored**, as JSON Schema specifies: `[0-9]+` accepts `a1`, and a
+/// pattern that means the whole string says `^...$`. Enforced only with
+/// the `regex` feature ([`PATTERNS_ENFORCED`](super::PATTERNS_ENFORCED)
+/// says whether this build has it), and only for a pattern that crate's
+/// syntax accepts -- ECMA-262 lookaround and backreferences are carried,
+/// never enforced. Carried either way, so a renderer can still check as a
+/// person types.
+///
+/// **The dialect is ECMA-262's, with these differences.** `\d`, `\D`,
+/// `\w` and `\W` are the ASCII classes ECMA-262 defines (`[0-9]`,
+/// `[A-Za-z0-9_]` and their complements), where the `regex` crate's own
+/// are Unicode; a `\D` or `\W` *inside* a character class is the one
+/// place that is not rewritten and stays Unicode. `\s`, `\b` and
+/// `\p{..}` keep the `regex` crate's Unicode meaning, and a pattern
+/// using syntax only one of the two dialects has is carried, not
+/// enforced.
+pub const PATTERN: &str = "pattern";
+/// What a string holds: `email`, `uri`, `hostname`, `ipv4`, `ipv6`,
+/// `date`, `date-time`, `uuid` and the rest JSON Schema names. Optional.
+///
+/// **An annotation, never checked.** JSON Schema 2020-12 splits `format`
+/// into an annotation vocabulary (the default) and an assertion one, and
+/// this crate implements the first. A renderer picks an input from it; a
+/// value is not refused for failing to look like one.
+pub const FORMAT: &str = "format";
+
+// --- lists -------------------------------------------------------------
+
+/// Fewest elements a list may hold. Optional.
+pub const MIN_ITEMS: &str = "minItems";
+/// Most elements a list may hold. Optional.
+pub const MAX_ITEMS: &str = "maxItems";
+
+// --- about a value, not its shape ----------------------------------------
+
+/// The value is owned by whoever serves it: shown, never edited. `true`
+/// or absent. An annotation -- carried, read, never enforced here, since
+/// "a person may not change this" is a statement about who writes, not
+/// about which values are acceptable.
+pub const READ_ONLY: &str = "readOnly";
+/// The value is accepted and never handed back: a password a form sends
+/// and a server never echoes. `true` or absent. Written beside
+/// [`X_SENSITIVE`] by `FieldBuilder::sensitive`, so a tool that knows no
+/// `x-` key still treats the field as a secret; `x-sensitive` stays the
+/// one this crate reads, because "never log" is the stronger promise.
+pub const WRITE_ONLY: &str = "writeOnly";
+/// The field is kept for old documents and should not be offered for new
+/// ones. `true` or absent. An annotation.
+pub const DEPRECATED: &str = "deprecated";
+/// Sample values: a list, each of the field's own kind. An annotation --
+/// a renderer may offer them, and nothing is refused for not being one.
+pub const EXAMPLES: &str = "examples";
+
+// --- alternatives -----------------------------------------------------
+
+/// The permitted values of an enumeration: a list.
+pub const ENUM: &str = "enum";
+/// The one value a schema accepts, which is how an arm carries its
+/// discriminant.
+pub const CONST: &str = "const";
+/// **Any** of these schemas accepting is enough: an untagged union.
+///
+/// `anyOf` and not `oneOf`, deliberately. A union asks whether the value is
+/// acceptable at all — a port number *or* the word `auto` — and knowing
+/// which arm took it is explicitly not the point. `oneOf` would reject a
+/// value two arms both accept, which is a rule nobody declaring a union
+/// meant to state.
+pub const ANY_OF: &str = "anyOf";
+/// **Exactly one** of these schemas: a tagged variant's arms.
+///
+/// Exact here because the arms are told apart by a discriminant, so a value
+/// matching two of them is a contradiction rather than a convenience.
+pub const ONE_OF: &str = "oneOf";
+/// A value this schema accepts is refused: `{"not": {"const": 0}}` beside
+/// an integer's bounds is every integer but zero, what a signed non-zero
+/// type writes.
+pub const NOT: &str = "not";
+/// **Every** one of these schemas must accept. Read as the wrapper a
+/// generator writes around one schema to put a `description` beside a
+/// reference (`{"description": .., "allOf": [{"$ref": ..}]}`), which reads
+/// as that one schema. Beside a `type` it is not read; on its own with
+/// several members it is a kind to skip.
+pub const ALL_OF: &str = "allOf";
+
+// --- what this crate adds ---------------------------------------------
+//
+// ONE key, and the bar it had to clear: a key belongs here only if this
+// crate acts on it. Presentation keys do not -- they were removed on
+// 2026-09-24, vocabulary and readers together, and this file does not
+// name them even to say so. They remain perfectly legal in a document:
+// unknown to `known()`, carried as annotations, interpreted by whoever
+// wrote them.
+
+/// True when the value is a secret: never print it.
+///
+/// **Not presentation**, which is why it stayed when the rest went. A
+/// form masks it, but so does a log, a crash dump and anything else that
+/// renders a value into text, none of which have a screen. What each of
+/// them does about it is its own decision; this says only that somebody
+/// declared the field one.
+pub const X_SENSITIVE: &str = "x-sensitive";
+/// What a person is shown for each value in [`ENUM`], or for each name an
+/// open enumeration lists in [`EXAMPLES`]: a map from the value to its
+/// label.
+///
+/// Keyed rather than parallel, so a label cannot come adrift from the value
+/// it belongs to. A value with no entry shows as itself.
+pub const X_ENUM_LABELS: &str = "x-enum-labels";
+/// The key a variant's discriminant is stored under.
+///
+/// JSON Schema has no discriminator keyword — OpenAPI's is not JSON
+/// Schema — and the alternative is for a reader to infer it by finding the
+/// property that is [`CONST`] in every arm, which stops working the moment
+/// two properties are. So it is carried.
+///
+/// Spelled out rather than `x-tag`: an annotation space is shared with
+/// every vendor, and "tag" is the most overloaded word in the
+/// neighbourhood — a label on a field, a marker on a resource. The
+/// earlier emitter in this family chose the same long name.
+///
+/// **Written even for a variant with no arms**, which is what lets a
+/// reader tell an empty variant from an empty union.
+///
+/// Flattened onto `key -> text` storage — a config map, a URI query — the
+/// discriminant lands at the field's own key and each payload field at
+/// `<key>.<field>`.
+pub const X_VARIANT_TAG: &str = "x-variant-tag";
+
+// --- the types --------------------------------------------------------
+
+/// True or false.
+pub const TYPE_BOOLEAN: &str = "boolean";
+/// Nothing: the only value is null. Chiefly an arm of [`ANY_OF`] or an
+/// entry of a [`TYPE`] list that makes a value optional.
+pub const TYPE_NULL: &str = "null";
+/// A whole number, optionally bounded by [`MINIMUM`] and [`MAXIMUM`].
+pub const TYPE_INTEGER: &str = "integer";
+/// A real number, optionally bounded by [`MINIMUM`] and [`MAXIMUM`].
+pub const TYPE_NUMBER: &str = "number";
+/// Free text, or — with [`ENUM`] — one of a fixed set of alternatives.
+pub const TYPE_STRING: &str = "string";
+/// A sequence of values, every one satisfying [`ITEMS`].
+pub const TYPE_ARRAY: &str = "array";
+/// A nested object, whose fields are under [`PROPERTIES`].
+///
+/// Also what a tagged variant is: an object carrying [`X_VARIANT_TAG`] and
+/// [`ONE_OF`].
+pub const TYPE_OBJECT: &str = "object";
+/// Opaque bytes. **Ours, and not a JSON Schema type.**
+///
+/// A value kind the schema can name, so a field carrying a certificate or a
+/// ticket is described as what it is rather than as text that happens to
+/// survive. It has no text form and therefore no bounds.
+///
+/// The consequence, stated so nobody rediscovers it: JSON Schema's
+/// meta-schema fixes `type` to a closed set, so a document saying
+/// `"type": "bytes"` is readable by anything and **fails a strict
+/// schema-of-the-schema check**. Data is unaffected. The escape hatch, if
+/// it is ever wanted, is `"type": "string"` with a `contentEncoding` of our
+/// choosing, which carries the same information in a valid document — and
+/// says the bytes are text, which they are not.
+pub const TYPE_BYTES: &str = "bytes";
+
+/// Every key JSON Schema assigns a meaning that this crate writes.
+pub const KEYWORDS: &[&str] = &[
+    SCHEMA,
+    REF,
+    DEFS,
+    TYPE,
+    TITLE,
+    DESCRIPTION,
+    DEFAULT,
+    PROPERTIES,
+    REQUIRED,
+    ITEMS,
+    PREFIX_ITEMS,
+    UNIQUE_ITEMS,
+    PROPERTY_NAMES,
+    MINIMUM,
+    MAXIMUM,
+    EXCLUSIVE_MINIMUM,
+    EXCLUSIVE_MAXIMUM,
+    MULTIPLE_OF,
+    MIN_LENGTH,
+    MAX_LENGTH,
+    PATTERN,
+    FORMAT,
+    MIN_ITEMS,
+    MAX_ITEMS,
+    READ_ONLY,
+    WRITE_ONLY,
+    DEPRECATED,
+    EXAMPLES,
+    ENUM,
+    CONST,
+    ANY_OF,
+    ONE_OF,
+    ALL_OF,
+    NOT,
+    ADDITIONAL_PROPERTIES,
+];
+
+/// Every key **this crate** invented, all of them `x-` prefixed.
+pub const EXTENSIONS: &[&str] = &[X_SENSITIVE, X_ENUM_LABELS, X_VARIANT_TAG];
+
+/// Every key that has a meaning at all: [`KEYWORDS`] and [`EXTENSIONS`].
+///
+/// A reader uses it to tell an annotation from a key it merely does not
+/// know: anything outside this list is an annotation, and annotations are
+/// carried, never interpreted. `x-merge` is one of those — this crate's
+/// merge gives it a meaning from over in its own module, and the schema
+/// itself still does not know that merging exists.
+pub fn known(key: &str) -> bool {
+    KEYWORDS.contains(&key) || EXTENSIONS.contains(&key)
+}
+
+/// Every type name this vocabulary assigns a meaning.
+pub const TYPES: &[&str] = &[
+    TYPE_NULL,
+    TYPE_BOOLEAN,
+    TYPE_INTEGER,
+    TYPE_NUMBER,
+    TYPE_STRING,
+    TYPE_ARRAY,
+    TYPE_OBJECT,
+    TYPE_BYTES,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The vocabulary is flat and every name is distinct. A duplicate
+    /// would mean two concepts sharing a key, which a reader cannot undo.
+    #[test]
+    fn every_keyword_is_distinct() {
+        let mut seen: Vec<&str> = KEYWORDS.iter().chain(EXTENSIONS).copied().collect();
+        seen.sort_unstable();
+        let before = seen.len();
+        seen.dedup();
+        assert_eq!(seen.len(), before, "a key means one thing: {seen:?}");
+
+        let mut kinds = TYPES.to_vec();
+        kinds.sort_unstable();
+        let before = kinds.len();
+        kinds.dedup();
+        assert_eq!(kinds.len(), before);
+    }
+
+    /// The prefix is the whole boundary between what the specification
+    /// says and what we added, so it has to hold in both directions.
+    #[test]
+    fn the_prefix_separates_ours_from_theirs() {
+        for k in EXTENSIONS {
+            assert!(k.starts_with("x-"), "{k} is ours and must say so");
+        }
+        for k in KEYWORDS {
+            assert!(
+                !k.starts_with("x-"),
+                "{k} is JSON Schema's and must not be prefixed"
+            );
+        }
+    }
+
+    /// Exactly one type is not JSON Schema's, and it is the one the
+    /// meta-schema consequence is recorded against.
+    #[test]
+    fn bytes_is_the_only_type_we_invented() {
+        const JSON_SCHEMA_TYPES: [&str; 7] = [
+            "null", "boolean", "object", "array", "number", "string", "integer",
+        ];
+        let ours: Vec<&&str> = TYPES
+            .iter()
+            .filter(|t| !JSON_SCHEMA_TYPES.contains(t))
+            .collect();
+        assert_eq!(ours, [&TYPE_BYTES], "extending the type set is a decision");
+    }
+}

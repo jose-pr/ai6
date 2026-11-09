@@ -1,0 +1,438 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! A host, end to end: where it looks, what it found, and how it builds a
+//! provider from a configuration it wrote itself.
+//!
+//! `examples/greeter_kind` is the two traits a host and a library both
+//! compile against. `examples/derived_greeter` is one library offering
+//! them. This is the other side -- the program that maps whatever
+//! libraries are on disk and calls them as the traits:
+//!
+//! 1. **Where it looks** is a search path: the arguments, else
+//!    `GREETER_HOST_PATH`, else the directory this executable is in.
+//!    Every entry is walked once and the report says what happened at
+//!    each place -- a library that loaded, a file that was not one, an
+//!    entry that could not be read.
+//! 2. **What it found** is asked for as `dyn Greeter`: an [`Offer`] per
+//!    provider whose table fits the trait. A library with a hand-written
+//!    table of the same kind is loaded but is not an offer, and that is
+//!    the difference between "the file is a library" and "I can call it".
+//!    A greeter is also lent a configuration (`&mut Map`) and fills it
+//!    in where it stands, in the host's own map.
+//! 3. **A configured provider** is built from a value the host made
+//!    with its own derived type -- `#[derive(ToValue, Schema)]` on a
+//!    struct the host owns -- checked against the schema the provider
+//!    declared, and handed to `instantiate`. The instance is the trait.
+//! 4. **Objects cross both ways**: the host implements `Listener` (an
+//!    object kind) and hands one in; the provider hands a `Conversation`
+//!    back; the host drives it with `&mut` calls, reads into its own
+//!    buffer, and drops it. Each side destroys what it holds last.
+//! 5. **A source**, when `GREETER_HOST_SOURCE` names one: a file serving
+//!    libraries that are not files themselves, such as the guatiao-source-py
+//!    bridge serving greeters written in Python, configured by the JSON
+//!    in `GREETER_HOST_SOURCE_CONFIG`. One refresh loads what it serves,
+//!    and its greeters are offered beside the rest. On Windows the
+//!    bridge imports `python3.dll` from the Python installation:
+//!    `GREETER_HOST_IMPORT_SEARCH=path` lets every file this host opens
+//!    find its imports on `PATH` too.
+//!
+//! ```text
+//! cargo build --workspace            # puts derived_greeter beside this binary
+//! cargo run -p greeter_host          # scans target/debug
+//! cargo run -p greeter_host -- /some/dir /some/lib.so
+//! GREETER_HOST_SOURCE=/path/to/libguatiao_source_py.so \
+//!   GREETER_HOST_SOURCE_CONFIG='{"dirs": ["examples/python_provider"],
+//!     "paths": ["bindings/python/guatiao/src", "examples/greeter_kind/python"]}' \
+//!   cargo run -p greeter_host
+//! ```
+extern crate alloc;
+
+use alloc::sync::Arc;
+use core::sync::atomic::{AtomicBool, Ordering};
+use guatiao::value::convert::TryAsRef;
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::sync::Mutex;
+
+use greeter_kind::{Counter, Greeter, Listener};
+use guatiao::library::{
+    ImportSearch, Kind, Offer, Order, ProviderError, Registry, ScanRules, SearchPath, scan_path,
+};
+use guatiao::schema::{SchemaRef, validate_map};
+use guatiao::{Map, Provider, Schema, ToValue, Value};
+
+/// What this host wants a shouting greeter to start with.
+///
+/// The provider declares what it takes as a schema; this host declares
+/// what it has as a type. Neither knows the other's spelling, so the value
+/// crossing between them is checked against the schema before it is
+/// offered -- a refusal names the key, not the value, so it is safe to
+/// print.
+#[derive(ToValue, Schema, Debug)]
+struct ShoutSettings {
+    /// What every shout starts with.
+    prefix: String,
+}
+
+fn main() -> ExitCode {
+    let path = search_path();
+    println!("looking in:");
+    for entry in path.entries() {
+        println!("  {}", entry.display());
+    }
+
+    // The host's registry: its own id and version, and its own allocator
+    // for every value that crosses back (`None` is the Rust one).
+    let mut registry = Registry::with_alloc("greeter_host", env!("CARGO_PKG_VERSION"), None);
+    // Where Windows finds what a file this host opens imports: beside it,
+    // beside this program and in the system directory, unless
+    // `GREETER_HOST_IMPORT_SEARCH=path` adds the current directory and
+    // PATH, as the Python bridge's python3.dll needs.
+    if std::env::var("GREETER_HOST_IMPORT_SEARCH").as_deref() == Ok("path") {
+        registry.set_import_search(ImportSearch::Path);
+    }
+
+    // A provider this program carries compiled in, registered beside
+    // what it loads: same keys, same dedup, same offers, no file. It is
+    // offered first only because its key sorts first.
+    if let Err(e) = registry.register_local("greeter_host", library) {
+        println!("the built-in greeter was refused: {e}");
+    }
+
+    // Only libraries that declare a greeter are mapped. The declaration is
+    // read out of the file as data before anything in it runs, so a
+    // directory holding unrelated libraries costs nothing but the read.
+    let rules = ScanRules::parse(&[format!("kind={}", <dyn Greeter as Kind>::NAME)])
+        .expect("a rule written by hand");
+    let report = scan_path(&mut registry, &path, Order::Ascending, &rules);
+
+    println!("\nloaded ({}):", report.loaded.len());
+    for (file, key) in &report.loaded {
+        println!("  {} as {key}", file.display());
+    }
+    if !report.skipped.is_empty() {
+        println!("skipped ({}):", report.skipped.len());
+        for (file, why) in &report.skipped {
+            println!("  {}: {why}", file.display());
+        }
+    }
+    for (file, error) in &report.failed {
+        println!("failed: {}: {error}", file.display());
+    }
+    for (place, error) in &report.unreadable {
+        println!("unreadable: {}: {error}", place.display());
+    }
+    let served = add_source(&mut registry);
+    if report.loaded.is_empty() && served == 0 {
+        eprintln!(
+            "\nno greeter library found -- `cargo build --workspace` first, or name a directory"
+        );
+        return ExitCode::FAILURE;
+    }
+
+    // Everything the libraries registered, whatever its kind and however
+    // its table was written.
+    println!("\nproviders ({}):", registry.all().len());
+    for provider in registry.all() {
+        println!(
+            "  {} [{}] from {}",
+            provider.id(),
+            provider.kinds().join(", "),
+            provider.library()
+        );
+    }
+
+    // The ones this host can call as the trait. An offer derefs to the
+    // trait, so `greet` here is the proxy the kind generated, marshalling
+    // across the table.
+    let offers: Vec<Offer<dyn Greeter>> = registry.offers::<dyn Greeter>().collect();
+    println!("\noffers as dyn Greeter ({}):", offers.len());
+    for offer in &offers {
+        let availability = match offer.available() {
+            Ok(()) => "available".to_string(),
+            Err(why) => format!("unavailable: {why}"),
+        };
+        println!("  {} ({availability})", offer.id());
+    }
+    for (provider, mismatch) in registry.mismatches::<dyn Greeter>() {
+        println!(
+            "  {} is a greeter this host cannot call: {mismatch}",
+            provider.id()
+        );
+    }
+
+    // 2. A provider with a default instance answers as it is; one built
+    // only from a configuration has none, and waits for step 3.
+    for (offer, greeter) in offers
+        .iter()
+        .filter_map(|o| o.default_instance().map(|g| (o, g)))
+    {
+        match greeter.greet("ana") {
+            Ok(answer) => println!(
+                "\n{} greets: {}",
+                offer.id(),
+                answer
+                    .get("greeting")
+                    .and_then(TryAsRef::<str>::try_as_ref)
+                    .unwrap_or("?")
+            ),
+            Err(e) => println!("\n{} refused: {e}", offer.id()),
+        }
+        println!("{} shouts: {}", offer.id(), greeter.shout("ana"));
+        // A configuration LENT for one call: the greeter fills it in where
+        // it stands, in this host's own map, and the host then hands it
+        // over to be greeted.
+        let mut config = Map::new();
+        config.set("mood", "cheerful");
+        match greeter.check(&mut config) {
+            Ok(usable) => {
+                let added: Vec<&str> = config.keys().filter(|k| *k != "mood").collect();
+                println!(
+                    "{} checked a configuration, added [{}], usable: {usable}",
+                    offer.id(),
+                    added.join(", ")
+                );
+                if usable && let Ok(answer) = greeter.greet_from(config) {
+                    println!(
+                        "{} greets from it: {}",
+                        offer.id(),
+                        answer
+                            .get("greeting")
+                            .and_then(TryAsRef::<str>::try_as_ref)
+                            .unwrap_or("?")
+                    );
+                }
+            }
+            Err(e) => println!("{} refused the configuration: {e}", offer.id()),
+        }
+        // The same provider through its other kind, if it serves one.
+        if let Some(Ok(counter)) = offer
+            .key()
+            .and_then(|key| registry.offer::<dyn Counter>(key))
+            && let Some(counter) = counter.default_instance()
+        {
+            println!("{} has been asked {} time(s)", offer.id(), counter.count());
+        }
+    }
+
+    // 3. A provider built from a configuration: read what it takes, build
+    // what this host has, check the one against the other, instantiate.
+    let mut status = ExitCode::SUCCESS;
+    for offer in offers.iter().filter(|o| o.builds_instances()) {
+        let Some(schema) = offer.config_schema() else {
+            println!("\n{} builds instances but declares no schema", offer.id());
+            continue;
+        };
+        println!("\n{} takes:", offer.id());
+        println!("{}", indent(&render(schema)));
+
+        let settings = ShoutSettings {
+            prefix: "hey".to_string(),
+        };
+        let config = settings.to_value().expect("a host's own type converts");
+        // The host's schema for the type it wrote, beside the provider's
+        // for the value it takes: the two are independent documents that
+        // happen to agree, and `validate_map` is what says so.
+        println!("this host offers: {}", render(&config));
+        let provider_schema = SchemaRef::new(schema).expect("a schema is a map");
+        if let Err(e) = validate_map(provider_schema, &config) {
+            println!("{} would refuse this configuration: {e}", offer.id());
+            status = ExitCode::FAILURE;
+            continue;
+        }
+        match offer.instantiate(&config) {
+            Ok(instance) => match instance.greet("ana") {
+                Ok(answer) => println!(
+                    "{} configured with {:?} greets: {}",
+                    offer.id(),
+                    settings,
+                    answer
+                        .get("greeting")
+                        .and_then(TryAsRef::<str>::try_as_ref)
+                        .unwrap_or("?")
+                ),
+                Err(e) => println!("{} refused: {e}", offer.id()),
+            },
+            Err(e) => {
+                println!("{} could not be built: {e}", offer.id());
+                status = ExitCode::FAILURE;
+            }
+        }
+        // And what the provider says to a value that does not fit -- the
+        // refusal comes from the provider's decode, across the boundary.
+        let empty = Value::from(Map::new());
+        if let Err(e) = offer.instantiate(&empty) {
+            println!("{} given nothing: {e}", offer.id());
+        }
+    }
+
+    // 4. An object: the host hands a listener IN (an object kind this
+    // program implements, owned by the library from then on), gets a
+    // conversation OUT (an object kind the library implements, owned by
+    // this program), drives it, reads into its own buffer, drops it --
+    // and both objects are destroyed on the side that holds them last.
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let listener_dropped = Arc::new(AtomicBool::new(false));
+    for (offer, greeter) in offers
+        .iter()
+        .filter_map(|o| o.default_instance().map(|g| (o, g)))
+    {
+        let listener = Echo {
+            heard: Arc::clone(&heard),
+            dropped: Arc::clone(&listener_dropped),
+        }
+        .into_object();
+        match greeter.start(listener) {
+            Ok(mut chat) => {
+                for line in ["good morning", "how are you"] {
+                    if let Err(e) = chat.say(line) {
+                        println!("{} would not hear \"{line}\": {e}", offer.id());
+                    }
+                }
+                let mut buffer = [0u8; 64];
+                let n = chat.read(&mut buffer);
+                let transcript = String::from_utf8_lossy(&buffer[..n.max(0) as usize]).into_owned();
+                println!(
+                    "\n{} held a conversation of {} turn(s); the transcript read back into a {}-byte buffer:",
+                    offer.id(),
+                    chat.turns(),
+                    buffer.len()
+                );
+                println!("{}", indent(&transcript));
+                drop(chat);
+                println!(
+                    "the listener heard {:?} and was dropped with the conversation: {}",
+                    heard.lock().map(|h| h.clone()).unwrap_or_default(),
+                    listener_dropped.load(Ordering::SeqCst)
+                );
+            }
+            Err(e) => println!("\n{} holds no conversations: {e}", offer.id()),
+        }
+    }
+    status
+}
+
+/// A greeter this program carries itself. `local_providers!` writes the
+/// `library` function `register_local` takes, which hands the registry
+/// parts it owns, and nothing else: no entry symbol, no declaration, so
+/// this executable never looks like a plugin.
+#[derive(Default, Provider)]
+#[provider(Greeter, id = "builtin", name = "Built-in greeter")]
+struct Builtin;
+
+impl Greeter for Builtin {
+    fn greet(&self, name: &str) -> Result<Map, ProviderError> {
+        let mut map = Map::new();
+        map.set("greeting", format!("hi from the host, {name}"));
+        Ok(map)
+    }
+}
+
+guatiao::local_providers!(Builtin);
+
+/// This program's listener: an object kind implemented on the HOST side
+/// and handed to the library, which calls it back across the boundary
+/// and destroys it when the conversation ends.
+struct Echo {
+    heard: Arc<Mutex<Vec<String>>>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl Listener for Echo {
+    fn heard(&mut self, what: &str) {
+        if let Ok(mut heard) = self.heard.lock() {
+            heard.push(what.to_string());
+        }
+    }
+}
+
+impl Drop for Echo {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Adds the source `GREETER_HOST_SOURCE` names, configured by the JSON map
+/// in `GREETER_HOST_SOURCE_CONFIG`, refreshes once, and answers how many
+/// libraries it loaded.
+fn add_source(registry: &mut Registry) -> usize {
+    let Ok(path) = std::env::var("GREETER_HOST_SOURCE") else {
+        return 0;
+    };
+    let text = std::env::var("GREETER_HOST_SOURCE_CONFIG").unwrap_or_else(|_| "{}".to_string());
+    let config = match guatiao_serde::text::json::from_str(
+        &text,
+        guatiao::Alloc::rust(),
+        guatiao_serde::Presentation::new(),
+    ) {
+        Ok(value) => match TryAsRef::<Map>::try_as_ref(&value) {
+            Some(map) => map.clone(),
+            None => {
+                println!("\nthe source's configuration is not a map");
+                return 0;
+            }
+        },
+        Err(e) => {
+            println!("\nthe source's configuration does not parse: {e}");
+            return 0;
+        }
+    };
+    match registry.add_source_file(std::path::Path::new(&path), &config) {
+        Ok(name) => println!("\nadded the source {name}"),
+        Err(e) => {
+            println!("\nthe source was refused: {e}");
+            return 0;
+        }
+    }
+    let changed = registry.refresh();
+    for one in &changed.loaded {
+        println!("  served {} as {}", one.id, one.key);
+    }
+    for one in &changed.refused {
+        println!(
+            "  refused {}: {}",
+            one.id.as_deref().unwrap_or("the listing"),
+            one.reason
+        );
+    }
+    changed.loaded.len()
+}
+
+/// The arguments, else `GREETER_HOST_PATH`, else beside this executable.
+///
+/// Adjacency accumulates with the override rather than being replaced by
+/// it, and a place named twice is one entry.
+fn search_path() -> SearchPath {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut path = if args.is_empty() {
+        SearchPath::parse(&std::env::var("GREETER_HOST_PATH").unwrap_or_default())
+    } else {
+        let mut path = SearchPath::new();
+        for arg in args {
+            path.push(PathBuf::from(arg));
+        }
+        path
+    };
+    if path.is_empty()
+        && let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(PathBuf::from))
+    {
+        path.push(dir);
+    }
+    path
+}
+
+fn render(value: &Value) -> String {
+    guatiao_serde::text::json::to_string_pretty(value, guatiao_serde::Presentation::new())
+        .unwrap_or_else(|e| format!("<not renderable: {e}>"))
+}
+
+fn indent(text: &str) -> String {
+    text.lines()
+        .map(|l| format!("  {l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}

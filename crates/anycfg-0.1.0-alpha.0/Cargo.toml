@@ -1,0 +1,41 @@
+# anycfg-rs/. at bf71f7097a550037972a0651e8bd35747b8dcd11, with what it inherits written out.
+[package]
+name = "anycfg"
+version = "0.1.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Format-neutral configuration discovery, loading and layering"
+license = "MPL-2.0"
+readme = "README.md"
+repository = "https://github.com/jose-pr/anycfg-rs"
+homepage = "https://jose-pr.github.io/anycfg-rs/"
+keywords = ["config", "configuration", "serde", "toml", "yaml"]
+categories = ["config"]
+publish = false
+exclude = [".*", "*.local.*", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+[dependencies]
+serde_path_to_error = "0.1"
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["std"]
+[dev-dependencies]
+serde-saphyr = "2"
+tempfile = "3"
+[dev-dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+[dev-dependencies.serde_json]
+version = "1"
+features = ["preserve_order"]
+[dev-dependencies.toml]
+version = "0.9"
+features = ["preserve_order"]

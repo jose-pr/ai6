@@ -1,0 +1,150 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+NAME_SCHEMA <- '{"type": "object", "properties": {"name": {"type": "string", "title": "Name"}},
+  "required": ["name"], "additionalProperties": false}'
+
+FLAT_SCHEMA <- '{
+  "type": "object",
+  "properties": {
+    "auth": {"type": "object", "x-variant-tag": "auth", "oneOf": [
+      {"type": "object", "properties": {"auth": {"const": "sso"}}, "required": ["auth"]},
+      {"type": "object", "properties": {"auth": {"const": "userpass"}, "username": {"type": "string"},
+        "password": {"type": "string", "x-sensitive": true}}, "required": ["auth"]}]},
+    "agent": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}}}},
+    "env": {"type": "object", "additionalProperties": {"type": "string"}},
+    "host": {"type": "string", "title": "Host"}
+  }
+}'
+
+empty_map <- structure(list(), names = character())
+
+case("checking a form and laying it out", with_library({
+  schema <- value(read_json(NAME_SCHEMA))
+  expect_true(is.null(intake_check(schema, empty_map)))
+  err <- intake_check(schema, list(sections = list(), fields = list(nope = empty_map)))
+  expect_equal(err$kind, "unknown_field")
+  expect_equal(unlist(lapply(intake_layout(schema, empty_map), function(s) unlist(s$fields))), "name")
+  expect_true(intake_is_visible(schema, empty_map, "name", list(name = "ana")))
+  e <- expect_error(intake_is_visible(schema, empty_map, "nope", empty_map), "guatiao_error")
+  expect_equal(e$status, "NotFound")
+  close(schema)
+}))
+
+case("a path names one place inside a value", with_library({
+  v <- value(list(agent = list(list(name = "one"), list(name = "two")),
+    env = list(PATH = "/bin", "a.b" = "dotted", "1" = "keyed")))
+  expect_equal(value_data(intake_at(v, "agent[0].name")), "one")
+  expect_equal(value_data(intake_at(v, "agent[1].name")), "two")
+  expect_equal(value_data(intake_at(v, "env[PATH]")), "/bin")
+  expect_equal(value_data(intake_at(v, "env[a.b]")), "dotted")
+  expect_equal(value_data(intake_at(v, 'env["1"]')), "keyed")
+  expect_true(is.null(intake_at(v, "agent[9].name")))
+  expect_true(is.null(intake_at(v, "nonesuch")))
+  expect_true(is.null(intake_at(v, "agent[")))
+  view <- intake_at(v, "agent[0]")
+  expect_equal(node_path(view), "agent[0]")
+  copy <- intake_at(list(a = list(b = 1)), "a.b")
+  expect_equal(value_data(copy), 1L)
+  close(v)
+  expect_error(value_data(view), "guatiao_closed")
+}))
+
+case("a form made out of a schema", with_library({
+  schema <- value(list(type = "object", additionalProperties = FALSE, properties = list(
+    host = list(type = "string", "x-section" = "net"),
+    tls = list(type = "object", additionalProperties = FALSE,
+      properties = list(verify = list(type = "boolean", "x-section" = "trust"))),
+    label = list(type = "string"))))
+  made <- intake_for_schema(schema)
+  doc <- value_data(made)
+  expect_equal(vapply(doc$sections, function(s) s$id, ""), "net")
+  expect_equal(doc$fields$tls$form$sections, list(list(id = "trust")))
+  expect_true(is.null(intake_check(schema, made)))
+  close(made)
+  implied <- intake_form_for(empty_map, schema, "tls")
+  expect_true(inherits(implied, "guatiao_value"))
+  close(implied)
+  expect_true(is.null(intake_form_for(empty_map, schema, "label")))
+  expect_true(is.null(intake_form_for(empty_map, schema, "nonesuch")))
+  close(schema)
+}))
+
+case("the flat projection", with_library({
+  schema <- value(read_json(FLAT_SCHEMA))
+  host <- intake_resolve(schema, "host")
+  expect_equal(value_data(host$title), "Host")
+  expect_true(isTRUE(value_data(intake_resolve(schema, "auth.password")[["x-sensitive"]])))
+  expect_true(is.null(intake_resolve(schema, "nonesuch")))
+  expect_equal(intake_flat_keys(schema, "auth"), c("auth", "auth.username", "auth.password"))
+  expect_error(intake_flat_keys(schema, "nonesuch"), "guatiao_error")
+  rows <- list(
+    list("auth", list(auth = "userpass", username = "alice", password = "s3cret"),
+      c(auth = "userpass", auth.username = "alice", auth.password = "s3cret")),
+    list("auth", list(auth = "sso"), c(auth = "sso")),
+    list("agent", list(list(name = "one"), list(name = "two")), c("agent[0].name" = "one", "agent[1].name" = "two")),
+    list("env", list(PATH = "/bin", "a.b" = "dotted"), c("env[PATH]" = "/bin", "env[a.b]" = "dotted")),
+    list("host", "example.org", c(host = "example.org")))
+  for (r in rows) {
+    flat <- intake_flatten(schema, r[[1]], r[[2]])
+    expect_equal(flat[order(names(flat))], r[[3]][order(names(r[[3]]))], paste("flatten", r[[1]]))
+    back <- intake_unflatten(schema, r[[1]], r[[3]])
+    expect_equal(value_data(back), r[[2]], paste("unflatten", r[[1]]))
+    close(back)
+  }
+  expect_true(is.null(intake_unflatten(schema, "auth", c(auth = "nonesuch"))))
+  expect_true(is.null(intake_unflatten(schema, "nonesuch", character())))
+  expect_true(is.null(intake_unflatten(schema, "host", character())))
+  expect_error(intake_unflatten(schema, "host", list(host = 1)))
+  expect_error(intake_flatten(schema, "auth", list(1)), "guatiao_error")
+  close(schema)
+  expect_error(value_data(host), "guatiao_closed")
+}))
+
+case("a provider's form is its own, else the one its schema implies", with_library({
+  schema <- list(type = "object", properties = list(
+    user = list(type = "string", `x-section` = "account"),
+    token = list(type = "string", `x-sensitive` = TRUE)))
+  declared <- list(sections = list(list(id = "account", title = "Account")))
+
+  form <- intake_provider_form(schema, setNames(list(declared, 1L), c(intake_provider_form_key, "other")))
+  expect_true(!is.null(form))
+  expect_equal(value_data(form), declared)
+  close(form)
+
+  form <- intake_provider_form(schema, NULL)
+  made <- value_data(form)
+  expect_equal(made$sections, list(list(id = "account")))
+  expect_equal(made$fields$token$widget, "password")
+  close(form)
+
+  # Meta without a form is the same as none; values work as R data does.
+  held <- value(schema)
+  meta <- value(list(other = 1L))
+  form <- intake_provider_form(held, meta)
+  expect_equal(value_data(form), made)
+  close(form)
+  close(held)
+  close(meta)
+
+  expect_true(is.null(intake_provider_form(NULL, NULL)))
+  expect_true(is.null(intake_provider_form(NULL, list(other = 1L))))
+
+  # What is not a form is skipped, as reading the key by hand skips it.
+  form <- intake_provider_form(schema, setNames(list(list("not", "a", "form")), intake_provider_form_key))
+  expect_equal(value_data(form), made)
+  close(form)
+  expect_true(is.null(intake_provider_form(NULL, setNames(list("a form"), intake_provider_form_key))))
+}))
+
+case("a provider's form refuses a closed value cleanly", with_library({
+  meta <- value(list(other = 1L))
+  close(meta)
+  expect_error(intake_provider_form(list(type = "object"), meta), "guatiao_closed")
+  expect_error(intake_provider_form(meta, NULL), "guatiao_closed")
+  # and nothing is left broken for the next call
+  form <- intake_provider_form(list(type = "object"), NULL)
+  expect_true(!is.null(form))
+  close(form)
+}))

@@ -1,0 +1,760 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! `#[derive(Form)]`: a type's default screen, declared beside its fields.
+//!
+//! What the schema derive cannot say — what a section is **called**, which
+//! **widget** draws a field, its **placeholder**, and **when** it is shown —
+//! is written here and emitted as an `impl guatiao_intake::Screen`, which
+//! builds the form value through `guatiao_intake`'s own builders:
+//!
+//! ```ignore
+//! #[derive(Schema, Form)]
+//! #[form(section(id = "net", label = "Network", help = "Where to connect"))]
+//! struct Connection {
+//!     #[schema(section = "net")]
+//!     host: String,
+//!     #[form(widget = "password")]
+//!     token: String,
+//!     verify: bool,
+//!     #[form(placeholder = "/etc/ssl/ca.pem", visible_when(field = "verify", equals = true))]
+//!     ca: Option<String>,
+//!     #[form(nested)]
+//!     auth: Auth,               // `Auth` derives `Form`; its hints land under `auth.`
+//! }
+//! ```
+//!
+//! On the type: `section(id = "..", label = "..", help = "..")`, repeated,
+//! in display order. On a field: `widget = ".."`, `placeholder = ".."`,
+//! `unit = ".."`, `visible_when(field = "..", equals = <expr>)` or
+//! `visible_when(field = "..", in(<expr>, ..))`, `form` (or
+//! `form = Ty`), which gives the member a form of its OWN, and `nested`,
+//! which says
+//! the field's type derives `Form` too and composes its hints under
+//! `<key>.`. Keys follow `#[map(rename = "..")]`, so the form names the
+//! same paths the schema and the value do; a `#[map(skip)]` field cannot
+//! carry hints, since it has no key to name.
+//!
+//! An enum with fields (`#[map(tag = "..")]`) contributes each arm field
+//! under its own key — `owner.member` once composed by an owner's
+//! `nested` — and may declare sections; an enum of unit variants is one
+//! choice and has no fields to place, so it is refused.
+//!
+//! The derive is `Form`, after what it builds; the trait is `Screen`,
+//! because `guatiao_intake::Form` is the builder it uses.
+
+#![forbid(unsafe_code)]
+
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::ext::IdentExt;
+use syn::{Attribute, Data, DeriveInput, Fields, LitStr, Type};
+
+use crate::rename::RenameRule;
+
+const LABEL: &str = "#[derive(Form)]";
+
+/// Expands the derive, or emits a compile error at the user's span.
+pub(crate) fn expand(input: TokenStream) -> TokenStream {
+    match try_expand(input) {
+        Ok(tokens) => tokens,
+        Err(e) => e.to_compile_error(),
+    }
+}
+
+/// A section declared on the type.
+struct SectionDecl {
+    id: String,
+    label: Option<String>,
+    help: Option<String>,
+}
+
+/// What a condition compares with: one value, or any of several.
+enum Shown {
+    Equals(syn::Expr),
+    In(Vec<syn::Expr>),
+}
+
+/// What one field says about its screen.
+#[derive(Default)]
+struct FieldHints {
+    widget: Option<String>,
+    placeholder: Option<String>,
+    unit: Option<String>,
+    visible_when: Option<(String, Shown)>,
+    nested: bool,
+    /// Whose screen this member is drawn by: `#[form(form = Ty)]` names
+    /// it, and `#[form(form)]` means the field's own type, which is
+    /// filled in below as soon as that type is in scope. So the emitter
+    /// has one thing to look at.
+    form: Option<Type>,
+    /// `form` was written without naming a type.
+    form_own: bool,
+}
+
+impl FieldHints {
+    fn is_empty(&self) -> bool {
+        self.widget.is_none()
+            && self.placeholder.is_none()
+            && self.unit.is_none()
+            && self.visible_when.is_none()
+            && !self.nested
+            && self.form.is_none()
+            && !self.form_own
+    }
+}
+
+/// One field with a key and, maybe, hints.
+struct FieldDecl {
+    key: String,
+    ty: Type,
+    hints: FieldHints,
+    /// `#[map(flatten)]`: its keys are this type's own, so `nested`
+    /// composes its hints with no prefix of its own.
+    flatten: bool,
+}
+
+fn try_expand(input: TokenStream) -> syn::Result<TokenStream> {
+    let ast: DeriveInput = syn::parse2(input)?;
+    let (sections, krate) = read_sections(&ast.attrs)?;
+    let fields = match &ast.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(named) => read_fields(named.named.iter(), rename_all(&ast.attrs)?)?,
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    format!(
+                        "{LABEL} needs named fields: a form names fields by key, and a \
+                         tuple, newtype or unit struct has none. A newtype is shown as \
+                         the field holding it, by that field's own hints."
+                    ),
+                ));
+            }
+        },
+        Data::Enum(data) => {
+            let mut fields = Vec::new();
+            let mut any_fields = false;
+            for variant in &data.variants {
+                if let Some(attr) = variant.attrs.iter().find(|a| a.path().is_ident("form")) {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        format!(
+                            "{LABEL} takes no `#[form(..)]` on a variant: an arm is a choice, \
+                             and hints go on the fields it adds"
+                        ),
+                    ));
+                }
+                match &variant.fields {
+                    Fields::Unit => {}
+                    Fields::Named(named) => {
+                        any_fields = true;
+                        // An enum's `rename_all` names its variants, not
+                        // their fields.
+                        fields.extend(read_fields(named.named.iter(), None)?);
+                    }
+                    // A newtype arm's fields are its type's, whose own
+                    // `Form` places them.
+                    Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => {
+                        any_fields = true;
+                    }
+                    Fields::Unnamed(unnamed) => {
+                        return Err(syn::Error::new_spanned(
+                            unnamed,
+                            format!("{LABEL} needs a variant's fields to have names"),
+                        ));
+                    }
+                }
+            }
+            if !any_fields {
+                return Err(syn::Error::new_spanned(
+                    &ast.ident,
+                    format!(
+                        "{LABEL} has nothing to place on an enum of unit variants: it is one \
+                         choice, drawn by the widget of the field holding it"
+                    ),
+                ));
+            }
+            fields
+        }
+        Data::Union(data) => {
+            return Err(syn::Error::new_spanned(
+                data.union_token,
+                format!("{LABEL} supports structs with named fields and enums"),
+            ));
+        }
+    };
+    // Every path is rooted at `::guatiao_intake`, guatiao's own through
+    // its `__private` re-export, so `crate =` moves them all at once.
+    Ok(crate::krate::reroot_crate(
+        emit(&ast.ident, &ast.generics, &sections, &fields),
+        "guatiao_intake",
+        krate.as_ref(),
+    ))
+}
+
+/// The sections declared on the type, in display order, and its
+/// `crate = <path>`: where the expansion finds `guatiao_intake`.
+fn read_sections(attrs: &[Attribute]) -> syn::Result<(Vec<SectionDecl>, Option<syn::Path>)> {
+    let mut sections = Vec::new();
+    let mut krate = None;
+    for attr in attrs {
+        if !attr.path().is_ident("form") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("crate") {
+                krate = Some(meta.value()?.parse()?);
+                return Ok(());
+            }
+            if !meta.path.is_ident("section") {
+                return Err(meta.error(format!(
+                    "unrecognised `#[form(..)]` option on a type. {LABEL} knows \
+                     `section(id = \"..\", label = \"..\", help = \"..\")`, repeated in \
+                     display order, and `crate = <path>`, where `guatiao_intake` is \
+                     re-exported; hints go on the fields"
+                )));
+            }
+            let mut id = None;
+            let mut label = None;
+            let mut help = None;
+            meta.parse_nested_meta(|inner| {
+                if inner.path.is_ident("id") {
+                    id = Some(inner.value()?.parse::<LitStr>()?.value());
+                } else if inner.path.is_ident("label") {
+                    label = Some(inner.value()?.parse::<LitStr>()?.value());
+                } else if inner.path.is_ident("help") {
+                    help = Some(inner.value()?.parse::<LitStr>()?.value());
+                } else {
+                    return Err(inner.error(format!(
+                        "unrecognised section option. {LABEL} knows `id`, `label` and `help`"
+                    )));
+                }
+                Ok(())
+            })?;
+            let Some(id) = id else {
+                return Err(meta.error("a section needs `id = \"..\"`: the id its fields name"));
+            };
+            sections.push(SectionDecl { id, label, help });
+            Ok(())
+        })?;
+    }
+    Ok((sections, krate))
+}
+
+/// A struct's `#[map(rename_all = "..")]`, so a key here is the key the
+/// value derives write. The other container keys are theirs to check.
+fn rename_all(attrs: &[Attribute]) -> syn::Result<Option<RenameRule>> {
+    let mut rule = None;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("map")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("rename_all") {
+                rule = Some(RenameRule::parse(&meta.value()?.parse::<LitStr>()?)?);
+            } else if meta.input.peek(syn::Token![=]) {
+                let _: syn::Expr = meta.value()?.parse()?;
+            }
+            Ok(())
+        })?;
+    }
+    Ok(rule)
+}
+
+fn read_fields<'a>(
+    fields: impl Iterator<Item = &'a syn::Field>,
+    rule: Option<RenameRule>,
+) -> syn::Result<Vec<FieldDecl>> {
+    let mut out = Vec::new();
+    for field in fields {
+        let ident = field.ident.as_ref().expect("only named fields reach here");
+        let mut key = ident.unraw().to_string();
+        if let Some(rule) = rule {
+            key = rule.field(&key);
+        }
+        let mut skip = false;
+        let mut flatten = false;
+        let mut hints = FieldHints::default();
+        for attr in &field.attrs {
+            if attr.path().is_ident("map") {
+                // `rename` and `skip` decide the key; anything else is
+                // the value derives' business and refused there.
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("rename") {
+                        key = meta.value()?.parse::<LitStr>()?.value();
+                    } else if meta.path.is_ident("skip") {
+                        skip = true;
+                    } else if meta.path.is_ident("flatten") {
+                        flatten = true;
+                    } else if meta.input.peek(syn::Token![=]) {
+                        let _: syn::Expr = meta.value()?.parse()?;
+                    }
+                    Ok(())
+                })?;
+            } else if attr.path().is_ident("form") {
+                read_hints(attr, &mut hints)?;
+            }
+        }
+        // `#[form(form)]` means this field's type, and here is where
+        // that type is known.
+        if hints.form_own && hints.form.is_none() {
+            hints.form = Some(field.ty.clone());
+        }
+        if hints.nested && hints.form.is_some() {
+            return Err(syn::Error::new_spanned(
+                ident,
+                format!(
+                    "`nested` and `form` are two presentations of one member, so a field \
+                     takes one or the other. {LABEL} flattens a member's hints into this \
+                     form with `nested`, and gives the member a form of its OWN with \
+                     `form` -- a window or a group, drawn from its own screen"
+                ),
+            ));
+        }
+        if skip && !hints.is_empty() {
+            return Err(syn::Error::new_spanned(
+                ident,
+                format!(
+                    "{LABEL} cannot place a `#[map(skip)]` field: it is never stored, so it \
+                     has no key for a form to name"
+                ),
+            ));
+        }
+        // A flattened member takes `nested` and nothing else.
+        let placeable = hints.is_empty() || (hints.nested && only_nested(&hints));
+        if flatten && !placeable {
+            return Err(syn::Error::new_spanned(
+                ident,
+                format!(
+                    "{LABEL} places a `#[map(flatten)]` field's members, not the field: it \
+                     has no key of its own. `#[form(nested)]` composes its type's hints \
+                     beside this type's."
+                ),
+            ));
+        }
+        if !skip {
+            out.push(FieldDecl {
+                key,
+                ty: field.ty.clone(),
+                hints,
+                flatten,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Whether `nested` is the only hint given.
+fn only_nested(hints: &FieldHints) -> bool {
+    hints.widget.is_none()
+        && hints.placeholder.is_none()
+        && hints.unit.is_none()
+        && hints.visible_when.is_none()
+        && hints.form.is_none()
+        && !hints.form_own
+}
+
+fn read_hints(attr: &Attribute, hints: &mut FieldHints) -> syn::Result<()> {
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("widget") {
+            hints.widget = Some(meta.value()?.parse::<LitStr>()?.value());
+        } else if meta.path.is_ident("placeholder") {
+            hints.placeholder = Some(meta.value()?.parse::<LitStr>()?.value());
+        } else if meta.path.is_ident("unit") {
+            hints.unit = Some(meta.value()?.parse::<LitStr>()?.value());
+        } else if meta.path.is_ident("nested") {
+            hints.nested = true;
+        } else if meta.path.is_ident("form") {
+            if meta.input.peek(syn::Token![=]) {
+                hints.form = Some(meta.value()?.parse::<Type>()?);
+            } else {
+                hints.form_own = true;
+            }
+        } else if meta.path.is_ident("visible_when") {
+            let mut field = None;
+            let mut equals = None;
+            let mut any = None;
+            meta.parse_nested_meta(|inner| {
+                if inner.path.is_ident("field") {
+                    field = Some(inner.value()?.parse::<LitStr>()?.value());
+                } else if inner.path.is_ident("equals") {
+                    equals = Some(inner.value()?.parse::<syn::Expr>()?);
+                } else if inner.path.is_ident("in") {
+                    // `in` is a keyword, and attribute paths accept one.
+                    let content;
+                    syn::parenthesized!(content in inner.input);
+                    let values: Vec<syn::Expr> = syn::punctuated::Punctuated::<
+                        syn::Expr,
+                        syn::Token![,],
+                    >::parse_terminated(&content)?
+                    .into_iter()
+                    .collect();
+                    if values.is_empty() {
+                        return Err(
+                            inner.error("`in()` with no values is a condition nothing meets")
+                        );
+                    }
+                    any = Some(values);
+                } else {
+                    return Err(inner.error(format!(
+                        "unrecognised `visible_when` option. {LABEL} knows `field = \"..\"` \
+                         and one of `equals = <value>` or `in(<value>, ..)`"
+                    )));
+                }
+                Ok(())
+            })?;
+            match (field, equals, any) {
+                (Some(field), Some(equals), None) => {
+                    hints.visible_when = Some((field, Shown::Equals(equals)));
+                }
+                (Some(field), None, Some(values)) => {
+                    hints.visible_when = Some((field, Shown::In(values)));
+                }
+                _ => {
+                    return Err(meta.error(
+                        "`visible_when` names `field = \"..\"` and exactly one of \
+                         `equals = <value>` or `in(<value>, ..)`",
+                    ));
+                }
+            }
+        } else if meta.path.is_ident("section") {
+            return Err(meta.error(format!(
+                "a field's section is the schema's: write `#[schema(section = \"..\")]`. \
+                 {LABEL} declares what a section is CALLED, on the type: \
+                 `#[form(section(id = \"..\", label = \"..\"))]`"
+            )));
+        } else {
+            return Err(meta.error(format!(
+                "unrecognised `#[form(..)]` option. {LABEL} knows `widget`, `placeholder`, \
+                 `unit`, `visible_when(field = \"..\", equals = <value>)` or \
+                 `visible_when(field = \"..\", in(<value>, ..))`, `nested` and `form` (or \
+                 `form = Ty`) on a field"
+            )));
+        }
+        Ok(())
+    })
+}
+
+fn emit(
+    name: &syn::Ident,
+    generics: &syn::Generics,
+    sections: &[SectionDecl],
+    fields: &[FieldDecl],
+) -> TokenStream {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let sections = sections.iter().map(|s| {
+        let id = &s.id;
+        let label = s.label.iter().map(|l| quote! { .label(#l) });
+        let help = s.help.iter().map(|h| quote! { .help(#h) });
+        quote! {
+            __form = __form.section(
+                ::guatiao_intake::Section::new_in(__alloc, #id) #(#label)* #(#help)*
+            );
+        }
+    });
+    let hints = fields.iter().filter(|f| !f.hints.is_empty()).map(|f| {
+        let key = &f.key;
+        let ty = &f.ty;
+        let own = {
+            let widget = f.hints.widget.iter().map(|w| quote! { .widget(#w) });
+            let placeholder = f
+                .hints
+                .placeholder
+                .iter()
+                .map(|p| quote! { .placeholder(#p) });
+            let unit = f.hints.unit.iter().map(|u| quote! { .unit(#u) });
+            let visible = f
+                .hints
+                .visible_when
+                .iter()
+                .map(|(field, shown)| match shown {
+                    Shown::Equals(equals) => quote! { .visible_when(#field, #equals) },
+                    Shown::In(values) => quote! { .visible_when_in(#field, [#(#values),*]) },
+                });
+            // The member's own screen, as this field's form. `form_value`
+            // rather than `form`, because `Screen::form` answers a
+            // `Result` and the builder is where the first error waits.
+            let form = f.hints.form.iter().map(|source| {
+                quote! {
+                    .form_value(<#source as ::guatiao_intake::Screen>::form(__alloc))
+                }
+            });
+            if f.hints.widget.is_some()
+                || f.hints.placeholder.is_some()
+                || f.hints.unit.is_some()
+                || f.hints.visible_when.is_some()
+                || f.hints.form.is_some()
+            {
+                quote! {
+                    __form = __form.field(
+                        &::guatiao_intake::__private::guatiao::__private::alloc::format!("{}{}", __prefix, #key),
+                        ::guatiao_intake::Hints::new_in(__alloc)
+                            #(#widget)* #(#placeholder)* #(#unit)* #(#visible)* #(#form)*,
+                    );
+                }
+            } else {
+                quote! {}
+            }
+        };
+        let nested = if f.hints.nested && f.flatten {
+            quote! {
+                __form = <#ty as ::guatiao_intake::Screen>::hints(__prefix, __form);
+            }
+        } else if f.hints.nested {
+            quote! {
+                __form = <#ty as ::guatiao_intake::Screen>::hints(
+                    &::guatiao_intake::__private::guatiao::__private::alloc::format!("{}{}.", __prefix, #key),
+                    __form,
+                );
+            }
+        } else {
+            quote! {}
+        };
+        quote! { #own #nested }
+    });
+
+    quote! {
+        #[automatically_derived]
+        impl #impl_generics ::guatiao_intake::Screen for #name #ty_generics #where_clause {
+            fn form(
+                __alloc: ::guatiao_intake::__private::guatiao::Alloc,
+            ) -> ::core::result::Result<
+                ::guatiao_intake::__private::guatiao::Value,
+                ::guatiao_intake::__private::guatiao::ValueError,
+            > {
+                let mut __form = ::guatiao_intake::Form::new_in(__alloc);
+                #(#sections)*
+                __form = <Self as ::guatiao_intake::Screen>::hints("", __form);
+                __form.finish()
+            }
+
+            fn hints(__prefix: &str, mut __form: ::guatiao_intake::Form) -> ::guatiao_intake::Form {
+                // Bound first: `field` takes the form by value.
+                let __alloc = __form.alloc();
+                #(#hints)*
+                __form
+            }
+        }
+
+        #[automatically_derived]
+        impl #impl_generics #name #ty_generics #where_clause {
+            /// This type's screen, by a name `#[provider(.., form = ..)]`
+            /// reaches without naming `guatiao_intake`.
+            #[doc(hidden)]
+            pub fn __guatiao_form(
+                __alloc: ::guatiao_intake::__private::guatiao::Alloc,
+            ) -> ::core::result::Result<
+                ::guatiao_intake::__private::guatiao::Value,
+                ::guatiao_intake::__private::guatiao::ValueError,
+            > {
+                <Self as ::guatiao_intake::Screen>::form(__alloc)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn expand_str(item: &str) -> Result<String, String> {
+        let item: TokenStream = item.parse().unwrap();
+        match try_expand(item) {
+            Ok(t) => Ok(t.to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    #[test]
+    fn sections_and_hints_become_builder_calls() {
+        let out = expand_str(
+            "#[form(section(id = \"net\", label = \"Network\", help = \"Where\"), section(id = \"auth\"))]
+             struct Conn {
+                 #[schema(section = \"net\")] host: String,
+                 #[form(widget = \"password\")] #[map(rename = \"api-token\")] token: String,
+                 verify: bool,
+                 #[form(placeholder = \"/etc/ca.pem\", visible_when(field = \"verify\", equals = true))] ca: Option<String>,
+                 #[form(nested)] auth: Auth,
+                 #[map(skip)] cache: Vec<u8>,
+                 plain: i64,
+             }",
+        )
+        .unwrap();
+        let file: syn::File = syn::parse_str(&out).expect("parses");
+        assert_eq!(
+            file.items.len(),
+            2,
+            "the `Screen` impl and `__guatiao_form`"
+        );
+        assert!(out.contains(
+            "Section :: new_in (__alloc , \"net\") . label (\"Network\") . help (\"Where\")"
+        ));
+        assert!(
+            out.contains("Section :: new_in (__alloc , \"auth\")) ;"),
+            "{out}"
+        );
+        assert!(out.contains("format ! (\"{}{}\" , __prefix , \"api-token\") , :: guatiao_intake :: Hints :: new_in (__alloc) . widget (\"password\")"));
+        assert!(out.contains(". placeholder (\"/etc/ca.pem\") . visible_when (\"verify\" , true)"));
+        assert!(out.contains("< Auth as :: guatiao_intake :: Screen > :: hints (& :: guatiao_intake :: __private :: guatiao :: __private :: alloc :: format ! (\"{}{}.\" , __prefix , \"auth\") , __form ,)"));
+        assert!(
+            !out.contains("\"host\"") && !out.contains("\"plain\"") && !out.contains("\"cache\""),
+            "a field without hints is not named: {out}"
+        );
+    }
+
+    /// With `crate = <path>` nothing is rooted at `::guatiao_intake` or at
+    /// `::guatiao`: a consumer reaching both through a re-export names
+    /// neither.
+    #[test]
+    fn a_crate_path_reroots_every_generated_path() {
+        let out = expand_str(
+            "#[form(crate = ::kinds::guatiao_intake, section(id = \"a\"))] struct S { #[form(widget = \"x\")] a: i64, #[form(nested)] b: B }",
+        )
+        .unwrap();
+        assert!(
+            out.contains(":: kinds :: guatiao_intake :: Screen"),
+            "{out}"
+        );
+        assert!(
+            out.contains(":: kinds :: guatiao_intake :: __private :: guatiao :: Alloc"),
+            "{out}"
+        );
+        let rest = out.replace(":: kinds :: guatiao_intake", "");
+        assert!(!rest.contains(":: guatiao_intake"), "{rest}");
+        assert!(
+            !rest
+                .replace("__private :: guatiao ::", "")
+                .contains(":: guatiao ::"),
+            "guatiao is reached through the intake root alone: {rest}"
+        );
+    }
+
+    #[test]
+    fn a_struct_s_rename_all_reaches_its_keys() {
+        let out = expand_str(
+            "#[map(rename_all = \"kebab-case\", crate = ::k::guatiao)] struct S { #[form(widget = \"x\")] api_token: String, #[form(widget = \"y\")] #[map(rename = \"own\")] other_name: String }",
+        )
+        .unwrap();
+        assert!(out.contains("\"api-token\""), "{out}");
+        assert!(out.contains("\"own\""), "{out}");
+    }
+
+    #[test]
+    fn an_enum_places_its_arm_fields() {
+        let out = expand_str(
+            "#[map(tag = \"auth\")] enum Auth { Ambient, UserPass { username: String, #[form(widget = \"password\")] password: String } }",
+        )
+        .unwrap();
+        assert!(out.contains("format ! (\"{}{}\" , __prefix , \"password\")"));
+        assert!(!out.contains("\"username\""));
+    }
+
+    /// A generic type gets a screen like any other, and a flattened
+    /// member's hints compose with no key of its own.
+    #[test]
+    fn generics_flatten_and_newtype_arms() {
+        let out = expand_str(
+            "struct S<T> { #[form(widget = \"x\")] a: T, #[map(flatten)] #[form(nested)] b: B }",
+        )
+        .unwrap();
+        assert!(
+            out.contains("impl < T > :: guatiao_intake :: Screen for S < T >"),
+            "{out}"
+        );
+        assert!(
+            out.contains("< B as :: guatiao_intake :: Screen > :: hints (__prefix , __form)"),
+            "{out}"
+        );
+        let arm = expand_str(
+            "#[map(tag = \"t\")] enum E { A(Inner), B { #[form(widget = \"x\")] b: i64 } }",
+        )
+        .unwrap();
+        assert!(arm.contains("\"b\""), "{arm}");
+    }
+
+    #[test]
+    fn form_rejects_by_name() {
+        let cases: &[(&str, &str)] = &[
+            ("struct S(String);", "needs named fields"),
+            ("struct S;", "needs named fields"),
+            (
+                "struct S { #[map(flatten)] #[form(widget = \"x\")] a: A }",
+                "places a `#[map(flatten)]` field's members",
+            ),
+            (
+                "enum E { A, B }",
+                "nothing to place on an enum of unit variants",
+            ),
+            (
+                "enum E { A(String, String) }",
+                "needs a variant's fields to have names",
+            ),
+            (
+                "enum E { #[form(widget = \"x\")] A { b: i64 } }",
+                "no `#[form(..)]` on a variant",
+            ),
+            (
+                "union U { a: i64 }",
+                "supports structs with named fields and enums",
+            ),
+            (
+                "#[form(widget = \"x\")] struct S { a: i64 }",
+                "unrecognised `#[form(..)]` option on a type",
+            ),
+            (
+                "#[form(section(label = \"x\"))] struct S { a: i64 }",
+                "a section needs `id",
+            ),
+            (
+                "#[form(section(id = \"x\", colour = \"y\"))] struct S { a: i64 }",
+                "unrecognised section option",
+            ),
+            (
+                "struct S { #[form(section = \"x\")] a: i64 }",
+                "a field's section is the schema's",
+            ),
+            (
+                "struct S { #[form(colour = \"x\")] a: i64 }",
+                "unrecognised `#[form(..)]` option",
+            ),
+            (
+                "struct S { #[form(visible_when(field = \"b\"))] a: i64 }",
+                "exactly one of `equals = <value>` or `in(<value>, ..)`",
+            ),
+            (
+                "struct S { #[form(visible_when(field = \"b\", is = 1))] a: i64 }",
+                "unrecognised `visible_when` option",
+            ),
+            // One condition, one spelling: two answers to "when is this
+            // shown" would leave a renderer to pick.
+            (
+                "struct S { #[form(visible_when(field = \"b\", equals = 1, in(1, 2)))] a: i64 }",
+                "exactly one of",
+            ),
+            (
+                "struct S { #[form(visible_when(field = \"b\", in()))] a: i64 }",
+                "a condition nothing meets",
+            ),
+            (
+                "struct S { #[map(skip)] #[form(widget = \"x\")] a: i64 }",
+                "cannot place a `#[map(skip)]` field",
+            ),
+            // The two presentations of one member are exclusive: either
+            // its hints are flattened into this screen, or it gets a
+            // screen of its own.
+            (
+                "struct S { #[form(nested, form)] a: A }",
+                "two presentations of one member",
+            ),
+            (
+                "struct S { #[form(form = B)] #[form(nested)] a: A }",
+                "two presentations of one member",
+            ),
+        ];
+        for (item, expected) in cases {
+            let err = expand_str(item).expect_err(item);
+            assert!(
+                err.contains(expected),
+                "{item}\n  got: {err}\n  want: {expected}"
+            );
+        }
+    }
+}

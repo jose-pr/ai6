@@ -1,0 +1,27 @@
+[package]
+name = "hello_library"
+description = "An example guatiao library: one provider, one vtable, built and loaded by the test suite"
+# Its own version, never the release's: the test suite loads this library
+# and names `hello_library_v0_1_ledger_schema`, the symbol `schema_export!`'s
+# versioned form derives from THIS crate's version. Following the workspace
+# would rename the export at every release.
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# `cdylib` is what a host loads. `rlib` as well, so the test can name the
+# vtable type this library defines. Only a test binary links the rlib: a
+# `cdylib` linking it would export this library's entry symbol as its own,
+# which is why a real kind publishes its table from a crate of its own
+# (`examples/greeter_kind`).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+guatiao = { path = "../../crates/guatiao", features = ["derive"] }
+
+[lints]
+workspace = true

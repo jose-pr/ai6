@@ -1,0 +1,17 @@
+[package]
+name = "libpam-sys-helpers"
+description = "Cross-platform compatibility helpers for libpam-sys."
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme = "README.md"
+categories = [
+    "api-bindings",
+    "os::unix-apis",
+]
+
+[build-dependencies]
+libpam-sys-impls = { version = "0.2.0", path = "../libpam-sys-impls" }

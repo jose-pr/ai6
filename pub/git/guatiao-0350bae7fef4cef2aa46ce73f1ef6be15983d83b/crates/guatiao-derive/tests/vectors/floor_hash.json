@@ -1,0 +1,646 @@
+{
+  "about": "Kinds as their description says them, the Rust trait declaring the same slots, the floor hash's input as #[guatiao::kind] spells it, and the floor hash: every language that computes the hash of a kind born in it checks it against these. `refused` are kinds no reader takes: `why` is in every refusal, and `by` says who refuses it, `every reader` (the kind attribute, the library's reader, and every binding through it) or the bindings whose own code has that name. `with` are kinds the document holds beside it, which every reader takes.",
+  "vectors": [
+    {
+      "name": "names",
+      "object": false,
+      "trait": "pub trait Names: Send + Sync { fn greet(&self, name: &str) -> Result<Map, ProviderError>; fn shout(&self, name: &str) -> String { name.to_string() } }",
+      "slots": [
+        {
+          "name": "greet",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "map"
+          }
+        },
+        {
+          "name": "shout",
+          "required": false,
+          "fallible": false,
+          "args": [
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ],
+      "spelled": "provider;greet(&str)->Result<Map,ProviderError>;shout(&str)->String",
+      "floor_hash": 1283548087
+    },
+    {
+      "name": "scalars",
+      "object": false,
+      "trait": "pub trait Scalars: Send + Sync { fn small(&self, a: bool, b: i8, c: i16, d: i32, e: u8, f: u16, g: u32) -> u32; fn wide(&self, a: i64, b: u64, c: isize, d: usize) -> Result<i64, ProviderError>; fn real(&self, a: f32, b: f64) -> f64; fn flag(&self) -> bool; }",
+      "slots": [
+        {
+          "name": "small",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "a",
+              "type": "bool"
+            },
+            {
+              "name": "b",
+              "type": "i8"
+            },
+            {
+              "name": "c",
+              "type": "i16"
+            },
+            {
+              "name": "d",
+              "type": "i32"
+            },
+            {
+              "name": "e",
+              "type": "u8"
+            },
+            {
+              "name": "f",
+              "type": "u16"
+            },
+            {
+              "name": "g",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "u32"
+          }
+        },
+        {
+          "name": "wide",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "a",
+              "type": "i64"
+            },
+            {
+              "name": "b",
+              "type": "u64"
+            },
+            {
+              "name": "c",
+              "type": "isize"
+            },
+            {
+              "name": "d",
+              "type": "usize"
+            }
+          ],
+          "answer": {
+            "type": "i64"
+          }
+        },
+        {
+          "name": "real",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "a",
+              "type": "f32"
+            },
+            {
+              "name": "b",
+              "type": "f64"
+            }
+          ],
+          "answer": {
+            "type": "f64"
+          }
+        },
+        {
+          "name": "flag",
+          "required": true,
+          "fallible": false,
+          "args": [],
+          "answer": {
+            "type": "bool"
+          }
+        }
+      ],
+      "spelled": "provider;small(bool,i8,i16,i32,u8,u16,u32)->u32;wide(i64,u64,isize,usize)->Result<i64,ProviderError>;real(f32,f64)->f64;flag()->bool",
+      "floor_hash": 522256390
+    },
+    {
+      "name": "buffers",
+      "object": true,
+      "trait": "pub trait Buffers: Send { fn sum(&self, data: &[u8]) -> u64; fn fill(&mut self, dst: &mut [u8]) -> Result<(), ProviderError>; fn both(&mut self, data: &[u8], dst: &mut [u8]); }",
+      "slots": [
+        {
+          "name": "sum",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "data",
+              "type": "bytes"
+            }
+          ],
+          "answer": {
+            "type": "u64"
+          }
+        },
+        {
+          "name": "fill",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            }
+          ]
+        },
+        {
+          "name": "both",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "data",
+              "type": "bytes"
+            },
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            }
+          ]
+        }
+      ],
+      "spelled": "object;sum(&[u8])->u64;fill(&mut[u8])->Result<(),ProviderError>;both(&[u8],&mut[u8])->()",
+      "floor_hash": 2798325755
+    },
+    {
+      "name": "trees",
+      "object": false,
+      "trait": "pub trait Trees: Send + Sync { fn read(&self, v: &Value, m: &Map, n: Option<&Value>) -> Value; fn take(&self, v: Value, m: Map, l: List) -> Result<List, ProviderError>; fn lend(&self, v: &mut Value, m: &mut Map, l: &mut List) -> Result<Map, ProviderError>; fn text(&self) -> Result<String, ProviderError>; fn later(&self, m: &Map) -> bool { false } }",
+      "slots": [
+        {
+          "name": "read",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "v",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "m",
+              "type": "map",
+              "pass": "borrowed"
+            },
+            {
+              "name": "n",
+              "type": "value",
+              "pass": "borrowed",
+              "nullable": true
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "take",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "v",
+              "type": "value",
+              "pass": "taken"
+            },
+            {
+              "name": "m",
+              "type": "map",
+              "pass": "taken"
+            },
+            {
+              "name": "l",
+              "type": "list",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "list"
+          }
+        },
+        {
+          "name": "lend",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "v",
+              "type": "value",
+              "pass": "lent"
+            },
+            {
+              "name": "m",
+              "type": "map",
+              "pass": "lent"
+            },
+            {
+              "name": "l",
+              "type": "list",
+              "pass": "lent"
+            }
+          ],
+          "answer": {
+            "type": "map"
+          }
+        },
+        {
+          "name": "text",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "later",
+          "required": false,
+          "fallible": false,
+          "args": [
+            {
+              "name": "m",
+              "type": "map",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "bool"
+          }
+        }
+      ],
+      "spelled": "provider;read(&Value,&Map,Option<&Value>)->Value;take(Value,Map,List)->Result<List,ProviderError>;lend(&mutValue,&mutMap,&mutList)->Result<Map,ProviderError>;text()->Result<String,ProviderError>;later(&Map)->bool",
+      "floor_hash": 1916241363
+    },
+    {
+      "name": "sound_level",
+      "object": true,
+      "trait": "pub trait SoundLevel: Send { fn level(&mut self) -> f64; fn set(&mut self, to: f64) -> Result<(), ProviderError>; fn label(&self) -> String { String::new() } }",
+      "slots": [
+        {
+          "name": "level",
+          "required": true,
+          "fallible": false,
+          "args": [],
+          "answer": {
+            "type": "f64"
+          }
+        },
+        {
+          "name": "set",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "to",
+              "type": "f64"
+            }
+          ]
+        },
+        {
+          "name": "label",
+          "required": false,
+          "fallible": false,
+          "args": [],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ],
+      "spelled": "object;level()->f64;set(f64)->Result<(),ProviderError>;label()->String",
+      "floor_hash": 2657342211
+    },
+    {
+      "name": "mixer",
+      "object": false,
+      "trait": "pub trait Mixer: Send + Sync { fn attach(&self, level: Object<dyn SoundLevel>) -> Result<(), ProviderError>; fn peek(&self, level: &mut dyn SoundLevel) -> Result<f64, ProviderError>; fn make(&self) -> Result<Object<dyn SoundLevel>, ProviderError>; }",
+      "slots": [
+        {
+          "name": "attach",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "level",
+              "type": "object",
+              "kind": "sound_level",
+              "pass": "taken"
+            }
+          ]
+        },
+        {
+          "name": "peek",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "level",
+              "type": "object",
+              "kind": "sound_level",
+              "pass": "lent"
+            }
+          ],
+          "answer": {
+            "type": "f64"
+          }
+        },
+        {
+          "name": "make",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "object",
+            "kind": "sound_level"
+          }
+        }
+      ],
+      "spelled": "provider;attach(Object<dynSoundLevel>)->Result<(),ProviderError>;peek(&mutdynSoundLevel)->Result<f64,ProviderError>;make()->Result<Object<dynSoundLevel>,ProviderError>",
+      "floor_hash": 1729275710
+    },
+    {
+      "name": "between",
+      "object": false,
+      "trait": "pub trait Between: Send + Sync { fn first(&self, name: &str) -> Result<Map, ProviderError>; fn middle(&self, name: &str) -> String { name.to_string() } fn last(&self, n: u32) -> u64; }",
+      "slots": [
+        {
+          "name": "first",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "map"
+          }
+        },
+        {
+          "name": "middle",
+          "required": false,
+          "fallible": false,
+          "args": [
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "last",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "n",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "u64"
+          }
+        }
+      ],
+      "spelled": "provider;first(&str)->Result<Map,ProviderError>;middle(&str)->String;last(u32)->u64",
+      "floor_hash": 3036448798
+    },
+    {
+      "name": "a_borrowed_list",
+      "object": false,
+      "trait": "pub trait Summer: Send + Sync { fn sum(&self, items: &List) -> i64; }",
+      "slots": [
+        {
+          "name": "sum",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "items",
+              "type": "list",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "i64"
+          }
+        }
+      ],
+      "spelled": "provider;sum(&List)->i64",
+      "floor_hash": 2920396019
+    }
+  ],
+  "refused": [
+    {
+      "name": "bytes_mut_on_a_provider_kind",
+      "object": false,
+      "trait": "pub trait Filler: Send + Sync { fn fill(&self, dst: &mut [u8]) -> i64; }",
+      "slots": [
+        {
+          "name": "fill",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            }
+          ],
+          "answer": {
+            "type": "i64"
+          }
+        }
+      ],
+      "why": "on an object kind only",
+      "by": "every reader"
+    },
+    {
+      "name": "a_slot_named_header",
+      "object": false,
+      "trait": "pub trait Headed: Send + Sync { fn header(&self) -> u32; }",
+      "slots": [
+        {
+          "name": "header",
+          "required": true,
+          "fallible": false,
+          "args": [],
+          "answer": {
+            "type": "u32"
+          }
+        }
+      ],
+      "why": "the table's first field",
+      "by": "every reader"
+    },
+    {
+      "name": "an_object_lent_on_an_infallible_slot",
+      "object": false,
+      "trait": "pub trait Reader: Send + Sync { fn read(&self, memo: &dyn Memo) -> u64; }",
+      "slots": [
+        {
+          "name": "read",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "memo",
+              "type": "object",
+              "kind": "memo",
+              "pass": "lent"
+            }
+          ],
+          "answer": {
+            "type": "u64"
+          }
+        }
+      ],
+      "with": [
+        {
+          "name": "memo",
+          "floor_hash": 1,
+          "object": true,
+          "slots": [
+            {
+              "name": "read",
+              "required": true,
+              "fallible": false,
+              "args": [],
+              "answer": {
+                "type": "text"
+              }
+            }
+          ]
+        }
+      ],
+      "why": "on a fallible slot only",
+      "by": "every reader"
+    },
+    {
+      "name": "an_object_answered_on_an_infallible_slot",
+      "object": false,
+      "trait": "pub trait Opener: Send + Sync { fn open(&self) -> Object<dyn Memo>; }",
+      "slots": [
+        {
+          "name": "open",
+          "required": true,
+          "fallible": false,
+          "args": [],
+          "answer": {
+            "type": "object",
+            "kind": "memo"
+          }
+        }
+      ],
+      "with": [
+        {
+          "name": "memo",
+          "floor_hash": 1,
+          "object": true,
+          "slots": [
+            {
+              "name": "read",
+              "required": true,
+              "fallible": false,
+              "args": [],
+              "answer": {
+                "type": "text"
+              }
+            }
+          ]
+        }
+      ],
+      "why": "on a fallible slot only",
+      "by": "every reader"
+    },
+    {
+      "name": "an_empty_kind",
+      "object": false,
+      "trait": "pub trait Idle: Send + Sync {}",
+      "slots": [],
+      "why": "an empty table serves nothing",
+      "by": "every reader"
+    },
+    {
+      "name": "two_arguments_named_alike",
+      "object": false,
+      "trait": "pub trait Adder: Send + Sync { fn add(&self, n: u32, n: u32) -> u32; }",
+      "slots": [
+        {
+          "name": "add",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "n",
+              "type": "u32"
+            },
+            {
+              "name": "n",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "u32"
+          }
+        }
+      ],
+      "why": "a second time",
+      "by": "every reader"
+    },
+    {
+      "name": "a_slot_named_like_a_remotes_method",
+      "object": false,
+      "slots": [
+        {
+          "name": "has",
+          "required": true,
+          "fallible": false,
+          "args": [
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "bool"
+          }
+        }
+      ],
+      "why": "a remote's own",
+      "by": [
+        "python",
+        "node",
+        "go",
+        "dart"
+      ]
+    }
+  ]
+}
