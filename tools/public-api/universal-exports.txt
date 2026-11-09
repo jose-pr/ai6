@@ -396,6 +396,7 @@ pub universal_exports::MissionAttempt::lost: core::option::Option<alloc::string:
 pub universal_exports::MissionAttempt::predecessor: core::option::Option<alloc::string::String>
 pub universal_exports::MissionAttempt::probe_requested: core::option::Option<f64>
 pub universal_exports::MissionAttempt::provider_session_id: core::option::Option<alloc::string::String>
+pub universal_exports::MissionAttempt::recommendation: core::option::Option<ai6::directorates::registry::sessions::MissionVerdict>
 pub universal_exports::MissionAttempt::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub universal_exports::MissionAttempt::session_id: alloc::string::String
 pub universal_exports::MissionAttempt::station: alloc::string::String

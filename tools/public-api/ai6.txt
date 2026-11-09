@@ -5349,6 +5349,7 @@ pub fn ai6::directorates::registry::backend::SessionStore::latest_session(&self,
 pub fn ai6::directorates::registry::backend::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::backend::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::backend::SessionStore::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::backend::SessionStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5363,6 +5364,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5377,6 +5379,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -5949,6 +5952,23 @@ impl ai6::directorates::registry::contexts::SessionContextStore for ai6::directo
 pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::SessionContext>>
 pub fn ai6::directorates::registry::store::FileRegistry::file_session_context(&self, &ai6::directorates::registry::contexts::SessionContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::session_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::SessionContext>>
+pub mod ai6::directorates::registry::decisions
+#[non_exhaustive] pub struct ai6::directorates::registry::decisions::VerifyingDecision<'a>
+pub ai6::directorates::registry::decisions::VerifyingDecision::amendment: core::option::Option<&'a str>
+pub ai6::directorates::registry::decisions::VerifyingDecision::at: f64
+pub ai6::directorates::registry::decisions::VerifyingDecision::by: &'a str
+pub ai6::directorates::registry::decisions::VerifyingDecision::mission: &'a str
+pub ai6::directorates::registry::decisions::VerifyingDecision::operation: &'a str
+pub ai6::directorates::registry::decisions::VerifyingDecision::reason: &'a str
+pub ai6::directorates::registry::decisions::VerifyingDecision::verdict: ai6::directorates::registry::sessions::OutcomeVerdict
+impl<'a> ai6::directorates::registry::decisions::VerifyingDecision<'a>
+pub fn ai6::directorates::registry::decisions::VerifyingDecision<'a>::new(&'a str, &'a str, ai6::directorates::registry::sessions::OutcomeVerdict, &'a str, &'a str, f64) -> Self
+pub fn ai6::directorates::registry::decisions::VerifyingDecision<'a>::verdict_named(&str) -> core::option::Option<ai6::directorates::registry::sessions::OutcomeVerdict>
+pub fn ai6::directorates::registry::decisions::VerifyingDecision<'a>::with_amendment(self, core::option::Option<&'a str>) -> Self
+pub fn ai6::directorates::registry::decisions::VerifyingDecision<'a>::word(&self) -> &'static str
+pub fn ai6::directorates::registry::decisions::check_verifying(&core::option::Option<ai6::directorates::registry::sessions::SessionRecord>, &str) -> core::result::Result<(), ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::decisions::decide(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::decisions::VerifyingDecision<'_>) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::decisions::recommend(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::decisions::VerifyingDecision<'_>) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub mod ai6::directorates::registry::holds
 #[non_exhaustive] pub struct ai6::directorates::registry::holds::RosterHold
 pub ai6::directorates::registry::holds::RosterHold::agent: alloc::string::String
@@ -7148,6 +7168,7 @@ pub ai6::directorates::registry::sessions::SessionRecord::predecessor: core::opt
 pub ai6::directorates::registry::sessions::SessionRecord::probe_requested: core::option::Option<f64>
 pub ai6::directorates::registry::sessions::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sessions::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::sessions::SessionRecord::recommendation: core::option::Option<ai6::directorates::registry::sessions::MissionVerdict>
 pub ai6::directorates::registry::sessions::SessionRecord::result: core::option::Option<ai6::directorates::registry::sessions::SessionResult>
 pub ai6::directorates::registry::sessions::SessionRecord::session_id: alloc::string::String
 pub ai6::directorates::registry::sessions::SessionRecord::station: alloc::string::String
@@ -7188,6 +7209,7 @@ pub fn ai6::directorates::registry::sessions::SessionStore::latest_session(&self
 pub fn ai6::directorates::registry::sessions::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sessions::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sessions::SessionStore::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sessions::SessionStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -7202,6 +7224,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -7216,6 +7239,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -7497,6 +7521,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -7783,6 +7808,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -11675,6 +11701,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -13130,6 +13157,7 @@ pub ai6::SessionRecord::predecessor: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::probe_requested: core::option::Option<f64>
 pub ai6::SessionRecord::provider_session_id: core::option::Option<alloc::string::String>
 pub ai6::SessionRecord::recent: alloc::vec::Vec<alloc::string::String>
+pub ai6::SessionRecord::recommendation: core::option::Option<ai6::directorates::registry::sessions::MissionVerdict>
 pub ai6::SessionRecord::result: core::option::Option<ai6::directorates::registry::sessions::SessionResult>
 pub ai6::SessionRecord::session_id: alloc::string::String
 pub ai6::SessionRecord::station: alloc::string::String
@@ -13466,6 +13494,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -14886,6 +14915,7 @@ pub fn ai6::SessionStore::latest_session(&self, &str) -> core::io::error::Result
 pub fn ai6::SessionStore::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::SessionStore::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::SessionStore::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::SessionStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -14900,6 +14930,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::latest_session(&self, &str
 pub fn ai6::directorates::registry::sql::SqlRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
@@ -14914,6 +14945,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::latest_session(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::lose_session(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_exposure(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>>
 pub fn ai6::directorates::registry::store::FileRegistry::open_session(&self, ai6::directorates::registry::sessions::NewSession, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
+pub fn ai6::directorates::registry::store::FileRegistry::record_recommendation(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::record_verdict(&self, &str, &str, &ai6::directorates::registry::sessions::MissionVerdict) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::renew_session(&self, &str, &str, u64, core::time::Duration) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::sessions::SessionRecord, ai6::directorates::registry::sessions::SessionError>
