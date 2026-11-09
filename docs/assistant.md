@@ -1059,9 +1059,10 @@ With `assistant = false` in the `unex` record she is not served: the profile say
 off and who can change that. Otherwise **Ask Moneypenny** (top right on every page, or Ctrl+Alt+I;
 ⌃⌘I on macOS) opens the chat:
 beside the page in a wide window, over it in a narrower one, full screen on a phone. It can
-be expanded into the centre (Ctrl+Alt+Shift+I) and, on desktop, popped out into its own
-window (Ctrl+Alt+O); every layout shows the same conversation, and the app remembers the
-layout per person on each device (the app's README has the details). The app's demo build
+be expanded into the centre (Ctrl+Alt+Shift+I) and popped out into its own window
+(Ctrl+Alt+O), a native one on desktop and a browser window on the web
+([below](#her-own-window-on-the-web)); every layout shows the same conversation, and the app
+remembers the layout per person on each device (the app's README has the details). The app's demo build
 (`OO_DEMO=true`) shows a scripted sample conversation instead, labelled as one; it reaches no
 network and its proposals change nothing.
 
@@ -1101,6 +1102,57 @@ Claude handler sends each as an image block. A handler that takes none (Codex, A
 an `acp` agent) refuses the message and says why. Any image in the conversation, the person's
 or one of her drawings, opens enlarged on a click, where it pans and zooms; the person's are
 read back with `GET /v1/user/moneypenny/images/{sha256}`, which answers only them.
+
+### Her own window on the web
+
+**Pop out** on the web opens a browser window at the app's own address with `?oo_window=chat`,
+from the click, so the browser does not take it for a pop-up nobody asked for. The window is a
+second copy of the app that shows only her chat. It signs in with the session cookie the
+browser already holds, so no token travels between the two pages, and the page it came from says
+"Moneypenny is in her own window" with **Bring back**.
+
+![The page, saying she is in another window](assets/outer-office/popout-page.png)
+
+The two copies share three things:
+
+- **The conversation.** The window asks the page for the conversation's ID and opens its own
+  socket to `/v1/user/moneypenny` on it. Universal Exports sends each reply to every socket on
+  the conversation, so a reply streams in the window and the page's copy has it too.
+- **The draft.** Each composer's text goes to the other over a same-origin `BroadcastChannel`
+  named for the person, so what was half typed in the page is in the window when it opens, and
+  what is typed in the window is in the page when it closes.
+- **The theme and wallpaper.** The window follows the page's as the person changes them.
+
+![The pop-out, with the draft carried over](assets/outer-office/popout-draft.png)
+
+![A reply in the pop-out](assets/outer-office/popout-reply.png)
+
+Links she offers in the window open in the page. Closing the window, **Bring back** and
+**Hide** tell the page, which docks the chat or hides it; a window the browser closed without
+saying so is noticed when the page next takes the focus. Closing or reloading the page sends the
+window away (it closes itself, else says its page is gone), and a reloaded page starts with the
+chat in the page, never popped out: nothing remembers a window the browser has closed. A browser
+that blocks the window leaves the chat where it was and says so in the chat until dismissed;
+allow pop-ups for the page and try again. The window does not send the page's route with its
+messages, so "why is this one stuck?" there means the conversation, not the page.
+
+**Why a second copy, not the same app in another window.** Flutter's multi-view embedding can
+add a view to an element of a window the page opened, and the view draws, takes pointer events
+and shares state with the page. Typing does not work in it: the characters reach the browser's
+hidden text-editing element in that window and never the Flutter text field (probably because
+Flutter listens for text input on the page's own document; the cause was not chased). That was measured in Chrome 156 and
+Edge 156 with a probe app (a field bound to one controller, shown in the page's view and in a
+view added to a `window.open`ed window); the same typing in the page's own view works. The
+screenshot shows the window after typing "hello" into its field: the draft stays empty.
+
+![The multi-view probe: typed text does not reach the field](assets/outer-office/multiview-no-input.png)
+
+Firefox was not installed on the machine that built this, so multi-view there is unmeasured;
+the shipped design does not rely on it. The pop-out itself was driven only in Chrome 156, on
+the preview build, where each window's conversation is its own scripted sample, so the
+shared conversation (one socket per window on one conversation) is by the gateway's design and
+was not watched in a browser. Clipboard and input-method composition in the pop-out were not
+tried by hand.
 
 ## Her conversation log
 

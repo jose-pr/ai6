@@ -49,8 +49,10 @@ native windows build their app with `boardThemedApp`.
 - `env.sh` and `env.ps1` under the SDK prefix set `FLUTTER_WINDOWING`; any other Flutter needs `enable-windowing` before running or building a desktop client.
 - The API is experimental and internal in this Flutter revision; keep its use isolated in this package and do not describe it as production-stable.
 - Web uses one ordinary Flutter app view. Session details navigate inside that page;
-  do not enable Flutter multi-view or imply it opens browser child windows. A browser
-  popup is a separate feature and would need an explicit `window.open` plus messaging.
+  do not enable Flutter multi-view: a view added to a `window.open`ed window draws but takes
+  no typing (measured, `docs/assistant.md` "Her own window on the web"). Moneypenny's web
+  pop-out is a second copy of the app at `?oo_window=chat` (`lib/assistant/chat_popout*.dart`),
+  tied to the page by a `BroadcastChannel`; both sockets are on one conversation.
 - Native desktop windows are a separate, experimental Flutter feature. Opening or closing
   a Session window must not start, resume or stop its provider Session.
 - Every native window (a Session's, Moneypenny's popped-out chat) opens through
