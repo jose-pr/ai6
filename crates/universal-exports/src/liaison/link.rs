@@ -110,7 +110,12 @@ impl LinkListener {
             .map(str::parse)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| LiaisonError::new("a peer id is not sha256:<hex> of a key"))?;
-        let proof = Arc::new(Proof::new(identity).with_initiators(Trust::pinned(ids)));
+        let proof = Arc::new(
+            Proof::builder(identity)
+                .initiators(Trust::pinned(ids))
+                .build()
+                .map_err(|error| LiaisonError::new(format!("the link key: {error}")))?,
+        );
         let listener = match tls {
             Some(tls) => Listener::bind(address, Some(tls)),
             None if address.ip().is_loopback() || config.plain_beyond_loopback => {

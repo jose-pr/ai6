@@ -326,8 +326,10 @@ fn over_link<R>(
     body: impl FnOnce(&Mux<'_, Sealed<'_, WsChannel>>) -> R,
 ) -> Result<R, String> {
     let server: String = server.into();
-    let proof =
-        Proof::new(client.clone()).with_responders(Trust::pinned([server.parse().unwrap()]));
+    let proof = Proof::builder(client.clone())
+        .responders(Trust::pinned([server.parse().unwrap()]))
+        .build()
+        .unwrap();
     let channel = Dialer::new()
         .with_frames(Frames::Binary)
         .dial(Kind::WebSocket, url, WAIT)
@@ -1059,7 +1061,10 @@ fn serve_peer(
     store
         .put(&PeerRecord::new(client).granting(PROTOCOL))
         .unwrap();
-    let proof = Proof::new(identity).with_initiators(Trust::pinned([client.parse().unwrap()]));
+    let proof = Proof::builder(identity)
+        .initiators(Trust::pinned([client.parse().unwrap()]))
+        .build()
+        .unwrap();
     let services = Server::new(agent).serving(Services::default());
     let thread = thread::spawn(move || {
         while !stop.load(Ordering::SeqCst) {

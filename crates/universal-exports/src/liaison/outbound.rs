@@ -98,7 +98,10 @@ impl Outbound {
             .ok_or("no peer id")?
             .parse()
             .map_err(|_| "not a peer id")?;
-        let proof = Proof::new(self.identity.clone()).with_responders(Trust::pinned([server]));
+        let proof = Proof::builder(self.identity.clone())
+            .responders(Trust::pinned([server]))
+            .build()
+            .map_err(|error| error.to_string())?;
         let mut dialer = Dialer::new().with_frames(Frames::Binary);
         if url.scheme() == "wss" {
             dialer = dialer.with_tls(public_roots()?);
