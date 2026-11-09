@@ -12,7 +12,7 @@ are a convention, not decoration: each one says who owns a decision.
 | **Registry** | `ai6::directorates::registry` | The shared record (briefs, leases, check-ins, audit, access tokens) and the Cable relay; real SIS and MI5 usage |
 | **Q Branch** | `ai6::directorates::q` | Gear: terminals, loadouts, Mission-scoped secret leases, MCP configuration, sandbox arguments |
 | **00 Section** | `ai6::directorates::section_00`, `crates/providers/agents/` | The AgentHandler contract and the Claude and Codex handlers |
-| **Medical** | `ai6::directorates::medical` | Agent health: the watchdog for stalls, loops and blocked prompts; token and cost [usage and budgets](medical.md#budgets); [exposure](medical.md#exposure) to untrusted input; [quarantine](medical.md#quarantine) |
+| **Medical** | `ai6::directorates::medical` | Agent health ([Medical](medical.md)): the watchdog for stalls, loops and blocked prompts; token and cost usage and budgets; exposure to untrusted input; quarantine |
 | **Station** | `ai6::station`, `ai6 serve` | A node running the daemon: its server, provider host, safe houses, publisher and identity |
 | **Universal Exports** | `crates/universal-exports` | The public front: the only address operators and clients reach |
 | **Outer Office** | `clients/outer-office` | The operator app (short name OO): board, briefs, terminals, administration, audit |
@@ -68,14 +68,11 @@ grant nothing.
 | `field` | Change its worktree and run tests; irreversible steps need M's authorization |
 | `00` | Act unattended within the Operation's policy (the *licence to kill*) |
 
-**The 00 in charge.** An Operation may give an Agent with `00` clearance the job of keeping
-its [watch](watches.md): one standing Session, not a Mission, that answers for the Operation's
-outcome. It verifies each Mission that waits in [`verifying`](missions.md#verifying) and decides
-it done, failed or redispatched, takes the Cables addressed to the Operation, and proposes child
-Missions with `propose_mission`; proposals wait in a separate inbox until an operator with
-`mission.create` approves them in Outer Office. An Agent without `00` clearance cannot keep an
-Operation's watch. Clearance never grants policy authority or bypasses cover, Q leases or Station
-policy. It is the autonomy axis; [Compartments](compartments.md) are need-to-know.
+**The 00 in charge.** An Operation may give a `00` Agent its [watch](watches.md), which answers
+for its outcome: it decides Missions in [`verifying`](missions.md#verifying), takes the
+Operation's Cables and proposes child Missions for an operator to approve. Clearance is
+autonomy, never policy authority: it bypasses no cover, Q lease or Station policy;
+[Compartments](compartments.md) are need-to-know.
 
 ## Conventions
 
