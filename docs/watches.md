@@ -32,8 +32,12 @@ M's watch moves with the Headquarters lease; a Station's watch does not move.
 
 ## Configuration
 
-Each watch is a `[watch.<scope>]` table of the `watch` family (the `watches` file, or the `watch`
-tables of `ai6.cfg`):
+Each watch is a record of the `watch` family in the configuration provider (the shared database
+in a deployment), keyed by its scope. Nothing reads a watch from `ai6.cfg`. A person with
+`config.manage` on `config:watch` lists, adds, edits and removes watches on the Watches kind of
+Outer Office's Roster page, or through `/v1/user/roster/watches` (with `/schema` for the form);
+every Station takes a change up at its next provider poll, with no restart, and each write is
+audited with the revision it moved to. TOML below is the import and export form of a record:
 
 ```toml
 [watch."operation:G"]

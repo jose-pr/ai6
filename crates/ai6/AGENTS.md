@@ -69,7 +69,7 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
                               // agent.configure, agent.read, approval.class,
                               // approval.decide, assistant.memory.admin, audit.read,
                               // cable.read, cable.send, compartment.cover, compartment.manage,
-                              // compartment.read, mission.control, mission.create, mission.read, mission.review,
+                              // compartment.read, config.manage, config.read, mission.control, mission.create, mission.read, mission.review,
                               // mission.status, mission.verify, pool.manage, pool.read, product.read, roster.manage,
                               // roster.read, session.input, session.read,
                               // station.configure, station.read; cable.* on operation:<id>

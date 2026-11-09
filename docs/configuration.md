@@ -831,24 +831,30 @@ refused, and a running Station keeps the last good one.
 
 ### Families
 
-| Family | File | Station's own | Singleton | Applies | Holds |
-| --- | --- | --- | --- | --- | --- |
-| `operation` | `operations` | no | no | live | `[operation.<id>]`, sleepers included |
-| `agent`, `role` | `agents` | no | no | live | `[agent.<codename>]`, `[role.<id>]` |
-| `assistant` | `agents` | no | yes | live | `[assistant]`, Moneypenny's settings |
-| `cover` | `covers` | no | no | live | `[cover.<name>]` |
-| `theater` | `theaters` | yes | no | restart | `[theater.<id>]` |
-| `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool` | `loadouts` | yes | no | live | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
-| `cables` | `cables` | yes | yes | restart | the whole file: grants, inbound, channels, limits |
-| `plugin` | `plugins` | yes | no | restart | `[[library]]` entries, keyed by their `file` |
-| `station` | `station` | yes | yes | restart | the whole file: the Station's runtime settings |
-| `tls` | `tls` | yes | yes | restart | the whole file: the Station TLS policy |
-| `access` | `access` | no | yes | live, in Universal Exports | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
-| `operation_access` | `operation_access` | no | no | live, in Universal Exports | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
-| `unex` | `unex` | no | yes | restart | the whole file: Universal Exports' sign-in, limits and assistant |
-| `compartment` | `compartments` | no | no | at each call | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
-| `review` | `reviews` | no | no | live | `[review.<name>]`: [review policies](review.md) |
-| `watch` | `watches` | no | no | live | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
+Every family is a record of the configuration provider (the shared database in a deployment);
+the "File" column is the name its records take in the import and export form. "Edited in"
+says where a person changes it: the Roster page of Outer Office and the gateway's
+`/v1/user/roster/{kind}` routes (with `/schema` for the form), or, for the families not yet
+there, `ai6 config import` of a file.
+
+| Family | File | Station's own | Singleton | Applies | Edited in | Holds |
+| --- | --- | --- | --- | --- | --- | --- |
+| `operation` | `operations` | no | no | live | Roster page, route | `[operation.<id>]`, sleepers included |
+| `agent`, `role` | `agents` | no | no | live | Roster page, route | `[agent.<codename>]`, `[role.<id>]` |
+| `assistant` | `agents` | no | yes | live | Roster page, route | `[assistant]`, Moneypenny's settings |
+| `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
+| `theater` | `theaters` | yes | no | restart | `ai6 config import` | `[theater.<id>]` |
+| `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool` | `loadouts` | yes | no | live | `ai6 config import` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
+| `cables` | `cables` | yes | yes | restart | `ai6 config import` | the whole file: grants, inbound, channels, limits |
+| `plugin` | `plugins` | yes | no | restart | `ai6 config import` | `[[library]]` entries, keyed by their `file` |
+| `station` | `station` | yes | yes | restart | Outer Office Stations page | the whole file: the Station's runtime settings |
+| `tls` | `tls` | yes | yes | restart | `ai6 config import` | the whole file: the Station TLS policy |
+| `access` | `access` | no | yes | live, in Universal Exports | Outer Office Access page | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
+| `operation_access` | `operation_access` | no | no | live, in Universal Exports | Outer Office Access page | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
+| `unex` | `unex` | no | yes | restart | `ai6 config import` | the whole file: Universal Exports' sign-in, limits and assistant |
+| `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
+| `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
+| `watch` | `watches` | no | no | live | Roster page (Watches), route `/v1/user/roster/watches` | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live
 reaches requests, the scheduler and new Sessions at once; running Sessions keep what they
