@@ -75,7 +75,11 @@ template with `{name}` and `{version}`; each file still has to match `Cargo.lock
 The `deps` branch's `crates/` is a cargo vendor directory: every package `Cargo.lock` names for every
 target, from crates.io and from each pinned git commit, as a directory `<name>-<version>/` of
 unpacked source with a `.cargo-checksum.json`. It holds no archive. Tests, examples, benchmarks and
-fixtures are left out, as is any file an archive scanner would refuse. `crates.py`, which needs
+fixtures are left out, as is any file that is not text or an image (archives, executables, keys,
+wasm, object files, binary tables). A binary a build reads is rewritten as text: an
+`include_bytes!` of it becomes an array literal, and `ring`'s prebuilt objects become hex that its
+`build.rs` decodes; one that only tests read, or that only another byte order reads, is dropped.
+`refresh` makes the same tree every time. `crates.py`, which needs
 Python 3.11.4 or later, works on a checkout of that branch. Installing the SDKs needs the network once;
 the build after this does not:
 
@@ -102,8 +106,10 @@ checksum, and its `files` list every file kept with its SHA-256, which cargo che
 
 Run `python3 tools/sdk/check_lock.py` afterwards (`--online` also compares each download's hash
 with what upstream publishes; `--deps-ref` says where to read the build containers' defaults). It
-fails on any archive, compressed data, pack file, executable or key file in the `deps` commit, found
-by leading bytes the way the repository scanner finds them, and on any path below a `.git`. It
+fails on any archive, compressed data, pack file, executable, key file, wasm, object file or other
+binary in the `deps` commit, found by leading bytes the way the repository scanner finds them
+(Flutter's CanvasKit wasm is allowed for now, `crates.ALLOWED_WASM`), and on any path below a
+`.git`. It
 also fails on a package `clients/outer-office/pubspec.lock` names that the `deps` commit's `pub/`
 lacks, so a new dependency cannot land ahead of a refreshed branch.
 
