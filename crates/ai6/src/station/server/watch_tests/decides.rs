@@ -327,6 +327,23 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
     assert!(tools[0].contains("\"missing\"") && tools[0].contains("feature-x"));
     assert!(tools[1].starts_with("redispatch=>"), "{tools:?}");
 
+    // What the probe found is also a Report of the Operation, tied to the Mission.
+    let readbacks = state
+        .intake
+        .reports(&crate::directorates::registry::reports::ReportFilter::all().of_kind("evidence"))
+        .unwrap();
+    assert_eq!(readbacks.len(), 1, "{readbacks:?}");
+    assert!(readbacks[0].about_mission(&mission), "{:?}", readbacks[0].links);
+    assert!(
+        readbacks[0].text.contains("branch:feature-x: missing"),
+        "{}",
+        readbacks[0].text
+    );
+    assert_eq!(
+        readbacks[0].severity,
+        crate::directorates::registry::logbook::Severity::Warning
+    );
+
     // Its probes are the Mission's evidence, and the decision is the attempt's verdict, audited,
     // on the timeline, counted against the attempt's Agent, and told to the next attempt.
     let first = attempt(&state, &mission, 1);

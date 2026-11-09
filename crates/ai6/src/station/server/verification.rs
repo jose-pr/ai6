@@ -12,10 +12,14 @@ use std::time::Duration;
 
 use coqui_acp_provider::AgentEvent;
 
-use super::{DaemonState, agents, head_of_station, publish_lifecycle, session_hold, vetting};
+use super::{
+    DaemonState, agents, head_of_station, observations, publish_lifecycle, session_hold, vetting,
+};
 use crate::directorates::m::deliverables::{self, Deliverable, DeliverableKind};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::theaters::{LOCAL_THEATER, TheaterAccess};
+use crate::directorates::registry::logbook::Severity;
+use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::sessions::{
     Evidence, MissionVerdict, ProbeResult, SessionStatus, SessionUpdate,
 };
@@ -323,12 +327,64 @@ pub(super) fn probe_and_record(state: &DaemonState, mission_id: &str) -> Result<
         .ok_or("the Session record is gone")?;
     let evidence = probe_all(state, &mission, &record.deliverables);
     let found = evidence.len();
+    let readback = evidence.clone();
     let update = SessionUpdate::default().evidence(evidence).probed();
     state
         .intake
         .update_session(&hold.id, &state.station_id, hold.fence, update)
         .map_err(|error| error.to_string())?;
+    report_readback(state, &mission, &hold.id, &readback);
     Ok(found)
+}
+
+/// Files what the probes found as a Report of the Mission's Operation, linked to the Mission.
+/// Reading the same attempt back again updates the one Report. Anything not found makes it a
+/// warning.
+fn report_readback(state: &DaemonState, mission: &Mission, attempt: &str, evidence: &[Evidence]) {
+    let Some(operation) = mission.operation_id.as_deref() else {
+        return;
+    };
+    let missing = evidence
+        .iter()
+        .filter(|found| found.result != ProbeResult::Found)
+        .count();
+    let text = evidence
+        .iter()
+        .map(|found| {
+            format!(
+                "{}: {} ({})",
+                found.deliverable,
+                found.result.as_str(),
+                found.detail
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    observations::observe(
+        state,
+        observations::Observed {
+            operation,
+            filer: ReportFiler::Probe {
+                probe: "deliverables".to_owned(),
+            },
+            kind: "evidence",
+            severity: if missing > 0 {
+                Severity::Warning
+            } else {
+                Severity::Info
+            },
+            about: attempt,
+            title: format!(
+                "Deliverables of {}: {} of {} not found",
+                mission.mission_id,
+                missing,
+                evidence.len()
+            ),
+            text,
+            mission: Some(mission.mission_id.as_str()),
+            links: Vec::new(),
+        },
+    );
 }
 
 /// Runs the probes a person asked for on Missions of this Station that are verifying, each on a

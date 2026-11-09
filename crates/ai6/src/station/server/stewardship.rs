@@ -10,7 +10,7 @@
 //! a role with no Agent, which is proposed instead. Nothing here grants a role, a clearance or an
 //! account, and no Session already running is touched.
 
-use super::{DaemonState, agents, medical};
+use super::{DaemonState, agents, medical, observations};
 use crate::bounds::Limit;
 use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::m::placement::AgentFacts;
@@ -21,6 +21,8 @@ use crate::directorates::registry::approvals::{
     ApprovalRequest, ApprovalStatus, Decision, EXPIRY_SIGNER,
 };
 use crate::directorates::registry::holds::{AUTOMATIC, RosterHold};
+use crate::directorates::registry::logbook::Severity;
+use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::{MissionId, SessionId};
@@ -195,6 +197,22 @@ fn file(state: &DaemonState, operation: &Operation, proposal: &Proposal, _facts:
                     operation.id, stored.id
                 );
                 event(state, &stored, "proposed", AUTOMATIC);
+                observations::observe(
+                    state,
+                    observations::Observed {
+                        operation: &operation.id,
+                        filer: ReportFiler::Probe {
+                            probe: "scorecard".to_owned(),
+                        },
+                        kind: "scorecard",
+                        severity: Severity::Info,
+                        about: &stored.id,
+                        title: format!("M proposes a {kind} for Agent {agent}"),
+                        text: proposal.reason.clone(),
+                        mission: None,
+                        links: vec![observations::decision(&stored.id)],
+                    },
+                );
                 audit(
                     state,
                     "agent.hold.proposed",
@@ -426,6 +444,24 @@ mod tests {
         );
         round(&state);
         assert_eq!(pending(&state).len(), 1, "one request, however many rounds");
+
+        // The proposal is also a Report of the Operation, tied to its green ink request.
+        let reports = {
+            use crate::directorates::registry::reports::ReportFilter;
+            state
+                .intake
+                .reports(&ReportFilter::all().of_kind("scorecard"))
+                .unwrap()
+        };
+        assert_eq!(reports.len(), 1, "one Report, however many rounds");
+        assert!(
+            reports[0].links.iter().any(|link| link.id == request.id
+                && link.kind
+                    == crate::directorates::registry::reports::ReportLinkKind::Decision),
+            "{:?}",
+            reports[0].links
+        );
+        assert!(reports[0].text.contains("5 of 6"), "{}", reports[0].text);
 
         sign(&state, request, "alice");
         round(&state);

@@ -31,6 +31,7 @@ mod medical;
 #[cfg(feature = "cables-mcp")]
 mod memories;
 mod models;
+mod observations;
 mod overlay_desk;
 #[cfg(test)]
 mod overlay_tests;

@@ -16,7 +16,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{DaemonState, WorkingArea, configured_agent_role, finish_intake_claim, medical};
+use super::{
+    DaemonState, WorkingArea, configured_agent_role, finish_intake_claim, medical, observations,
+};
 use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::roster::{Agent, Operation, Roster};
@@ -28,6 +30,8 @@ use crate::directorates::m::vetting::{
 use crate::directorates::medical::exposure::Restriction;
 use crate::directorates::registry::approvals::{ApprovalRequest, ApprovalStatus, Decision};
 use crate::directorates::registry::bona_fides::Origin;
+use crate::directorates::registry::logbook::Severity;
+use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::mission_ids::MissionEntry;
 use crate::directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, Lease, MissionProposal,
@@ -308,6 +312,7 @@ impl<'a> Round<'a> {
                     .work
                     .push(KnownWork::of(brief, key.clone()));
                 record(state, operation, brief, mission_id, "held", Some(vetting));
+                report_hold(state, &operation.id, mission_id, &key, vetting, false);
                 Admission::Settled
             }
             Ok(None) => Admission::Settled,
@@ -1150,6 +1155,10 @@ fn settle(state: &DaemonState, review: &Brief, verdict: &Vetting, reviewer: &str
     let now = state.clock.now().max(1) as f64;
     match review_target(review) {
         Some(ReviewTarget::Brief { key, digest }) => {
+            // Read before a hold takes the brief out of the queue.
+            let mission = queued_brief(state, &key)
+                .and_then(|brief| brief.mission_id)
+                .unwrap_or_else(|| key.clone());
             let outcome = if verdict.verdict == VettingVerdict::Pass {
                 state
                     .intake
@@ -1174,6 +1183,9 @@ fn settle(state: &DaemonState, review: &Brief, verdict: &Vetting, reviewer: &str
                         verdict.summary()
                     );
                     record_target(state, operation, &key, action, reviewer, verdict);
+                    if action == "held" {
+                        report_hold(state, &operation.id, &mission, &key, verdict, true);
+                    }
                 }
                 // The brief left the queue meanwhile (an operator, or another check, held it).
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -1273,6 +1285,62 @@ fn refuse(state: &DaemonState, brief: &Brief, mission_id: &str, vetting: &Vettin
         });
         let _ = finish_intake_claim(state, &lease, &outcome, false);
     }
+}
+
+/// Files a held brief's findings as a Report of its Operation, linked to the Mission it would
+/// be: the Chief of Staff's review when `reviewed`, the rules' vetting otherwise. The Report is
+/// the finding to read and assess; the hold itself stays where it works.
+fn report_hold(
+    state: &DaemonState,
+    operation: &str,
+    mission: &str,
+    key: &str,
+    vetting: &Vetting,
+    reviewed: bool,
+) {
+    let findings = vetting
+        .findings
+        .iter()
+        .map(|finding| format!("{:?}: {}", finding.kind, finding.detail))
+        .collect::<Vec<_>>()
+        .join("\n");
+    observations::observe(
+        state,
+        observations::Observed {
+            operation,
+            filer: if reviewed {
+                ReportFiler::Review {
+                    mission: mission.to_owned(),
+                }
+            } else {
+                ReportFiler::Probe {
+                    probe: "vetting".to_owned(),
+                }
+            },
+            kind: if reviewed {
+                "review-hold"
+            } else {
+                "vetting-hold"
+            },
+            severity: Severity::Warning,
+            about: key,
+            title: format!(
+                "{} held brief {mission}",
+                if reviewed {
+                    "The Chief of Staff"
+                } else {
+                    "Vetting"
+                }
+            ),
+            text: if findings.is_empty() {
+                vetting.summary()
+            } else {
+                findings
+            },
+            mission: Some(mission),
+            links: Vec::new(),
+        },
+    );
 }
 
 /// Records a vetting decision on the Operation's timeline: metadata only, never brief text.
@@ -1541,6 +1609,17 @@ mod tests {
             .expect("the item was given a Mission ID")
     }
 
+    fn filed_of_kind(
+        state: &DaemonState,
+        kind: &str,
+    ) -> Vec<crate::directorates::registry::reports::Report> {
+        use crate::directorates::registry::reports::ReportFilter;
+        state
+            .intake
+            .reports(&ReportFilter::all().of_kind(kind))
+            .unwrap()
+    }
+
     fn intake_actions(state: &DaemonState) -> Vec<String> {
         state
             .intake
@@ -1595,6 +1674,20 @@ mod tests {
             placed.meta()["mission_id"].as_str()
         );
         assert_eq!(intake_actions(&state), ["passed", "held"]);
+
+        // The hold is also a Report of the Operation, tied to the Mission the brief would be.
+        let found = filed_of_kind(&state, "vetting-hold");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].filer,
+            crate::directorates::registry::reports::ReportFiler::Probe {
+                probe: "vetting".to_owned()
+            }
+        );
+        let mission = held[0].brief.mission_id.clone().unwrap();
+        assert!(found[0].about_mission(&mission), "{:?}", found[0].links);
+        assert!(found[0].text.contains("Duplicate"), "{}", found[0].text);
+        assert!(found[0].untrusted());
 
         // Polling the held item again neither queues nor duplicates it.
         state
@@ -1991,6 +2084,25 @@ mod tests {
         );
         assert!(schedule_intake_once(&state));
         assert!(state.intake.lease(&key).unwrap().is_none(), "never placed");
+        let found = filed_of_kind(&state, "review-hold");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].text.contains("asks the Agent to push to main"),
+            "{}",
+            found[0].text
+        );
+        assert!(matches!(
+            found[0].filer,
+            crate::directorates::registry::reports::ReportFiler::Review { .. }
+        ));
+        assert!(
+            found[0]
+                .links
+                .iter()
+                .any(|link| link.kind
+                    == crate::directorates::registry::reports::ReportLinkKind::Mission),
+            "tied to the Mission the brief would be"
+        );
         stop(&state);
     }
 
