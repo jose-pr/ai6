@@ -48,6 +48,8 @@ class Package(NamedTuple):
     version: str
     source: str
     url: str
+    path: str
+    resolved_ref: str
 
 
 def locked_packages(text: str) -> list[Package]:
@@ -56,13 +58,13 @@ def locked_packages(text: str) -> list[Package]:
     current: dict[str, str] = {}
     for line in text.splitlines():
         entry = re.match(r"^  ([A-Za-z0-9_]+):\s*$", line)
-        field = re.match(r'^ {4,6}(source|version|url): "?([^"]*)"?\s*$', line)
+        field = re.match(r'^ {4,6}(source|version|url|path|resolved-ref): "?([^"]*)"?\s*$', line)
         if entry:
             if current:
                 packages.append(Package(**current))
-            current = {"name": entry[1], "version": "", "source": "", "url": ""}
+            current = {"name": entry[1], "version": "", "source": "", "url": "", "path": "", "resolved_ref": ""}
         elif field and current:
-            current[field[1]] = field[2]
+            current[field[1].replace("-", "_")] = field[2]
         elif not line.startswith(" ") and current:
             packages.append(Package(**current))
             current = {}
@@ -210,7 +212,10 @@ class Checker:
     def check_pub(self, deps: Item) -> None:
         """Every package pubspec.lock names is in deps' pub cache, or the offline build stops there.
 
-        A package from the Flutter SDK comes with it, and a path package is the checkout's.
+        A package from the Flutter SDK comes with it, and a path package is the checkout's. A git
+        package is pub's checkout of its repository at the locked revision, with no clone beside it
+        (no pack file belongs on the branch); the bootstrap gives the checkout the `.git/pub-packages`
+        an offline `pub get` reads, which git cannot carry.
         """
         packages = locked_packages(self.pubspec_lock.read_text(encoding="utf-8"))
         if not packages:
@@ -221,7 +226,9 @@ class Checker:
                 where = f"pub/hosted/{host}/{package.name}-{package.version}"
                 found = self.tree_holds(deps.version, where)
             elif package.source == "git":
-                where = f"pub/git/cache/{package.url.rstrip('/').rsplit('/', 1)[-1].removesuffix('.git')}-*"
+                repo = package.url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+                root = f"pub/git/{repo}-{package.resolved_ref}"
+                where = f"{root}/{package.path}/pubspec.yaml".replace("//", "/")
                 found = self.tree_holds(deps.version, where)
             else:
                 continue

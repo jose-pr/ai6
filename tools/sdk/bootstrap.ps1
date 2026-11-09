@@ -334,6 +334,16 @@ function InstallDeps([string] $commit) {
         if (Test-Path -LiteralPath $cache) { Remove-Item -LiteralPath $cache -Recurse -Force }
         New-Item -ItemType Directory -Path (Split-Path $cache) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $dir 'pub') -Destination $partial -Recurse
+        # Pub takes a git package from its checkout once the checkout has .git\pub-packages, which
+        # it fills in itself; git cannot carry a .git path, so deps has none.
+        $git = Join-Path $partial 'git'
+        if (Test-Path -LiteralPath $git) {
+            foreach ($checkout in Get-ChildItem -LiteralPath $git -Directory) {
+                $marker = Join-Path $checkout.FullName '.git'
+                New-Item -ItemType Directory -Path $marker -Force | Out-Null
+                New-Item -ItemType File -Path (Join-Path $marker 'pub-packages') -Force | Out-Null
+            }
+        }
         Move-Item -LiteralPath $partial -Destination $cache
     }
     Report "deps $commit" 'ok'

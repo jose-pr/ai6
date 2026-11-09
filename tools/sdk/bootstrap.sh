@@ -337,6 +337,12 @@ install_deps() {
     mkdir -p "$prefix/pub-cache"
     rm -rf "$pub_cache.partial" "$pub_cache"
     cp -R "$deps_dir/pub" "$pub_cache.partial"
+    # Pub takes a git package from its checkout once the checkout has .git/pub-packages, which
+    # it fills in itself; git cannot carry a .git path, so deps has none.
+    for checkout in "$pub_cache.partial"/git/*/; do
+      [ -d "$checkout" ] || continue
+      mkdir -p "$checkout.git" && : > "$checkout.git/pub-packages"
+    done
     mv "$pub_cache.partial" "$pub_cache"
   fi
   report "deps $deps_commit" ok
