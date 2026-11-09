@@ -68,11 +68,14 @@ grant nothing.
 | `field` | Change its worktree and run tests; irreversible steps need M's authorization |
 | `00` | Act unattended within the Operation's policy (the *licence to kill*) |
 
-**The 00 coordinator.** An Operation may give an Agent with `00` clearance the job of
-coordinating its Missions. Such a Session can propose child Missions; proposals wait in a
-separate inbox until an operator with `mission.create` approves them in Outer Office.
-Clearance never grants policy authority or bypasses cover, Q leases or Station policy. It is
-the autonomy axis; [Compartments](compartments.md) are need-to-know.
+**The 00 in charge.** An Operation may give an Agent with `00` clearance the job of keeping
+its [watch](watches.md): one standing Session, not a Mission, that answers for the Operation's
+outcome. It verifies each Mission that waits in [`verifying`](missions.md#verifying) and decides
+it done, failed or redispatched, takes the Cables addressed to the Operation, and proposes child
+Missions with `propose_mission`; proposals wait in a separate inbox until an operator with
+`mission.create` approves them in Outer Office. An Agent without `00` clearance cannot keep an
+Operation's watch. Clearance never grants policy authority or bypasses cover, Q leases or Station
+policy. It is the autonomy axis; [Compartments](compartments.md) are need-to-know.
 
 ## Conventions
 

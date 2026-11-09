@@ -10,10 +10,10 @@ scorecard credit or board card, and no Sleeper queues it. Its Session is recorde
 own record in the Registry, which names its scope where a Mission's Session record names the
 Mission.
 
-What each watch decides comes in later releases: the Operation's watch verifying Missions that
-wait in `verifying` ([Missions](missions.md#verifying)), Sources reporting to it, and the Chief of
-Station taking over the [Head of Station](stations.md#head-of-station) rounds. This page describes the Session
-they all run in.
+The Operation's watch decides the Missions that wait in `verifying`
+([Missions](missions.md#verifying)); Sources reporting to it, and the Chief of Station taking over
+the [Head of Station](stations.md#head-of-station) rounds, come in later releases. This page
+describes the Session they all run in.
 
 ## Scopes and where a watch runs
 
@@ -47,7 +47,9 @@ operation = "infra"     # the Operation its Cables go in, for M's or a Station's
 ```
 
 A scope with no table has no watch. The Agent must be on the roster, and an Operation's watch
-names an Operation the roster has.
+names an Operation the roster has. **An Operation's watch is kept by an Agent that holds `00`
+clearance**: the roster is refused otherwise, naming the watch and the Agent. The Operation must
+allow `00` as well, or the Agent cannot serve it.
 
 <!-- schema:record.watch:begin -->
 | Key | Default | Meaning |
@@ -87,8 +89,8 @@ The Station wakes a watch with what its area holds that the watch has not been t
 
 | Event | Scope | Untrusted |
 | --- | --- | --- |
-| `verifying`: a Mission of the Operation enters `verifying`, on any Station | `operation:` | when it names deliverables |
-| `cable`: a Cable to the watch's Agent | any, when its Cables have an Operation | always |
+| `verifying`: a Mission of the Operation enters `verifying`, on any Station | `operation:` | always: it carries the final report and the brief |
+| `cable`: a Cable to the watch's Agent, or to its Operation | any, when its Cables have an Operation | always |
 | `health`: an Agent quarantined in the area; for M, a Station whose check-ins stopped | all | the quarantine's reason |
 | `control`: a person asked the watch to wake, with an optional note | all | when it carries a note |
 | `timer`: `wake_every` passed with no other wake | all | no |
@@ -119,6 +121,33 @@ A watch's tools are its scope's, and their rules are Station code:
   like any Agent ([Agents](agents.md#cables)).
 - **`station_report` and `file_report`**, on a Station's watch: the Head of Station's read of the
   Station and its logbook, each call checking that this Station still runs the watch.
+- **The Operation watch's tools**, on an Operation's watch: `operation_missions`, `mission_detail`,
+  `deliverables`, `deliverable_probe`, `verify_mission`, `redispatch` and `propose_mission`
+  ([below](#deciding-missions)).
 
-Deciding verifying Missions, proposing Missions and the Chief of Station's other tools come with
-the phases that give each watch its work.
+The Chief of Station's other tools come with the phases that give each watch its work.
+
+## Deciding Missions
+
+The Operation's 00 Agent in charge answers for its Operation's outcome; the Station only runs and
+provides. When a Mission of the Operation enters `verifying`, the watch is woken with the attempt's
+final report and brief (text written outside AI6, marked untrusted) and its declared deliverables.
+It verifies them itself: `deliverable_probe` reads every deliverable back, read-only, and keeps what
+it found as the Mission's evidence, and `mission_detail` and the rest of its harness let it read the
+work. Then it decides:
+
+- `verify_mission(mission, done|failed, reason)`;
+- `redispatch(mission, brief_amendment?, reason)`: the Mission's next attempt, told the reason and
+  the amendment.
+
+The decision is a person's decision made by the watch ([Missions](missions.md#verifying)): audited,
+on the timeline and the outcome, applied by the Mission's Station, and counted on the scorecard. A
+watch cannot decide a Mission that is not verifying, one of another Operation, or one a person has
+already decided, and a person's decision replaces its own. Its clearance is read again at every
+decision. At `desk`, which a Keep-on-desk retirement or a lowered clearance grant leaves a watch at,
+its decisions are recommendations a person confirms.
+
+A Cable to the Operation (its coordinating role) goes to its watch alone when the Operation has one,
+and reaches it as a message ([Agents](agents.md#cables)); it creates no Mission. Only the
+Operation's own 00 Agents see it when there is no watch. A watch that leaves a Mission
+`verifying` leaves it for a person, shown on the board.

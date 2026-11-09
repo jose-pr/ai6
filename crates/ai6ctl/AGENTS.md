@@ -105,7 +105,7 @@ origin leaves the public roots alone.
   detail) and prints the findings made since; at the end of the wait it says the Station has not
   answered. `ai6ctl missions verify <MISSION> <done|redispatch|failed> --reason <TEXT> [--amend <TEXT>]
   [--operation <ID>]` posts `.../verify` and prints `MISSION attempt N: DECISION by PERSON`; `--reason` is
-  required, `--amend` only with `redispatch`. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
+  required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation watch at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
   repeatable.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the

@@ -224,9 +224,14 @@ Session (`modelProvider`), never those that decide what it may do.
 
 ## 00 coordination
 
-The coordinating 00 Agent is an Operation-assigned Agent identity with `00` clearance, not a
-separate role or Session type. A managed Session with that clearance can use `propose_mission`
-to submit a child-Mission brief to the Operation's pending proposal inbox. AI6 binds the
+The 00 Agent in charge of an Operation is the Operation's [watch](watches.md): an Agent with `00`
+clearance that the Operation's `[watch."operation:CODENAME"]` table names, kept as one standing
+Session that is not a Mission. It replaces the 00 coordinator that was the Session of one Mission.
+It decides the Operation's Missions that are verifying, takes Cables to the Operation, and has
+`propose_mission` among its tools: it submits a child-Mission brief to the Operation's pending
+proposal inbox, naming the watch's own Session where a Mission's Session would be named. An
+Agent whose clearance is not `00` is refused when the watch is configured. A Mission's own Session
+at `00` clearance keeps `propose_mission` too. AI6 binds the
 proposer, parent Mission, provider Session and Operation; proposals stay outside runnable I
 intake until M explicitly authorizes and promotes them. Universal Exports' authenticated
 `mission.create` review endpoints let an operator inspect, approve and queue, or reject a
@@ -385,8 +390,8 @@ step 2. A restricted thread that uses a tool anyway is ended (above).
 AI6's **Cable** relay supports Agent unicast and permission-scoped Station, Theater,
 Global and named-channel broadcasts. Its MCP tools provide peer discovery, sending,
 inbox reads, acknowledgements, replies and explicitly authorized held-Cable release. An
-authorized 00 Agent also has the `propose_mission` tool for submitting work to M; this does
-not make the proposal a Cable or scheduler input. The Station checks the Agent's clearance
+authorized 00 Agent, and an Operation's watch, also has the `propose_mission` tool for submitting
+work to M; this does not make the proposal a Cable or scheduler input. The Station checks the Agent's clearance
 again on every proposal, so a lowered clearance or a retirement stops a running Session's
 proposals at once. Every Agent has `request_approval`, which
 asks a person for [green ink](missions.md#green-ink) before an irreversible step.

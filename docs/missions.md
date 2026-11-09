@@ -338,8 +338,9 @@ found is kept on the attempt as `evidence`, oldest first, up to `[registry.limit
 evidence_entries`. A tracker probe works where the Station holds the tracker's credentials, and an
 `artifact` probe makes a request from the Station to the address the role or brief names.
 
-**The decision.** Until an Operation's own watch decides, a person with `mission.verify` on the
-Operation does:
+**The decision.** The Operation's [watch](watches.md#deciding-missions), its 00 Agent in charge,
+verifies and decides; an Operation with no watch leaves the decision to a person. A person with
+`mission.verify` on the Operation can always decide, and their decision replaces a watch's:
 
 ```bash
 ai6ctl missions probe "$MISSION"                  # asks the Station to probe, waits, prints the findings
@@ -360,6 +361,13 @@ Its Station then settles the Mission within a scheduler pass:
 | `done` | Becomes `done` | Counts as done on the scorecard |
 | `failed` | Becomes `failed` | Disputed: a failure of that Agent |
 | `redispatch` | Is queued as attempt N+1 of the same Mission, for the best qualified Agent, in the safe house the last attempt kept, with a new provider Session told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
+
+The watch's decision takes this same path: it is audited (`mission.verify`, by `watch:operation:CODENAME`),
+recorded as the attempt's verdict, put on the timeline and counted on the scorecard, and a redispatch is a
+failure of the attempt's Agent. A watch whose clearance has been lowered to `desk` only recommends:
+the recommendation is audited (`mission.recommend`) and shown as `recommendation` in the Mission's detail and
+by `ai6ctl missions probe`, settles nothing, and a person confirms it by deciding the same way. A watch never
+replaces a decision a person has given.
 
 A person who gives a verdict on a `verifying` Mission with `ai6ctl missions verdict` settles it the same
 way as `confirmed` or `failed-verification`; only `verify` redispatches. A standing order whose attempt is

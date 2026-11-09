@@ -2466,6 +2466,7 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub deliverables: Vec<Deliverable>,      // what the Mission was to deliver; set when the attempt goes verifying
     pub evidence: Vec<Evidence>,             // what probes found of them, oldest first, bounded (evidence_entries)
     pub probe_requested: Option<f64>,        // when a person asked for a probe, until the Station ran it
+    pub recommendation: Option<MissionVerdict>,   // what a `desk` watch advises for a verifying attempt; settles nothing
 }
 #[non_exhaustive] pub enum ProbeResult { Found, Missing, Unprobed, Failed }   // serde kebab-case; as_str()
     // Missing: the place was read and it is not there. Failed: the look failed or timed out, nothing is known.
@@ -2515,6 +2516,8 @@ pub trait SessionStore {
     fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
     fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<SessionRecord, SessionError>
         // on the latest attempt; NotFound, or Unsettled when it has not ended done or held or is not verifying
+    fn record_recommendation(&self, operation, mission_id, &MissionVerdict) -> Result<SessionRecord, SessionError>
+        // on a verifying latest attempt; no lease; NotFound, or Unsettled when it is not verifying
     fn request_probe(&self, operation, mission_id, at: f64) -> Result<SessionRecord, SessionError>
         // asks the Station that holds a verifying latest attempt to probe its deliverables; no lease needed;
         // NotFound, or Unsettled when the attempt is not verifying
@@ -5356,6 +5359,25 @@ house and starts a new provider Session), told the person's reason and amendment
 (`Mission::task()`). The verified attempt keeps its verdict and counts against its Agent on the scorecard.
 Nothing else leaves `verifying`.
 
+`ai6::directorates::registry::decisions` is the one path a decision takes, for the gateway's `verify`
+route and for an Operation's watch alike:
+
+```rust
+#[non_exhaustive] pub struct VerifyingDecision<'a> { pub operation: &'a str, pub mission: &'a str /* UID */,
+    pub verdict: OutcomeVerdict /* Confirmed | FailedVerification | Redispatch */, pub reason: &'a str,
+    pub amendment: Option<&'a str>, pub by: &'a str /* person ID or `watch:operation:CODENAME` */, pub at: f64 }
+impl<'a> VerifyingDecision<'a> {
+    pub fn new(operation, mission, verdict, reason, by, at) -> Self; pub fn with_amendment(self, Option<&'a str>) -> Self;
+    pub fn verdict_named(word: &str) -> Option<OutcomeVerdict>;   // "done" | "failed" | "redispatch"
+    pub fn word(&self) -> &'static str;
+}
+pub fn check_verifying(latest: &Option<SessionRecord>, operation: &str) -> Result<(), SessionError>;
+pub fn decide(store: &dyn RegistryBackend, &VerifyingDecision) -> Result<SessionRecord, SessionError>;
+    // audit `mission.verify` first, then `record_verdict`, then the timeline entry (kind `verify`)
+pub fn recommend(store: &dyn RegistryBackend, &VerifyingDecision) -> Result<SessionRecord, SessionError>;
+    // audit `mission.recommend`, `record_recommendation`, timeline kind `recommend`; settles nothing
+```
+
 ## Operation cover (`ai6::directorates::m::cover`)
 
 `Covers::default()` supplies `covert`, `partial` and `overt`. `Covers::load(config_dir)`
@@ -5434,6 +5456,17 @@ of waiting events when the hour's `max_turns_per_hour` has room. The harness run
 Mission has that ID), resumed with the record's provider Session, or started fresh with the
 logbook when the resume is refused or fails before it answers. A Station's watch gets
 `station_report` and `file_report` on its Cable endpoint. Stopping closes every watch's harness.
+
+An Operation's watch is its 00 Agent in charge: `Roster` refuses an `operation:` watch whose Agent's
+configured clearance is not `00`. Its `verifying` event carries the attempt (brief and final report,
+untrusted; deliverables; evidence; verdict; recommendation). Its Cable endpoint gets `operation_missions`,
+`mission_detail`, `deliverables`, `deliverable_probe` (probes locally and keeps the evidence, or asks the
+holding Station through `request_probe`), `verify_mission(mission, done|failed, reason)` and
+`redispatch(mission, brief_amendment?, reason)`, which call `registry::decisions` as the watch
+(`watch:operation:CODENAME`), re-reading the Agent's effective clearance each time: at `desk` they
+`recommend`. It never replaces a verdict a person gave. `propose_mission` is its tool too, naming the
+watch's Session where a Mission's would be named. A Cable to `operation:CODENAME` waits for the watch's
+Agent alone when the Operation has a watch, else for its 00 Agents.
 
 Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
 background scheduler starts assigned queued Missions and leases file-backed Registry
