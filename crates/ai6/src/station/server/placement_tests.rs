@@ -1118,6 +1118,16 @@ async fn a_restart_does_not_resume_a_settled_brief() {
         )
         .unwrap();
     state.sessions.lock().unwrap().clear();
+    // The mock harness may have moved the Mission on already; a restart finds it working.
+    let _ = state
+        .missions
+        .lock()
+        .unwrap()
+        .transition(&key, MissionState::Working);
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Working
+    );
     let mut recovered = MissionStore::open(root.path().join("missions.json")).unwrap();
     let pending = recover_startup_missions(&mut recovered).unwrap();
     *state.missions.lock().unwrap() = recovered;
@@ -1149,6 +1159,16 @@ async fn a_restart_settles_a_mission_whose_session_is_gone() {
         )
         .unwrap();
     state.sessions.lock().unwrap().clear();
+    // The mock harness may have moved the Mission on already; a restart finds it working.
+    let _ = state
+        .missions
+        .lock()
+        .unwrap()
+        .transition(&key, MissionState::Working);
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Working
+    );
     let mut recovered = MissionStore::open(root.path().join("missions.json")).unwrap();
     let pending = recover_startup_missions(&mut recovered).unwrap();
     *state.missions.lock().unwrap() = recovered;

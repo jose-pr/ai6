@@ -3911,8 +3911,13 @@ async fn schedule_queued_once(state: &DaemonState) {
     }
 }
 
-/// Start tries that failed in a row, by Station and Mission.
-static START_FAILURES: Mutex<BTreeMap<(String, String), u32>> = Mutex::new(BTreeMap::new());
+/// Start tries that failed in a row, by daemon (the address of its retry book) and Mission.
+static START_FAILURES: Mutex<BTreeMap<(usize, String), u32>> = Mutex::new(BTreeMap::new());
+
+/// What names this daemon's entries in [`START_FAILURES`].
+fn daemon_key(state: &DaemonState) -> usize {
+    Arc::as_ptr(&state.retry_after) as usize
+}
 
 /// How long to wait before the next try of a start that failed once more: `retry_backoff`,
 /// doubled for each failure in a row before it, up to `retry_backoff_max`.
@@ -3920,7 +3925,7 @@ fn start_backoff(state: &DaemonState, mission_id: &str) -> Duration {
     let failures = {
         let mut tries = START_FAILURES.lock().unwrap_or_else(|e| e.into_inner());
         let count = tries
-            .entry((state.station_id.clone(), mission_id.to_owned()))
+            .entry((daemon_key(state), mission_id.to_owned()))
             .or_insert(0);
         *count = count.saturating_add(1);
         *count
@@ -3970,7 +3975,7 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
                 "operation_id": operation,
                 "agent": mission.agent_id,
                 "state": if recovering { "recovering" } else { "queued" },
-                "failures": tries.get(&(state.station_id.clone(), id.clone())).copied().unwrap_or(0),
+                "failures": tries.get(&(daemon_key(state), id.clone())).copied().unwrap_or(0),
                 "retry_in_secs": retry_in,
                 "waiting": mission.waiting,
             }))
@@ -3981,7 +3986,7 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
 /// Forgets the failed start tries of every Mission of this Station that `gone` names.
 fn forget_start_failures(state: &DaemonState, gone: impl Fn(&str) -> bool) {
     if let Ok(mut tries) = START_FAILURES.lock() {
-        tries.retain(|(station, mission), _| *station != state.station_id || !gone(mission));
+        tries.retain(|(daemon, mission), _| *daemon != daemon_key(state) || !gone(mission));
     }
 }
 
