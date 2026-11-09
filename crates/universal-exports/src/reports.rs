@@ -4,6 +4,9 @@
 //! watch's order; `GET /v1/reports/{id}` shows one; `PUT /v1/reports/{id}/markings` changes its
 //! markings; `GET /v1/missions/{id}/reports` lists the Reports tied to a Mission.
 //!
+//! `PUT /v1/reports/{id}/assessment` decides what an open Source item becomes (`mission.control`
+//! on its Operation).
+//!
 //! `GET /v1/reports/clearances` lists who is cleared for which classification (`access.read`
 //! on `config:reports`); `PUT` and `DELETE /v1/reports/clearances/{subject}` grant and revoke one
 //! (`access.manage` there), each written to the audit log before it is made.
@@ -26,6 +29,7 @@ use ai6::directorates::registry::backend::*;
 use ai6::directorates::registry::reports::{
     ReportClearance, ReportFiler, ReportFilter, ReportScope, ReportState,
 };
+use ai6::directorates::registry::source_items::{ItemDecision, ItemVerdict, decide_item};
 use ai6::{Authorizer, Person};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -427,6 +431,89 @@ pub(crate) async fn mark(
         }
     })
     .await
+}
+
+/// `PUT /v1/reports/{id}/assessment` with `{"assessment", "reason", "of"?, "wait_seconds"?}`: a
+/// person decides what an open Source item becomes (`mission`, `duplicate`, `no_action` or
+/// `later`), as the Operation's watch does. It needs `mission.control` on the Operation and being
+/// able to read the item's content; nothing becomes a Mission by itself, and the Station that
+/// polls the Source queues a `mission` on its next pass. `404` for a Report of a scope the person
+/// may not read or one that is no Source item, `409` for an item already decided.
+pub(crate) async fn assess(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<AssessRequest>,
+) -> Result<Json<Value>, Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let registry = registry_of(&gateway)?;
+    let at = unix_timestamp()?;
+    blocking(move || {
+        let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
+        let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
+        let Some(operation) = report.scope.operation().map(str::to_owned) else {
+            return Err(missing());
+        };
+        if !reader.reads_scope(&report.scope) {
+            return Err(missing());
+        }
+        let verdict = ItemVerdict::parse(
+            &request.assessment,
+            request.of.as_deref(),
+            request.wait_seconds,
+            at,
+        )
+        .map_err(|reason| refused(StatusCode::BAD_REQUEST, reason))?;
+        if !reader.holds("mission.control", format!("operation:{operation}"))
+            || sight(&reader, &report, &reader.rules()) != ReportSight::Content
+        {
+            return Err(refused(
+                StatusCode::FORBIDDEN,
+                "Deciding an item needs mission.control on its Operation and reading its content.",
+            ));
+        }
+        let decided = decide_item(
+            registry.as_ref(),
+            &ItemDecision::new(
+                &operation,
+                &id,
+                verdict,
+                &request.reason,
+                &reader.person.id,
+                at,
+            ),
+        );
+        match decided {
+            Ok(report) => Ok(Json(shown(registry.as_ref(), &reader, &report))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(missing()),
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                let status = if error.to_string().contains("only an open item") {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                Err(refused(status, error.to_string()))
+            }
+            Err(_) => Err(Refused::from(ApiError::internal())),
+        }
+    })
+    .await
+}
+
+/// What a person decides of a Source item.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AssessRequest {
+    /// `mission`, `duplicate`, `no_action` or `later`.
+    assessment: String,
+    /// Why, kept apart from the item's own words.
+    reason: String,
+    /// For a duplicate: the Mission, Report or item it repeats.
+    #[serde(default)]
+    of: Option<String>,
+    /// For later: seconds from now until it comes back.
+    #[serde(default)]
+    wait_seconds: Option<u64>,
 }
 
 /// What grants and revokes a clearance, and what lists them: a clearance hands a person or an

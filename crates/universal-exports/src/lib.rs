@@ -1546,6 +1546,10 @@ impl Gateway {
                 axum::routing::put(reports::mark),
             )
             .route(
+                "/v1/reports/{id}/assessment",
+                axum::routing::put(reports::assess),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions",
                 post(create_user_mission),
             )

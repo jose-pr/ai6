@@ -30,6 +30,26 @@ pub(crate) enum ReportsCommand {
         /// Its ID.
         id: String,
     },
+    /// Decide what an open Source item becomes (needs mission.control on its Operation and
+    /// reading the item): `mission` queues it as a brief for vetting and placement, `duplicate`
+    /// names what it repeats, `no_action` closes it, `later` brings it back after a wait.
+    /// Nothing becomes a Mission without this or the Operation's watch deciding it.
+    Assess {
+        /// The item's Report ID.
+        id: String,
+        /// `mission`, `duplicate`, `no_action` or `later`.
+        #[arg(value_parser = ["mission", "duplicate", "no_action", "later"])]
+        assessment: String,
+        /// Why, kept apart from the item's own words.
+        #[arg(long)]
+        reason: String,
+        /// For a duplicate: the Mission, Report or item it repeats.
+        #[arg(long, required_if_eq("assessment", "duplicate"))]
+        of: Option<String>,
+        /// For later: seconds until it comes back.
+        #[arg(long, required_if_eq("assessment", "later"))]
+        wait_seconds: Option<u64>,
+    },
     /// Who is cleared for which classification: list, grant or revoke (access.read, and
     /// access.manage to change, on config:reports). A change holds from the next request.
     Clearance {
@@ -221,6 +241,36 @@ pub(crate) async fn run(
                 }
             }
             print_listed(&exchange(client, token, Method::GET, url, None, None).await?);
+        }
+        ReportsCommand::Assess {
+            id,
+            assessment,
+            reason,
+            of,
+            wait_seconds,
+        } => {
+            let mut body = json!({"assessment": assessment, "reason": reason});
+            if let Some(of) = of {
+                body["of"] = of.into();
+            }
+            if let Some(wait) = wait_seconds {
+                body["wait_seconds"] = wait.into();
+            }
+            let decided = exchange(
+                client,
+                token,
+                Method::PUT,
+                address(server, &["reports", &id, "assessment"])?,
+                None,
+                Some(body),
+            )
+            .await?;
+            println!(
+                "{}\t{}\t{}",
+                text(&decided["id"]),
+                text(&decided["state"]),
+                text(&decided["assessment"]["verdict"])
+            );
         }
         ReportsCommand::Clearance { command } => {
             run_clearance(client, server, token, command).await?;

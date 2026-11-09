@@ -44,6 +44,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with(ROLES).await
+}
+
+async fn fixture_with(roles: &str) -> Fixture {
     let config = tempfile::tempdir().unwrap();
     let location = format!("sqlite:{}", config.path().join("config.db").display());
     let source = Arc::new(SqlProvider::open(&location).unwrap());
@@ -57,7 +61,7 @@ async fn fixture() -> Fixture {
             )
             .unwrap();
     }
-    let served = served_with_roster(ROLES, Some(source.clone())).await;
+    let served = served_with_roster(roles, Some(source.clone())).await;
     let brief: ai6::Brief = serde_json::from_value(json!({
         "title": "work",
         "id": "mission-g",
@@ -418,4 +422,115 @@ async fn a_clearance_granted_through_the_gateway_holds_at_once_and_so_does_its_r
             "{expected:?} in {audits:?}"
         );
     }
+}
+
+/// `operator-007` reads and controls G; `viewer-007` only reads it.
+const CONTROL_ROLES: &str = r#"
+    [role.viewer]
+    actions = ["mission.read"]
+
+    [role.controller]
+    actions = ["mission.read", "mission.control"]
+
+    [[rule]]
+    subject = "person:viewer-007"
+    scope = "operation:G"
+    role = "viewer"
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "operation:G"
+    role = "controller"
+"#;
+
+fn item_report(registry: &dyn RegistryBackend, id: &str) -> String {
+    let item = ai6::directorates::registry::sources::SourceItem {
+        id: id.to_owned(),
+        title: format!("Item {id}"),
+        body: "It fails.".to_owned(),
+        url: None,
+        labels: Vec::new(),
+        author: None,
+        updated: "2026-01-01T00:00:00Z".to_owned(),
+        code: None,
+        code_tag: None,
+    };
+    ai6::directorates::registry::source_items::offer(registry, "G", "github", &item, 100.0)
+        .unwrap()
+        .report()
+        .id
+        .clone()
+}
+
+#[tokio::test]
+async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audited() {
+    let fixture = fixture_with(CONTROL_ROLES).await;
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    let registry = &fixture.served.registry;
+    let (first, second) = (item_report(registry, "o/r#1"), item_report(registry, "o/r#2"));
+    let path = |id: &str| format!("/v1/reports/{id}/assessment");
+    let body = json!({"assessment": "mission", "reason": "a real fault"});
+
+    // Reading is not deciding.
+    let (status, _) = fixture
+        .call(&viewer, Method::PUT, &path(&first), Some(body.clone()))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        registry.report(&first).unwrap().unwrap().state.as_str(),
+        "open"
+    );
+    let (status, _) = fixture
+        .call(&operator, Method::PUT, &path("nope"), Some(body.clone()))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, said) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &path(&second),
+            Some(json!({"assessment": "duplicate", "reason": "same"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a duplicate names what: {said}");
+
+    let (status, decided) = fixture
+        .call(&operator, Method::PUT, &path(&first), Some(body.clone()))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{decided}");
+    assert_eq!(decided["state"], "assessed");
+    assert_eq!(decided["assessment"]["verdict"], "mission");
+    assert_eq!(decided["assessment"]["by"], "operator-007");
+    assert_eq!(decided["assessment"]["comment"], "a real fault");
+    assert!(
+        registry.list_new().unwrap().is_empty(),
+        "deciding queues nothing itself: the Station that polls the Source does"
+    );
+    let (status, _) = fixture
+        .call(&operator, Method::PUT, &path(&first), Some(body))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "an item is decided once");
+
+    let (status, closed) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &path(&second),
+            Some(json!({"assessment": "no_action", "reason": "a question"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["state"], "closed");
+    let audited = registry
+        .audit_records()
+        .unwrap()
+        .into_iter()
+        .filter(|record| record.action == "source.item.decide")
+        .map(|record| (record.actor, record.target))
+        .collect::<Vec<_>>();
+    assert_eq!(audited.len(), 2, "{audited:?}");
+    assert!(audited.iter().all(|(actor, _)| actor == "operator-007"));
 }
