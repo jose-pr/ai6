@@ -1,7 +1,51 @@
 {
-  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, packages (each runtime's installed packages directory), and for setup phases change ('add', 'sync', 'activate' or 'remove'), digest (the overlay's), record (the digest and phase of the last preparation of this overlay that succeeded on this OS; absent, none) and fails (the step that fails: 'deps' or 'setup'). 'expect' gives the resulting environment, the selected setup and runtime variants, the dependencies (runtime, file, lock or null, environment), what a probe needs, and the weakenings as [id, subject], and with a change the setup_phase (null when nothing runs), setup_arguments (the phase, then the variant's args; null when no setup runs), the steps in order ('empty-state', 'deps:<runtime>', 'setup', 'record', 'delete'), the record afterwards, and whether the digest activates; or the refusal.",
+  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, packages (each runtime's installed packages directory), and for setup phases change ('add', 'sync', 'activate' or 'remove'), digest (the overlay's), record (the digest and phase of the last preparation of this overlay that succeeded on this OS; absent, none) and fails (the step that fails: 'deps' or 'setup'). 'expect' gives the resulting environment, the selected setup and runtime variants, the dependencies (runtime, file, lock or null, environment), what a probe needs, and the non_defaults as [id, subject], and with a change the setup_phase (null when nothing runs), setup_arguments (the phase, then the variant's args; null when no setup runs), the steps in order ('empty-state', 'deps:<runtime>', 'setup', 'record', 'delete'), the record afterwards, and whether the digest activates; or the refusal, its 'error' and its 'subject' as the conformance chapter writes one: escaped and cut.",
   "spec": "spec/v0/environment.md#order-of-application",
   "cases": [
+    {
+      "id": "env-harness-config",
+      "description": "CLAUDE_CONFIG_DIR and CODEX_HOME point a harness at another configuration: sensitive.",
+      "manifest": {
+        "env": {
+          "CLAUDE_CONFIG_DIR": "/ov/claude",
+          "CODEX_HOME": "/ov/codex"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "CLAUDE_CONFIG_DIR": "/ov/claude",
+          "CODEX_HOME": "/ov/codex"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": [
+          [
+            "env-sensitive",
+            "CLAUDE_CONFIG_DIR"
+          ],
+          [
+            "env-sensitive",
+            "CODEX_HOME"
+          ]
+        ]
+      }
+    },
     {
       "id": "bare",
       "description": "No manifest: only the root variable; unpinned is reported.",
@@ -27,7 +71,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "unpinned",
             ""
@@ -138,7 +182,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-passthrough",
             "DOCS_TOKEN"
@@ -248,7 +292,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-passthrough",
             "DOCS_TOKEN"
@@ -347,7 +391,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -420,7 +464,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -523,7 +567,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "secret-read",
             "file:c"
@@ -560,6 +604,260 @@
       "expect": {
         "error": "invalid-reference",
         "subject": "../etc/passwd"
+      }
+    },
+    {
+      "id": "subject-control-escaped",
+      "description": "A control character in a subject is written as an escape, so a refusal printed to a terminal cannot drive it.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "../a\u001b[31mb"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../a\\x1b[31mb"
+      }
+    },
+    {
+      "id": "subject-bidi-escaped",
+      "description": "A format character, a right-to-left override here, is written as an escape: \\u and four hexadecimal digits, in lowercase.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "../‮txt.exe"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../\\u202etxt.exe"
+      }
+    },
+    {
+      "id": "subject-capped",
+      "description": "A subject is cut to 256 characters, then three dots: 3 + 253 of 303.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "../aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..."
+      }
+    },
+    {
+      "id": "subject-cap-counts-escapes",
+      "description": "The cap counts the characters of the subject as shown: each escape is four.",
+      "manifest": {
+        "env": {
+          "A": {
+            "provider": "file",
+            "key": "../\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007\u0007"
+          }
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\x07\\..."
+      }
+    },
+    {
+      "id": "env-name-is-not-a-name",
+      "description": "A variable name that is not a name is refused where it is applied, with no other validation.",
+      "manifest": {
+        "env": {
+          "A=B": "x"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "A=B"
+      }
+    },
+    {
+      "id": "env-name-with-line-break",
+      "description": "A line break in a variable name is refused, and shown as an escape.",
+      "manifest": {
+        "env": {
+          "A\nB": "x"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "A\\x0aB"
+      }
+    },
+    {
+      "id": "path-leaves-overlay",
+      "description": "A path that leaves the overlay is refused where it is applied.",
+      "manifest": {
+        "paths": [
+          {
+            "variable": "PATH",
+            "path": "../bin"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../bin"
+      }
+    },
+    {
+      "id": "env-file-absolute-path",
+      "description": "An absolute path is not one of the overlay's.",
+      "manifest": {
+        "env_files": [
+          "/etc/passwd"
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "/etc/passwd"
+      }
+    },
+    {
+      "id": "setup-path-leaves-overlay",
+      "description": "A setup script outside the overlay.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "../s.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "../s.sh"
+      }
+    },
+    {
+      "id": "script-path-device-name",
+      "description": "A path naming a device is not a relative path.",
+      "manifest": {
+        "scripts": {
+          "x": "s/con.sh"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "error": "invalid-reference",
+        "subject": "s/con.sh"
+      }
+    },
+    {
+      "id": "other-faults-do-not-stop-applying",
+      "description": "Applying does not validate the whole manifest: a field it does not read and a value it does not use do not stop it. validate reports them.",
+      "manifest": {
+        "unknown_field": 1,
+        "description": 5,
+        "env": {
+          "A": "x"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "secret_files": {}
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "A": "x"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": []
       }
     },
     {
@@ -620,7 +918,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -668,7 +966,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-sensitive",
             "GIT_CONFIG_COUNT"
@@ -731,7 +1029,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-sensitive",
             "LD_LIBRARY_PATH"
@@ -858,7 +1156,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -917,7 +1215,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "no-timeout",
             "s/u.sh"
@@ -970,7 +1268,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "network-not-enforced",
             "s/any.py"
@@ -1020,7 +1318,7 @@
           ],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1058,7 +1356,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1157,7 +1455,7 @@
             "git"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "requirements.txt"
@@ -1200,7 +1498,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1236,7 +1534,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1303,7 +1601,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env/a.py"
@@ -1396,7 +1694,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-passthrough",
             "HOME_DIR"
@@ -1518,7 +1816,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1554,7 +1852,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1592,7 +1890,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1629,7 +1927,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1667,7 +1965,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1708,7 +2006,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1749,7 +2047,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1802,7 +2100,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1847,7 +2145,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1908,7 +2206,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-sensitive",
             "PATH"
@@ -1956,7 +2254,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -1992,7 +2290,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-sensitive",
             "PATH"
@@ -2045,7 +2343,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2107,7 +2405,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2177,7 +2475,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2235,7 +2533,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2307,7 +2605,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2345,7 +2643,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2386,7 +2684,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2428,7 +2726,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.py"
@@ -2480,7 +2778,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.sh"
@@ -2527,7 +2825,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.ps1"
@@ -2578,7 +2876,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.js"
@@ -2624,7 +2922,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "script-not-run",
             "env.bash"
@@ -2668,7 +2966,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2723,7 +3021,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.py"
@@ -2786,7 +3084,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.py"
@@ -2843,7 +3141,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.sh"
@@ -2899,7 +3197,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "env-script",
             "env.sh"
@@ -2936,7 +3234,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -2976,7 +3274,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3021,7 +3319,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.ps1"
@@ -3061,7 +3359,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "script-not-run",
             "setup.ps1"
@@ -3105,7 +3403,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -3151,7 +3449,7 @@
           ],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -3198,7 +3496,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.py"
@@ -3253,7 +3551,7 @@
           ],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -3303,7 +3601,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.py"
@@ -3349,7 +3647,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3413,7 +3711,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3488,7 +3786,7 @@
           ],
           "commands": []
         },
-        "weakenings": [],
+        "non_defaults": [],
         "setup_phase": "sync",
         "setup_arguments": [
           "sync",
@@ -3547,7 +3845,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3606,7 +3904,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3670,7 +3968,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3733,7 +4031,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3787,7 +4085,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3851,7 +4149,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3907,7 +4205,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -3965,7 +4263,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -4022,7 +4320,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -4083,7 +4381,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -4146,7 +4444,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "setup-network",
             "setup.sh"
@@ -4203,7 +4501,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": [],
+        "non_defaults": [],
         "setup_phase": null,
         "setup_arguments": null,
         "steps": [],
@@ -4255,7 +4553,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/python/requirements.txt"
@@ -4347,7 +4645,7 @@
             "npm"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/node/package.json"
@@ -4435,7 +4733,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/python/requirements.txt"
@@ -4509,7 +4807,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/python/requirements.txt"
@@ -4523,7 +4821,7 @@
     },
     {
       "id": "deps-python-locked",
-      "description": "A hash on every requirement makes the file a lock: no unlocked weakening; the network is still reported.",
+      "description": "A hash on every requirement makes the file a lock: no unlocked non_default; the network is still reported.",
       "manifest": {},
       "facts": {
         "os": "linux",
@@ -4563,7 +4861,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/python/requirements.txt"
@@ -4635,7 +4933,7 @@
             "npm"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/node/package.json"
@@ -4687,7 +4985,7 @@
             "npm"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/node/package.json"
@@ -4735,7 +5033,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -4775,7 +5073,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     },
     {
@@ -4833,7 +5131,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "locks/posix.txt"
@@ -4890,7 +5188,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "reqs/base.txt"
@@ -4956,7 +5254,7 @@
             "npm"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "web/package.json"
@@ -5015,7 +5313,7 @@
           ],
           "commands": []
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/python/requirements.txt"
@@ -5077,7 +5375,7 @@
             "npm"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/node/package.json"
@@ -5142,7 +5440,7 @@
             "npm"
           ]
         },
-        "weakenings": [
+        "non_defaults": [
           [
             "deps-network",
             "lib/node/package.json"
@@ -5203,7 +5501,7 @@
           "interpreters": [],
           "commands": []
         },
-        "weakenings": []
+        "non_defaults": []
       }
     }
   ]

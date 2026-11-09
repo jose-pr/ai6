@@ -145,7 +145,7 @@
       "description": "The full form: three entries with icons, one pinned.",
       "catalog": {
         "name": "catalog.toml",
-        "text": "# A catalog in the full form: the registry format, with informational fields a store lists and\n# searches before it fetches anything. registry.json, registry.toml and registry.yaml are catalogs\n# in the minimal form. Relative sources and icons resolve beside this file.\nname = \"Example overlays\"\ndescription = \"The overlays of the AOS examples, listed for a store.\"\nhomepage = \"https://example.org/overlays\"\n\n# A string entry is the minimal form, a table the full form; one catalog may mix them.\n[overlays.engineering]\nsource = \"../engineering\"\ndescription = \"Shared engineering practices and review guidance.\"\n\n[overlays.engineering.about]\nsummary = \"Repository-wide engineering practices.\"\nicon = \"icons/engineering.png\"\ntags = [\"engineering\", \"review\"]\n\n[overlays.python-review]\nsource = \"../dependent\"\n\n[overlays.python-review.about]\nsummary = \"Python review guidance, on top of engineering.\"\nicon = \"icons/python-review.png\"\nlicense = \"MIT\"\ntags = [\"python\", \"review\"]\n\n[overlays.release-notes]\nsource = \"../about\"\npin = \"sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1\"\n\n[overlays.release-notes.about]\nsummary = \"Release notes and changelogs, written the same way in every repository.\"\nicon = \"icons/release-notes.png\"\nhomepage = \"https://example.org/overlays/release-notes\"\nrepository = \"https://github.com/example/overlays\"\nlicense = \"MIT OR Apache-2.0\"\nauthors = [\"Example Docs Team <docs@example.org>\"]\ntags = [\"documentation\", \"release\", \"changelog\"]\n",
+        "text": "# A catalog in the full form: the registry format, with informational fields a store lists and\n# searches before it fetches anything. registry.json, registry.toml and registry.yaml are catalogs\n# in the minimal form. Relative sources and icons resolve beside this file. Its skills table is what\n# an overlay's bare skill names resolve through.\nname = \"Example overlays\"\ndescription = \"The overlays of the AOS examples, listed for a store.\"\nhomepage = \"https://example.org/overlays\"\n\n# A string entry is the minimal form, a table the full form; one catalog may mix them.\n[overlays.engineering]\nsource = \"../engineering\"\ndescription = \"Shared engineering practices and review guidance.\"\n\n[overlays.engineering.about]\nsummary = \"Repository-wide engineering practices.\"\nicon = \"icons/engineering.png\"\ntags = [\"engineering\", \"review\"]\n\n[overlays.python-review]\nsource = \"../dependent\"\n\n[overlays.python-review.about]\nsummary = \"Python review guidance, on top of engineering.\"\nicon = \"icons/python-review.png\"\nlicense = \"MIT\"\ntags = [\"python\", \"review\"]\n\n[overlays.release-notes]\nsource = \"../about\"\npin = \"sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1\"\n\n[overlays.release-notes.about]\nsummary = \"Release notes and changelogs, written the same way in every repository.\"\nicon = \"icons/release-notes.png\"\nhomepage = \"https://example.org/overlays/release-notes\"\nrepository = \"https://github.com/example/overlays\"\nlicense = \"MIT OR Apache-2.0\"\nauthors = [\"Example Docs Team <docs@example.org>\"]\ntags = [\"documentation\", \"release\", \"changelog\"]\n\n# A skill's entry has the fields of an overlay's. Skills and overlays are listed apart: one name can\n# be both.\n[skills.pdf]\nsource = \"https://github.com/example/skills.git#skills/pdf\"\nref = \"v1.2.0\"\ndescription = \"Reads and fills PDF files.\"\n",
         "base": "/srv/overlays/registry/catalog.toml"
       },
       "expect": {
@@ -214,6 +214,20 @@
           }
         },
         "refused": [],
+        "skills": {
+          "entries": {
+            "pdf": {
+              "source": {
+                "kind": "git",
+                "location": "https://github.com/example/skills.git",
+                "ref": "v1.2.0",
+                "path": "skills/pdf"
+              },
+              "description": "Reads and fills PDF files."
+            }
+          },
+          "refused": []
+        },
         "ignored": []
       }
     },
@@ -715,10 +729,480 @@
     },
     {
       "id": "no-overlays",
-      "description": "A catalog has an overlays table.",
+      "description": "A catalog has an overlays table or a skills table.",
       "catalog": {
         "name": "catalog.toml",
         "text": "name = \"Empty\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "error": "not-a-catalog"
+      }
+    },
+    {
+      "id": "url-base-file-scheme",
+      "description": "A catalog at a URL cannot name a file: URL, Git or not.",
+      "catalog": {
+        "name": "overlays.json",
+        "text": "{\"overlays\": {\"web\": \"file:///etc/passwd\", \"WEB2\": \"FILE:///etc/passwd\", \"git\": \"file:///srv/a.git\", \"ok\": \"https://example.org/x\"}}\n",
+        "base": "https://example.org/catalogs/overlays.json"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "ok": {
+            "source": {
+              "kind": "url",
+              "location": "https://example.org/x",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [
+          [
+            "WEB2",
+            "local-source"
+          ],
+          [
+            "git",
+            "local-source"
+          ],
+          [
+            "web",
+            "local-source"
+          ]
+        ],
+        "ignored": []
+      }
+    },
+    {
+      "id": "local-base-file-scheme",
+      "description": "A catalog on this machine may name a file: URL.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays]\nweb = \"file:///srv/x\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "web": {
+            "source": {
+              "kind": "url",
+              "location": "file:///srv/x",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": []
+      }
+    },
+    {
+      "id": "remote-sources-held",
+      "description": "A catalog from elsewhere: a credential or query, a host that is this machine, a scheme before a path, and a location that is not Git or the web are refused; a private address is not.",
+      "catalog": {
+        "name": "skills.json",
+        "text": "{\"skills\": {\"query\": \"https://evil.example?@github.com/acme/pdf.git\", \"user\": \"https://token@example.org/skills/a\", \"loop\": \"http://127.0.0.1/x.git\", \"fileish\": \"file:/etc/passwd\", \"zip\": \"zip:///etc/x.zip\", \"s3\": \"s3://internal/x\", \"js\": \"javascript:alert(1)\", \"helper\": \"ext::sh -c id\", \"private\": \"https://10.1.2.3/skills/x\", \"ok\": \"./ok\"}}\n",
+        "base": "https://example.org/catalogs/overlays.json"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {},
+        "refused": [],
+        "skills": {
+          "entries": {
+            "ok": {
+              "source": {
+                "kind": "url",
+                "location": "https://example.org/catalogs/ok",
+                "ref": null,
+                "path": null
+              }
+            },
+            "private": {
+              "source": {
+                "kind": "url",
+                "location": "https://10.1.2.3/skills/x",
+                "ref": null,
+                "path": null
+              }
+            }
+          },
+          "refused": [
+            [
+              "fileish",
+              "local-source"
+            ],
+            [
+              "helper",
+              "local-source"
+            ],
+            [
+              "js",
+              "local-source"
+            ],
+            [
+              "loop",
+              "local-source"
+            ],
+            [
+              "query",
+              "source-credentials"
+            ],
+            [
+              "s3",
+              "invalid-source"
+            ],
+            [
+              "user",
+              "source-credentials"
+            ],
+            [
+              "zip",
+              "invalid-source"
+            ]
+          ]
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "local-sources-kept",
+      "description": "A catalog on this machine is the user's own: credentials and other schemes stay, to be shown without them.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[skills]\ntoken = \"https://u:secret@example.org/skills/pdf?token=t\"\nzip = \"zip:///srv/skills.zip\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {},
+        "refused": [],
+        "skills": {
+          "entries": {
+            "token": {
+              "source": {
+                "kind": "url",
+                "location": "https://u:secret@example.org/skills/pdf?token=t",
+                "ref": null,
+                "path": null
+              }
+            },
+            "zip": {
+              "source": {
+                "kind": "url",
+                "location": "zip:///srv/skills.zip",
+                "ref": null,
+                "path": null
+              }
+            }
+          },
+          "refused": []
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "skills-minimal",
+      "description": "A catalog of skills alone, as strings, resolved beside the catalog.",
+      "catalog": {
+        "name": "skills.toml",
+        "text": "[skills]\npdf = \"../skills/pdf\"\nreview = \"https://github.com/example/skills.git#skills/review\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {},
+        "refused": [],
+        "skills": {
+          "entries": {
+            "pdf": {
+              "source": {
+                "kind": "directory",
+                "location": "/srv/overlays/skills/pdf",
+                "ref": null,
+                "path": null
+              }
+            },
+            "review": {
+              "source": {
+                "kind": "git",
+                "location": "https://github.com/example/skills.git",
+                "ref": null,
+                "path": "skills/review"
+              }
+            }
+          },
+          "refused": []
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "skills-beside-overlays",
+      "description": "Overlays and skills in one catalog keep apart: a name may be both.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays]\nreview = \"../review\"\n\n[skills]\nreview = \"../skills/review\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/review",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "skills": {
+          "entries": {
+            "review": {
+              "source": {
+                "kind": "directory",
+                "location": "/srv/overlays/skills/review",
+                "ref": null,
+                "path": null
+              }
+            }
+          },
+          "refused": []
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "skills-full",
+      "description": "A table entry makes the catalog full; a skill's entry takes the fields an overlay's does.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "[overlays]\nreview = \"../review\"\n\n[skills.pdf]\nsource = \"https://github.com/example/skills.git#skills/pdf\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\ndescription = \"Reads PDF files.\"\nabout = { summary = \"PDF\", tags = [\"documents\"] }\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {
+          "review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/review",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "skills": {
+          "entries": {
+            "pdf": {
+              "source": {
+                "kind": "git",
+                "location": "https://github.com/example/skills.git",
+                "ref": "v1",
+                "path": "skills/pdf"
+              },
+              "pin": "sha256:abababababababababababababababababababababababababababababababab",
+              "description": "Reads PDF files.",
+              "about": {
+                "summary": "PDF",
+                "tags": [
+                  "documents"
+                ]
+              }
+            }
+          },
+          "refused": []
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "skills-git-base",
+      "description": "Skills resolve like overlays: a relative source in a Git catalog is the same repository, and a local source is refused.",
+      "catalog": {
+        "name": "overlays.toml",
+        "text": "[skills]\npdf = \"../skills/pdf\"\nout = \"../../../out\"\nlocal = \"/srv/skills/x\"\nfile = \"file:///srv/x\"\n",
+        "base": "https://github.com/example/agents.git@v2#catalogs/overlays.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {},
+        "refused": [],
+        "skills": {
+          "entries": {
+            "pdf": {
+              "source": {
+                "kind": "git",
+                "location": "https://github.com/example/agents.git",
+                "ref": "v2",
+                "path": "skills/pdf"
+              }
+            }
+          },
+          "refused": [
+            [
+              "file",
+              "local-source"
+            ],
+            [
+              "local",
+              "local-source"
+            ],
+            [
+              "out",
+              "leaves-repository"
+            ]
+          ]
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "skills-entry-errors",
+      "description": "Skill entries are refused alone: names by the skill name rule, equal without ASCII case, and fields as for an overlay.",
+      "catalog": {
+        "name": "catalog.json",
+        "text": "{\"skills\": {\"good\": \"../good\", \"Twice\": \"../a\", \"twice\": \"../b\", \"con\": \"../c\", \"a.\": \"../d\", \"-x\": \"../e\", \"a/b\": \"../f\", \"UPPER_case.1\": \"../g\", \"num\": 7, \"nosource\": {\"pin\": \"sha256:abababababababababababababababababababababababababababababababab\"}, \"badpin\": {\"source\": \"../x\", \"pin\": \"x\"}, \"extra\": {\"source\": \"../x\", \"pinn\": \"sha256:abababababababababababababababababababababababababababababababab\"}}}\n",
+        "base": "/srv/overlays/catalogs/catalog.json"
+      },
+      "expect": {
+        "form": "full",
+        "entries": {},
+        "refused": [],
+        "skills": {
+          "entries": {
+            "UPPER_case.1": {
+              "source": {
+                "kind": "directory",
+                "location": "/srv/overlays/g",
+                "ref": null,
+                "path": null
+              }
+            },
+            "good": {
+              "source": {
+                "kind": "directory",
+                "location": "/srv/overlays/good",
+                "ref": null,
+                "path": null
+              }
+            }
+          },
+          "refused": [
+            [
+              "-x",
+              "invalid-name"
+            ],
+            [
+              "Twice",
+              "duplicate-name"
+            ],
+            [
+              "a.",
+              "invalid-name"
+            ],
+            [
+              "a/b",
+              "invalid-name"
+            ],
+            [
+              "badpin",
+              "invalid-pin"
+            ],
+            [
+              "con",
+              "invalid-name"
+            ],
+            [
+              "extra",
+              "invalid-entry"
+            ],
+            [
+              "nosource",
+              "invalid-entry"
+            ],
+            [
+              "num",
+              "invalid-entry"
+            ],
+            [
+              "twice",
+              "duplicate-name"
+            ]
+          ]
+        },
+        "ignored": []
+      }
+    },
+    {
+      "id": "skills-not-a-table",
+      "description": "skills beside overlays and not a table is reported; the overlays are still listed.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "skills = [\"../pdf\"]\n\n[overlays]\nreview = \"../review\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {
+          "review": {
+            "source": {
+              "kind": "directory",
+              "location": "/srv/overlays/review",
+              "ref": null,
+              "path": null
+            }
+          }
+        },
+        "refused": [],
+        "ignored": [
+          "/skills"
+        ]
+      }
+    },
+    {
+      "id": "overlays-not-a-table-beside-skills",
+      "description": "overlays beside skills and not a table is reported; the skills are still listed.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "overlays = [\"../review\"]\n\n[skills]\npdf = \"../pdf\"\n",
+        "base": "/srv/overlays/catalogs/catalog.toml"
+      },
+      "expect": {
+        "form": "minimal",
+        "entries": {},
+        "refused": [],
+        "skills": {
+          "entries": {
+            "pdf": {
+              "source": {
+                "kind": "directory",
+                "location": "/srv/overlays/pdf",
+                "ref": null,
+                "path": null
+              }
+            }
+          },
+          "refused": []
+        },
+        "ignored": [
+          "/overlays"
+        ]
+      }
+    },
+    {
+      "id": "skills-not-a-table-alone",
+      "description": "Neither table: not a catalog.",
+      "catalog": {
+        "name": "catalog.toml",
+        "text": "skills = [\"../pdf\"]\n",
         "base": "/srv/overlays/catalogs/catalog.toml"
       },
       "expect": {

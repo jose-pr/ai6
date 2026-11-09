@@ -264,6 +264,109 @@
       "expect": {
         "error": "invalid-source"
       }
+    },
+    {
+      "id": "source-29",
+      "source": "git+https://evil.example@github.com#skills/pdf",
+      "expect": {
+        "kind": "git",
+        "location": "https://evil.example@github.com",
+        "ref": null,
+        "path": "skills/pdf"
+      }
+    },
+    {
+      "id": "source-30",
+      "source": "git+https://user:ghp_secret@github.com",
+      "expect": {
+        "kind": "git",
+        "location": "https://user:ghp_secret@github.com",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-31",
+      "source": "https://user@github.com/example/agents.git@v2",
+      "expect": {
+        "kind": "git",
+        "location": "https://user@github.com/example/agents.git",
+        "ref": "v2",
+        "path": null
+      }
+    },
+    {
+      "id": "source-32",
+      "source": "https://evil.example\\@github.com/example/agents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-33",
+      "source": "https://evil.example?@github.com/example/agents.git",
+      "expect": {
+        "kind": "git",
+        "location": "https://evil.example?@github.com/example/agents.git",
+        "ref": null,
+        "path": null
+      }
+    },
+    {
+      "id": "source-34",
+      "source": "https://github.com/example/agents‮.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-35",
+      "source": "https://github.com/example/agents.git@a\nb",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-36",
+      "source": "https://github.com/example/\u001b[2Kagents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-37",
+      "source": "ssh://-oProxyCommand=calc@host.example/agents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-38",
+      "source": "ssh://%2doProxyCommand=calc@host.example/agents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-39",
+      "source": "git@host.example:-oFoo/agents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-40",
+      "source": "ssh://host.example:-oProxyCommand=calc/agents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
+    },
+    {
+      "id": "source-41",
+      "source": "ssh://git@[::1]:22/agents.git",
+      "expect": {
+        "error": "invalid-source"
+      }
     }
   ]
 }

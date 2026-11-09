@@ -3,6 +3,188 @@
   "spec": "spec/v0/manifest.md#validation",
   "cases": [
     {
+      "id": "files-missing-skill",
+      "description": "A listed name with no SKILL.md is for the consumer's catalogs to resolve: valid, and flagged.",
+      "document": {
+        "skills": [
+          "k"
+        ]
+      },
+      "files": [
+        "skills/k/README.md"
+      ],
+      "expect": {
+        "valid": true,
+        "flags": [
+          "/skills/0"
+        ]
+      }
+    },
+    {
+      "id": "skills-from-elsewhere",
+      "description": "Bundled, named and sourced together; only the bare name with no directory is flagged.",
+      "document": {
+        "skills": [
+          "summarize-docs",
+          "pdf",
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ]
+      },
+      "files": [
+        "skills/summarize-docs/SKILL.md"
+      ],
+      "expect": {
+        "valid": true,
+        "flags": [
+          "/skills/1"
+        ]
+      }
+    },
+    {
+      "id": "skills-table-ref",
+      "description": "A table with a ref, for a Git source written without one.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review",
+            "ref": "v1"
+          }
+        ]
+      },
+      "files": [],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-table-source-ref",
+      "description": "A Git source may carry its own ref instead.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git@v1#skills/review"
+          }
+        ]
+      },
+      "files": [],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "context-harness-names-body",
+      "description": "A harness's context may name the body of OVERLAY.md.",
+      "document": {
+        "harness": {
+          "codex": {
+            "context": [
+              "OVERLAY.md"
+            ]
+          }
+        }
+      },
+      "files": [
+        "OVERLAY.md"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-source-private-address",
+      "description": "A private address is no local source; it is reported when the skill is resolved.",
+      "document": {
+        "skills": [
+          {
+            "name": "a",
+            "source": "https://10.1.2.3/skills.git"
+          }
+        ]
+      },
+      "files": [],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-table-account",
+      "description": "An SSH account is not a credential.",
+      "document": {
+        "skills": [
+          {
+            "name": "a",
+            "source": "git@github.com:example/skills.git#a"
+          },
+          {
+            "name": "b",
+            "source": "ssh://git@github.com/example/skills.git#b"
+          }
+        ]
+      },
+      "files": [],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-table-web",
+      "description": "A web URL can be a source.",
+      "document": {
+        "skills": [
+          {
+            "name": "a",
+            "source": "https://example.org/skills/a",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ]
+      },
+      "files": [],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-table-no-files",
+      "description": "Without the files, a validator checks a table's shape and its source alone.",
+      "document": {
+        "skills": [
+          {
+            "name": "a",
+            "source": "https://example.org/skills/a"
+          },
+          "b"
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-bundled-defaults-off",
+      "description": "With the default off, a listed name that is bundled is still bundled, not flagged.",
+      "document": {
+        "defaults": {
+          "skills": false
+        },
+        "skills": [
+          "k"
+        ]
+      },
+      "files": [
+        "skills/k/SKILL.md",
+        "skills/other/SKILL.md"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
       "id": "empty",
       "description": "No manifest reads as the empty mapping.",
       "document": {},
@@ -523,6 +705,29 @@
       }
     },
     {
+      "id": "defaults-hooks",
+      "description": "hooks is a key of defaults: false turns off hook.<ext>'s default events and keeps the declared ones.",
+      "document": {
+        "defaults": {
+          "hooks": false
+        },
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "execute"
+            ],
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "files": [
+        "hook.sh"
+      ],
+      "expect": {
+        "valid": true
+      }
+    },
+    {
       "id": "fixture-about-icon-svg",
       "description": "tests/fixtures/invalid/about-icon-svg.cfg",
       "document": {
@@ -844,6 +1049,109 @@
       "expect": {
         "valid": false,
         "at": "/harness/codex/skills"
+      }
+    },
+    {
+      "id": "fixture-hooks-match-on-prompt",
+      "description": "tests/fixtures/invalid/hooks-match-on-prompt.cfg",
+      "document": {
+        "hooks": {
+          "prompt": {
+            "match": [
+              "execute"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "fixture-hooks-refuse-after-tool",
+      "description": "tests/fixtures/invalid/hooks-refuse-after-tool.cfg",
+      "document": {
+        "hooks": {
+          "post-tool": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/post-tool"
+      }
+    },
+    {
+      "id": "fixture-hooks-run-extension",
+      "description": "tests/fixtures/invalid/hooks-run-extension.cfg",
+      "document": {
+        "hooks": {
+          "session-start": "hooks/start.txt"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-start"
+      }
+    },
+    {
+      "id": "fixture-hooks-timeout-zero",
+      "description": "tests/fixtures/invalid/hooks-timeout-zero.cfg",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": 0
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "fixture-hooks-true",
+      "description": "tests/fixtures/invalid/hooks-true.cfg",
+      "document": {
+        "hooks": {
+          "turn-end": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/turn-end"
+      }
+    },
+    {
+      "id": "fixture-hooks-unknown-event",
+      "description": "tests/fixtures/invalid/hooks-unknown-event.cfg",
+      "document": {
+        "hooks": {
+          "pre_tool": "hook.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks"
+      }
+    },
+    {
+      "id": "fixture-hooks-unknown-kind",
+      "description": "tests/fixtures/invalid/hooks-unknown-kind.cfg",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "Bash"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
       }
     },
     {
@@ -1332,6 +1640,70 @@
       }
     },
     {
+      "id": "fixture-skills-local-source",
+      "description": "tests/fixtures/invalid/skills-local-source.cfg",
+      "document": {
+        "skills": [
+          {
+            "name": "r",
+            "source": "../r"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source"
+      }
+    },
+    {
+      "id": "fixture-skills-source-credentials",
+      "description": "tests/fixtures/invalid/skills-source-credentials.cfg",
+      "document": {
+        "skills": [
+          {
+            "name": "r",
+            "source": "https://u:p@example.org/r.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source"
+      }
+    },
+    {
+      "id": "fixture-skills-table-no-source",
+      "description": "tests/fixtures/invalid/skills-table-no-source.cfg",
+      "document": {
+        "skills": [
+          {
+            "name": "r"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "fixture-skills-table-unknown-key",
+      "description": "tests/fixtures/invalid/skills-table-unknown-key.cfg",
+      "document": {
+        "skills": [
+          {
+            "name": "r",
+            "source": "https://example.org/r",
+            "pinn": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
       "id": "fixture-unknown-key-null-json",
       "description": "tests/fixtures/invalid/unknown-key-null-json.cfg",
       "document": {
@@ -1352,6 +1724,1241 @@
       }
     },
     {
+      "id": "skills-entry-number",
+      "description": "An entry is a name or a table.",
+      "document": {
+        "skills": [
+          5
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-table-unknown-key",
+      "description": "A misspelt pin must not fetch a skill unpinned.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review",
+            "pinn": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-table-no-source",
+      "description": "A table without a source: a bare name is the string form.",
+      "document": {
+        "skills": [
+          {
+            "name": "review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-table-no-name",
+      "description": "A table without a name.",
+      "document": {
+        "skills": [
+          {
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-table-bad-pin",
+      "description": "A pin is a digest.",
+      "document": {
+        "skills": [
+          {
+            "pin": "sha1:0123",
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-table-bad-ref",
+      "description": "A ref has the form a catalog's has.",
+      "document": {
+        "skills": [
+          {
+            "ref": "release/1.0",
+            "name": "review",
+            "source": "https://github.com/example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-table-blank-source",
+      "description": "A source that is only white space.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "   "
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-ref-beside-ref",
+      "description": "A ref beside an @ref.",
+      "document": {
+        "skills": [
+          {
+            "ref": "v2",
+            "name": "review",
+            "source": "https://github.com/example/skills.git@v1"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/ref",
+        "class": "ref-not-allowed"
+      }
+    },
+    {
+      "id": "skills-ref-on-web-url",
+      "description": "A ref on a source that is not Git.",
+      "document": {
+        "skills": [
+          {
+            "ref": "v2",
+            "name": "review",
+            "source": "https://example.org/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/ref",
+        "class": "ref-not-allowed"
+      }
+    },
+    {
+      "id": "skills-source-relative",
+      "description": "A relative directory: a manifest names no place on the consumer's machine.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "../review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-absolute",
+      "description": "An absolute directory.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "/srv/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-drive",
+      "description": "A drive path.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "C:\\skills\\review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-unc",
+      "description": "A UNC path.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "\\\\host\\share\\review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-home",
+      "description": "A home directory: nothing in a source is expanded, and it is a local path.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "~/.ssh"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-local-git",
+      "description": "A Git location that is a local path.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "../review.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-explicit-local-git",
+      "description": "git+ on a local path.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git+/srv/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-file-git",
+      "description": "A file: URL to a repository.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "file:///srv/review.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-file-url",
+      "description": "A file: URL.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "file:///etc/passwd"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-file-url-case",
+      "description": "The scheme compares without ASCII case.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "FILE:///etc/passwd"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-other-scheme",
+      "description": "A URL source is http or https.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ftp://example.org/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-option",
+      "description": "A location starting with '-' would reach git as an option.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "-oProxyCommand=x.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-helper",
+      "description": "Git's remote-helper syntax runs a program.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ext::sh -c x.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-bad-path",
+      "description": "A #path that leaves the location.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#../x"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-password",
+      "description": "A password in a URL.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://user:secret@github.com/example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "source-credentials"
+      }
+    },
+    {
+      "id": "skills-source-token-user",
+      "description": "A user in a web URL is how a token travels.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://token@github.com/example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "source-credentials"
+      }
+    },
+    {
+      "id": "skills-source-ssh-password",
+      "description": "A password in an SSH URL.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ssh://git:secret@github.com/example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "source-credentials"
+      }
+    },
+    {
+      "id": "skills-source-query",
+      "description": "A query holds tokens too.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://example.org/skills/review?token=t"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "source-credentials"
+      }
+    },
+    {
+      "id": "skills-name-device",
+      "description": "A skill name becomes a directory: a Windows device name cannot.",
+      "document": {
+        "skills": [
+          "con"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0",
+        "class": "skill-name"
+      }
+    },
+    {
+      "id": "skills-name-device-extension",
+      "description": "Nor with an extension.",
+      "document": {
+        "skills": [
+          "NUL.txt"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0",
+        "class": "skill-name"
+      }
+    },
+    {
+      "id": "skills-name-trailing-dot",
+      "description": "A trailing dot aliases the name without it on Windows.",
+      "document": {
+        "skills": [
+          "pdf."
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0",
+        "class": "skill-name"
+      }
+    },
+    {
+      "id": "skills-name-short",
+      "description": "The shape of a Windows short name.",
+      "document": {
+        "skills": [
+          "PROGRA~1"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-name-pyc",
+      "description": "A name a tree digest leaves out.",
+      "document": {
+        "skills": [
+          "x.pyc"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0",
+        "class": "skill-name"
+      }
+    },
+    {
+      "id": "skills-name-table-device",
+      "description": "A table's name is held to the same rule.",
+      "document": {
+        "skills": [
+          {
+            "name": "aux",
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/name",
+        "class": "skill-name"
+      }
+    },
+    {
+      "id": "skills-duplicate-case",
+      "description": "Names equal without regard to ASCII case are one directory on Windows and macOS.",
+      "document": {
+        "skills": [
+          "Review",
+          "review"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/1",
+        "class": "skill-duplicate"
+      }
+    },
+    {
+      "id": "skills-duplicate-table",
+      "description": "A name and a table for one skill.",
+      "document": {
+        "skills": [
+          "review",
+          {
+            "name": "REVIEW",
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/1/name",
+        "class": "skill-duplicate"
+      }
+    },
+    {
+      "id": "skills-table-also-bundled",
+      "description": "A table whose name is also bundled is ambiguous within the overlay.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "files": [
+        "skills/review/SKILL.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/name",
+        "class": "skill-ambiguous"
+      }
+    },
+    {
+      "id": "skills-table-also-bundled-case",
+      "description": "Compared without regard to ASCII case.",
+      "document": {
+        "skills": [
+          {
+            "name": "Review",
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "files": [
+        "skills/review/SKILL.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/name",
+        "class": "skill-ambiguous"
+      }
+    },
+    {
+      "id": "skills-table-also-bundled-default-off",
+      "description": "Whether or not the default offers the bundled one.",
+      "document": {
+        "defaults": {
+          "skills": false
+        },
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review"
+          }
+        ]
+      },
+      "files": [
+        "skills/review/SKILL.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/name",
+        "class": "skill-ambiguous"
+      }
+    },
+    {
+      "id": "skills-name-case-of-bundled",
+      "description": "A name differing from a bundled skill only in case resolves to neither.",
+      "document": {
+        "skills": [
+          "Review"
+        ]
+      },
+      "files": [
+        "skills/review/SKILL.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/skills/0",
+        "class": "skill-case"
+      }
+    },
+    {
+      "id": "two-manifests",
+      "description": "A validator that knows the files refuses OVERLAY.md beside overlay.cfg.",
+      "document": {},
+      "files": [
+        "OVERLAY.md",
+        "overlay.cfg"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "",
+        "class": "two-manifests"
+      }
+    },
+    {
+      "id": "skills-source-user-before-host",
+      "description": "An @ in a URL's authority is user information, never a ref: this names evil.example with a user, not github.com.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git+https://evil.example@github.com#skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "source-credentials"
+      }
+    },
+    {
+      "id": "skills-source-password-before-host",
+      "description": "So a password there is a credential.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git+https://user:secret@github.com"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "source-credentials"
+      }
+    },
+    {
+      "id": "skills-source-backslash-authority",
+      "description": "A backslash in an authority, which URL parsers read differently.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://evil.example\\@github.com/example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-control",
+      "description": "A control character in a source.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/\u001b[2Kskills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-bidi",
+      "description": "A character that reorders displayed text.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills‮.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-ref-newline",
+      "description": "A line break in a ref.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git@a\nb"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-option-user",
+      "description": "A user that is an option, as ssh would read it.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ssh://-oProxyCommand=calc@host.example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-option-encoded",
+      "description": "Percent-encoded too.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ssh://%2doProxyCommand=calc@host.example/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-option-port",
+      "description": "A port that is an option.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ssh://host.example:-oProxyCommand=calc/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-option-scp-path",
+      "description": "An scp-like path that is an option.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git@host.example:-oFoo/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "invalid-source"
+      }
+    },
+    {
+      "id": "skills-source-loopback",
+      "description": "A host that is this machine is a local source.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://127.0.0.1:8080/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-localhost",
+      "description": "localhost.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://localhost/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-localhost-subdomain",
+      "description": "A name under localhost.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://skills.localhost/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-ipv6-loopback",
+      "description": "The IPv6 loopback.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://[::1]:8000/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-mapped-loopback",
+      "description": "An IPv4-mapped loopback.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://[::ffff:127.0.0.1]/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-link-local",
+      "description": "A link-local address, where cloud metadata answers.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://169.254.169.254/latest/meta-data/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-short-loopback",
+      "description": "A loopback written with fewer than four parts: the last part fills the bytes the others leave, so 127.1 is 127.0.0.1.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://127.1/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-decimal-loopback",
+      "description": "A loopback written as one number.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://2130706433/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-hex-loopback",
+      "description": "A loopback with a hexadecimal part.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://0x7f.0.0.1/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-octal-loopback",
+      "description": "A loopback with an octal part, which a leading zero makes.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://0177.0.0.1/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-short-link-local",
+      "description": "A link-local address written with three parts.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://169.254.1/latest/meta-data/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-short-scp-loopback",
+      "description": "A loopback in an SSH account's host.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git@127.1:skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-name-with-address-prefix",
+      "description": "A host name that begins like an address is a name, not this machine.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://127.0.0.1.example.org/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-source-number-past-range",
+      "description": "A number that does not fit its bytes is not an address, so this host is a name.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://127.1.2.256/skills/review"
+          }
+        ]
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "skills-source-unspecified",
+      "description": "The unspecified address.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "http://0.0.0.0/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-ssh-localhost",
+      "description": "Over SSH.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "ssh://localhost/etc/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-scp-localhost",
+      "description": "scp-like.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git+localhost:/etc/skills"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-file-no-slashes",
+      "description": "A file: location without slashes.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "file:/etc/skills.git"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-source-git-file-no-slashes",
+      "description": "With git+.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "git+file:/etc/skills"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0/source",
+        "class": "local-source"
+      }
+    },
+    {
+      "id": "skills-name-trailing-newline",
+      "description": "A pattern matches the whole string: a trailing line feed is no part of a name.",
+      "document": {
+        "skills": [
+          "pdf\n"
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "skills-pin-trailing-newline",
+      "description": "Nor of a digest.",
+      "document": {
+        "skills": [
+          {
+            "name": "review",
+            "source": "https://github.com/example/skills.git#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab\n"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "at": "/skills/0"
+      }
+    },
+    {
+      "id": "rules-names-overlay-md",
+      "description": "A manifest is no rules file: rules would carry its front matter to the agent.",
+      "document": {
+        "rules": [
+          "OVERLAY.md"
+        ]
+      },
+      "files": [
+        "OVERLAY.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/rules/0",
+        "class": "manifest-file"
+      }
+    },
+    {
+      "id": "context-names-overlay-cfg",
+      "description": "Nor is overlay.cfg context.",
+      "document": {
+        "context": [
+          "overlay.cfg"
+        ]
+      },
+      "files": [
+        "overlay.cfg"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/context/0",
+        "class": "manifest-file"
+      }
+    },
+    {
+      "id": "env-files-names-overlay-md",
+      "description": "Nor an env file.",
+      "document": {
+        "env_files": [
+          "OVERLAY.md"
+        ]
+      },
+      "files": [
+        "OVERLAY.md"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/env_files/0",
+        "class": "manifest-file"
+      }
+    },
+    {
       "id": "files-missing-rule",
       "description": "A rules file that does not exist.",
       "document": {
@@ -1363,22 +2970,6 @@
       "expect": {
         "valid": false,
         "at": "/rules/0"
-      }
-    },
-    {
-      "id": "files-missing-skill",
-      "description": "A listed skill without SKILL.md.",
-      "document": {
-        "skills": [
-          "k"
-        ]
-      },
-      "files": [
-        "skills/k/README.md"
-      ],
-      "expect": {
-        "valid": false,
-        "at": "/skills/0"
       }
     },
     {
@@ -2135,6 +3726,549 @@
       "expect": {
         "valid": false,
         "at": "/defaults"
+      }
+    },
+    {
+      "id": "hooks-not-a-table",
+      "description": "hooks maps events; it is not one script.",
+      "document": {
+        "hooks": "hook.py"
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks"
+      }
+    },
+    {
+      "id": "hooks-run-absolute",
+      "description": "A hook is a script in the overlay, never a program elsewhere.",
+      "document": {
+        "hooks": {
+          "prompt": "/usr/bin/guard.sh"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-escape",
+      "description": "A hook's path cannot leave the root.",
+      "document": {
+        "hooks": {
+          "prompt": "../guard.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-space",
+      "description": "A hook's path uses the characters a scripts path does, so a consumer can put it on a command line unquoted.",
+      "document": {
+        "hooks": {
+          "prompt": "hooks/my guard.sh"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-backslash",
+      "description": "A backslash is no separator.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "run": "hooks\\guard.ps1"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-run-exe",
+      "description": "A hook is a script with an interpreter, never a program file.",
+      "document": {
+        "hooks": {
+          "prompt": "bin/guard.exe"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-run-manifest",
+      "description": "No field names a manifest, a hook's run included.",
+      "document": {
+        "hooks": {
+          "prompt": "overlay.cfg"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt",
+        "class": "manifest-file"
+      }
+    },
+    {
+      "id": "hooks-timeout-float",
+      "description": "A timeout is an integer: 5.0 is not 5.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": 5.0
+          }
+        }
+      },
+      "files": [
+        "hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool/timeout"
+      }
+    },
+    {
+      "id": "hooks-timeout-too-large",
+      "description": "At most an hour.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": 3601
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-timeout-bool",
+      "description": "A boolean is not a number of seconds.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "timeout": true
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-empty",
+      "description": "An empty match would never run: it is refused rather than read as every one.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": []
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-duplicate",
+      "description": "A kind listed twice.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "execute",
+              "execute"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-string",
+      "description": "match is an array.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": "execute"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-match-harness-tool",
+      "description": "match names tool kinds, never one harness's tool names.",
+      "document": {
+        "hooks": {
+          "post-tool": {
+            "match": [
+              "Write"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/post-tool"
+      }
+    },
+    {
+      "id": "hooks-match-reason-unknown",
+      "description": "A harness's own reason (startup) is not one of the session reasons.",
+      "document": {
+        "hooks": {
+          "session-start": {
+            "match": [
+              "startup"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-start"
+      }
+    },
+    {
+      "id": "hooks-match-on-pre-compact",
+      "description": "pre-compact takes no match.",
+      "document": {
+        "hooks": {
+          "pre-compact": {
+            "match": [
+              "manual"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-compact"
+      }
+    },
+    {
+      "id": "hooks-match-on-pre-env",
+      "description": "Nor pre-env.",
+      "document": {
+        "hooks": {
+          "pre-env": {
+            "match": [
+              "new"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-env"
+      }
+    },
+    {
+      "id": "hooks-match-on-session-end",
+      "description": "Only session-start, pre-tool and post-tool take match.",
+      "document": {
+        "hooks": {
+          "session-end": {
+            "match": [
+              "new"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-end"
+      }
+    },
+    {
+      "id": "hooks-on-failure-unknown",
+      "description": "on_failure is report or refuse; a hook's failure never chooses a decision of its own.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "on_failure": "deny"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-refuse-on-turn-end",
+      "description": "turn-end cannot be refused: the turn has ended.",
+      "document": {
+        "hooks": {
+          "turn-end": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/turn-end"
+      }
+    },
+    {
+      "id": "hooks-refuse-on-session-end",
+      "description": "Nor session-end.",
+      "document": {
+        "hooks": {
+          "session-end": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-end"
+      }
+    },
+    {
+      "id": "hooks-refuse-on-cd",
+      "description": "Nor cd: the directory has changed.",
+      "document": {
+        "hooks": {
+          "cd": {
+            "on_failure": "refuse"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/cd"
+      }
+    },
+    {
+      "id": "hooks-table-unknown-key",
+      "description": "A table holds run, match, timeout and on_failure; a harness's matcher is not one.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "matcher": "Bash"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-table-os",
+      "description": "A hook has no os key: hook.<ext>, chosen by runtime, gives each OS its own.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "run": "hooks/guard.sh",
+            "os": [
+              "unix"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-run-missing",
+      "description": "A script hooks names must be in the overlay.",
+      "document": {
+        "hooks": {
+          "prompt": "hooks/prompt.py"
+        }
+      },
+      "files": [
+        "hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-table-no-hook-file",
+      "description": "A table with no run runs hook.<ext>, which must be at the root.",
+      "document": {
+        "hooks": {
+          "pre-tool": {
+            "match": [
+              "execute"
+            ]
+          }
+        }
+      },
+      "files": [
+        "hooks/hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-tool"
+      }
+    },
+    {
+      "id": "hooks-table-no-hook-file-other-extension",
+      "description": "hook.cfg is no hook.<ext>.",
+      "document": {
+        "hooks": {
+          "prompt": {}
+        }
+      },
+      "files": [
+        "hook.cfg",
+        "Hook.py"
+      ],
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "defaults-hooks-string",
+      "description": "The hooks default is turned off by false, nothing else.",
+      "document": {
+        "defaults": {
+          "hooks": "no"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/defaults/hooks"
+      }
+    },
+    {
+      "id": "hooks-sets-on-post-tool",
+      "description": "post-tool takes no variables, so no sets.",
+      "document": {
+        "hooks": {
+          "post-tool": {
+            "sets": [
+              "A"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/post-tool"
+      }
+    },
+    {
+      "id": "hooks-sets-on-pre-env",
+      "description": "pre-env sets what an env script does: sets has no place there.",
+      "document": {
+        "hooks": {
+          "pre-env": {
+            "sets": [
+              "A"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/pre-env"
+      }
+    },
+    {
+      "id": "hooks-sets-reserved",
+      "description": "A reserved variable cannot be declared.",
+      "document": {
+        "hooks": {
+          "session-start": {
+            "sets": [
+              "DOCS_OVERLAY_ROOT"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/session-start"
+      }
+    },
+    {
+      "id": "hooks-sets-empty",
+      "description": "An empty sets is written by leaving it out.",
+      "document": {
+        "hooks": {
+          "cd": {
+            "sets": []
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/cd"
+      }
+    },
+    {
+      "id": "hooks-sets-bad-name",
+      "description": "A variable name.",
+      "document": {
+        "hooks": {
+          "prompt": {
+            "sets": [
+              "A-B"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks/prompt"
+      }
+    },
+    {
+      "id": "hooks-event-case",
+      "description": "Event names match exactly.",
+      "document": {
+        "hooks": {
+          "Pre-Tool": "hook.py"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/hooks"
+      }
+    },
+    {
+      "id": "about-license-nested",
+      "description": "Parentheses nested past what a parser can follow make no license expression, and stop nothing.",
+      "document": {
+        "name": "x",
+        "about": {
+          "license": "((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((MIT))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/about/license",
+        "applies": true
       }
     },
     {

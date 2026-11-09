@@ -4478,7 +4478,7 @@ and applies only the secrets: see "Credentials" under the Station daemon.
 
 ## Overlays (`ai6::directorates::q::overlays`)
 
-Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`, vectors at commit `061b8f5`
+Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`, vectors of coqui-aos `c73cf23a`
 in `tests/fixtures/aos-vectors/`): reading, validating, digesting, resolving and composing,
 and the environment, setup and dependencies an overlay asks for, as pure functions. Nothing
 here runs a script, installs a package, starts a server or reads the network: a Station's own

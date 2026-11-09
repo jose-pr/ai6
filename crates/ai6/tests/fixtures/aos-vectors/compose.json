@@ -631,6 +631,235 @@
       }
     },
     {
+      "id": "skills-one-from-elsewhere",
+      "description": "Two overlays naming one skill alike do not collide: by name, or by the same source and pin.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf",
+            {
+              "name": "review",
+              "source": "https://github.com/example/skills.git#skills/review",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        },
+        "b": {
+          "skills": [
+            "PDF",
+            {
+              "name": "Review",
+              "source": "https://github.com/example/skills.git#skills/review",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "install_order": [
+          "a",
+          "b"
+        ],
+        "active": [
+          "a",
+          "b"
+        ],
+        "missing": [],
+        "root_variables": {
+          "a": "A_OVERLAY_ROOT",
+          "b": "B_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {
+          "PDF": "b",
+          "Review": "b"
+        },
+        "skill_collisions": []
+      }
+    },
+    {
+      "id": "skills-collide-from-elsewhere",
+      "description": "Different sources, or different pins, of one name fall under the collision rule: reported, and the overlay later in order wins.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "review",
+              "source": "https://github.com/example/skills.git#skills/review",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#skills/review-a"
+            }
+          ]
+        },
+        "b": {
+          "skills": [
+            {
+              "name": "review",
+              "source": "https://github.com/example/skills.git#skills/review",
+              "pin": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+            },
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#skills/review-b"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "install_order": [
+          "a",
+          "b"
+        ],
+        "active": [
+          "a",
+          "b"
+        ],
+        "missing": [],
+        "root_variables": {
+          "a": "A_OVERLAY_ROOT",
+          "b": "B_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {
+          "lint": "a",
+          "review": "a"
+        },
+        "skill_collisions": [
+          "lint",
+          "review"
+        ]
+      }
+    },
+    {
+      "id": "skills-bundled-against-named",
+      "description": "A bundled skill and the same name from elsewhere collide.",
+      "overlays": {
+        "a": {},
+        "b": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "a": [
+          "skills/pdf/SKILL.md"
+        ]
+      },
+      "expect": {
+        "install_order": [
+          "a",
+          "b"
+        ],
+        "active": [
+          "a",
+          "b"
+        ],
+        "missing": [],
+        "root_variables": {
+          "a": "A_OVERLAY_ROOT",
+          "b": "B_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [],
+        "skills": {
+          "pdf": "a"
+        },
+        "skill_collisions": [
+          "pdf"
+        ]
+      }
+    },
+    {
+      "id": "context-body-order",
+      "description": "An overlay's body stands where its CONTEXT.md would, in composition order.",
+      "overlays": {
+        "a": {
+          "priority": 100
+        },
+        "b": {
+          "priority": 200
+        },
+        "c": {
+          "priority": 300
+        }
+      },
+      "requested": [
+        "a",
+        "b",
+        "c"
+      ],
+      "files": {
+        "a": {
+          "CONTEXT.md": "a\n"
+        },
+        "b": {
+          "OVERLAY.md": "# b\n",
+          "CONTEXT.md": "ignored\n"
+        },
+        "c": {
+          "OVERLAY.md": "---\nname: c\n---\n \n",
+          "CONTEXT.md": "c\n"
+        }
+      },
+      "expect": {
+        "install_order": [
+          "a",
+          "b",
+          "c"
+        ],
+        "active": [
+          "a",
+          "b",
+          "c"
+        ],
+        "missing": [],
+        "root_variables": {
+          "a": "A_OVERLAY_ROOT",
+          "b": "B_OVERLAY_ROOT",
+          "c": "C_OVERLAY_ROOT"
+        },
+        "routing": [],
+        "rules": [],
+        "context": [
+          [
+            "a",
+            "CONTEXT.md"
+          ],
+          [
+            "b",
+            "OVERLAY.md"
+          ],
+          [
+            "c",
+            "CONTEXT.md"
+          ]
+        ],
+        "skills": {},
+        "skill_collisions": []
+      }
+    },
+    {
       "id": "env-across-overlays",
       "description": "Root variables first; then each overlay's env and paths in order: the later overlay wins and its prepends come first.",
       "overlays": {
@@ -1992,6 +2221,436 @@
           "A_OVERLAY_ROOT": "/scope/ov/a",
           "PYTHONPATH": "/scope/ov/a/lib/python:/scope/envs/python/shared/site-packages"
         }
+      }
+    },
+    {
+      "id": "env-pre-env-before-every-overlay",
+      "description": "pre-env applies after the root variables and before any overlay's declarations, so an overlay earlier in composition order reads what a later one's pre-env set.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "SEEN": "${FROM_HIGH:-none}"
+          }
+        },
+        "high": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        },
+        "pre_env": {
+          "high": {
+            "stdout": "{\"FROM_HIGH\": \"yes\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "FROM_HIGH": "yes",
+          "SEEN": "yes"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-composition-order",
+      "description": "Every overlay's pre-env in composition order: the later one's value replaces the earlier one's.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        },
+        "pre_env": {
+          "low": {
+            "stdout": "{\"MODE\": \"low\"}"
+          },
+          "high": {
+            "stdout": "{\"MODE\": \"high\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "MODE": "high"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-then-env",
+      "description": "An overlay's own env comes after every pre-env, and replaces what one set.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "MODE": "declared"
+          }
+        },
+        "high": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        },
+        "pre_env": {
+          "high": {
+            "stdout": "{\"MODE\": \"hook\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high",
+          "MODE": "declared"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-sees-roots",
+      "description": "A pre-env hook's output is what it printed: nothing in it is substituted, and the roots were set before it ran.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        }
+      },
+      "requested": [
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low"
+        },
+        "pre_env": {
+          "low": {
+            "stdout": "{\"RAW\": \"${LOW_OVERLAY_ROOT}\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "RAW": "${LOW_OVERLAY_ROOT}"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-lines",
+      "description": "The output is an env script's: one object per line, applied in order, null unsetting.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        }
+      },
+      "requested": [
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "OLD": "1",
+          "KEEP": "1"
+        },
+        "roots": {
+          "low": "/ov/low"
+        },
+        "pre_env": {
+          "low": {
+            "stdout": "{\"A\": \"1\", \"OLD\": \"2\"}\n{\"OLD\": null}\n"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low"
+        ],
+        "env": {
+          "KEEP": "1",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "A": "1"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-failed-report",
+      "description": "A failed pre-env hook applies nothing, is reported, and the session goes on.",
+      "overlays": {
+        "low": {
+          "priority": 100,
+          "env": {
+            "MODE": "${HOOKED:-no}"
+          }
+        }
+      },
+      "requested": [
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low"
+        },
+        "pre_env": {
+          "low": {
+            "exit": 1,
+            "stdout": "{\"HOOKED\": \"yes\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "MODE": "no"
+        },
+        "hook_reports": [
+          [
+            "hook-failed",
+            "low",
+            "pre-env",
+            "exit"
+          ]
+        ],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-reserved",
+      "description": "A pre-env hook that sets another overlay's root fails as an env script would, and applies nothing.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        },
+        "high": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "high",
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low",
+          "high": "/ov/high"
+        },
+        "pre_env": {
+          "high": {
+            "stdout": "{\"LOW_OVERLAY_ROOT\": \"/tmp/evil\", \"OK\": \"1\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low",
+          "high"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "HIGH_OVERLAY_ROOT": "/ov/high"
+        },
+        "hook_reports": [
+          [
+            "hook-failed",
+            "high",
+            "pre-env",
+            "output"
+          ]
+        ],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-refuse",
+      "description": "With on_failure = refuse, a failed pre-env hook refuses the session: no environment is built and the harness is not started.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        }
+      },
+      "requested": [
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low"
+        },
+        "pre_env": {
+          "low": {
+            "timed_out": true,
+            "on_failure": "refuse",
+            "stdout": ""
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low"
+        ],
+        "env": {
+          "error": "hook-refused",
+          "subject": "low"
+        },
+        "hook_reports": [
+          [
+            "hook-failed",
+            "low",
+            "pre-env",
+            "timeout"
+          ]
+        ],
+        "hook_non_defaults": []
+      }
+    },
+    {
+      "id": "env-pre-env-sensitive",
+      "description": "A sensitive variable a pre-env hook sets is reported as env-sensitive.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        }
+      },
+      "requested": [
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {
+          "PATH": "/usr/bin"
+        },
+        "roots": {
+          "low": "/ov/low"
+        },
+        "pre_env": {
+          "low": {
+            "stdout": "{\"PATH\": \"/opt/low/bin:/usr/bin\", \"CODEX_HOME\": \"/ov/low/codex\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low"
+        ],
+        "env": {
+          "PATH": "/opt/low/bin:/usr/bin",
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "CODEX_HOME": "/ov/low/codex"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": [
+          [
+            "env-sensitive",
+            "CODEX_HOME"
+          ],
+          [
+            "env-sensitive",
+            "PATH"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-pre-env-grant-is-a-variable",
+      "description": "pre-env takes only variables: a 'decision' key is a variable name there, and grants nothing.",
+      "overlays": {
+        "low": {
+          "priority": 100
+        }
+      },
+      "requested": [
+        "low"
+      ],
+      "facts": {
+        "os": "linux",
+        "base_env": {},
+        "roots": {
+          "low": "/ov/low"
+        },
+        "pre_env": {
+          "low": {
+            "stdout": "{\"decision\": \"allow\"}"
+          }
+        }
+      },
+      "expect": {
+        "active": [
+          "low"
+        ],
+        "env": {
+          "LOW_OVERLAY_ROOT": "/ov/low",
+          "decision": "allow"
+        },
+        "hook_reports": [],
+        "hook_non_defaults": []
       }
     }
   ]
