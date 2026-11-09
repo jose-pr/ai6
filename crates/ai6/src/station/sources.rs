@@ -949,6 +949,7 @@ pub(crate) fn source_link(
 
 /// Why a window passed unfired, as the timeline says it.
 const NOT_AUTHORIZED: &str = "not authorized";
+const DISABLED: &str = "disabled by an operator";
 const SCHEDULER_DOWN: &str = "the scheduler was not running";
 const IN_FLIGHT: &str = "the last attempt was in flight";
 const PAST_THE_BOUND: &str = "older than its catch-up bound";
@@ -1045,10 +1046,12 @@ pub(crate) fn fire_due_sleepers(
                     continue;
                 }
             };
-            let authorized = approval
-                .as_ref()
-                .is_some_and(|approval| approval.fingerprint == sleeper.fingerprint());
-            if !authorized && warned.insert(format!("{}/{name}", operation.id)) {
+            let disabled = approval.as_ref().is_some_and(|approval| approval.disabled);
+            let authorized = !disabled
+                && approval
+                    .as_ref()
+                    .is_some_and(|approval| approval.fingerprint == sleeper.fingerprint());
+            if !authorized && !disabled && warned.insert(format!("{}/{name}", operation.id)) {
                 eprintln!(
                     "ai6: sleeper {name} of Operation {} waits for `ai6 sleeper authorize {} {name}`",
                     operation.id, operation.id
@@ -1074,6 +1077,8 @@ pub(crate) fn fire_due_sleepers(
                 .unwrap_or_else(|| SleeperMark::new(approval.at, latest));
             let gap = if authorized {
                 SCHEDULER_DOWN
+            } else if disabled {
+                DISABLED
             } else {
                 NOT_AUTHORIZED
             };
@@ -1096,7 +1101,7 @@ pub(crate) fn fire_due_sleepers(
                     None => {}
                 }
             } else if !mark.settled {
-                mark.why = Some(NOT_AUTHORIZED.to_owned());
+                mark.why = Some(gap.to_owned());
             }
             if approval.mark.as_ref() != Some(&mark)
                 && let Err(error) = registry.mark_sleeper(&operation.id, name, &mark)
@@ -1130,6 +1135,10 @@ fn fire_rounds(
     let mut queued = 0;
     let (mut in_flight, mut failed) = (false, false);
     for round in &rounds {
+        let before = sleeper
+            .standing
+            .then(|| standing_fingerprint(registry, operation, name, round.as_deref()))
+            .flatten();
         match registry.fire_sleeper(
             operation,
             name,
@@ -1139,6 +1148,13 @@ fn fire_rounds(
         ) {
             Ok(Fire::Queued) => {
                 queued += 1;
+                if before.is_some_and(|old| old != sleeper.fingerprint()) {
+                    order.tell(
+                        "revised",
+                        window_label(window),
+                        Some("authorized again after an edit: this attempt takes the new brief"),
+                    );
+                }
                 match round {
                     Some(round) => eprintln!(
                         "ai6: sleeper {name} of Operation {operation} queued the round of Station {round}",
@@ -1181,6 +1197,28 @@ fn fire_rounds(
         mark.why = None;
     }
     queued
+}
+
+/// The fingerprint of the definition the standing Mission of a Sleeper's round was last briefed
+/// from, when it has been.
+fn standing_fingerprint(
+    registry: &dyn RegistryBackend,
+    operation: &str,
+    name: &str,
+    station: Option<&str>,
+) -> Option<String> {
+    let id = registry
+        .entered_mission_id(&MissionEntry::standing(operation, name, station))
+        .ok()??;
+    registry
+        .filed_brief(&id)
+        .ok()??
+        .brief
+        .data
+        .get("sleeper")?
+        .get("definition")?
+        .as_str()
+        .map(str::to_owned)
 }
 
 /// The Stations an `each_station` sleeper holds a round on: every Station whose last check-in
@@ -1947,6 +1985,130 @@ mod tests {
 
     /// 2026-10-25T10:00:00Z, a Sunday.
     const NOW: i64 = 1_792_922_400;
+
+    #[test]
+    fn a_disabled_sleeper_mints_nothing_and_an_enabled_one_resumes() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("operations.toml"),
+            "[operation.G]
+clearance = \"field\"
+             [operation.G.sleepers.deps]
+schedule = \"0 3 * * *\"
+title = \"Update dependencies\"
+             prompt = \"Update the lockfile.\"
+",
+        )
+        .unwrap();
+        let roster = Roster::load(dir.path()).unwrap();
+        let sleeper = roster.operation("G").unwrap().sleepers["deps"].clone();
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let mut warned = BTreeSet::new();
+        let window = sleeper.due_window(NOW, 0, &Default::default()).unwrap();
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", window - 60)
+            .unwrap();
+        assert!(
+            registry
+                .set_sleeper_disabled("G", "deps", true, "operator", NOW)
+                .unwrap()
+        );
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW, &mut warned),
+            0
+        );
+        assert!(registry.list_new().unwrap().is_empty());
+        assert!(
+            warned.is_empty(),
+            "a disabled order is not waiting for an approval"
+        );
+
+        // Authorizing again keeps it stopped.
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", NOW)
+            .unwrap();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW + 60, &mut warned),
+            0
+        );
+
+        assert!(
+            registry
+                .set_sleeper_disabled("G", "deps", false, "operator", NOW + 120)
+                .unwrap()
+        );
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW + 180, &mut warned),
+            1
+        );
+        assert!(
+            !registry
+                .set_sleeper_disabled("G", "none", true, "operator", NOW)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn an_edited_and_authorized_again_standing_sleeper_briefs_its_next_window_anew() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |prompt: &str| {
+            fs::write(
+                dir.path().join("operations.toml"),
+                format!(
+                    "[operation.G]\nclearance = \"field\"\n\
+                     [operation.G.sleepers.deps]\nschedule = \"0 3 * * *\"\n\
+                     title = \"Update dependencies\"\nstanding = true\nprompt = {prompt:?}\n"
+                ),
+            )
+            .unwrap();
+            Roster::load(dir.path()).unwrap()
+        };
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        let mut warned = BTreeSet::new();
+
+        let roster = write("Update the lockfile.");
+        let sleeper = roster.operation("G").unwrap().sleepers["deps"].clone();
+        let window = sleeper.due_window(NOW, 0, &Default::default()).unwrap();
+        registry
+            .authorize_sleeper("G", "deps", &sleeper, "operator", window - 60)
+            .unwrap();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW, &mut warned),
+            1
+        );
+        let first = registry.claim_new(None).unwrap().unwrap();
+        assert_eq!(first.body, "Update the lockfile.");
+        registry
+            .finish(
+                &first,
+                &serde_json::json!({"state": "done"}),
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let roster = write("Update the lockfile and the toolchain.");
+        let edited = roster.operation("G").unwrap().sleepers["deps"].clone();
+        registry
+            .authorize_sleeper("G", "deps", &edited, "operator", NOW + 60)
+            .unwrap();
+        assert_eq!(
+            fire_due_sleepers(&registry, &roster, "station-a", NOW + 86_400, &mut warned),
+            1
+        );
+        let second = registry.claim_new(None).unwrap().unwrap();
+        assert_eq!(second.body, "Update the lockfile and the toolchain.");
+        let revised = registry
+            .timeline_events("G")
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == "sleeper" && event.action == "revised")
+            .count();
+        assert_eq!(revised, 1);
+    }
 
     #[test]
     fn an_authorized_sleeper_queues_one_brief_per_window_across_failover() {

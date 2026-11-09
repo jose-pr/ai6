@@ -834,6 +834,7 @@ impl SleeperStore for SqlRegistry {
                 fingerprint: sleeper.fingerprint(),
                 authorized_by: authorized_by.to_owned(),
                 at,
+                disabled: replaced.as_ref().is_some_and(|approval| approval.disabled),
                 mark: replaced.and_then(|approval| approval.mark),
             };
             tx.execute(
@@ -884,6 +885,46 @@ impl SleeperStore for SqlRegistry {
                 }
             }
             Ok(removed)
+        })
+    }
+
+    fn set_sleeper_disabled(
+        &self,
+        operation: &str,
+        name: &str,
+        disabled: bool,
+        by: &str,
+        at: i64,
+    ) -> io::Result<bool> {
+        let kind = if disabled { "disabled" } else { "enabled" };
+        let event = TimelineEvent::new("sleeper", kind, operation, at as f64)
+            .actor(by)
+            .detail("sleeper", name);
+        self.write(|tx, revision| {
+            let approval: Option<SleeperAuthorization> = tx
+                .query_opt(
+                    "SELECT record FROM ai6_sleeper_authorizations                      WHERE operation = $1 AND name = $2",
+                    &[operation.into(), name.into()],
+                )?
+                .map(|row| from_json(&row.text(0)?, "Sleeper authorization"))
+                .transpose()?;
+            let Some(mut approval) = approval else {
+                return Ok(false);
+            };
+            approval.disabled = disabled;
+            tx.execute(
+                "UPDATE ai6_sleeper_authorizations SET record = $3, revision = $4                  WHERE operation = $1 AND name = $2",
+                &[
+                    operation.into(),
+                    name.into(),
+                    to_json(&approval)?.into(),
+                    revision.into(),
+                ],
+            )?;
+            if event.to_record(&self.limits.timeline).is_ok() {
+                insert_event(tx, &event, revision, &self.limits.timeline)?;
+            }
+            Ok(true)
         })
     }
 

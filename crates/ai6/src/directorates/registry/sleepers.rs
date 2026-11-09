@@ -188,6 +188,10 @@ pub struct SleeperAuthorization {
     /// keeps it, and a revoke ends it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<SleeperMark>,
+    /// An operator stopped the order minting briefs; the definition and this approval stand,
+    /// and an approval given again keeps it stopped.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
 }
 
 /// What the Headquarters Station last reckoned of a Sleeper's windows, so one that passes unfired
@@ -503,6 +507,21 @@ pub trait SleeperStore {
     /// Returns an error when the Registry cannot be written.
     fn revoke_sleeper(&self, operation: &str, name: &str) -> io::Result<bool>;
 
+    /// Stops (`disabled`) or resumes the order's windows without touching its definition or
+    /// approval, and puts it on the timeline; returns whether it has an approval.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read or written.
+    fn set_sleeper_disabled(
+        &self,
+        operation: &str,
+        name: &str,
+        disabled: bool,
+        by: &str,
+        at: i64,
+    ) -> io::Result<bool>;
+
     /// Records what the Headquarters Station has reckoned of the order's windows, on its approval;
     /// returns whether it has one.
     ///
@@ -590,6 +609,9 @@ pub(super) fn fired_brief(
     received_by: &str,
 ) -> Brief {
     let mut brief = sleeper_brief(operation, name, sleeper, window, station);
+    if let Some(origin) = brief.data.get_mut("sleeper") {
+        origin["definition"] = serde_json::json!(sleeper.fingerprint());
+    }
     brief.provenance = Some(
         Provenance::new(Origin::Sleeper, &brief, received_by, now_secs())
             .with_principal(name)
@@ -612,13 +634,13 @@ impl SleeperStore for FileRegistry {
             .check_size(&self.limits.sleepers)
             .map_err(invalid_data)?;
         let _lock = self.lock()?;
+        let replaced = self.sleeper_authorization(operation, name)?;
         let record = SleeperAuthorization {
             fingerprint: sleeper.fingerprint(),
             authorized_by: authorized_by.to_owned(),
             at,
-            mark: self
-                .sleeper_authorization(operation, name)?
-                .and_then(|approval| approval.mark),
+            disabled: replaced.as_ref().is_some_and(|approval| approval.disabled),
+            mark: replaced.and_then(|approval| approval.mark),
         };
         let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
         self.write_atomic(&self.sleeper_path(operation, name), &bytes)?;
@@ -658,6 +680,29 @@ impl SleeperStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(error),
         }
+    }
+
+    fn set_sleeper_disabled(
+        &self,
+        operation: &str,
+        name: &str,
+        disabled: bool,
+        by: &str,
+        at: i64,
+    ) -> io::Result<bool> {
+        let _lock = self.lock()?;
+        let Some(mut approval) = self.sleeper_authorization(operation, name)? else {
+            return Ok(false);
+        };
+        approval.disabled = disabled;
+        let bytes = serde_json::to_vec_pretty(&approval).map_err(io::Error::other)?;
+        self.write_atomic(&self.sleeper_path(operation, name), &bytes)?;
+        let kind = if disabled { "disabled" } else { "enabled" };
+        let event = TimelineEvent::new("sleeper", kind, operation, at as f64)
+            .actor(by)
+            .detail("sleeper", name);
+        let _ = record_event_locked(self, &event);
+        Ok(true)
     }
 
     fn mark_sleeper(&self, operation: &str, name: &str, mark: &SleeperMark) -> io::Result<bool> {
