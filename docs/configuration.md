@@ -809,8 +809,9 @@ start; on the web it shows the deployment's file and changes nothing.
 ## Agent handler settings
 
 An Agent's `handler_settings` table in the roster (`agents` family) configures its handler
-provider, beside what the `station` record's `[providers.<id>]` table says; a handler refuses a
-key it does not know. Codex takes none. The Claude handler takes `allowed_tools` and
+provider, beside what the `station` record's `[providers.<id>]` table says; they are the handler's own
+configuration, so a key its schema does not know is refused, naming the handler and the key. The
+Codex handler takes its own keys (`executable` and its limits). The Claude handler takes `allowed_tools` and
 `denied_tools`, lists of Claude Code permission rules that change what a Mission may call: both
 empty by default, and a rule that adds to the list is reported as a weakening ([What a Claude Code
 Mission may call](agents.md#what-a-claude-code-mission-may-call)). The `acp` handler's keys (`command`,
