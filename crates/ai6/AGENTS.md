@@ -6283,18 +6283,12 @@ declare (or a value it does not accept), naming the provider and the key. `handl
   code); the profile is `[station.plugins] profile` (`ServeConfig::with_plugin_profile`); verified
   copies go to the state directory's `plugins/verified/`, and `[station.plugins] keep_verified`
   (`ServeConfig::with_keep_verified`) says which old ones stay.
-- `ai6 config show FAMILY [KEY] [--scope station:ID]` prints records as TOML;
-  `ai6 config import DIR [--scope station:ID]` loads a configuration directory's records
-  into a writable provider with `ConfigProvider::put_all` (checked whole, one transaction on
-  SQL); `ai6 config export DIR` writes every family of every scope as TOML family files
-  (`config::export`, owner-only on Unix). `ai6 config rm FAMILY KEY [--scope station:ID] [--force]`
-  removes one record through `ConfigProvider::remove_on_host`: `config::references_to` reads every
-  family at every scope first (a read error removes nothing) and refuses, listing them, what another
-  record still names unless `--force` (a secret only through a `secrets` list entry, a `secret`
-  value or a pool account of its name that reads a secret and names none; any other record through
-  any equal string or table key, `handler`, `provider`, `model` and `effort` values aside); audited
-  `roster.remove`/`roster.refused`, `cli:<user>`, before the removal. `--force` is reported; the
-  provider's own checks still apply.
+- Records are not changed by the `ai6` binary: `ai6ctl get|apply|edit|set|unset|delete` do it through
+  Universal Exports. The library keeps what they use: `config::parse_document` reads a document
+  (any of the three formats, a whole-file family's file by its name) into records,
+  `config::document_tables` writes records back as one, `config::family_of_kind` maps a kind or
+  its plural to a `ConfigRecord`, `ConfigProvider::check_all` checks a `put_all` without keeping
+  it (SQL rolls the transaction back), and `config::references_to` finds what still names a record.
 - `ai6 runner serve [--state-dir PATH] [--listen ADDR] [--plugin-path PATH]... [--pins PATH] [--plugin-profile P] [--keep-verified N|none] [--terminal ID] [--settings PATH] [--detach]`:
   run the field runner on this host until Ctrl-C or SIGTERM (provider libraries checked as
   the Station's, verified copies under its state directory); `--detach` starts it in the

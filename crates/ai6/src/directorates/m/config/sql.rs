@@ -174,6 +174,17 @@ impl SqlProvider {
         scope: &ConfigScope,
         change: impl FnOnce(&mut Tx<'_>, i64) -> io::Result<bool> + Send,
     ) -> Result<Option<ConfigRevision>, RosterError> {
+        self.change_or_check(scope, true, change)
+    }
+
+    /// [`change`](Self::change), or with `keep` false only the check: the transaction is rolled
+    /// back after every view is found acceptable, and the answer is `None`.
+    fn change_or_check(
+        &self,
+        scope: &ConfigScope,
+        keep: bool,
+        change: impl FnOnce(&mut Tx<'_>, i64) -> io::Result<bool> + Send,
+    ) -> Result<Option<ConfigRevision>, RosterError> {
         let scope = scope.clone();
         let limits = self.limits.clone();
         let outcome = self.db.write(Clock::Config, move |tx, revision| {
@@ -204,6 +215,9 @@ impl SqlProvider {
                         .revision,
                 );
             }
+            if !keep {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "checked"));
+            }
             Ok(revision.unwrap_or_default())
         });
         match outcome {
@@ -217,6 +231,45 @@ impl SqlProvider {
             }
             Err(reason) => Err(failed(reason)),
         }
+    }
+
+    /// [`put_all`](ConfigProvider::put_all), kept only with `keep`.
+    fn store_all(
+        &self,
+        scope: &ConfigScope,
+        records: &[(ConfigRecord, String, serde_json::Value)],
+        keep: bool,
+    ) -> Result<Option<ConfigRevision>, RosterError> {
+        for (record, key, definition) in records {
+            if key.trim().is_empty() || !definition.is_object() {
+                return Err(error(format!(
+                    "{SOURCE}: a {record} needs a key and a JSON object"
+                )));
+            }
+            check_placement(*record, scope, key, &SOURCE)?;
+        }
+        let scope_text = scope.as_text();
+        self.change_or_check(scope, keep, move |tx, revision| {
+            let mut changed = false;
+            for (record, key, definition) in records {
+                let sql = format!(
+                    "INSERT INTO {} (scope, key, definition, revision) VALUES ($1, $2, $3, $4) \
+                     ON CONFLICT (scope, key) DO UPDATE SET definition = excluded.definition, \
+                     revision = excluded.revision",
+                    table(*record)
+                );
+                changed |= tx.execute(
+                    &sql,
+                    &[
+                        scope_text.clone().into(),
+                        key.as_str().into(),
+                        definition.to_string().into(),
+                        revision.into(),
+                    ],
+                )? > 0;
+            }
+            Ok(changed)
+        })
     }
 }
 
@@ -376,36 +429,15 @@ impl ConfigProvider for SqlProvider {
         scope: &ConfigScope,
         records: &[(ConfigRecord, String, serde_json::Value)],
     ) -> Result<Option<ConfigRevision>, RosterError> {
-        for (record, key, definition) in records {
-            if key.trim().is_empty() || !definition.is_object() {
-                return Err(error(format!(
-                    "{SOURCE}: a {record} needs a key and a JSON object"
-                )));
-            }
-            check_placement(*record, scope, key, &SOURCE)?;
-        }
-        let scope_text = scope.as_text();
-        self.change(scope, move |tx, revision| {
-            let mut changed = false;
-            for (record, key, definition) in records {
-                let sql = format!(
-                    "INSERT INTO {} (scope, key, definition, revision) VALUES ($1, $2, $3, $4) \
-                     ON CONFLICT (scope, key) DO UPDATE SET definition = excluded.definition, \
-                     revision = excluded.revision",
-                    table(*record)
-                );
-                changed |= tx.execute(
-                    &sql,
-                    &[
-                        scope_text.clone().into(),
-                        key.as_str().into(),
-                        definition.to_string().into(),
-                        revision.into(),
-                    ],
-                )? > 0;
-            }
-            Ok(changed)
-        })
+        self.store_all(scope, records, true)
+    }
+
+    fn check_all(
+        &self,
+        scope: &ConfigScope,
+        records: &[(ConfigRecord, String, serde_json::Value)],
+    ) -> Result<(), RosterError> {
+        self.store_all(scope, records, false).map(|_| ())
     }
 
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError> {

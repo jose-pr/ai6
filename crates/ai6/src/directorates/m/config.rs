@@ -1193,6 +1193,22 @@ pub trait ConfigProvider: Send + Sync {
         Ok(revision)
     }
 
+    /// Checks that [`put_all`](ConfigProvider::put_all) of `records` would be accepted, and
+    /// stores nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`put_all`](ConfigProvider::put_all); [`RosterErrorKind::ReadOnly`] from a provider
+    /// that cannot check without storing (the default).
+    fn check_all(
+        &self,
+        scope: &ConfigScope,
+        records: &[(ConfigRecord, String, serde_json::Value)],
+    ) -> Result<(), RosterError> {
+        let _ = (scope, records);
+        Err(read_only())
+    }
+
     /// The scopes that hold records: [`ConfigScope::Global`] and each Station with records of
     /// its own. The default is the global scope alone.
     ///
@@ -1463,22 +1479,158 @@ fn family_value(
     document
 }
 
-/// `records` of `record` as the TOML text of their family file.
+/// The family whose route kind is `kind`: its name or the plural (`watch`, `watches`).
+pub fn family_of_kind(kind: &str) -> Option<ConfigRecord> {
+    ConfigRecord::ALL.into_iter().find(|record| {
+        let name = record.name();
+        kind == name
+            || kind
+                .strip_prefix(name)
+                .is_some_and(|rest| rest == "s" || rest == "es")
+    })
+}
+
+/// `records` of `record` as the tables of an applicable document: `[name.<key>]` tables, a
+/// singleton's or whole-file family's `[name]` table, `[[library]]` entries for plugins. The
+/// inverse of [`document_records`].
+pub fn document_tables(
+    record: ConfigRecord,
+    records: impl IntoIterator<Item = (String, serde_json::Value)>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let records: Vec<_> = records.into_iter().collect();
+    if record.is_whole_file() {
+        let mut document = serde_json::Map::new();
+        if let Some((_, whole)) = records.into_iter().next() {
+            document.insert(record.name().to_owned(), whole);
+        }
+        return document;
+    }
+    family_value(record, records)
+}
+
+/// The records of the configuration document `text` of a file named `path`
+/// ([`document_records`]): its extension and first line choose the format, unless `format`
+/// names one. A document named for a whole-file family's file (`access.toml`) with no table of
+/// that family's name is the record itself.
 ///
 /// # Errors
 ///
-/// A record TOML cannot hold (a `null`).
-pub fn family_document(
-    record: ConfigRecord,
-    records: impl IntoIterator<Item = (String, serde_json::Value)>,
-) -> Result<String, RosterError> {
-    let value = json_to_toml(serde_json::Value::Object(family_value(record, records)))
-        .map_err(|reason| error(format!("{record}: {reason}")))?;
-    toml::to_string(&value).map_err(|reason| error(format!("{record}: {reason}")))
+/// [`RosterErrorKind::Invalid`] naming the key or position the document is refused at, never
+/// its values.
+pub fn parse_document(
+    path: &Path,
+    format: Option<crate::bootstrap::format::Format>,
+    text: &str,
+) -> Result<Vec<(ConfigRecord, String, serde_json::Value)>, RosterError> {
+    let in_file = |reason: &dyn fmt::Display| error(format!("{}: {reason}", path.display()));
+    let document = match format {
+        Some(format) => crate::bootstrap::format::from_str::<serde_json::Value>(format, text)
+            .map_err(|reason| in_file(&reason))?,
+        None => {
+            let parsed =
+                crate::bootstrap::format::parse(path, text).map_err(|reason| in_file(&reason))?;
+            serde_json::to_value(guatiao_serde::Serializable::from(&parsed))
+                .map_err(|reason| in_file(&reason))?
+        }
+    };
+    document_records(whole_file_family(path, document)).map_err(|reason| in_file(&reason))
+}
+
+/// A document named for a whole-file family's file (`access.toml`, `tls.yaml`) that holds no
+/// table of that family's name is the record itself, as a family file is laid out.
+fn whole_file_family(path: &Path, document: serde_json::Value) -> serde_json::Value {
+    let stem = path.file_stem().and_then(|stem| stem.to_str());
+    let record = ConfigRecord::ALL
+        .into_iter()
+        .find(|record| record.is_whole_file() && Some(record.file()) == stem);
+    match (record, document) {
+        (Some(record), serde_json::Value::Object(whole)) if !whole.contains_key(record.name()) => {
+            serde_json::json!({ record.name(): whole })
+        }
+        (_, document) => document,
+    }
+}
+
+/// The records a configuration document holds, in the order they are stored. Each top-level
+/// table names a family: a table family's entries are its records, a singleton's or
+/// whole-file family's table is its one record, and `[[library]]` entries are `plugin` records
+/// keyed by their `file`.
+///
+/// # Errors
+///
+/// [`RosterErrorKind::Invalid`] naming the table for anything else, and for a record given
+/// twice.
+pub fn document_records(
+    mut document: serde_json::Value,
+) -> Result<Vec<(ConfigRecord, String, serde_json::Value)>, RosterError> {
+    document.sort_all_objects();
+    let serde_json::Value::Object(document) = document else {
+        return Err(error("the document is not a table".to_owned()));
+    };
+    let mut found: BTreeMap<(usize, String), (ConfigRecord, serde_json::Value)> = BTreeMap::new();
+    let mut add = |record: ConfigRecord, key: String, value: serde_json::Value| {
+        let order = IMPORT_ORDER
+            .iter()
+            .position(|other| *other == record)
+            .unwrap_or(IMPORT_ORDER.len());
+        if found
+            .insert((order, key.clone()), (record, value))
+            .is_some()
+        {
+            return Err(error(format!("{record} {key:?} is given twice")));
+        }
+        Ok(())
+    };
+    for (name, value) in document {
+        if name == "library" {
+            let serde_json::Value::Array(libraries) = value else {
+                return Err(error("`library` is not an array of tables".to_owned()));
+            };
+            for library in libraries {
+                let serde_json::Value::Object(mut library) = library else {
+                    return Err(error("a [[library]] entry is not a table".to_owned()));
+                };
+                let Some(serde_json::Value::String(file)) = library.remove("file") else {
+                    return Err(error("a [[library]] entry names no file".to_owned()));
+                };
+                add(
+                    ConfigRecord::Plugin,
+                    file,
+                    serde_json::Value::Object(library),
+                )?;
+            }
+            continue;
+        }
+        let record = ConfigRecord::from_name(&name)
+            .filter(|record| *record != ConfigRecord::Plugin)
+            .ok_or_else(|| error(format!("unknown table `{name}`")))?;
+        let serde_json::Value::Object(entries) = value else {
+            return Err(error(format!("`{name}` is not a table")));
+        };
+        if record.is_singleton() {
+            add(
+                record,
+                ConfigRecord::SINGLETON_KEY.to_owned(),
+                serde_json::Value::Object(entries),
+            )?;
+            continue;
+        }
+        for (key, definition) in entries {
+            if !definition.is_object() {
+                return Err(error(format!("`{name}.{key}` is not a table")));
+            }
+            add(record, key, definition)?;
+        }
+    }
+    Ok(found
+        .into_iter()
+        .map(|((_, key), (record, value))| (record, key, value))
+        .collect())
 }
 
 /// Writes `bytes` to `path`, readable by its owner only on Unix: an exported family may hold
 /// a credential.
+#[cfg(test)]
 fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write as _;
     let mut options = std::fs::OpenOptions::new();
@@ -1495,7 +1647,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// # Errors
 ///
 /// As [`ConfigProvider::definitions`]; `Unavailable` when a file cannot be written.
-pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError> {
+#[cfg(test)]
+pub(crate) fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError> {
     let mut written = 0;
     for scope in provider.scopes()? {
         let target = match &scope {
@@ -2020,6 +2173,147 @@ mod tests {
                 &"t"
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn a_kind_is_a_family_s_name_or_its_plural() {
+        for (kind, record) in [
+            ("watch", ConfigRecord::Watch),
+            ("watches", ConfigRecord::Watch),
+            ("agents", ConfigRecord::Agent),
+            ("sandboxes", ConfigRecord::Sandbox),
+            ("secret_providers", ConfigRecord::SecretProvider),
+            ("secret", ConfigRecord::Secret),
+            ("cables", ConfigRecord::Cables),
+            ("access", ConfigRecord::Access),
+        ] {
+            assert_eq!(family_of_kind(kind), Some(record), "{kind}");
+        }
+        for kind in ["", "watchs", "secret_", "nothing", "agentss"] {
+            assert_eq!(family_of_kind(kind), None, "{kind}");
+        }
+    }
+
+    #[test]
+    fn a_document_reads_into_records_in_the_order_they_are_stored_and_back() {
+        let document = serde_json::json!({
+            "watch": {"operation:G": {"agent": "007"}},
+            "agent": {"007": {"handler": "mock-agent"}},
+            "assistant": {"allow_elevated": false},
+            "tls": {"min_version": "1.3"},
+            "library": [{"file": "a.dll", "sha256": "00"}],
+        });
+        let records = document_records(document.clone()).unwrap();
+        let names: Vec<_> = records
+            .iter()
+            .map(|(record, key, _)| format!("{record}/{key}"))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "assistant/settings",
+                "agent/007",
+                "plugin/a.dll",
+                "tls/settings",
+                "watch/operation:G"
+            ]
+        );
+        assert_eq!(records[2].2, serde_json::json!({"sha256": "00"}));
+        let mut again = serde_json::Map::new();
+        for record in ConfigRecord::ALL {
+            let held = records
+                .iter()
+                .filter(|(found, _, _)| *found == record)
+                .map(|(_, key, definition)| (key.clone(), definition.clone()));
+            again.extend(document_tables(record, held));
+        }
+        assert_eq!(serde_json::Value::Object(again), document);
+    }
+
+    #[test]
+    fn a_document_that_is_not_records_names_what_is_wrong() {
+        for (document, reason) in [
+            (
+                serde_json::json!({"nothing": {"x": {}}}),
+                "unknown table `nothing`",
+            ),
+            (serde_json::json!({"agent": []}), "`agent` is not a table"),
+            (
+                serde_json::json!({"agent": {"007": 3}}),
+                "`agent.007` is not a table",
+            ),
+            (serde_json::json!({"library": [{}]}), "names no file"),
+            (serde_json::json!([]), "not a table"),
+            (
+                serde_json::json!({"library": [{"file": "a"}, {"file": "a"}]}),
+                "plugin \"a\" is given twice",
+            ),
+        ] {
+            let error = document_records(document).unwrap_err().to_string();
+            assert!(error.contains(reason), "{reason}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_parsed_document_takes_its_format_and_a_family_file_is_the_record() {
+        let toml = "[watch.\"operation:G\"]\nagent = \"007\"\n";
+        let yaml = "#!yaml\nwatch:\n  \"operation:G\":\n    agent: '007'\n";
+        let json = r#"{"watch": {"operation:G": {"agent": "007"}}}"#;
+        let expected = vec![(
+            ConfigRecord::Watch,
+            "operation:G".to_owned(),
+            serde_json::json!({"agent": "007"}),
+        )];
+        assert_eq!(
+            parse_document(Path::new("a.cfg"), None, toml).unwrap(),
+            expected
+        );
+        assert_eq!(
+            parse_document(Path::new("a.cfg"), None, yaml).unwrap(),
+            expected
+        );
+        assert_eq!(
+            parse_document(Path::new("a.json"), None, json).unwrap(),
+            expected
+        );
+        // Whatever the name says, `format` decides.
+        assert_eq!(
+            parse_document(
+                Path::new("a.cfg"),
+                Some(crate::bootstrap::format::Format::Json),
+                json
+            )
+            .unwrap(),
+            expected
+        );
+        assert!(parse_document(Path::new("a.ini"), None, toml).is_err());
+        let refused = parse_document(
+            Path::new("a.cfg"),
+            None,
+            "[watch.x]\nagent = 1\nagent = 2\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            refused.contains("a.cfg") && refused.contains("agent"),
+            "{refused}"
+        );
+
+        // `access.toml` is the access record; the same text in `a.toml` is not a document.
+        let access = "chief = [\"account:root\"]\n";
+        let record = parse_document(Path::new("dir/access.toml"), None, access).unwrap();
+        assert_eq!(record.len(), 1);
+        assert_eq!(
+            (record[0].0, record[0].1.as_str()),
+            (ConfigRecord::Access, ConfigRecord::SINGLETON_KEY)
+        );
+        assert!(parse_document(Path::new("dir/a.toml"), None, access).is_err());
+        assert_eq!(
+            parse_document(Path::new("access.toml"), None, "[access]\nchief = []\n")
+                .unwrap()
+                .len(),
+            1
         );
     }
 }

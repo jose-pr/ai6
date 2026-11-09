@@ -79,10 +79,7 @@ ai6 sleeper [--config PATH] revoke OPERATION NAME
 ai6 quarantine [--config PATH] list|add|release ...
 ai6 config path [--config PATH]
 ai6 config public [--output PATH] [--config PATH]
-ai6 config show FAMILY [KEY] [--scope station:ID] [--config PATH]
-ai6 config import DIR [--scope station:ID] [--config PATH]
-ai6 config rm FAMILY KEY [--scope station:ID] [--force] [--config PATH]
-ai6 config export DIR [--config PATH]
+ai6 config schema [SECTION]
 ```
 
 Settings needed before the configuration provider is reached come from the bootstrap file

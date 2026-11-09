@@ -115,47 +115,6 @@ enum ConfigCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
-    /// Print one family's records at a scope as TOML, or the record KEY alone.
-    Show {
-        /// The family: operation, agent, role, assistant, cover, theater, loadout, sandbox,
-        /// mcp, secret, pool, cables, plugin, station, tls, access or unex.
-        family: String,
-        /// One record's key.
-        key: Option<String>,
-        /// `station:<id>` for one Station's own records (default: the global ones).
-        #[arg(long, default_value = "")]
-        scope: String,
-        #[command(flatten)]
-        bootstrap: BootstrapArg,
-    },
-    /// Load a configuration directory's family files into the configuration provider, which
-    /// must take changes (SQL); checked whole and refused whole.
-    Import {
-        /// The directory, laid out as a configuration directory.
-        dir: PathBuf,
-        /// Load its records at `station:<id>` (default: global).
-        #[arg(long, default_value = "")]
-        scope: String,
-        #[command(flatten)]
-        bootstrap: BootstrapArg,
-    },
-    /// Remove one record. Refused, listing them, while another record still names it; with
-    /// --force it goes anyway, and the output and the audit record say what still names it.
-    /// A file provider's comments are kept in the common shape of a TOML file.
-    Rm {
-        /// The family, as for show.
-        family: String,
-        /// The record's key.
-        key: String,
-        /// `station:<id>` for one Station's own record (default: the global one).
-        #[arg(long, default_value = "")]
-        scope: String,
-        /// Remove it though another record names it. The provider's own checks still apply.
-        #[arg(long)]
-        force: bool,
-        #[command(flatten)]
-        bootstrap: BootstrapArg,
-    },
     /// Write the public ai6.cfg a web page reads beside index.html, from this host's file: the
     /// gateway's address ([unex] public_origin, else url) and what the page needs of [oo], and
     /// nothing else.
@@ -163,13 +122,6 @@ enum ConfigCommand {
         /// Where to write it (default: standard output); this host's own file is refused.
         #[arg(long, value_name = "PATH")]
         output: Option<PathBuf>,
-        #[command(flatten)]
-        bootstrap: BootstrapArg,
-    },
-    /// Write every family's global records, and each Station's own, as TOML family files.
-    Export {
-        /// The directory to write; files in it are replaced.
-        dir: PathBuf,
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
@@ -482,13 +434,7 @@ enum PeerCommand {
 async fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Config {
-            command:
-                command @ (ConfigCommand::Schema { .. }
-                | ConfigCommand::Show { .. }
-                | ConfigCommand::Import { .. }
-                | ConfigCommand::Rm { .. }
-                | ConfigCommand::Public { .. }
-                | ConfigCommand::Export { .. }),
+            command: command @ (ConfigCommand::Schema { .. } | ConfigCommand::Public { .. }),
         } => match config_command(command) {
             Ok(output) => {
                 print!("{output}");
@@ -748,126 +694,8 @@ fn open_station(located: &Located<Bootstrap>) -> Result<Opened, String> {
     })
 }
 
-/// Runs `ai6 config rm`. Everything is read first, so a record that cannot be judged stays, and
-/// the audit record is written before the removal, so no removal goes unrecorded; a refusal
-/// after that is recorded too.
-fn remove_config_record(
-    (family, key, scope): (&str, &str, &ai6::ConfigScope),
-    force: bool,
-    bootstrap: &BootstrapArg,
-) -> Result<String, String> {
-    let record = ai6::ConfigRecord::from_name(family)
-        .ok_or_else(|| format!("{family:?} is not a configuration family"))?;
-    let located = load_bootstrap(bootstrap)?;
-    let location = located
-        .provider_location()
-        .map_err(|error| error.to_string())?;
-    let provider = open_provider(&location, &located.value)?;
-    let names = ai6::directorates::m::config::references_to(provider.as_ref(), record, scope, key)
-        .map_err(|error| error.to_string())?;
-    let registry = open_registry(&located)?;
-    let audit = |action: &str, target: String| {
-        registry
-            .record_audit(&cli_audit(action, target))
-            .map_err(|error| format!("the audit record could not be written: {error}"))
-    };
-    let what = format!("{family} {key} at {scope}");
-    let listed = names
-        .iter()
-        .map(|name| format!("  {name}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let joined = names
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
-    if !names.is_empty() && !force {
-        audit("roster.refused", format!("{what}: still named by {joined}"))?;
-        return Err(format!(
-            "{what} is still named by:\n{listed}\nchange those first, or pass --force"
-        ));
-    }
-    let target = if names.is_empty() {
-        what.clone()
-    } else {
-        format!("{what}, forced: still named by {joined}")
-    };
-    audit("roster.remove", target)?;
-    match provider.remove_on_host(record, scope, key) {
-        Ok(Some(_)) if names.is_empty() => Ok(format!("Removed {what}\n")),
-        Ok(Some(_)) => {
-            eprintln!("ai6: weakening: {what} removed by --force though still named");
-            Ok(format!(
-                "Removed {what}, by --force, though these still name it:\n{listed}\n"
-            ))
-        }
-        Ok(None) => {
-            audit("roster.refused", format!("{what}: gone already"))?;
-            Err(format!("no {what}"))
-        }
-        Err(error) => {
-            let reason = error.to_string();
-            audit("roster.refused", format!("{what}: {reason}"))?;
-            Err(reason)
-        }
-    }
-}
-
-/// An audit record of a roster edit made on this host, by the user running the command.
-fn cli_audit(action: &str, target: String) -> ai6::AuditRecord {
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_default();
-    let at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
-    ai6::AuditRecord {
-        id: uuid::Uuid::new_v4().to_string(),
-        actor: format!("cli:{user}"),
-        action: action.to_owned(),
-        operation: String::new(),
-        resource: Some("config:roster".to_owned()),
-        target: bounded_line(
-            &target,
-            ai6::station::limits::AuditLimits::default()
-                .target_bytes
-                .or_max(),
-        ),
-        at,
-    }
-}
-
-/// `text` on one line, cut at a character boundary to fit `bytes`.
-fn bounded_line(text: &str, bytes: usize) -> String {
-    let mut line: String = text
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    if line.len() > bytes {
-        let mut end = bytes - '…'.len_utf8();
-        while !line.is_char_boundary(end) {
-            end -= 1;
-        }
-        line.truncate(end);
-        line.push('…');
-    }
-    line
-}
-
-/// Runs `ai6 config show|import|rm|export`.
+/// Runs `ai6 config schema|path|public`.
 fn config_command(command: ConfigCommand) -> Result<String, String> {
-    use ai6::{ConfigProvider as _, ConfigRecord, ConfigScope};
-    let scope_of = |text: &str| {
-        ConfigScope::parse(text).ok_or_else(|| format!("--scope {text:?}: \"\" or station:<id>"))
-    };
-    let open = |bootstrap: &BootstrapArg| -> Result<Arc<dyn ai6::ConfigProvider>, String> {
-        let located = load_bootstrap(bootstrap)?;
-        let location = located
-            .provider_location()
-            .map_err(|error| error.to_string())?;
-        open_provider(&location, &located.value)
-    };
     match command {
         ConfigCommand::Schema { section } => match section {
             None => Ok(ai6::settings::sections()
@@ -885,76 +713,6 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
         },
         ConfigCommand::Path { .. } => Ok(String::new()),
         ConfigCommand::Public { output, bootstrap } => public_config(output.as_deref(), &bootstrap),
-        ConfigCommand::Rm {
-            family,
-            key,
-            scope,
-            force,
-            bootstrap,
-        } => remove_config_record((&family, &key, &scope_of(&scope)?), force, &bootstrap),
-        ConfigCommand::Show {
-            family,
-            key,
-            scope,
-            bootstrap,
-        } => {
-            let record = ConfigRecord::from_name(&family)
-                .ok_or_else(|| format!("{family:?} is not a configuration family"))?;
-            let records = open(&bootstrap)?
-                .definitions(record, &scope_of(&scope)?)
-                .map_err(|error| error.to_string())?
-                .records;
-            let records: Vec<_> = match &key {
-                Some(key) => records
-                    .into_iter()
-                    .filter(|(found, _)| found == key)
-                    .collect(),
-                None => records,
-            };
-            if key.is_some() && records.is_empty() {
-                return Err(format!("no {family} record {:?}", key.unwrap_or_default()));
-            }
-            ai6::directorates::m::config::family_document(record, records)
-                .map_err(|error| error.to_string())
-        }
-        ConfigCommand::Import {
-            dir,
-            scope,
-            bootstrap,
-        } => {
-            let scope = scope_of(&scope)?;
-            let station = match &scope {
-                ConfigScope::Station(id) => id.clone(),
-                _ => String::new(),
-            };
-            let source = ai6::FileProvider::new(&dir);
-            // The directory must be acceptable on its own before anything is written.
-            source.load("").map_err(|error| error.to_string())?;
-            let target = open(&bootstrap)?;
-            let mut records = Vec::new();
-            for record in ai6::directorates::m::config::IMPORT_ORDER {
-                let read = ai6::FileProvider::new(&dir)
-                    .definitions(record, &ConfigScope::Global)
-                    .map_err(|error| error.to_string())?;
-                records.extend(
-                    read.records
-                        .into_iter()
-                        .map(|(key, value)| (record, key, value)),
-                );
-            }
-            target
-                .put_all(&scope, &records)
-                .map_err(|error| error.to_string())?;
-            target.load(&station).map_err(|error| error.to_string())?;
-            Ok(format!("Imported {} records at {scope}\n", records.len()))
-        }
-        ConfigCommand::Export { dir, bootstrap } => {
-            let provider = open(&bootstrap)?;
-            std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
-            let written = ai6::directorates::m::config::export(provider.as_ref(), &dir)
-                .map_err(|error| error.to_string())?;
-            Ok(format!("Wrote {written} files to {}\n", dir.display()))
-        }
     }
 }
 

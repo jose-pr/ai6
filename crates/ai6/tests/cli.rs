@@ -1438,39 +1438,19 @@ fn the_green_ink_hook_denies_a_governed_step_and_stays_silent_otherwise() {
 }
 
 #[test]
-fn config_import_into_sqlite_then_export_round_trips_the_examples() {
-    use ai6::ConfigProvider as _;
-
-    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/config");
-    let dir = tempfile::tempdir().unwrap();
-    let file = bootstrap(dir.path(), "[provider]\nlocation = \"sqlite:ai6.db\"\n");
-    let run = |args: &[&std::ffi::OsStr]| {
-        let output = ai6()
-            .arg("config")
-            .args(args)
-            .arg("--config")
-            .arg(&file)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{args:?}: {output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    };
-    let imported = run(&["import".as_ref(), examples.as_os_str()]);
-    assert!(imported.starts_with("Imported "), "{imported}");
-    let shown = run(&["show".as_ref(), "agent".as_ref(), "007".as_ref()]);
-    assert!(shown.contains("[agent.007]"), "{shown}");
-    let out = dir.path().join("exported");
-    run(&["export".as_ref(), out.as_os_str()]);
-    let shape = |dir: &std::path::Path| {
-        let snapshot = ai6::FileProvider::new(dir).load("").unwrap();
-        format!("{:?}\n{:?}", snapshot.roster, snapshot.settings)
-    };
-    assert_eq!(shape(&out), shape(&examples));
-
-    let refused = ai6()
-        .args(["config", "show", "agents", "--config"])
-        .arg(&file)
-        .output()
-        .unwrap();
-    assert!(!refused.status.success());
+fn config_keeps_only_what_concerns_the_bootstrap_file() {
+    for removed in ["import", "show", "rm", "export"] {
+        let output = ai6().args(["config", removed]).output().unwrap();
+        assert!(!output.status.success(), "{removed}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("unrecognized subcommand"),
+            "{removed}: {error}"
+        );
+    }
+    let help = ai6().args(["config", "--help"]).output().unwrap();
+    let help = String::from_utf8_lossy(&help.stdout);
+    for kept in ["schema", "path", "public"] {
+        assert!(help.contains(kept), "{kept}: {help}");
+    }
 }
