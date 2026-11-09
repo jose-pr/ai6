@@ -108,7 +108,7 @@ Run `python3 tools/sdk/check_lock.py` afterwards (`--online` also compares each 
 with what upstream publishes; `--deps-ref` says where to read the build containers' defaults). It
 fails on any archive, compressed data, pack file, executable, key file, wasm, object file or other
 binary in the `deps` commit, found by leading bytes the way the repository scanner finds them
-(Flutter's CanvasKit wasm is allowed for now, `crates.ALLOWED_WASM`), and on any path below a
+(but Flutter's CanvasKit wasm, `crates.ALLOWED_WASM`, which offline web builds need), and on any path below a
 `.git`. It
 also fails on a package `clients/outer-office/pubspec.lock` names that the `deps` commit's `pub/`
 lacks, so a new dependency cannot land ahead of a refreshed branch.

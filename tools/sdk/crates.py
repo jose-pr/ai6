@@ -100,8 +100,8 @@ PRIVATE_KEY = re.compile(
 )
 
 
-# Wasm below these paths is allowed for now. CanvasKit is what the web app downloads from a CDN, and
-# whether the branch keeps it is undecided.
+# The only wasm the branch keeps: Flutter's CanvasKit, which the web app would otherwise download
+# from a CDN, so an offline web build has it.
 ALLOWED_WASM = ("cdn/www.gstatic.com/flutter-canvaskit/",)
 
 
