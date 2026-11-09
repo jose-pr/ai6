@@ -2084,6 +2084,8 @@ mod tests {
         );
         assert!(schedule_intake_once(&state));
         assert!(state.intake.lease(&key).unwrap().is_none(), "never placed");
+        // The hold and its Report are written apart: wait for the Report too.
+        until(|| !filed_of_kind(&state, "review-hold").is_empty()).await;
         let found = filed_of_kind(&state, "review-hold");
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(
