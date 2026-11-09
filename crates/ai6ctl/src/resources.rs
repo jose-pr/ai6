@@ -104,6 +104,7 @@ pub(crate) struct Apply {
     #[arg(long, value_enum)]
     format: Option<Input>,
     /// Check the documents against the stored records and say what would change; store nothing.
+    /// There is no `--if-revision`: the records are stored together, not against one revision.
     #[arg(long)]
     dry_run: bool,
     /// Store though the records loosen what is in force, without asking.
@@ -126,6 +127,9 @@ pub(crate) struct Edit {
     /// Refuse the save unless the record is at this revision (default: the one read).
     #[arg(long, value_name = "REVISION")]
     if_revision: Option<String>,
+    /// Store though the record loosens what is in force, without asking.
+    #[arg(short = 'y', long)]
+    yes: bool,
     #[command(flatten)]
     scope: Scope,
 }
@@ -144,6 +148,9 @@ pub(crate) struct Set {
     /// Refuse the change unless the record is at this revision (default: the one read).
     #[arg(long, value_name = "REVISION")]
     if_revision: Option<String>,
+    /// Store though the record loosens what is in force, without asking.
+    #[arg(short = 'y', long)]
+    yes: bool,
     #[command(flatten)]
     scope: Scope,
 }
@@ -160,6 +167,9 @@ pub(crate) struct Unset {
     /// Refuse the change unless the record is at this revision (default: the one read).
     #[arg(long, value_name = "REVISION")]
     if_revision: Option<String>,
+    /// Store though the record loosens what is in force, without asking.
+    #[arg(short = 'y', long)]
+    yes: bool,
     #[command(flatten)]
     scope: Scope,
 }
@@ -304,17 +314,38 @@ impl<'a> Gateway<'a> {
         station: Option<&str>,
         revision: &str,
         definition: Value,
+        yes: bool,
     ) -> Result<(), String> {
-        let query: Vec<(&str, &str)> = station.map(|id| ("station", id)).into_iter().collect();
-        let changed = self
+        let mut query: Vec<(&str, &str)> = station.map(|id| ("station", id)).into_iter().collect();
+        if yes {
+            query.push(("confirm", "true"));
+        }
+        let mut changed = self
             .send(
                 Method::PUT,
                 &["roster", kind, key],
                 &query,
                 Some(revision),
-                Some(definition),
+                Some(definition.clone()),
             )
             .await?;
+        // A record that loosens what is in force waits for a person to say so.
+        if changed["applied"] == false {
+            let weakened = changed["weakened"].as_array().cloned().unwrap_or_default();
+            if !confirmed(&weakened)? {
+                return Err("nothing stored".to_owned());
+            }
+            query.push(("confirm", "true"));
+            changed = self
+                .send(
+                    Method::PUT,
+                    &["roster", kind, key],
+                    &query,
+                    Some(revision),
+                    Some(definition),
+                )
+                .await?;
+        }
         println!("{}/{} configured", plain(kind), plain(key));
         print_change(&changed);
         Ok(())
@@ -643,6 +674,7 @@ pub(crate) async fn edit(gateway: &Gateway<'_>, command: Edit) -> Result<(), Str
             station,
             command.if_revision.as_deref().unwrap_or(&revision),
             definition,
+            command.yes,
         )
         .await
 }
@@ -941,6 +973,7 @@ pub(crate) async fn set(gateway: &Gateway<'_>, command: Set) -> Result<(), Strin
             station,
             command.if_revision.as_deref().unwrap_or(&held.revision),
             held.definition,
+            command.yes,
         )
         .await
 }
@@ -969,6 +1002,7 @@ pub(crate) async fn unset(gateway: &Gateway<'_>, command: Unset) -> Result<(), S
             station,
             command.if_revision.as_deref().unwrap_or(&held.revision),
             held.definition,
+            command.yes,
         )
         .await
 }

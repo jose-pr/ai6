@@ -841,3 +841,55 @@ async fn the_example_configuration_s_documents_load_as_they_are_written() {
         "{shown}"
     );
 }
+
+#[tokio::test]
+async fn a_trust_root_record_that_loosens_waits_for_the_person_to_confirm() {
+    let deployment = first_install().await;
+    let stored = |record: ConfigRecord| {
+        deployment
+            .station
+            .definitions(record, &ConfigScope::Global)
+            .unwrap()
+            .records
+    };
+    let loose = "[cables]\ncross_operation = \"station_grants\"\n";
+
+    let denied = ai6ctl(&deployment, &deployment.guest, &["apply", "-y", "-f", "-"], Some(loose), &[]).await;
+    assert!(
+        !denied.ok && denied.err.contains("the cables family needs config.manage on config:cables"),
+        "{}",
+        denied.err
+    );
+
+    // Held back: the weakening is printed and nothing is stored, and no one is asked on a pipe.
+    let held = ai6ctl(&deployment, &deployment.boss, &["apply", "-f", "-"], Some(loose), &[]).await;
+    assert!(!held.ok && held.err.contains("--yes"), "{}", held.err);
+    assert!(held.out.contains("weakening\t") && held.out.contains("station_grants"), "{}", held.out);
+    assert!(stored(ConfigRecord::Cables).is_empty());
+    assert!(audits(&deployment, "roster.update").is_empty());
+
+    let confirmed = ai6ctl(&deployment, &deployment.boss, &["apply", "-y", "-f", "-"], Some(loose), &[]).await;
+    assert!(confirmed.ok, "{}", confirmed.err);
+    assert!(confirmed.out.contains("cables/settings created"), "{}", confirmed.out);
+    assert!(confirmed.out.contains("weakening\t"), "the weakening is still reported: {}", confirmed.out);
+    assert_eq!(stored(ConfigRecord::Cables).len(), 1);
+    assert_eq!(audits(&deployment, "roster.update").len(), 1);
+
+    // A no-op and a tightening apply at once.
+    let same = ai6ctl(&deployment, &deployment.boss, &["apply", "-f", "-"], Some(loose), &[]).await;
+    assert!(same.ok && same.out.contains("cables/settings unchanged"), "{}{}", same.out, same.err);
+    let tight = ai6ctl(&deployment, &deployment.boss, &["apply", "-f", "-"], Some("[cables]\n"), &[]).await;
+    assert!(tight.ok && tight.out.contains("cables/settings changed"), "{}{}", tight.out, tight.err);
+    assert!(!tight.out.contains("weakening"));
+
+    // `set` is held the same way: a SHA-1 pin loosens, a SHA-256 pin does not.
+    let sha1 = format!("pin=sha1:{}", "0".repeat(40));
+    let held = ai6ctl(&deployment, &deployment.boss, &["set", "plugin", "a.so", &sha1], None, &[]).await;
+    assert!(!held.ok && held.err.contains("--yes"), "{}", held.err);
+    assert!(stored(ConfigRecord::Plugin).is_empty());
+    let pinned = format!("pin=sha256:{}", "0".repeat(64));
+    boss(&deployment, &["set", "plugin", "b.so", &pinned]).await;
+    assert_eq!(stored(ConfigRecord::Plugin).len(), 1);
+    boss(&deployment, &["set", "plugin", "a.so", &sha1, "-y"]).await;
+    assert_eq!(stored(ConfigRecord::Plugin).len(), 2);
+}

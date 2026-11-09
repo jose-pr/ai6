@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `--if-revision`. The gateway gains `POST /v1/user/resources/apply` and `GET /v1/user/resources`;
   `/v1/user/roster/{kind}` takes a family's name as well as its plural, refuses a delete another
   record names (`?force=true` goes anyway) and refuses a person naming the family. The `theater`,
-  `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` families are served
-  under `config.read` and `config.manage` on `config:<family>`.
+  `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` families, and the trust-root `plugin`, `tls`, `cables` and `unex`, are served
+  under `config.read` and `config.manage` on `config:<family>`; a trust-root record that loosens what is in
+  force is held back with its weakenings until sent again with `confirm` (`ai6ctl -y`).
 - `ai6 config import`, `show`, `rm` and `export` are gone, with `config::export` and
   `config::family_document`; `ai6 config` keeps `schema`, `path` and `public`. A first install starts
   on an empty database, the bootstrap's `chief` holds every action and loads the rest with `ai6ctl

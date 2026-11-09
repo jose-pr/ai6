@@ -1508,6 +1508,72 @@ pub fn document_tables(
     family_value(record, records)
 }
 
+/// The families that decide whom a Station or the gateway trusts: a record that loosens one of
+/// them is confirmed by a person before it is stored.
+pub const TRUST_ROOT: [ConfigRecord; 4] = [
+    ConfigRecord::Plugin,
+    ConfigRecord::Tls,
+    ConfigRecord::Cables,
+    ConfigRecord::Unex,
+];
+
+/// What `records` of a [`TRUST_ROOT`] family give up against the built-in defaults, one line
+/// each, worded for a person. Empty for any other family, and for records the family does not
+/// accept (the provider refuses those when they are stored).
+pub fn record_weakenings(
+    record: ConfigRecord,
+    records: &[(String, serde_json::Value)],
+) -> Vec<String> {
+    let first = records.first().map(|(_, definition)| definition.clone());
+    match record {
+        ConfigRecord::Cables => first
+            .and_then(|definition| json_to_toml(definition).ok())
+            .and_then(|value| toml::to_string(&value).ok())
+            .and_then(|text| CableConfig::parse_toml(&text).ok())
+            .map(|cables| cables.weakenings())
+            .unwrap_or_default(),
+        ConfigRecord::Plugin => {
+            let library: Vec<serde_json::Value> = records
+                .iter()
+                .map(|(key, definition)| {
+                    let mut definition = definition.clone();
+                    if let Some(entry) = definition.as_object_mut() {
+                        entry.insert("file".to_owned(), serde_json::Value::String(key.clone()));
+                    }
+                    definition
+                })
+                .collect();
+            json_to_toml(serde_json::json!({ "library": library }))
+                .ok()
+                .and_then(|value| toml::to_string(&value).ok())
+                .and_then(|text| PinSet::from_toml(&text).ok())
+                .map(|pins| pins.weakenings())
+                .unwrap_or_default()
+        }
+        ConfigRecord::Unex => first
+            .and_then(|definition| records::from_json::<UnexRecord>(&definition).ok())
+            .map(|unex| unex.weakenings())
+            .unwrap_or_default(),
+        #[cfg(feature = "station-tls")]
+        ConfigRecord::Tls => first
+            .and_then(|definition| coqui_peer_tls::Policy::deserialize(&definition).ok())
+            .map(|policy| {
+                policy
+                    .non_defaults_against(&coqui_peer_tls::Policy::default())
+                    .into_iter()
+                    .map(|weakening| {
+                        format!(
+                            "tls.{} = {} (default {})",
+                            weakening.setting, weakening.value, weakening.default
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 /// The records of the configuration document `text` of a file named `path`
 /// ([`document_records`]): its extension and first line choose the format, unless `format`
 /// names one. A document named for a whole-file family's file (`access.toml`) with no table of
@@ -2190,7 +2256,7 @@ mod tests {
         ] {
             assert_eq!(family_of_kind(kind), Some(record), "{kind}");
         }
-        for kind in ["", "watchs", "secret_", "nothing", "agentss"] {
+        for kind in ["", "watchess", "secret_", "nothing", "agentss"] {
             assert_eq!(family_of_kind(kind), None, "{kind}");
         }
     }
@@ -2296,7 +2362,7 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(
-            refused.contains("a.cfg") && refused.contains("agent"),
+            refused.contains("a.cfg") && refused.contains("duplicate key"),
             "{refused}"
         );
 

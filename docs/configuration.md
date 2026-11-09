@@ -838,8 +838,12 @@ Every family is a record of the configuration provider (the shared database in a
 the "File" column is the name its records take in a family file, and so what a document named for it holds. "Edited in"
 says where a person changes it: `ai6ctl` (above) and the gateway's `/v1/user/roster/{kind}`
 routes (with `/schema` for the form), with Outer Office's Roster page for the ones it shows. The
-`cables`, `plugin`, `tls` and `unex` families are not served by the gateway yet, so nothing
-changes them but a file provider's files, and `ai6 plugins pin --import` for `plugin` pins.
+`plugin`, `tls`, `cables` and `unex` families decide whom a Station or the gateway trusts: each has
+its own action (`config.manage` on `config:plugin`, `config:tls`, ...), and a record that gives up
+more than the stored ones do (a SHA-1 pin, a publisher that alone admits a library, a looser
+TLS profile, `cross_operation = "station_grants"`, an inline credential) is held back with its
+weakenings until it is sent again with `confirm`: `ai6ctl` asks, or takes `-y`. A tightening or a
+no-op is stored at once.
 
 | Family | File | Station's own | Singleton | Applies | Edited in | Holds |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -849,13 +853,13 @@ changes them but a file provider's files, and `ai6 plugins pin --import` for `pl
 | `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
 | `theater` | `theaters` | yes | no | restart | `ai6ctl`, route `theaters` | `[theater.<id>]` |
 | `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool` | `loadouts` | yes | no | live | `ai6ctl`, routes `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, each under `config.read` and `config.manage` on `config:<family>` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
-| `cables` | `cables` | yes | yes | restart | not yet served | the whole file: grants, inbound, channels, limits |
-| `plugin` | `plugins` | yes | no | restart | not yet served | `[[library]]` entries, keyed by their `file` |
+| `cables` | `cables` | yes | yes | restart | `ai6ctl`, own action and confirmation | the whole file: grants, inbound, channels, limits |
+| `plugin` | `plugins` | yes | no | restart | `ai6ctl`, own action and confirmation | `[[library]]` entries, keyed by their `file` |
 | `station` | `station` | yes | yes | restart | Outer Office Stations page | the whole file: the Station's runtime settings |
-| `tls` | `tls` | yes | yes | restart | not yet served | the whole file: the Station TLS policy |
+| `tls` | `tls` | yes | yes | restart | `ai6ctl`, own action and confirmation | the whole file: the Station TLS policy |
 | `access` | `access` | no | yes | live, in Universal Exports | Outer Office Access page | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
 | `operation_access` | `operation_access` | no | no | live, in Universal Exports | Outer Office Access page | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
-| `unex` | `unex` | no | yes | restart | not yet served | the whole file: Universal Exports' sign-in, limits and assistant |
+| `unex` | `unex` | no | yes | restart | `ai6ctl`, own action and confirmation | the whole file: Universal Exports' sign-in, limits and assistant |
 | `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 | `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
 | `watch` | `watches` | no | no | live | Roster page (Watches), route `/v1/user/roster/watches` | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |

@@ -108,7 +108,11 @@ struct Family {
 
 /// The route kinds gated by `config.read` and `config.manage` on `config:<family>`, and the
 /// family each names.
-pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 9] = [
+pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 13] = [
+    ("plugins", ConfigRecord::Plugin),
+    ("tls", ConfigRecord::Tls),
+    ("cables", ConfigRecord::Cables),
+    ("unex", ConfigRecord::Unex),
     ("watches", ConfigRecord::Watch),
     ("theaters", ConfigRecord::Theater),
     ("loadouts", ConfigRecord::Loadout),
@@ -190,6 +194,9 @@ pub(crate) struct Scoped {
     /// For a removal: go ahead though another record names this one.
     #[serde(default)]
     force: bool,
+    /// For a write: store a record of a trust-root family though it loosens what is in force.
+    #[serde(default)]
+    confirm: bool,
 }
 
 fn scope_of(record: ConfigRecord, scoped: &Scoped) -> Result<ai6::ConfigScope, ApiError> {
@@ -200,6 +207,32 @@ fn scope_of(record: ConfigRecord, scoped: &Scoped) -> Result<ai6::ConfigScope, A
         }
         Some(_) => Err(ApiError::bad_request()),
     }
+}
+
+/// What the changed records of a trust-root family give up that the family's stored records
+/// do not already give up.
+fn loosened(
+    source: &dyn ai6::ConfigProvider,
+    record: ConfigRecord,
+    scope: &ai6::ConfigScope,
+    changes: &[(String, serde_json::Value)],
+) -> Result<Vec<String>, RosterError> {
+    if !ai6::directorates::m::config::TRUST_ROOT.contains(&record) {
+        return Ok(Vec::new());
+    }
+    let current = source.definitions(record, scope)?.records;
+    let mut after = current.clone();
+    for (key, definition) in changes {
+        match after.iter_mut().find(|(found, _)| found == key) {
+            Some(held) => held.1 = definition.clone(),
+            None => after.push((key.clone(), definition.clone())),
+        }
+    }
+    let before = ai6::directorates::m::config::record_weakenings(record, &current);
+    Ok(ai6::directorates::m::config::record_weakenings(record, &after)
+        .into_iter()
+        .filter(|line| !before.contains(line))
+        .collect())
 }
 
 fn checked_key(key: &str, bytes: ai6::Limit) -> Result<(), ApiError> {
@@ -500,7 +533,19 @@ pub(crate) async fn put_record(
     let source = source(&gateway)?;
     let target = target_of(record, &scope, &key);
     let expected = expected_revision(&headers);
+    let confirm = scoped.confirm;
     let outcome = tokio::task::spawn_blocking(move || {
+        if !confirm {
+            let held = loosened(
+                source.as_ref(),
+                record,
+                &scope,
+                &[(key.clone(), definition.clone())],
+            )?;
+            if !held.is_empty() {
+                return Ok(Ok((None, held)));
+            }
+        }
         // What an `assistant` record changes is told against the settings in force just
         // before it, and only for an accepted edit, whose definition the source parsed the
         // same way.
@@ -523,12 +568,19 @@ pub(crate) async fn put_record(
             .zip(ai6::read_definition::<AssistantSettings>(&definition).ok())
             .map(|(current, settings)| settings.changes_from(&current))
             .unwrap_or_default();
-        Ok(Ok((revision, weakened)))
+        Ok(Ok((Some(revision), weakened)))
     })
     .await
     .map_err(|_| ApiError::internal())?;
     let (outcome, weakened) = match outcome {
-        Ok(Ok((revision, weakened))) => (Ok(Some(revision)), weakened),
+        Ok(Ok((None, weakened))) => {
+            return Ok(Json(Held {
+                applied: false,
+                weakened,
+            })
+            .into_response());
+        }
+        Ok(Ok((Some(revision), weakened))) => (Ok(Some(revision)), weakened),
         Ok(Err(changed)) => return Ok(changed_response(changed)),
         Err(error) => (Err(error), Vec::new()),
     };
@@ -654,6 +706,13 @@ enum Removal {
     Removed(ai6::ConfigRevision, Vec<String>),
 }
 
+/// An edit held back because it loosens what is in force; repeat it with `confirm=true`.
+#[derive(Serialize)]
+struct Held {
+    applied: bool,
+    weakened: Vec<String>,
+}
+
 /// A request to store records of any served families together.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -743,6 +802,7 @@ pub(crate) async fn apply(
     let scoped = Scoped {
         station: request.station,
         force: false,
+        confirm: false,
     };
     let mut seen = Vec::new();
     for (family, _, _) in &records {
@@ -791,6 +851,16 @@ pub(crate) async fn apply(
             {
                 let current = source.load("")?.roster.assistant().clone();
                 weakened.extend(settings.changes_from(&current));
+            }
+        }
+        for trusted in ai6::directorates::m::config::TRUST_ROOT {
+            let changes: Vec<(String, serde_json::Value)> = stored
+                .iter()
+                .filter(|(record, _, _)| *record == trusted)
+                .map(|(_, key, definition)| (key.clone(), definition.clone()))
+                .collect();
+            if !changes.is_empty() {
+                weakened.extend(loosened(source.as_ref(), trusted, &read_scope, &changes)?);
             }
         }
         if stored.is_empty() {
