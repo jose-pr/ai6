@@ -895,9 +895,14 @@ tables configure providers.
 | `providers` | none | **Provider configurations.** `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds it with none of its own (handlers, terminals and safe houses). |
 <!-- schema:record.station:end -->
 
-The `tls` record is a coqui-peer-tls policy document (`profile = "modern" | "intermediate" |
-"legacy"`, `cipher_profiles`, `tls_versions` and the rest), read over the library's default;
-whatever it gives up against that default is logged and sent at check-in as `tls_weakened`.
+The `tls` record is a coqui-peer-tls policy document, read over the library's default (the
+intermediate preset): a key it names replaces the default's, and an unknown key is refused. A preset is
+written out as its values, `tls_versions = ["1.3"]` for modern; the keys are `tls_versions`,
+`cipher_suites`, `kx_groups`, `cipher_profiles`, `crypto`, `pin_digests`, `check_validity`,
+`allow_chain_when_pinned`, `allow_resumption`, `require_ems`, `acl` and the table `[waiting]`
+(`per_source`, `total` and `rerecord`, a number of seconds).
+Every setting that differs from the default is logged and sent
+at check-in as `tls_weakened`.
 
 The `unex` record's own keys, and its tables `[gateway]`, `[controls]`, `[timeline]`, `[login]`
 and `[text]` ([Universal Exports limits](#universal-exports-limits)). A credential written inline

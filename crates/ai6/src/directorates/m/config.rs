@@ -504,8 +504,8 @@ impl Settings {
             .map_err(|reason: String| format!("access: {reason}"))
     }
 
-    /// The Station TLS policy: the `tls` record read over the library's default policy
-    /// (`profile` picks a preset).
+    /// The Station TLS policy: the `tls` record read over the library's default policy, each
+    /// key replacing the default's.
     ///
     /// # Errors
     ///
@@ -2171,7 +2171,7 @@ mod tests {
 
     #[cfg(feature = "station-tls")]
     #[test]
-    fn the_tls_record_is_read_over_the_library_default_and_names_its_weakenings() {
+    fn the_tls_record_is_read_over_the_library_default_and_names_its_non_defaults() {
         let settings = |document: Option<serde_json::Value>| Settings {
             tls: document,
             ..Settings::default()
@@ -2179,26 +2179,37 @@ mod tests {
         let default = coqui_peer_tls::Policy::default();
         assert_eq!(settings(None).tls_policy().unwrap(), default);
         let read = settings(Some(serde_json::json!({
-            "profile": "modern",
+            "tls_versions": ["1.3"],
             "cipher_profiles": ["fips-140-3-compliant"],
         })))
         .tls_policy()
         .unwrap();
         assert_eq!(read.cipher_profiles.len(), 1);
         assert_eq!(read.cipher_profiles[0].as_str(), "fips-140-3-compliant");
-        assert!(
-            read.non_defaults_against(&default).is_empty(),
-            "modern is stricter"
-        );
-        let legacy = settings(Some(serde_json::json!({"profile": "legacy"})))
-            .tls_policy()
-            .unwrap();
+        let named: Vec<_> = read
+            .non_defaults_against(&default)
+            .into_iter()
+            .map(|difference| difference.setting)
+            .collect();
+        assert!(named.iter().any(|setting| setting == "tls_versions"), "{named:?}");
+        let legacy = settings(Some(serde_json::json!({
+            "pin_digests": ["sha256", "sha384", "sha512", "sha1"],
+            "require_ems": false,
+            "waiting": {"per_source": 4, "rerecord": 30},
+        })))
+        .tls_policy()
+        .unwrap();
+        assert_eq!(legacy.waiting.per_source, 4);
         assert!(!legacy.non_defaults_against(&default).is_empty());
-        assert!(
-            settings(Some(serde_json::json!({"profile": "lax"})))
-                .tls_policy()
-                .is_err()
-        );
+        // The earlier policy keys are unknown now.
+        for key in ["profile", "policy_version", "waiting_per_source"] {
+            assert!(
+                settings(Some(serde_json::json!({ key: "modern" })))
+                    .tls_policy()
+                    .is_err(),
+                "{key}"
+            );
+        }
     }
 
     #[test]
