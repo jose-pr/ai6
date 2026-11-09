@@ -11,6 +11,7 @@ import '../shell/oo_markdown.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
+import 'chat_commands.dart';
 import 'assistant_view.dart';
 import 'entry_kind.dart';
 import 'images.dart';
@@ -45,6 +46,8 @@ class AssistantPanel extends StatefulWidget {
     this.saveText = exporting.saveText,
     this.imageInput,
     this.imageLoader,
+    this.commands,
+    this.onCommandMenu,
     super.key,
   });
 
@@ -103,6 +106,12 @@ class AssistantPanel extends StatefulWidget {
   /// their names.
   final ImageLoader? imageLoader;
 
+  /// Where the `/` menu reads its commands; without it the composer offers none.
+  final ChatCommands? commands;
+
+  /// Told whether the `/` menu is open, so Escape closes it before it leaves the chat.
+  final ValueChanged<bool>? onCommandMenu;
+
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
 }
@@ -117,16 +126,107 @@ class _AssistantPanelState extends State<AssistantPanel> {
   List<OutgoingImage> _images = const [];
   StreamSubscription<OutgoingImage>? _pasting;
 
+  /// The commands last read, and whether a read is under way.
+  List<ChatCommand>? _commands;
+  bool _loadingCommands = false;
+  int _highlight = 0;
+  String? _shownQuery;
+
+  /// Escape closed the menu for this word; typing another opens it again.
+  bool _menuClosed = false;
+  bool _menuReported = false;
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_showReveal);
     widget.controller.open();
     _pasting = widget.imageInput?.pasted.listen(_add);
+    _message.addListener(_edited);
+    // The field's own node hears a key before the text field's shortcuts do, so the arrow
+    // keys and Escape move the menu instead of the caret.
+    _composer = widget.composerFocus ?? (_ownComposer = FocusNode());
+    _composer.onKeyEvent = _composerKey;
+  }
+
+  late FocusNode _composer;
+  FocusNode? _ownComposer;
+
+  /// The word typed after a leading `/`, while the menu has something to show for it.
+  String? get _query {
+    final value = _message.value;
+    return commandQuery(
+      value.text,
+      value.selection.isValid ? value.selection.end : value.text.length,
+    );
+  }
+
+  List<ChatCommand> get _matches =>
+      matchingCommands(_commands ?? const [], _query ?? '');
+
+  bool get _menuOpen =>
+      widget.commands != null &&
+      _query != null &&
+      !_menuClosed &&
+      _matches.isNotEmpty;
+
+  void _edited() {
+    final query = _query;
+    if (query == null) {
+      _menuClosed = false;
+    } else if (query != _shownQuery) {
+      _menuClosed = false;
+      _highlight = 0;
+      if (_shownQuery == null) unawaited(_loadCommands());
+    }
+    // Pasted, or typed past the menu: still told whether the name is hers when it is sent.
+    if (_commands == null && _message.text.startsWith('/')) {
+      unawaited(_loadCommands());
+    }
+    _shownQuery = query;
+    if (!mounted) return;
+    setState(() {});
+    final open = _menuOpen;
+    if (open != _menuReported) {
+      _menuReported = open;
+      widget.onCommandMenu?.call(open);
+    }
+  }
+
+  Future<void> _loadCommands() async {
+    final source = widget.commands;
+    if (source == null || _loadingCommands) return;
+    _loadingCommands = true;
+    try {
+      final loaded = await source.load(
+        conversation: widget.controller.conversationId,
+      );
+      if (mounted) {
+        setState(() => _commands = loaded);
+        _edited();
+      }
+    } on Object {
+      // No list: the composer sends what is typed, as it always did.
+    } finally {
+      _loadingCommands = false;
+    }
+  }
+
+  void _pickCommand(ChatCommand command) {
+    final inserted = insertCommand(_message.text, command.name);
+    _message.value = TextEditingValue(
+      text: inserted.text,
+      selection: TextSelection.collapsed(offset: inserted.cursor),
+    );
+    _composer.requestFocus();
   }
 
   @override
   void dispose() {
+    _message.removeListener(_edited);
+    _composer.onKeyEvent = null;
+    _ownComposer?.dispose();
+    if (_menuReported) widget.onCommandMenu?.call(false);
     widget.controller.removeListener(_showReveal);
     unawaited(_pasting?.cancel());
     _ownMessage?.dispose();
@@ -216,13 +316,54 @@ class _AssistantPanelState extends State<AssistantPanel> {
         !widget.controller.connected) {
       return;
     }
-    widget.controller.say(text, route: widget.route, images: _images);
+    // A name her menu does not list goes as plain text, which the notice says.
+    final typed = typedCommand(text);
+    final known = _commands;
+    final unknown =
+        widget.commands != null &&
+        typed != null &&
+        known != null &&
+        !known.any((command) => command.name == typed);
+    widget.controller.say(
+      text,
+      route: widget.route,
+      images: _images,
+      notice: unknown
+          ? '/$typed is not one of her commands, so she got it as text and did '
+                'not run it.'
+          : null,
+    );
     _message.clear();
     setState(() => _images = const []);
   }
 
   /// Enter sends; with Shift it is left to the field, which starts a new line.
   KeyEventResult _composerKey(FocusNode _, KeyEvent event) {
+    if (event is KeyDownEvent && _menuOpen) {
+      final matches = _matches;
+      final key = event.logicalKey;
+      if (key == LogicalKeyboardKey.arrowDown) {
+        setState(() => _highlight = (_highlight + 1) % matches.length);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        setState(
+          () => _highlight = (_highlight - 1 + matches.length) % matches.length,
+        );
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key == LogicalKeyboardKey.tab) {
+        _pickCommand(matches[_highlight.clamp(0, matches.length - 1)]);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.escape) {
+        setState(() => _menuClosed = true);
+        _edited();
+        return KeyEventResult.handled;
+      }
+    }
     if (event is! KeyDownEvent ||
         (event.logicalKey != LogicalKeyboardKey.enter &&
             event.logicalKey != LogicalKeyboardKey.numpadEnter) ||
@@ -519,25 +660,34 @@ class _AssistantPanelState extends State<AssistantPanel> {
                 ),
               ),
             ),
-          _column(
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  if (widget.imageInput?.canPick ?? false)
-                    IconButton(
-                      tooltip: 'Add an image',
-                      onPressed: controller.connected ? _pick : null,
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                    ),
-                  Expanded(
-                    child: Focus(
-                      canRequestFocus: false,
-                      skipTraversal: true,
-                      onKeyEvent: _composerKey,
+          if (_menuOpen)
+            _column(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: CommandMenu(
+                  commands: _matches,
+                  highlighted: _highlight.clamp(0, _matches.length - 1),
+                  onPick: _pickCommand,
+                ),
+              ),
+            ),
+          KeyedSubtree(
+            key: const ValueKey('composer'),
+            child: _column(
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    if (widget.imageInput?.canPick ?? false)
+                      IconButton(
+                        tooltip: 'Add an image',
+                        onPressed: controller.connected ? _pick : null,
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                      ),
+                    Expanded(
                       child: TextField(
                         controller: _message,
-                        focusNode: widget.composerFocus,
+                        focusNode: _composer,
                         minLines: 1,
                         maxLines: 4,
                         enabled: controller.connected,
@@ -547,23 +697,23 @@ class _AssistantPanelState extends State<AssistantPanel> {
                         onSubmitted: (_) => _send(),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (controller.busy)
-                    IconButton.filled(
-                      tooltip: controller.stopping ? 'Stopping…' : 'Stop',
-                      onPressed: controller.connected && !controller.stopping
-                          ? controller.interrupt
-                          : null,
-                      icon: const Icon(Icons.stop),
-                    )
-                  else
-                    IconButton.filled(
-                      tooltip: 'Send',
-                      onPressed: controller.connected ? _send : null,
-                      icon: const Icon(Icons.send),
-                    ),
-                ],
+                    const SizedBox(width: 8),
+                    if (controller.busy)
+                      IconButton.filled(
+                        tooltip: controller.stopping ? 'Stopping…' : 'Stop',
+                        onPressed: controller.connected && !controller.stopping
+                            ? controller.interrupt
+                            : null,
+                        icon: const Icon(Icons.stop),
+                      )
+                    else
+                      IconButton.filled(
+                        tooltip: 'Send',
+                        onPressed: controller.connected ? _send : null,
+                        icon: const Icon(Icons.send),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

@@ -20,6 +20,7 @@ import 'agents/agents_page.dart';
 import 'agents/scorecard.dart';
 import 'pools/models_section.dart';
 import 'assistant/assistant_controller.dart';
+import 'assistant/chat_commands.dart';
 import 'assistant/chat_layout.dart';
 import 'assistant/chat_popout.dart';
 import 'assistant/chat_popout_app.dart';
@@ -202,7 +203,7 @@ class AppearancePreferences {
 }
 
 class MissionBoard extends ChangeNotifier
-    implements PageActions, TranscriptReads {
+    implements PageActions, TranscriptReads, ChatCommands {
   MissionBoard({
     required this.apiOrigin,
     this.demo = false,
@@ -1229,6 +1230,28 @@ class MissionBoard extends ChangeNotifier
     '/v1/user/assistant/conversations/${Uri.encodeComponent(conversation)}/log',
     "the conversation's log",
   );
+
+  /// What the composer offers after `/` (`GET /v1/user/moneypenny/commands`), with the
+  /// harness commands of [conversation] when it is named.
+  @override
+  Future<List<ChatCommand>> load({String? conversation}) async {
+    final query = conversation == null
+        ? ''
+        : '?conversation=${Uri.encodeQueryComponent(conversation)}';
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/moneypenny/commands$query',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused her commands.');
+    }
+    final body = jsonDecode(utf8.decode(response.bodyBytes));
+    return [
+      for (final command
+          in (body is Map ? body['commands'] : null) as List? ?? const [])
+        ?ChatCommand.fromJson(command),
+    ];
+  }
 
   /// An image of the person's conversations with Moneypenny, by its digest
   /// (`GET /v1/user/moneypenny/images/{sha256}`); `null` once it is no longer kept.
@@ -4782,6 +4805,7 @@ MoneypennyChat moneypennyChatFor(
     transcripts: board.demo ? null : board,
     imageInput: board.demo ? null : platformImageInput(),
     imageLoader: board.demo ? null : board.conversationImage,
+    commands: board.demo ? const DemoCommands() : board,
     openWindow: openWindow,
     windowOutlivesPage: windowOutlivesPage,
   );

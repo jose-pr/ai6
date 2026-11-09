@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'assistant_controller.dart';
 import 'assistant_panel.dart' show moneypennyPrompts;
+import 'chat_commands.dart';
 
 /// The label the chat shows over the preview's scripted conversation.
 const demoConversationLabel = 'Sample conversation — demo';
@@ -320,4 +321,28 @@ class DemoAssistantChannel implements AssistantChannel {
     _timers.clear();
     await _incoming.close();
   }
+}
+
+/// The commands the preview's composer offers after `/`: samples, which run nothing.
+class DemoCommands implements ChatCommands {
+  const DemoCommands();
+
+  @override
+  Future<List<ChatCommand>> load({String? conversation}) async => const [
+    ChatCommand(
+      name: 'report-writer',
+      description: 'Writes up what the board shows as a short report.',
+      argumentHint: '[period]',
+    ),
+    ChatCommand(
+      name: 'charts',
+      description: 'Draws a chart of a Mission or Station metric.',
+      argumentHint: '[metric]',
+    ),
+    ChatCommand(
+      name: 'compact',
+      description: 'Shrinks the conversation so far.',
+      source: 'harness',
+    ),
+  ];
 }

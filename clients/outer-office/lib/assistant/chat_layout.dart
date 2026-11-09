@@ -14,6 +14,7 @@ import 'transcripts.dart' show TranscriptReads;
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
 import 'assistant_controller.dart';
+import 'chat_commands.dart' show ChatCommands;
 import 'chat_popout.dart' show ChatWindowBlocked;
 
 /// Where Moneypenny's chat is, as the person chose it.
@@ -185,6 +186,7 @@ class MoneypennyChat extends ChangeNotifier {
     this.transcripts,
     this.imageInput,
     this.imageLoader,
+    this.commands,
   }) : _width = settings.width {
     controller.addListener(_heard);
   }
@@ -210,6 +212,12 @@ class MoneypennyChat extends ChangeNotifier {
 
   /// Reads the conversation's images; none in the demo.
   final ImageLoader? imageLoader;
+
+  /// Where the composer's `/` menu reads her commands; none, no menu.
+  final ChatCommands? commands;
+
+  /// The composer's `/` menu is open: Escape closes it and leaves the chat as it is.
+  bool commandMenuOpen = false;
 
   final AssistantController controller;
   final ChatPreferences? preferences;
@@ -513,7 +521,7 @@ class MoneypennyChat extends ChangeNotifier {
     final focused = FocusManager.instance.primaryFocus;
     final inChat = region.hasFocus;
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (!inChat || keyboard.isShiftPressed) return false;
+      if (!inChat || keyboard.isShiftPressed || commandMenuOpen) return false;
       final placement = chatPlacement(_layout, width);
       if (_layout == ChatLayout.expanded && placement == ChatPlacement.centre) {
         _set(ChatLayout.docked);

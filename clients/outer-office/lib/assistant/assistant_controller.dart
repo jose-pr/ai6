@@ -319,6 +319,17 @@ class AssistantController extends ChangeNotifier {
           (message['entry'] as Map).cast<String, Object?>(),
         );
         entries = [...entries, entry];
+        if (entry.role == 'person' && _noticeAfterEcho != null) {
+          entries = [
+            ...entries,
+            AssistantEntry(
+              role: 'notice',
+              text: _noticeAfterEcho!,
+              at: entry.at,
+            ),
+          ];
+          _noticeAfterEcho = null;
+        }
         notifyListeners();
         _arrivals.add(entry);
         return;
@@ -361,12 +372,17 @@ class AssistantController extends ChangeNotifier {
 
   /// Sends a message, with the [route] of the page the person is on and the [images] they
   /// added to it.
+  ///
+  /// [notice] is shown right after the message, once it is in the conversation; it is not
+  /// kept by Universal Exports, so a reconnect drops it.
   void say(
     String text, {
     OoRoute? route,
     List<OutgoingImage> images = const [],
+    String? notice,
   }) {
     if (text.trim().isEmpty) return;
+    _noticeAfterEcho = notice;
     _send({
       'type': 'message',
       'text': text,
@@ -375,6 +391,8 @@ class AssistantController extends ChangeNotifier {
         'images': [for (final image in images) image.toJson()],
     });
   }
+
+  String? _noticeAfterEcho;
 
   /// Sends a message now when the conversation is ready, else opens it and sends the
   /// message once Universal Exports says it is ready.

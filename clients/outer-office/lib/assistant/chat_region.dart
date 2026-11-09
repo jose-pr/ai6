@@ -373,6 +373,8 @@ class ChatPanel extends StatelessWidget {
             transcripts: chat.transcripts,
             imageInput: chat.imageInput,
             imageLoader: chat.imageLoader,
+            commands: chat.commands,
+            onCommandMenu: (open) => chat.commandMenuOpen = open,
             followAtOnce: chat.followAtOnce,
             onFollowAtOnce: chat.setFollowAtOnce,
             onClose: placement == ChatPlacement.fullScreen
