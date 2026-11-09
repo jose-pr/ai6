@@ -2191,7 +2191,10 @@ mod tests {
             .into_iter()
             .map(|difference| difference.setting)
             .collect();
-        assert!(named.iter().any(|setting| setting == "tls_versions"), "{named:?}");
+        assert!(
+            named.iter().any(|setting| setting == "tls_versions"),
+            "{named:?}"
+        );
         let legacy = settings(Some(serde_json::json!({
             "pin_digests": ["sha256", "sha384", "sha512", "sha1"],
             "require_ems": false,

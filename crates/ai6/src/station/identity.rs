@@ -89,7 +89,9 @@ pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>
 ///
 /// Returns an error when the directories cannot be created.
 pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError> {
-    Ok(TrustStore::builder(state_dir).limits(policy.waiting).build()?)
+    Ok(TrustStore::builder(state_dir)
+        .limits(policy.waiting)
+        .build()?)
 }
 
 /// Trust exactly the peers in `store`: a peer that is not accepted is refused, and recorded as
@@ -130,10 +132,12 @@ pub fn server_config(
     trust: &Trust,
     policy: &Policy,
 ) -> Result<Built<ServerConfig>, StationIdentityError> {
-    Ok(ServerBuilder::new(identity, ClientAuth::Required(trust.clone()))
-        .alpn([STATION_ALPN])
-        .policy(policy.clone())
-        .build()?)
+    Ok(
+        ServerBuilder::new(identity, ClientAuth::Required(trust.clone()))
+            .alpn([STATION_ALPN])
+            .policy(policy.clone())
+            .build()?,
+    )
 }
 
 /// What a Station's identity signs about its sealing key. A TLS 1.3 handshake's signed text starts
