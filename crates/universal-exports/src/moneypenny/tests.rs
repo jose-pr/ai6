@@ -2872,6 +2872,184 @@ async fn a_group_table_keeps_a_skill_out_of_its_members_jobs() {
     assert!(job.skills.is_empty(), "no roster, no skills");
 }
 
+/// A pinned catalog skill `name` in `catalog`, its front matter `front` after the name and
+/// description.
+fn catalog_skill(
+    settings: ai6::AssistantSettings,
+    catalog: &std::path::Path,
+    name: &str,
+    front: &str,
+) -> ai6::AssistantSettings {
+    let dir = catalog.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Makes {name}.\n{front}---\nDo it.\n"),
+    )
+    .unwrap();
+    let pin = ai6::ProjectManifest::read_tree(&dir).unwrap().digest();
+    settings.with_skill(
+        name,
+        ai6::SkillEntry::new(dir.to_string_lossy()).pinned(pin),
+    )
+}
+
+/// The commands `token` is offered, with the conversation's own when it names one.
+async fn commands_of(served: &Served, token: &str, conversation: Option<&str>) -> Vec<Value> {
+    let mut url = format!("{}/v1/user/moneypenny/commands", served.base);
+    if let Some(id) = conversation {
+        url.push_str(&format!("?conversation={id}"));
+    }
+    let response = reqwest::Client::new()
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.unwrap();
+    body["commands"].as_array().unwrap().clone()
+}
+
+fn names(commands: &[Value]) -> Vec<&str> {
+    commands
+        .iter()
+        .map(|command| command["name"].as_str().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn the_commands_route_lists_her_skills_and_her_harness_commands() {
+    let catalog = tempfile::tempdir().unwrap();
+    let mut settings = ai6::AssistantSettings::new();
+    settings = catalog_skill(
+        settings,
+        catalog.path(),
+        "charts",
+        "argument-hint: \"[period]\"\n",
+    );
+    settings = catalog_skill(settings, catalog.path(), "report-writer", "");
+    settings = catalog_skill(
+        settings,
+        catalog.path(),
+        "internal",
+        "user-invocable: false\n",
+    );
+    // The operator is in `ops`, which keeps two; one of those is for the model only. The
+    // viewer is in no group.
+    let settings = settings.with_group(
+        "ops",
+        ai6::AssistantNarrowing::new()
+            .with_skills(vec!["charts".to_owned(), "internal".to_owned()]),
+    );
+    let roster: Arc<dyn ai6::ConfigProvider> = Arc::new(ai6::MemoryProvider::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+
+    let (_app, job) = accepted(&served, &served.operator, "Hello.").await;
+    let operator = commands_of(&served, &served.operator, None).await;
+    assert_eq!(names(&operator), ["charts"]);
+    assert_eq!(operator[0]["description"], "Makes charts.");
+    assert_eq!(operator[0]["argument_hint"], "[period]");
+    assert_eq!(operator[0]["source"], "skill");
+    let viewer = commands_of(&served, &served.viewer, None).await;
+    assert_eq!(names(&viewer), ["charts", "report-writer"]);
+
+    // What her harness announces is listed for that conversation, after her skills, and a
+    // name a skill already has shows once.
+    let announce = AssistantEvent {
+        commands: vec![
+            ai6::AssistantCommand {
+                name: "compact".to_owned(),
+                description: "Shrinks the context.".to_owned(),
+                input_hint: Some("[focus]".to_owned()),
+            },
+            ai6::AssistantCommand {
+                name: "charts".to_owned(),
+                description: "Its own charts.".to_owned(),
+                input_hint: None,
+            },
+            ai6::AssistantCommand {
+                name: "has space".to_owned(),
+                description: "Not a name.".to_owned(),
+                input_hint: None,
+            },
+        ],
+        ..AssistantEvent::new(ai6::EVENT_COMMANDS, None)
+    };
+    assert_eq!(
+        report(&served, "hq", &job, None, vec![announce]).await,
+        StatusCode::NO_CONTENT
+    );
+    let with = commands_of(&served, &served.operator, Some(&job.conversation_id)).await;
+    assert_eq!(names(&with), ["charts", "compact"]);
+    assert_eq!(with[0]["source"], "skill");
+    assert_eq!(with[0]["description"], "Makes charts.");
+    assert_eq!(with[1]["source"], "harness");
+    assert_eq!(with[1]["argument_hint"], "[focus]");
+    // Without the conversation her harness's are not shown, and another person's
+    // conversation is not theirs to ask about.
+    assert_eq!(
+        names(&commands_of(&served, &served.operator, None).await),
+        ["charts"]
+    );
+    let other = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/user/moneypenny/commands?conversation={}",
+            served.base, job.conversation_id
+        ))
+        .bearer_auth(&served.viewer)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other.status(), StatusCode::NOT_FOUND);
+    let anonymous = reqwest::Client::new()
+        .get(format!("{}/v1/user/moneypenny/commands", served.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_skill_her_handler_cannot_run_is_not_offered_or_run() {
+    let catalog = tempfile::tempdir().unwrap();
+    let settings = catalog_skill(ai6::AssistantSettings::new(), catalog.path(), "charts", "");
+    let mut agent = ai6::Agent::new("moneypenny");
+    agent.handler = Some("codex".to_owned());
+    let roster: Arc<dyn ai6::ConfigProvider> = Arc::new(ai6::MemoryProvider::new(
+        ai6::Roster::builder()
+            .assistant(settings)
+            .agent(agent)
+            .build()
+            .unwrap(),
+    ));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    assert!(
+        commands_of(&served, &served.operator, None)
+            .await
+            .is_empty()
+    );
+    let (_app, job) = accepted(&served, &served.operator, "/charts weekly").await;
+    assert_eq!(job.message, "/charts weekly", "sent as text, not run");
+}
+
+#[tokio::test]
+async fn a_slash_skill_reaches_her_as_an_instruction_and_an_unknown_one_as_text() {
+    let catalog = tempfile::tempdir().unwrap();
+    let settings = catalog_skill(ai6::AssistantSettings::new(), catalog.path(), "charts", "");
+    let roster: Arc<dyn ai6::ConfigProvider> = Arc::new(ai6::MemoryProvider::new(
+        ai6::Roster::builder().assistant(settings).build().unwrap(),
+    ));
+    let served = served_with(AssistantConfig::default(), Some(roster)).await;
+    let (_app, job) = accepted(&served, &served.operator, "/charts last week").await;
+    assert!(job.message.contains("ai6:charts"), "{}", job.message);
+    assert!(job.message.ends_with("last week"), "{}", job.message);
+    let (_app, unknown) = accepted(&served, &served.viewer, "/nothing at all").await;
+    assert_eq!(unknown.message, "/nothing at all");
+}
+
 #[tokio::test]
 async fn each_person_works_in_their_own_repository_and_reads_only_their_groups() {
     let served = served_with(AssistantConfig::default(), Some(workspace_roster())).await;

@@ -127,6 +127,8 @@ pub(crate) struct Conversation {
     /// While a Station's report is applied: that Station, and the tokens it reported, which
     /// the first entry it adds carries.
     pub(crate) reporting: Option<(String, Option<u64>)>,
+    /// The commands the harness last announced.
+    pub(crate) commands: Vec<ai6::AssistantCommand>,
 }
 
 /// A read tool she called: its name and the identifier arguments it was given, never free
@@ -211,6 +213,7 @@ impl Conversation {
             account: None,
             model: None,
             reporting: None,
+            commands: Vec::new(),
         }
     }
 

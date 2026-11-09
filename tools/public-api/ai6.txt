@@ -3284,6 +3284,10 @@ pub ai6::directorates::q::overlays::SetupRun::interpreter: alloc::string::String
 pub ai6::directorates::q::overlays::SetupRun::network: bool
 pub ai6::directorates::q::overlays::SetupRun::path: alloc::string::String
 pub ai6::directorates::q::overlays::SetupRun::timeout: u64
+pub struct ai6::directorates::q::overlays::SkillSummary
+pub ai6::directorates::q::overlays::SkillSummary::argument_hint: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::overlays::SkillSummary::description: alloc::string::String
+pub ai6::directorates::q::overlays::SkillSummary::user_invocable: bool
 pub struct ai6::directorates::q::overlays::Source
 pub ai6::directorates::q::overlays::Source::kind: ai6::directorates::q::overlays::SourceKind
 pub ai6::directorates::q::overlays::Source::location: alloc::string::String
@@ -3355,6 +3359,7 @@ pub fn ai6::directorates::q::overlays::root_variable(&str) -> alloc::string::Str
 pub fn ai6::directorates::q::overlays::rules_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::q::overlays::setup_phase(ai6::directorates::q::overlays::Change, core::option::Option<&str>, core::option::Option<&str>) -> core::option::Option<ai6::directorates::q::overlays::Phase>
 pub fn ai6::directorates::q::overlays::skill_description(&std::path::Path) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::q::overlays::skill_summary(&std::path::Path) -> core::option::Option<ai6::directorates::q::overlays::SkillSummary>
 pub fn ai6::directorates::q::overlays::skills_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::q::overlays::state_variable(&str) -> alloc::string::String
 pub fn ai6::directorates::q::overlays::substitute(&str, &ai6::directorates::q::overlays::Lookup<'_>) -> core::result::Result<alloc::string::String, ai6::directorates::q::overlays::SubstitutionError>
@@ -8754,6 +8759,10 @@ pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_of(&all
 pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_over(&alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>, &alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::AssistantChange::new(alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> Self
 pub fn ai6::directorates::section_00::assistant::AssistantChange::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::directorates::section_00::assistant::AssistantCommand
+pub ai6::directorates::section_00::assistant::AssistantCommand::description: alloc::string::String
+pub ai6::directorates::section_00::assistant::AssistantCommand::input_hint: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::assistant::AssistantCommand::name: alloc::string::String
 pub struct ai6::directorates::section_00::assistant::AssistantCommit
 pub ai6::directorates::section_00::assistant::AssistantCommit::author_email: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantCommit::author_name: alloc::string::String
@@ -8765,6 +8774,7 @@ impl ai6::directorates::section_00::assistant::AssistantCommit
 pub fn ai6::directorates::section_00::assistant::AssistantCommit::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::directorates::section_00::assistant::AssistantEvent
 pub ai6::directorates::section_00::assistant::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
+pub ai6::directorates::section_00::assistant::AssistantEvent::commands: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantCommand>
 pub ai6::directorates::section_00::assistant::AssistantEvent::kind: alloc::string::String
 pub ai6::directorates::section_00::assistant::AssistantEvent::shared: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantSharedBase>
 pub ai6::directorates::section_00::assistant::AssistantEvent::text: core::option::Option<alloc::string::String>
@@ -8858,6 +8868,7 @@ pub const ai6::directorates::section_00::assistant::EVENT_ACCEPTED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_CABLE_PROPOSAL: &str
 pub const ai6::directorates::section_00::assistant::EVENT_CABLE_SENT: &str
 pub const ai6::directorates::section_00::assistant::EVENT_CLOSED: &str
+pub const ai6::directorates::section_00::assistant::EVENT_COMMANDS: &str
 pub const ai6::directorates::section_00::assistant::EVENT_COMPLETED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_FAILED: &str
 pub const ai6::directorates::section_00::assistant::EVENT_INTERRUPTED: &str
@@ -10550,6 +10561,10 @@ pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_of(&all
 pub fn ai6::directorates::section_00::assistant::AssistantChange::digest_over(&alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>, &alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> alloc::string::String
 pub fn ai6::directorates::section_00::assistant::AssistantChange::new(alloc::collections::btree::map::BTreeMap<alloc::string::String, core::option::Option<alloc::string::String>>) -> Self
 pub fn ai6::directorates::section_00::assistant::AssistantChange::validate(&self, &ai6::AssistantLimits) -> core::result::Result<(), alloc::string::String>
+pub struct ai6::AssistantCommand
+pub ai6::AssistantCommand::description: alloc::string::String
+pub ai6::AssistantCommand::input_hint: core::option::Option<alloc::string::String>
+pub ai6::AssistantCommand::name: alloc::string::String
 pub struct ai6::AssistantCommit
 pub ai6::AssistantCommit::author_email: alloc::string::String
 pub ai6::AssistantCommit::author_name: alloc::string::String
@@ -10595,6 +10610,7 @@ impl core::default::Default for ai6::AssistantDeskLimits
 pub fn ai6::AssistantDeskLimits::default() -> Self
 pub struct ai6::AssistantEvent
 pub ai6::AssistantEvent::cable: core::option::Option<ai6::directorates::section_00::assistant::AssistantCable>
+pub ai6::AssistantEvent::commands: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantCommand>
 pub ai6::AssistantEvent::kind: alloc::string::String
 pub ai6::AssistantEvent::shared: alloc::vec::Vec<ai6::directorates::section_00::assistant::AssistantSharedBase>
 pub ai6::AssistantEvent::text: core::option::Option<alloc::string::String>
@@ -14258,6 +14274,7 @@ pub const ai6::EVENT_ACCEPTED: &str
 pub const ai6::EVENT_CABLE_PROPOSAL: &str
 pub const ai6::EVENT_CABLE_SENT: &str
 pub const ai6::EVENT_CLOSED: &str
+pub const ai6::EVENT_COMMANDS: &str
 pub const ai6::EVENT_COMPLETED: &str
 pub const ai6::EVENT_FAILED: &str
 pub const ai6::EVENT_INTERRUPTED: &str

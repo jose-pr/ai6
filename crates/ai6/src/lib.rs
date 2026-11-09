@@ -251,12 +251,13 @@ pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_URL_ENV, ASSISTANT_MCP_ENV_PREFIX, ASSISTANT_MCP_PATH,
     ASSISTANT_MCP_SERVER, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV,
     ASSISTANT_PUBLISH_PAGE_TOOL, ASSISTANT_SHARED_CHANGE_TOOL, AssistantCable,
-    AssistantCableDecision, AssistantCableGrant, AssistantChange, AssistantCommit, AssistantEvent,
-    AssistantImage, AssistantJob, AssistantPageFile, AssistantReach, AssistantReport, AssistantRun,
-    AssistantSharedBase, AssistantWorkspace, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL,
-    EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT,
-    EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, SCRIPT_ENVIRONMENT, credential_dir_var,
-    host_pattern, interpreter_name, page_call_digest,
+    AssistantCableDecision, AssistantCableGrant, AssistantChange, AssistantCommand,
+    AssistantCommit, AssistantEvent, AssistantImage, AssistantJob, AssistantPageFile,
+    AssistantReach, AssistantReport, AssistantRun, AssistantSharedBase, AssistantWorkspace,
+    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMMANDS,
+    EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED,
+    EVENT_TEXT, EVENT_TOOL, SCRIPT_ENVIRONMENT, credential_dir_var, host_pattern, interpreter_name,
+    page_call_digest,
 };
 pub use directorates::section_00::content::{MessageContent, MessageImage};
 pub use guatiao;

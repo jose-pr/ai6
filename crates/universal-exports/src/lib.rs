@@ -1819,6 +1819,7 @@ impl Gateway {
             )
             .route("/v1/user/attach-grants", post(issue_user_attach_token))
             .route("/v1/user/moneypenny", get(moneypenny::socket))
+            .route("/v1/user/moneypenny/commands", get(moneypenny::commands::list))
             .route(
                 "/v1/user/moneypenny/images/{sha256}",
                 get(moneypenny::user_image),

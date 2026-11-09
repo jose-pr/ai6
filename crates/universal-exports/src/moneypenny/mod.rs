@@ -31,6 +31,7 @@
 pub(crate) mod actions;
 pub(crate) mod cables;
 mod checks;
+pub(crate) mod commands;
 mod guide;
 pub(crate) mod images;
 pub(crate) mod log;
@@ -53,11 +54,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ai6::{
-    AssistantChange, AssistantCommit, AssistantEvent, AssistantGatewayLimits, AssistantJob,
-    AssistantLimits, AssistantReach, AssistantReport, AssistantSettings, AssistantWorkspace,
-    EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED, EVENT_COMPLETED,
-    EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE, EVENT_REJECTED, EVENT_TEXT,
-    EVENT_TOOL, Limit, Seconds,
+    AssistantChange, AssistantCommand, AssistantCommit, AssistantEvent, AssistantGatewayLimits,
+    AssistantJob, AssistantLimits, AssistantReach, AssistantReport, AssistantSettings,
+    AssistantWorkspace, EVENT_ACCEPTED, EVENT_CABLE_PROPOSAL, EVENT_CABLE_SENT, EVENT_CLOSED,
+    EVENT_COMMANDS, EVENT_COMPLETED, EVENT_FAILED, EVENT_INTERRUPTED, EVENT_LIMIT, EVENT_NOTICE,
+    EVENT_REJECTED, EVENT_TEXT, EVENT_TOOL, Limit, Seconds,
 };
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -734,6 +735,13 @@ impl Assistant {
         // and her skills, the catalog's less what the person's group and person tables leave out.
         let reach = settings.reach_for(&person.id, &person.groups);
         let skills = settings.skills_for(&person.id, &person.groups);
+        // A skill the person ran with `/name` is handed to her harness as an instruction to
+        // run it; the conversation shows what the person typed.
+        let invoked = if commands::handler_runs_skills(gateway, &self.config.agent_id).await {
+            commands::invocation(message, &skills)
+        } else {
+            None
+        };
         // Read again for every message, so a permission removed reaches her next turn.
         let cables = cables::grants(gateway, &person, self.config.limits.cable_grants).await;
         let (remembered, marks) = memory::starting_headers(gateway, &person).await;
@@ -815,7 +823,7 @@ impl Assistant {
                 self.config.gateway.result_chars,
             ));
             let mut parts = std::mem::take(&mut conversation.notes);
-            parts.push(message.to_owned());
+            parts.push(invoked.unwrap_or_else(|| message.to_owned()));
             let job = AssistantJob {
                 job_id: Uuid::new_v4().to_string(),
                 conversation_id: conversation_id.to_owned(),
@@ -1216,6 +1224,7 @@ impl Assistant {
                         &self.config,
                         &mut after,
                     ),
+                    EVENT_COMMANDS => conversation.commands = announced(event, &self.config),
                     _ => apply(conversation, event, max_entries),
                 }
             }
@@ -2736,6 +2745,30 @@ pub(crate) async fn user_image(
         .get(&person.id, &sha256)
         .ok_or_else(ApiError::not_found)?;
     Ok(image_response(media_type, bytes))
+}
+
+/// The commands an [`EVENT_COMMANDS`] event announces, those with a name a person could type
+/// after `/`, their descriptions cut to `result_chars`.
+fn announced(event: &AssistantEvent, config: &AssistantConfig) -> Vec<AssistantCommand> {
+    event
+        .commands
+        .iter()
+        .filter(|command| {
+            !command.name.is_empty()
+                && command
+                    .name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
+        })
+        .map(|command| AssistantCommand {
+            name: command.name.clone(),
+            description: cut(&command.description, config.gateway.result_chars.or_max()),
+            input_hint: command
+                .input_hint
+                .as_deref()
+                .map(|hint| cut(hint, config.gateway.result_chars.or_max())),
+        })
+        .collect()
 }
 
 /// `POST /v1/station/assistant/reports`: what a Station's assistant harness did. `204`;

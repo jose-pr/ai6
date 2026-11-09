@@ -73,7 +73,7 @@ pub use read::{
     Document, DotenvLine, ReadError, ReadLimits, ScriptOutput, parse_dotenv, read_document,
     read_env_script_output,
 };
-pub use skills::{SKILL_INERT_KEYS, check_skill, skill_description};
+pub use skills::{SKILL_INERT_KEYS, SkillSummary, check_skill, skill_description, skill_summary};
 pub use source::{Source, SourceError, SourceKind};
 pub use subst::{Lookup, SubstitutionError, substitute};
 pub use validate::{Issue, applies, named_files, valid_license, validate};

@@ -358,6 +358,9 @@ pub const EVENT_NOTICE: &str = "notice";
 pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal";
 /// A Cable left on the person's behalf; [`AssistantEvent::cable`] says which.
 pub const EVENT_CABLE_SENT: &str = "cable_sent";
+/// The harness announced the commands it takes (an ACP agent's `available_commands_update`):
+/// [`AssistantEvent::commands`] is the whole list now, replacing any earlier one.
+pub const EVENT_COMMANDS: &str = "commands";
 
 /// Moneypenny's tool that changes one file of a shared repository, as Universal Exports
 /// serves it; Claude Code calls it `mcp__moneypenny__propose_shared_change`.
@@ -1068,6 +1071,23 @@ pub struct AssistantEvent {
     /// from, at most [`AssistantLimits::shared_bases`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared: Vec<AssistantSharedBase>,
+    /// The commands an [`EVENT_COMMANDS`] event announces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<AssistantCommand>,
+}
+
+/// One command the assistant's harness takes, as it announced it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistantCommand {
+    /// The name typed after `/`.
+    pub name: String,
+    /// What it does.
+    #[serde(default)]
+    pub description: String,
+    /// The hint for its argument, when it takes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_hint: Option<String>,
 }
 
 impl AssistantEvent {
@@ -1079,6 +1099,7 @@ impl AssistantEvent {
             tools: Vec::new(),
             cable: None,
             shared: Vec::new(),
+            commands: Vec::new(),
         }
     }
 }

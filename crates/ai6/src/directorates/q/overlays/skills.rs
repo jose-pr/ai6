@@ -109,6 +109,37 @@ pub fn skill_description(dir: &Path) -> Option<String> {
     keys.get("description")?.as_str().map(str::to_owned)
 }
 
+/// What a skill's `SKILL.md` front matter says to a person choosing it from a menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillSummary {
+    /// The front matter's `description`.
+    pub description: String,
+    /// Its `argument-hint`, such as `[issue-number]`.
+    pub argument_hint: Option<String>,
+    /// False when it sets `user-invocable: false`: only the model may call it, so no menu
+    /// offers it.
+    pub user_invocable: bool,
+}
+
+/// The menu summary of the skill whose `SKILL.md` is in `dir`; `None` when the file cannot be
+/// read or has no `description`.
+pub fn skill_summary(dir: &Path) -> Option<SkillSummary> {
+    let text = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
+    let (yaml, _) = front_matter(&text)?;
+    let keys: BTreeMap<String, serde_json::Value> = serde_saphyr::from_str(yaml).ok()?;
+    Some(SkillSummary {
+        description: keys.get("description")?.as_str()?.to_owned(),
+        argument_hint: keys
+            .get("argument-hint")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        user_invocable: keys
+            .get("user-invocable")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+    })
+}
+
 /// The YAML between the opening `---` line and the next `---` line, and the text after it.
 fn front_matter(text: &str) -> Option<(&str, &str)> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
