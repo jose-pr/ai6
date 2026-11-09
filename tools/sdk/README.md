@@ -56,7 +56,7 @@ Running it again does nothing when the versions match.
 | Flutter | its git repository | the commit in the lock; the version and engine hash it reports |
 | `rustup-init` | static.rust-lang.org | SHA-256 in the lock |
 | Rust toolchains | static.rust-lang.org, through rustup | rustup checks each component against its channel manifest |
-| Crates | crates.io and pinned git revisions, or the `deps` branch's `crates/` (below) | `Cargo.lock`'s checksums and revisions; `crates/git/SHA256SUMS` for an archive of a revision |
+| Crates | crates.io and pinned git revisions, or the `deps` branch's `crates/` (below) | `Cargo.lock`'s checksums and revisions; the files each vendored package lists in its `.cargo-checksum.json` |
 | LLVM on Windows ARM64, Node | upstream | SHA-256 in the lock |
 | MSVC, Windows SDK, Xcode, Linux dev packages | the vendor or distribution | a presence check; `--print-system` prints the install command |
 
@@ -72,9 +72,11 @@ template with `{name}` and `{version}`; each file still has to match `Cargo.lock
 
 ## Building with no network
 
-The `deps` branch's `crates/` holds every crate `Cargo.lock` names for every target: each `.crate`
-from crates.io, and a source archive of each pinned git commit. `crates.py`, which needs Python
-3.11.4 or later, works on a checkout of that branch. Installing the SDKs needs the network once;
+The `deps` branch's `crates/` is a cargo vendor directory: every package `Cargo.lock` names for every
+target, from crates.io and from each pinned git commit, as a directory `<name>-<version>/` of
+unpacked source with a `.cargo-checksum.json`. It holds no archive. Tests, examples, benchmarks and
+fixtures are left out, as is any file an archive scanner would refuse. `crates.py`, which needs
+Python 3.11.4 or later, works on a checkout of that branch. Installing the SDKs needs the network once;
 the build after this does not:
 
 ```sh
@@ -86,18 +88,22 @@ cargo build --locked -p ai6 --features ai6/cli
 
 | Command | Does |
 | --- | --- |
-| `crates.py use DEPS_DIR [--out DIR] [--repo-config]` | Checks `crates/`, unpacks it as cargo directory sources in a directory outside the repository, with a `[source]` entry for crates.io and each git source, and prints how to use the config it wrote. `--repo-config` also writes this checkout's `.cargo/config.toml` |
+| `crates.py use DEPS_DIR [--out DIR] [--repo-config]` | Checks `crates/`, writes a cargo config outside the repository that replaces crates.io and each git source by `crates/`, and prints how to use it. Nothing is unpacked. `--repo-config` also writes this checkout's `.cargo/config.toml` |
 | `crates.py check DEPS_DIR` | Fails, naming what is missing, changed or stale |
-| `crates.py sync DEPS_DIR` | Makes `crates/` match `Cargo.lock`: fetches what is missing, verifies it, removes what is gone |
+| `crates.py sync DEPS_DIR` | Makes `crates/` match `Cargo.lock`: fetches what is missing or changed, checks each `.crate` against the lock's checksum before unpacking it, removes what is gone |
 | `crates.py refresh DEPS_DIR` | `sync`, then a commit there, `DEPS_REF` in its Dockerfiles, and `app deps` in `sdk.lock` in a commit here |
 
-A package taken from a git archive keeps its files with its inherited workspace settings written
-into its manifest, since a directory source reads each package alone.
+A package taken from a git commit keeps its files with its inherited workspace settings written
+into its manifest, since a directory source reads each package alone; its `.cargo-checksum.json` has
+`"package": null`, as `cargo vendor` writes it. A registry package's `package` is the lock's
+checksum, and its `files` list every file kept with its SHA-256, which cargo checks as it builds.
 
 ## Changing a pin
 
 Run `python3 tools/sdk/check_lock.py` afterwards (`--online` also compares each download's hash
 with what upstream publishes; `--deps-ref` says where to read the build containers' defaults). It
+fails on any archive, compressed data, pack file, executable or key file in the `deps` commit, found
+by leading bytes the way the repository scanner finds them, and on any path below a `.git`. It
 also fails on a package `clients/outer-office/pubspec.lock` names that the `deps` commit's `pub/`
 lacks, so a new dependency cannot land ahead of a refreshed branch.
 
