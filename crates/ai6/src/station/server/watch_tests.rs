@@ -332,7 +332,8 @@ fn record(state: &DaemonState, tag: &str) -> WatchRecord {
     state.intake.watch(&scope(tag)).unwrap().unwrap()
 }
 
-/// Turns the watch's logbook records.
+/// Turns the watch took, by its logbook. A wake whose turn was refused (a loaded machine can
+/// refuse one, and the wake is retried) is logged as a `turn` too, and is not counted.
 fn turns(state: &DaemonState, tag: &str) -> usize {
     state
         .intake
@@ -342,7 +343,7 @@ fn turns(state: &DaemonState, tag: &str) -> usize {
             record
                 .logbook
                 .iter()
-                .filter(|entry| entry.kind == "turn")
+                .filter(|entry| entry.kind == "turn" && !entry.text.contains("took no turn"))
                 .count()
         })
 }
@@ -532,6 +533,28 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_control_wakes_the_watch_once_though_it_is_tended_during_the_turn() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "w7";
+    TURNS.lock().unwrap().insert(
+        key(tag),
+        Arc::new(|_: &str, _: &BTreeMap<String, String>| {
+            std::thread::sleep(Duration::from_millis(500));
+        }),
+    );
+    let state = station(root.path(), tag, "test", "", "");
+    watches::tend(&state, false, true).await;
+    control(&state, tag, "once");
+    tend_until(&state, "the turn", || turns(&state, tag) == 1).await;
+    tend_for(&state, 25).await;
+    let all = calls(&key(tag));
+    assert_eq!(all.len(), 1, "one turn for one control: {all:?}");
+    assert_eq!(turns(&state, tag), 1);
+    TURNS.lock().unwrap().remove(&key(tag));
+    watches::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_restarted_station_resumes_the_watch_session() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w2";
@@ -585,7 +608,12 @@ async fn a_watch_that_cannot_resume_starts_fresh_with_its_logbook() {
         tend_until(&after, "a fresh turn", || turns(&after, tag) == 2).await;
         let all = calls(&key(tag));
         let hows: Vec<&str> = all.iter().map(|call| call.how).collect();
-        assert_eq!(hows, ["start", "resume", "start"], "{mode}: {all:?}");
+        assert_eq!(
+            hows,
+            ["start", "resume", "start"],
+            "{mode}: {all:?}\n{:?}",
+            record(&after, tag).logbook
+        );
         let fresh = &all[2];
         assert_ne!(fresh.session, lost);
         assert!(
@@ -642,7 +670,12 @@ async fn a_watch_moves_to_another_station_when_its_station_goes_dark() {
         .into_iter()
         .filter(|call| call.how == "resume")
         .collect();
-    assert_eq!(resumed.len(), 1, "{resumed:?}");
+    assert_eq!(
+        resumed.len(),
+        1,
+        "{resumed:?}\n{:?}",
+        record(&second, tag).logbook
+    );
     assert_eq!(
         resumed[0].session, provider,
         "b resumes a's provider Session"

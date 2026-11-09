@@ -24,7 +24,7 @@
 pub(super) mod decide;
 mod turn;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -137,6 +137,9 @@ pub(super) struct Live {
     /// Before this time (Unix seconds) no turn starts: its harness last failed to start.
     retry_at: Mutex<f64>,
     waiting: Mutex<VecDeque<WatchEvent>>,
+    /// Keys of events handed to a turn that the record may not show as seen yet, so a scan of an
+    /// older record does not wake the watch for them again.
+    told: Mutex<BTreeSet<String>>,
     /// Events dropped for room since the logbook last said so.
     dropped: AtomicU64,
     /// When its turns of the last hour began.
@@ -198,6 +201,10 @@ impl Live {
                 .iter()
                 .any(|event| event.key.as_deref() == Some(key))
         })
+    }
+
+    fn was_told(&self, key: &str) -> bool {
+        self.told.lock().is_ok_and(|told| told.contains(key))
     }
 }
 
@@ -335,8 +342,20 @@ async fn post(state: &DaemonState, watch: Watch) {
     if let Ok(mut settings) = live.watch.lock() {
         *settings = watch;
     }
+    // The record may have been read before a turn in flight wrote it: keep this Station's own turns
+    // beside the record's, and forget a told event only once the record shows it seen.
     if let Ok(mut turns) = live.turns.lock() {
-        turns.clone_from(&record.turns);
+        let since = unix_now() - TURN_WINDOW_SECS;
+        // A time read back from the record may differ in its last bits from the one kept here.
+        for at in &record.turns {
+            if !turns.iter().any(|kept| (kept - at).abs() < 1e-3) {
+                turns.push(*at);
+            }
+        }
+        turns.retain(|at| *at > since);
+    }
+    if let Ok(mut told) = live.told.lock() {
+        told.retain(|key| !record.seen.contains(key));
     }
     let (looking, live_for_scan) = (state.clone(), live.clone());
     let events = tokio::task::spawn_blocking(move || scan(&looking, &live_for_scan, &record))
@@ -375,6 +394,7 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
         closing: AtomicBool::new(false),
         retry_at: Mutex::new(0.0),
         waiting: Mutex::new(VecDeque::new()),
+        told: Mutex::default(),
         dropped: AtomicU64::new(0),
         turns: Mutex::new(record.turns.clone()),
         last_wake: Mutex::new(record.last_wake),
@@ -613,7 +633,7 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
         event
             .key
             .as_ref()
-            .is_none_or(|key| !record.seen.contains(key) && !live.waits(key))
+            .is_none_or(|key| !record.seen.contains(key) && !live.waits(key) && !live.was_told(key))
     });
     found
 }
@@ -724,6 +744,9 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
     );
     if events.is_empty() {
         return;
+    }
+    if let Ok(mut told) = live.told.lock() {
+        told.extend(events.iter().filter_map(|event| event.key.clone()));
     }
     live.busy.store(true, Ordering::Release);
     if let Ok(mut turns) = live.turns.lock() {
