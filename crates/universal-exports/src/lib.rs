@@ -1783,6 +1783,8 @@ impl Gateway {
                 "/v1/user/accounts/{name}/secret",
                 post(accounts::reset_secret),
             )
+            .route("/v1/user/resources", get(roster::resources))
+            .route("/v1/user/resources/apply", post(roster::apply))
             .route("/v1/user/roster/{kind}", get(roster::records))
             .route(
                 "/v1/user/roster/operation/{id}/effective",
