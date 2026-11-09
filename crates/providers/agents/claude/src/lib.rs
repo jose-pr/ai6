@@ -32,12 +32,12 @@ use ai6::{
     AgentEvent, AgentMessage, AgentSession, DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage,
     UsageLimit,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 /// Claude Code AgentHandler configuration.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
-#[map(crate = ::ai6::guatiao)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
 pub struct ClaudeConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("claude"))]
@@ -65,10 +65,14 @@ pub struct ClaudeConfig {
     /// Default 30000.
     #[map(default = 30_000)]
     pub models_wait_ms: u64,
-    /// The Agent's `handler_settings` table as TOML (`allowed_tools`, `denied_tools`), which the
-    /// Station fills in. Empty keeps the default list of tools.
-    #[map(default = String::new())]
-    pub settings_toml: String,
+    /// Claude Code permission rules added to the allow list of a Mission's tools. A rule for a
+    /// tool the list keeps out (`WebFetch(domain:example.com)`, or `Bash` at `desk`) offers that
+    /// tool and lifts its default denial. Each rule starts with a letter.
+    #[map(default)]
+    pub allowed_tools: Vec<String>,
+    /// Permission rules added to the deny list; a deny rule beats an allow rule.
+    #[map(default)]
+    pub denied_tools: Vec<String>,
 }
 
 impl Default for ClaudeConfig {
@@ -82,7 +86,8 @@ impl Default for ClaudeConfig {
             close_wait_ms: 2_000,
             exit_wait_ms: 1_000,
             models_wait_ms: 30_000,
-            settings_toml: String::new(),
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
         }
     }
 }
@@ -90,24 +95,24 @@ impl Default for ClaudeConfig {
 /// What an Agent's `handler_settings` change about a Mission's tools, on top of [`FIELD_ALLOWED`]
 /// and [`FIELD_DENIED`] and, at `desk`, [`DESK_DENIED`]. Answer-only and assistant Sessions ignore
 /// them. Unknown keys are refused.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ClaudeSettings {
     /// Claude Code permission rules added to the allow list. A rule for a tool the list keeps
     /// out (`WebFetch(domain:example.com)`, or `Bash` at `desk`) offers that tool and lifts its
     /// default denial.
-    #[serde(default)]
     allowed_tools: Vec<String>,
     /// Claude Code permission rules added to the deny list; a deny rule beats an allow rule.
-    #[serde(default)]
     denied_tools: Vec<String>,
 }
 
 impl ClaudeSettings {
     /// Reads an Agent's settings. Each rule must start with a letter, so that none is read as
     /// another option of the variadic flag it goes in.
-    fn parse(toml_text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(toml_text).map_err(|error| error.to_string())?;
+    fn of(config: &ClaudeConfig) -> Result<Self, String> {
+        let settings = Self {
+            allowed_tools: config.allowed_tools.clone(),
+            denied_tools: config.denied_tools.clone(),
+        };
         for rule in settings.allowed_tools.iter().chain(&settings.denied_tools) {
             if !rule.starts_with(|first: char| first.is_ascii_alphabetic()) {
                 return Err(format!("{rule:?} is not a Claude Code permission rule"));
@@ -197,7 +202,7 @@ impl TryFrom<ClaudeConfig> for ClaudeHandler {
                 "Claude executable is empty",
             ));
         }
-        let settings = ClaudeSettings::parse(&config.settings_toml).map_err(|reason| {
+        let settings = ClaudeSettings::of(&config).map_err(|reason| {
             refuse(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 format!("handler_settings: {reason}"),
@@ -3689,13 +3694,24 @@ mod tests {
         assert!(!argv.iter().any(|argument| argument == "--settings"));
     }
 
+    /// A configuration read from TOML text, as the Station reads a record's settings.
+    fn read_config(text: &str) -> Result<ClaudeConfig, String> {
+        let table: toml::Table = toml::from_str(text).map_err(|error| error.to_string())?;
+        let value = ai6::provider_settings::table_value(&table)?;
+        ClaudeConfig::from_value(&value).map_err(|error| error.to_string())
+    }
+
+    fn config(text: &str) -> ClaudeConfig {
+        read_config(text).expect("the settings are valid")
+    }
+
     #[test]
     fn an_agents_settings_change_the_list_and_a_tool_they_add_is_offered() {
-        let handler = ClaudeHandler::try_from(ClaudeConfig {
-            settings_toml: "allowed_tools = [\"WebFetch(domain:example.com)\", \"Skill\",                             \"mcp__docs\"]\ndenied_tools = [\"Bash(rm *)\"]\n"
-                .to_owned(),
-            ..ClaudeConfig::default()
-        })
+        let handler = ClaudeHandler::try_from(config(
+            "allowed_tools = [\"WebFetch(domain:example.com)\", \"Skill\", \"mcp__docs\"]
+denied_tools = [\"Bash(rm *)\"]
+",
+        ))
         .unwrap();
         let mut argv = Vec::new();
         add_field_tools(&mut argv, &BTreeMap::new(), &handler.settings, true);
@@ -3721,14 +3737,11 @@ mod tests {
 
     #[test]
     fn only_a_rule_beyond_the_default_list_weakens_a_session() {
-        let weakenings = |settings_toml: &str| {
-            ClaudeHandler::try_from(ClaudeConfig {
-                settings_toml: settings_toml.to_owned(),
-                ..ClaudeConfig::default()
-            })
-            .unwrap()
-            .weakenings()
-            .unwrap()
+        let weakenings = |text: &str| {
+            ClaudeHandler::try_from(config(text))
+                .unwrap()
+                .weakenings()
+                .unwrap()
         };
         assert!(weakenings("").is_empty());
         assert!(weakenings("denied_tools = [\"Bash\", \"Read\"]").is_empty());
@@ -3749,8 +3762,8 @@ mod tests {
     const DESK_ALLOWED: &str = "Read,Glob,Grep,Edit(/**),\
                                 TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
 
-    /// The tool flags of a start, then a resume, at `clearance` under `settings_toml`.
-    fn flags_at(clearance: &str, settings_toml: &str) -> Vec<(String, String, String)> {
+    /// The tool flags of a start, then a resume, at `clearance` under `text`.
+    fn flags_at(clearance: &str, text: &str) -> Vec<(String, String, String)> {
         let mut environment = cable_environment();
         environment.insert(
             "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
@@ -3759,8 +3772,7 @@ mod tests {
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-field-fixture".to_owned(),
-            settings_toml: settings_toml.to_owned(),
-            ..ClaudeConfig::default()
+            ..config(text)
         })
         .unwrap();
         let working_directory = std::env::current_dir()
@@ -3858,14 +3870,11 @@ mod tests {
             "the tool it names, and no other"
         );
         assert_eq!(flags[1], flags[0]);
-        let weakenings = |settings_toml: &str| {
-            ClaudeHandler::try_from(ClaudeConfig {
-                settings_toml: settings_toml.to_owned(),
-                ..ClaudeConfig::default()
-            })
-            .unwrap()
-            .weakenings()
-            .unwrap()
+        let weakenings = |text: &str| {
+            ClaudeHandler::try_from(config(text))
+                .unwrap()
+                .weakenings()
+                .unwrap()
         };
         assert_eq!(
             weakenings(settings),
@@ -4031,23 +4040,18 @@ mod tests {
 
     #[test]
     fn handler_settings_it_cannot_read_are_refused() {
-        for settings_toml in [
+        for text in [
             "allowed = [\"Bash\"]",
             "allowed_tools = \"Bash\"",
             "allowed_tools = [\"--dangerously-skip-permissions\"]",
             "denied_tools = [\"\"]",
         ] {
-            let error = ClaudeHandler::try_from(ClaudeConfig {
-                settings_toml: settings_toml.to_owned(),
-                ..ClaudeConfig::default()
-            })
-            .err()
-            .unwrap_or_else(|| panic!("{settings_toml} was accepted"));
-            assert_eq!(
-                error.status,
-                Status::GUATIAO_ERR_BAD_VALUE,
-                "{settings_toml}"
-            );
+            let refused = read_config(text).and_then(|config| {
+                ClaudeHandler::try_from(config)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            });
+            assert!(refused.is_err(), "{text} was accepted");
         }
     }
 

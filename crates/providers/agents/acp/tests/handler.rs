@@ -8,16 +8,26 @@ use ai6::directorates::m::identity::SessionId;
 use ai6::directorates::q::terminal::{AgentTerminal, TerminalBridge};
 use ai6::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart, AssistantMode};
 use ai6::directorates::section_00::assistant::{ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV};
+use ai6::guatiao::FromValue;
 use ai6::guatiao::library::Object;
 use ai6::station::plugins::Plugins;
 use ai6::{AgentEvent, AgentSession};
-use ai6_agent_acp::{AcpConfig, AcpHandler};
+use ai6_agent_acp::{AcpHandler, AcpSettings};
+
+/// The handler for settings written as TOML text, which the Station would read from a record.
+fn from_text(settings: &str) -> Result<AcpHandler, String> {
+    let table: toml::Table = toml::from_str(settings).map_err(|error| error.to_string())?;
+    let value = ai6::provider_settings::table_value(&table)?;
+    let settings = AcpSettings::from_value(&value).map_err(|error| error.to_string())?;
+    AcpHandler::try_from(settings).map_err(|error| error.to_string())
+}
 
 fn handler(extra: &str) -> AcpHandler {
     let fake = env!("CARGO_BIN_EXE_ai6-acp-fake-agent");
-    AcpHandler::try_from(AcpConfig {
-        settings_toml: format!("command = '{fake}'\n{extra}"),
-    })
+    from_text(&format!(
+        "command = '{fake}'
+{extra}"
+    ))
     .expect("the settings are valid")
 }
 
@@ -460,10 +470,7 @@ fn a_desk_session_starts_only_on_a_setting_reported_as_a_weakening() {
     assert_eq!(weakenings.len(), 1, "{weakenings:?}");
     assert!(weakenings[0].contains("unconfined_desk"), "{weakenings:?}");
     assert_eq!(handler("").weakenings().unwrap(), Vec::<String>::new());
-    let unset = AcpHandler::try_from(AcpConfig {
-        settings_toml: String::new(),
-    })
-    .unwrap();
+    let unset = from_text("").unwrap();
     assert_eq!(unset.weakenings().unwrap(), Vec::<String>::new());
 }
 
@@ -489,11 +496,7 @@ fn answer_only_and_assistant_sessions_are_not_refused_at_desk() {
 
 #[test]
 fn settings_are_validated_when_the_handler_loads() {
-    let build = |settings: &str| {
-        AcpHandler::try_from(AcpConfig {
-            settings_toml: settings.to_owned(),
-        })
-    };
+    let build = from_text;
     assert!(
         build("").is_ok(),
         "defaults build; start explains what is missing"

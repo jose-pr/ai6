@@ -47,11 +47,13 @@ AI6 installs no adapter. These exist and are pinned by you:
 
 ### Settings
 
-Unknown keys are refused when the handler loads; every number is a setting.
+The handler declares these as its own configuration, so an unknown key is refused naming `acp` and the
+key; every number is a setting. They can also be set for every Agent in `[providers.acp]` of the
+`station` record.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `command` | required | The program that speaks ACP on standard input and output. |
+| `command` | none; a Session needs one | The program that speaks ACP on standard input and output. |
 | `args` | `[]` | Its arguments. |
 | `env` | `{}` | Environment added under the Session's own; the Session wins. |
 | `meta` | `{}` | A table passed beside AI6's launch data as `session/new._meta`, for an adapter's options (`claudeCode.options`). |

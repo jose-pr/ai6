@@ -24,11 +24,13 @@ milliseconds.
 | `tail_line_bytes` | 512 | Bytes of each of those lines |
 | `close_wait_ms` | 2000 | How long `close` waits for Claude Code to have exited |
 | `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
-| `settings_toml` | empty | The Agent's `handler_settings` as TOML; the Station fills it in |
+| `allowed_tools` | empty | Permission rules added to the allow list; an Agent sets them in `handler_settings` |
+| `denied_tools` | empty | Rules added to the deny list; a deny rule beats an allow rule |
 
-A Station sets them in `[providers.claude]` of its `station` record. The keys of `settings_toml`
-are `allowed_tools` and `denied_tools`, lists of Claude Code permission rules; an unknown key, or
-a rule that does not start with a letter, makes the build fail with `GUATIAO_ERR_BAD_VALUE`.
+A Station sets them in `[providers.claude]` of its `station` record. `allowed_tools` and `denied_tools`
+are lists of Claude Code permission rules; an unknown key is refused by the configuration schema,
+naming `claude` and the key, and a rule that does not start with a letter makes the build fail
+with `GUATIAO_ERR_BAD_VALUE`.
 
 ## `ClaudeHandler`
 

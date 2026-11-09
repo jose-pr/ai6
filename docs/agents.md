@@ -19,8 +19,8 @@ under the `strict` profile ([Stations](stations.md#provider-libraries-pins-and-p
 The `acp` handler (`ai6-agent-acp`) runs any agent that speaks the Agent Client Protocol: the
 Claude and Codex adapters, `gemini --acp`, or your own. An Agent configures it with a
 `handler_settings` table (`command`, `args`, `env`, `meta`, option ids and timeouts); any
-handler's settings reach its provider as TOML, which the provider validates and refuses unknown
-keys in. See [the Agent Client Protocol](acp.md).
+handler's settings reach its provider as values of the type the provider declares, whose schema
+refuses a key it does not know, naming the provider and the key. See [the Agent Client Protocol](acp.md).
 
 The `antigravity` handler (`ai6-agent-antigravity`) runs the [Antigravity
 CLI](https://antigravity.google/docs/cli/headless), `agy`, through its stream-json mode; see

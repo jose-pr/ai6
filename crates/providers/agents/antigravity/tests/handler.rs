@@ -18,6 +18,13 @@ use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue};
 use ai6::{AgentEvent, AgentMessage, AgentSession};
 use ai6_agent_antigravity::{AntigravityConfig, AntigravityHandler};
+
+/// A configuration read from TOML text, as the Station reads a record's settings.
+fn read_config(text: &str) -> Result<AntigravityConfig, String> {
+    let table: toml::Table = toml::from_str(text).map_err(|error| error.to_string())?;
+    let value = ai6::provider_settings::table_value(&table)?;
+    AntigravityConfig::from_value(&value).map_err(|error| error.to_string())
+}
 use serde_json::{Value, json};
 
 const CONV: &str = "00000000-0000-4000-8000-00000000c0de";
@@ -300,11 +307,7 @@ impl TerminalSession for FakeSession {
 }
 
 fn handler(settings: &str) -> AntigravityHandler {
-    AntigravityHandler::try_from(AntigravityConfig {
-        settings_toml: settings.to_owned(),
-        ..AntigravityConfig::default()
-    })
-    .unwrap()
+    AntigravityHandler::try_from(read_config(settings).unwrap()).unwrap()
 }
 
 /// A working directory beside which the Session's own directory can be made.
@@ -736,9 +739,8 @@ fn settings_that_are_unknown_malformed_or_decide_permissions_are_refused() {
         "[settings]\ntoolPermission = \"always-proceed\"\n",
         "[settings]\npermissions = {}\n",
     ] {
-        let built = AntigravityHandler::try_from(AntigravityConfig {
-            settings_toml: settings.to_owned(),
-            ..AntigravityConfig::default()
+        let built = read_config(settings).and_then(|config| {
+            AntigravityHandler::try_from(config).map_err(|error| error.to_string())
         });
         assert!(built.is_err(), "{settings}");
     }

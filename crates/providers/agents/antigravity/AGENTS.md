@@ -33,7 +33,10 @@ record.
 | `context_file_bytes` | 1048576 | Bytes of an assistant's `context_file`; a larger one is refused |
 | `gate_timeout_secs` | 60 | agy's timeout for the green ink hook; past it the command does not run |
 | `mcp_timeout_secs` | 0 | agy's `timeoutSeconds` for AI6's MCP servers: positive replaces its limits, negative turns them off, 0 leaves 300 s to connect and 180 s a call (its documentation) |
-| `settings_toml` | empty | The Agent's `handler_settings` as TOML; the Station fills it in |
+| `allowed_tools`, `denied_tools` | empty | Rules added to the allow and deny lists; an Agent sets them in `handler_settings` |
+| `settings` | empty | Further `settings.json` keys for the Session's `--settings`, never the reserved ones |
+| `auto_update` | false | Lets agy update itself while a Session starts |
+| `limit_phrases` | agy's quota wording | What marks a failed turn as a quota limit |
 
 ## `handler_settings`
 

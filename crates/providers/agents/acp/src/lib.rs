@@ -25,99 +25,96 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{AgentSession, HarnessStdio, ModelInfo, ModelListing};
 use coqui_acp::lines::{Diagnostics, over_io};
 use coqui_acp::{Answer, DescribeLimits};
-use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-/// The configuration the Station gives every handler: the Agent's `handler_settings` as TOML.
+/// What an `acp` handler is configured with, in the `station` record's `[providers.acp]` and
+/// an Agent's `handler_settings`. Unknown keys are refused.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
-#[map(crate = ::ai6::guatiao)]
-pub struct AcpConfig {
-    /// The Agent's `handler_settings` table, as TOML text; empty until an Agent sets it.
-    #[map(default = String::new())]
-    pub settings_toml: String,
-}
-
-/// What an Agent's `handler_settings` say about the agent to run. Unknown keys are refused.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
 pub struct AcpSettings {
-    /// The program that speaks ACP on its standard input and output.
-    pub command: String,
+    /// The program that speaks ACP on its standard input and output; an Agent sets it, and
+    /// without one the handler starts no Session.
+    pub command: Option<String>,
     /// Its arguments.
-    #[serde(default)]
+    #[map(default)]
     pub args: Vec<String>,
     /// Environment added under the Session's own (the Session wins).
-    #[serde(default)]
+    #[map(default)]
     pub env: BTreeMap<String, String>,
     /// A table passed beside AI6's launch data as `session/new._meta` (an adapter's options).
-    #[serde(default)]
+    #[map(with = ::ai6::guatiao_serde::adapt::object, default)]
     pub meta: Map<String, Value>,
     /// The config option id for the model; default: the option of category `model`, else `model`.
-    #[serde(default)]
     pub model_option: Option<String>,
     /// The config option id for the effort; default: the option of category `thought_level`,
     /// else `effort`.
-    #[serde(default)]
     pub effort_option: Option<String>,
     /// The ACP version spoken; only `v1`.
-    #[serde(default = "v1")]
+    #[map(default = String::from("v1"))]
     pub protocol: String,
     /// How long `initialize` may take, in milliseconds.
-    #[serde(default = "initialize_timeout")]
+    #[map(default = 20_000)]
     pub initialize_timeout_ms: u64,
     /// How long a request other than a prompt may take.
-    #[serde(default = "request_timeout")]
+    #[map(default = 30_000)]
     pub request_timeout_ms: u64,
     /// How long the first prompt of a façade may take to start.
-    #[serde(default = "start_timeout")]
+    #[map(default = 60_000)]
     pub start_timeout_ms: u64,
     /// How long close waits for the agent before its process is ended.
-    #[serde(default = "close_grace")]
+    #[map(default = 2_000)]
     pub close_grace_ms: u64,
     /// How many of the agent's last non-protocol output lines are kept to explain its death.
-    #[serde(default = "diagnostic_lines")]
+    #[map(default = 20)]
     pub diagnostic_lines: usize,
     /// How long, in milliseconds, the report of a lost agent waits for its exit status.
-    #[serde(default = "exit_wait")]
+    #[map(default = 1_000)]
     pub exit_wait_ms: i64,
     /// How often, in milliseconds, a silent agent's output is checked for a stop request.
-    #[serde(default = "poll")]
+    #[map(default = 200)]
     pub poll_ms: i64,
     /// Starts a `desk` Session with whatever tools the agent has: AI6 does not choose an ACP
     /// agent's tools, so it cannot keep commands from one, and without this the Session is
     /// refused. Reported as a weakening.
-    #[serde(default)]
+    #[map(default)]
     pub unconfined_desk: bool,
     /// What marks a failed turn as a provider's usage or rate limit, found in its error without
     /// regard to case: such a Session stops as limited rather than failed, so its route or account
     /// is passed over until the limit is likely over.
-    #[serde(default = "limit_phrases")]
+    #[map(default = limit_phrases())]
     pub limit_phrases: Vec<String>,
     /// UTF-8 bytes of agent text gathered before they are delivered mid-message.
-    #[serde(default = "text_flush")]
+    #[map(default = DEFAULT_TEXT_FLUSH_BYTES)]
     pub text_flush_bytes: usize,
     /// The tool calls whose kind is kept, by which a later message about one that does not say
     /// its kind is judged; past it the oldest is forgotten, and such a message is of unknown kind.
-    #[serde(default = "tool_kinds")]
+    #[map(default = DEFAULT_MAX_TOOL_KINDS)]
     pub max_tool_kinds: usize,
     /// What asking the agent for its models, before any Session, keeps of its answer: options.
-    #[serde(default = "describe_options")]
+    #[map(default = DescribeLimits::new().options)]
     pub describe_options: usize,
     /// Values kept of each option.
-    #[serde(default = "describe_values")]
+    #[map(default = DescribeLimits::new().values)]
     pub describe_values: usize,
     /// Modes kept.
-    #[serde(default = "describe_modes")]
+    #[map(default = DescribeLimits::new().modes)]
     pub describe_modes: usize,
     /// Sessions kept of the agent's list, across its pages.
-    #[serde(default = "describe_sessions")]
+    #[map(default = DescribeLimits::new().sessions)]
     pub describe_sessions: usize,
     /// UTF-8 bytes past which an identifier is dropped and other text cut.
-    #[serde(default = "describe_text")]
+    #[map(default = DescribeLimits::new().text)]
     pub describe_text_bytes: usize,
     /// Pages of the agent's session list asked for.
-    #[serde(default = "describe_pages")]
+    #[map(default = DescribeLimits::new().pages)]
     pub describe_pages: usize,
+}
+
+impl AcpSettings {
+    /// The program to run; empty until an Agent sets one.
+    fn command(&self) -> &str {
+        self.command.as_deref().unwrap_or_default()
+    }
 }
 
 /// How the Grok CLI words a limit (`Rate limited`, with xAI's `subscription:free-usage-exhausted`;
@@ -138,55 +135,6 @@ fn limit_phrases() -> Vec<String> {
     .to_vec()
 }
 
-fn v1() -> String {
-    "v1".to_owned()
-}
-fn initialize_timeout() -> u64 {
-    20_000
-}
-fn request_timeout() -> u64 {
-    30_000
-}
-fn start_timeout() -> u64 {
-    60_000
-}
-fn close_grace() -> u64 {
-    2_000
-}
-fn diagnostic_lines() -> usize {
-    20
-}
-fn exit_wait() -> i64 {
-    1_000
-}
-fn poll() -> i64 {
-    200
-}
-fn text_flush() -> usize {
-    DEFAULT_TEXT_FLUSH_BYTES
-}
-fn tool_kinds() -> usize {
-    DEFAULT_MAX_TOOL_KINDS
-}
-fn describe_options() -> usize {
-    DescribeLimits::new().options
-}
-fn describe_values() -> usize {
-    DescribeLimits::new().values
-}
-fn describe_modes() -> usize {
-    DescribeLimits::new().modes
-}
-fn describe_sessions() -> usize {
-    DescribeLimits::new().sessions
-}
-fn describe_text() -> usize {
-    DescribeLimits::new().text
-}
-fn describe_pages() -> usize {
-    DescribeLimits::new().pages
-}
-
 /// Runs an ACP agent for each Session.
 #[derive(Provider)]
 #[provider(
@@ -194,7 +142,7 @@ fn describe_pages() -> usize {
     id = "acp",
     name = "Agent Client Protocol agent",
     crate = ::ai6::guatiao,
-    config = AcpConfig
+    config = AcpSettings
 )]
 pub struct AcpHandler {
     settings: Option<AcpSettings>,
@@ -204,16 +152,21 @@ fn refuse(message: impl std::fmt::Display) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &message.to_string())
 }
 
-impl TryFrom<AcpConfig> for AcpHandler {
+impl TryFrom<AcpSettings> for AcpHandler {
     type Error = ProviderError;
 
-    fn try_from(config: AcpConfig) -> Result<Self, Self::Error> {
-        if config.settings_toml.trim().is_empty() {
+    fn try_from(settings: AcpSettings) -> Result<Self, Self::Error> {
+        let Some(command) = &settings.command else {
+            if !settings.args.is_empty()
+                || !settings.env.is_empty()
+                || !settings.meta.is_empty()
+                || settings.unconfined_desk
+            {
+                return Err(refuse("acp handler settings: `command` is required"));
+            }
             return Ok(Self { settings: None });
-        }
-        let settings: AcpSettings = toml::from_str(&config.settings_toml)
-            .map_err(|error| refuse(format!("acp handler settings: {error}")))?;
-        if settings.command.trim().is_empty() {
+        };
+        if command.trim().is_empty() {
             return Err(refuse("acp handler settings: `command` is empty"));
         }
         if settings.protocol != "v1" {
@@ -353,7 +306,7 @@ impl AcpHandler {
         }
         let mut environment = settings.env.clone();
         environment.extend(launch.environment.clone());
-        let mut argv = vec![settings.command.clone()];
+        let mut argv = vec![settings.command.clone().unwrap_or_default()];
         argv.extend(settings.args.clone());
         let spec = Spec {
             argv,
@@ -466,7 +419,7 @@ impl AcpHandler {
         let settings = self.settings().map_err(|error| error.to_string())?;
         let mut merged = settings.env.clone();
         merged.extend(environment);
-        let mut child = Command::new(&settings.command)
+        let mut child = Command::new(settings.command())
             .args(&settings.args)
             .env_clear()
             .envs(&merged)
@@ -475,13 +428,13 @@ impl AcpHandler {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|error| format!("{} could not be started: {error}", settings.command))?;
+            .map_err(|error| format!("{} could not be started: {error}", settings.command()))?;
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
                 "{} has no standard input or output",
-                settings.command
+                settings.command()
             ));
         };
         let described = over_io(stdout, stdin, 0, UNBOUNDED_LINE_BYTES)
@@ -531,7 +484,7 @@ impl AgentHandler for AcpHandler {
         Ok(self
             .settings
             .as_ref()
-            .map(|settings| settings.command.clone()))
+            .map(|settings| settings.command().to_owned()))
     }
 
     /// What the agent's model option offers, asked before any Session; an agent that does not
@@ -623,10 +576,9 @@ mod route_tests {
     use super::*;
 
     fn handler(settings: &str) -> AcpHandler {
-        AcpHandler::try_from(AcpConfig {
-            settings_toml: settings.to_owned(),
-        })
-        .unwrap()
+        let table: toml::Table = toml::from_str(settings).unwrap();
+        let value = ai6::provider_settings::table_value(&table).unwrap();
+        AcpHandler::try_from(AcpSettings::from_value(&value).unwrap()).unwrap()
     }
 
     #[test]

@@ -22,7 +22,6 @@ use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_P
 use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use files::SessionFiles;
@@ -30,7 +29,7 @@ use session::{AntigravitySession, Respawn, Restriction};
 
 /// Antigravity CLI AgentHandler configuration.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
-#[map(crate = ::ai6::guatiao)]
+#[map(crate = ::ai6::guatiao, deny_unknown_fields)]
 pub struct AntigravityConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("agy"))]
@@ -66,10 +65,26 @@ pub struct AntigravityConfig {
     /// them off, and 0 leaves its own, 300 s to connect and 180 s for a call. Default 0.
     #[map(default = 0)]
     pub mcp_timeout_secs: i64,
-    /// The Agent's `handler_settings` table as TOML, which the Station fills in. Empty keeps every
-    /// default.
-    #[map(default = String::new())]
-    pub settings_toml: String,
+    /// agy permission rules (`command(git)`, `read_url(*)`) added to the allow list, or the names
+    /// of tools added to what a Mission's Session is offered (`search_web`). Answer-only and
+    /// assistant Sessions ignore them.
+    #[map(default)]
+    pub allowed_tools: Vec<String>,
+    /// agy permission rules added to the deny list, or the names of tools taken out of what a
+    /// Mission's Session is offered; a deny rule beats an allow rule.
+    #[map(default)]
+    pub denied_tools: Vec<String>,
+    /// Further `settings.json` keys for this Session's `--settings` (`modelProvider`), never those
+    /// that decide what a Session may do.
+    #[map(with = ::ai6::guatiao_serde::adapt::object, default)]
+    pub settings: serde_json::Map<String, Value>,
+    /// Lets agy update itself while a Session starts; off by default, so that a Session runs the
+    /// CLI its fixtures were recorded from until an operator updates it.
+    #[map(default)]
+    pub auto_update: bool,
+    /// What marks a failed turn as a quota limit, found in its error without regard to case.
+    #[map(default = limit_phrases())]
+    pub limit_phrases: Vec<String>,
 }
 
 impl Default for AntigravityConfig {
@@ -85,34 +100,32 @@ impl Default for AntigravityConfig {
             context_file_bytes: 1024 * 1024,
             gate_timeout_secs: 60,
             mcp_timeout_secs: 0,
-            settings_toml: String::new(),
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            settings: serde_json::Map::new(),
+            auto_update: false,
+            limit_phrases: limit_phrases(),
         }
     }
 }
 
 /// What an Agent's `handler_settings` change. Unknown keys are refused.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone)]
 struct AntigravitySettings {
     /// agy permission rules (`command(git)`, `read_url(*)`) added to the allow list, or the names
     /// of tools added to what a Mission's Session is offered (`search_web`). Answer-only and
     /// assistant Sessions ignore them.
-    #[serde(default)]
     allowed_tools: Vec<String>,
     /// agy permission rules added to the deny list, or the names of tools taken out of what a
     /// Mission's Session is offered; a deny rule beats an allow rule.
-    #[serde(default)]
     denied_tools: Vec<String>,
     /// Further `settings.json` keys for this Session's `--settings` (`modelProvider`), never those
     /// that decide what a Session may do ([`RESERVED_SETTINGS`]).
-    #[serde(default)]
     settings: serde_json::Map<String, Value>,
     /// Lets agy update itself while a Session starts; off by default, so that a Session runs the
     /// CLI its fixtures were recorded from until an operator updates it.
-    #[serde(default)]
     auto_update: bool,
     /// What marks a failed turn as a quota limit, found in its error without regard to case.
-    #[serde(default = "limit_phrases")]
     limit_phrases: Vec<String>,
 }
 
@@ -143,8 +156,14 @@ fn limit_phrases() -> Vec<String> {
 }
 
 impl AntigravitySettings {
-    fn parse(toml_text: &str) -> Result<Self, String> {
-        let settings: Self = toml::from_str(toml_text).map_err(|error| error.to_string())?;
+    fn of(config: &AntigravityConfig) -> Result<Self, String> {
+        let settings = Self {
+            allowed_tools: config.allowed_tools.clone(),
+            denied_tools: config.denied_tools.clone(),
+            settings: config.settings.clone(),
+            auto_update: config.auto_update,
+            limit_phrases: config.limit_phrases.clone(),
+        };
         for rule in settings.allowed_tools.iter().chain(&settings.denied_tools) {
             if !valid_rule(rule) {
                 return Err(format!(
@@ -262,7 +281,7 @@ impl TryFrom<AntigravityConfig> for AntigravityHandler {
                 "the agy executable is empty",
             ));
         }
-        let settings = AntigravitySettings::parse(&config.settings_toml).map_err(|reason| {
+        let settings = AntigravitySettings::of(&config).map_err(|reason| {
             refuse(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 format!("handler_settings: {reason}"),

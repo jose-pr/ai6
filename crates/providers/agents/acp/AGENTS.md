@@ -8,10 +8,10 @@ Client Protocol SDK (`agent-client-protocol`), `futures`, `serde`, `serde_json` 
 Contains no `unsafe` code. Also builds the test binary `ai6-acp-fake-agent`.
 
 ```rust
-pub struct AcpConfig { pub settings_toml: String }   // Guatiao config; "" until an Agent sets handler_settings
-#[derive(Deserialize)] #[serde(deny_unknown_fields)]
+// The provider's Guatiao `config` (Schema, FromValue, ToValue; unknown keys refused): the `station`
+// record's `[providers.acp]` and an Agent's `handler_settings`.
 pub struct AcpSettings {
-    pub command: String, pub args: Vec<String>, pub env: BTreeMap<String, String>,
+    pub command: Option<String>, pub args: Vec<String>, pub env: BTreeMap<String, String>,
     pub meta: Map<String, Value>, pub model_option: Option<String>, pub effort_option: Option<String>,
     pub protocol: String,                       // "v1" only
     pub initialize_timeout_ms: u64,             // 20000
@@ -36,9 +36,9 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
                                                  // program() = the settings' `command`, None without settings
 ```
 
-- `TryFrom<AcpConfig>`: empty settings build a handler whose `start` fails naming
-  `handler_settings`; otherwise the TOML is parsed (unknown keys, an empty `command` and a
-  `protocol` other than `v1` are refused).
+- `TryFrom<AcpSettings>`: settings with no `command` build a handler whose `start` fails naming
+  `handler_settings` (`args`, `env`, `meta` or `unconfined_desk` without one are refused, as are an
+  empty `command` and a `protocol` other than `v1`).
 - `start`/`resume` spawn `command args` through the given terminal with the settings' `env` under
   the Session's environment, then `AcpSession::connect` (see `ai6::directorates::section_00::acp`).
   The first prompt is `initial_context`, a read-only notice for answer-only/assistant Sessions,
