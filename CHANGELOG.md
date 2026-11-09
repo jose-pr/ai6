@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office on the web: Moneypenny's Pop out opens her chat in a browser window of its own, a second copy
+  of the app on the same conversation, draft and theme (a `BroadcastChannel` between the two pages). A
+  blocked pop-up says so; closing or reloading either page brings the chat back. `docs/assistant.md`.
+- Moneypenny's `/` commands: the composer's menu lists her skills and what her harness announced
+  (`GET /v1/user/moneypenny/commands`, `EVENT_COMMANDS`, `ai6::AssistantCommand`,
+  `skill_summary`); `/name args` runs a skill of hers, and an unknown name goes as text with a notice.
 - Watches: a standing Session per scope (`m`, `operation:<codename>`, `station:<id>`), configured
   as `[watch.<scope>]` (the `watch` family: `agent`, `operation`, `wake_every`,
   `max_turns_per_hour`, `max_events_per_turn`, `max_waiting_events`, `turn_timeout`, `lease`). The

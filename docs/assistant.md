@@ -726,6 +726,43 @@ and its own bundled ones: [Codex skills](https://learn.chatgpt.com/docs/build-sk
 Codex the Station installs none, tells
 her skills are unavailable and logs why; a person who needs skills runs on Claude Code.
 
+### Running a skill with `/`
+
+Typing `/` at the start of a message in the chat opens a menu of what she takes: each of her
+skills, with its description and `argument-hint`, and the commands her harness announced for
+this conversation. It filters as you type (names that start with the word first, then names and
+descriptions that contain it), the arrow keys move, Enter or Tab or a click inserts `/name `,
+and Escape closes it. Sending `/charts last week` runs the skill: the conversation shows what
+was typed, and her harness is told the person ran her skill `ai6:charts` with those arguments,
+so she calls it with the Skill tool. A name the menu does not list is sent as plain text, is
+not run, and the chat says so under the message.
+
+![The menu in the preview, which lists sample commands](assets/outer-office/commands-menu.png)
+
+![A name the menu does not list, sent as text with a notice](assets/outer-office/commands-unknown.png)
+
+The menu reads `GET /v1/user/moneypenny/commands[?conversation=ID]`, as the signed-in person:
+
+```json
+{"commands": [
+  {"name": "charts", "description": "Draws charts.", "argument_hint": "[period]", "source": "skill"},
+  {"name": "compact", "description": "Shrinks the context.", "argument_hint": null, "source": "harness"}
+]}
+```
+
+- **Skills** are the catalog less what the person's group and person tables leave out
+  ([above](#her-skills)), less any skill whose front matter sets `user-invocable: false` (only
+  she may call it), and none at all when every route of her Agent is Codex's, which installs no
+  skill. A skill and a harness command of one name show once, as the skill. Their text comes
+  from each `SKILL.md`, read when the menu is asked for, so the directories must be readable by
+  Universal Exports as they must be for the roster check.
+- **Harness commands** are those a Station reported for the conversation in an event of kind
+  `commands` (`EVENT_COMMANDS`, whose `commands` are `{name, description, input_hint}`), the
+  whole list each time. The route returns them only for the person's own conversation
+  (`404` for another's) and drops names with anything but letters, digits and `-_:.`. No shipped
+  handler sends this event yet: an ACP agent's `available_commands_update` is read in the ACP
+  library, outside this repository, so today the menu shows her skills only.
+
 ## Cables
 
 She can talk to Agents for you over [Cables](agents.md#cables), in the Operations where you
