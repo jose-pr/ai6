@@ -61,11 +61,7 @@ fn recorder(told: &Told) -> impl Fn(&str, &str, &str) -> Result<(), String> + '_
     }
 }
 
-fn poll(
-    registry: &FileRegistry,
-    source: &Items,
-    intake: &Intake<'_>,
-) -> PollSummary {
+fn poll(registry: &FileRegistry, source: &Items, intake: &Intake<'_>) -> PollSummary {
     poll_source(
         registry,
         "station-a",
@@ -95,7 +91,14 @@ fn setup() -> SourceSetup {
 fn decide(registry: &FileRegistry, report: &str, verdict: ItemVerdict, by: &str) {
     decide_item(
         registry,
-        &ItemDecision::new("G", report, verdict, "from the item", by, unix_seconds() as f64),
+        &ItemDecision::new(
+            "G",
+            report,
+            verdict,
+            "from the item",
+            by,
+            unix_seconds() as f64,
+        ),
     )
     .unwrap();
 }
@@ -130,7 +133,10 @@ fn a_new_item_is_a_report_the_watch_is_told_of_and_no_brief_exists() {
     assert_eq!(notice["source_item"]["change"], "new");
     assert_eq!(notice["source_item"]["report"], found[0].id.as_str());
     assert_eq!(notice["source_item"]["item"], "o/r#1");
-    assert_eq!(notice["source_item"]["url"], "https://example.invalid/o/r#1");
+    assert_eq!(
+        notice["source_item"]["url"],
+        "https://example.invalid/o/r#1"
+    );
 }
 
 #[test]
@@ -198,11 +204,19 @@ fn a_duplicate_and_a_no_action_leave_no_brief_and_record_the_decision() {
         },
         "watch:operation:G",
     );
-    decide(&registry, &id("o/r#2"), ItemVerdict::NoAction, "watch:operation:G");
+    decide(
+        &registry,
+        &id("o/r#2"),
+        ItemVerdict::NoAction,
+        "watch:operation:G",
+    );
     let polled = setup();
     let queued = settle_items(&registry, "station-a", "G", &[&polled], &Intake::held());
     assert_eq!(queued, 0);
-    assert!(registry.list_new().unwrap().is_empty(), "no Mission, no brief");
+    assert!(
+        registry.list_new().unwrap().is_empty(),
+        "no Mission, no brief"
+    );
     for report in reports(&registry) {
         assert_eq!(report.state, ReportState::Closed);
     }
@@ -282,7 +296,10 @@ fn with_no_watch_the_items_wait_and_a_persons_decision_applies() {
     poll(&registry, &source, &intake);
     poll(&registry, &source, &intake);
     let polled = setup();
-    assert_eq!(settle_items(&registry, "station-a", "G", &[&polled], &intake), 0);
+    assert_eq!(
+        settle_items(&registry, "station-a", "G", &[&polled], &intake),
+        0
+    );
     assert!(
         registry.list_new().unwrap().is_empty(),
         "nothing becomes a Mission by itself"
@@ -292,7 +309,10 @@ fn with_no_watch_the_items_wait_and_a_persons_decision_applies() {
     assert_eq!(open[0].state, ReportState::Open);
 
     decide(&registry, &open[0].id, ItemVerdict::Mission, "person-1");
-    assert_eq!(settle_items(&registry, "station-a", "G", &[&polled], &intake), 1);
+    assert_eq!(
+        settle_items(&registry, "station-a", "G", &[&polled], &intake),
+        1
+    );
     assert_eq!(registry.list_new().unwrap().len(), 1);
     let audit = registry
         .audit_records()

@@ -16,7 +16,7 @@ use crate::directorates::m::memories::fenced;
 use crate::directorates::m::mission::MissionState;
 use crate::directorates::registry::decisions::{self, VerifyingDecision};
 use crate::directorates::registry::reports::{
-    Report, ReportFilter, ReportFiler, ReportScope, ReportState,
+    Report, ReportFiler, ReportFilter, ReportScope, ReportState,
 };
 use crate::directorates::registry::sessions::{OutcomeVerdict, SessionRecord};
 use crate::directorates::registry::source_items::{self, ITEM_KIND, ItemDecision, ItemVerdict};

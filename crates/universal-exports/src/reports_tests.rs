@@ -470,7 +470,10 @@ async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audi
         fixture.served.viewer.clone(),
     );
     let registry = &fixture.served.registry;
-    let (first, second) = (item_report(registry, "o/r#1"), item_report(registry, "o/r#2"));
+    let (first, second) = (
+        item_report(registry, "o/r#1"),
+        item_report(registry, "o/r#2"),
+    );
     let path = |id: &str| format!("/v1/reports/{id}/assessment");
     let body = json!({"assessment": "mission", "reason": "a real fault"});
 
@@ -495,7 +498,11 @@ async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audi
             Some(json!({"assessment": "duplicate", "reason": "same"})),
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "a duplicate names what: {said}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a duplicate names what: {said}"
+    );
 
     let (status, decided) = fixture
         .call(&operator, Method::PUT, &path(&first), Some(body.clone()))

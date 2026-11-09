@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use super::backend::RegistryBackend;
 use super::logbook::Severity;
 use super::reports::{
-    Report, ReportAssessment, ReportFilter, ReportFiler, ReportLink, ReportLinkKind,
+    Report, ReportAssessment, ReportFiler, ReportFilter, ReportLink, ReportLinkKind,
     ReportResolution, ReportScope, ReportState,
 };
 use super::sources::SourceItem;
@@ -153,8 +153,8 @@ pub fn offer(
         .assessment
         .as_ref()
         .is_some_and(|assessment| assessment.verdict == "later");
-    let reopened = stored.state == ReportState::Closed
-        || (stored.state == ReportState::Assessed && deferred);
+    let reopened =
+        stored.state == ReportState::Closed || (stored.state == ReportState::Assessed && deferred);
     let report = store.change_report(&id, &mut |report| {
         report.title = title.clone();
         report.text = text.clone();
@@ -178,9 +178,8 @@ pub fn offer(
             target: format!("{id} changed"),
             at: now,
         })?;
-        let _ = store.record_event(
-            &TimelineEvent::new("report", "reopened", operation, now).actor(by),
-        );
+        let _ =
+            store.record_event(&TimelineEvent::new("report", "reopened", operation, now).actor(by));
     }
     Ok(Offered::Changed { report, reopened })
 }
@@ -314,10 +313,7 @@ pub fn item_report(store: &dyn RegistryBackend, operation: &str, id: &str) -> io
 /// `NotFound` for no such item, `InvalidInput` for one already decided or for a decision without
 /// its reason, a duplicate that names nothing or a time that is not ahead; an audit that cannot
 /// be written, or a Registry failure.
-pub fn decide_item(
-    store: &dyn RegistryBackend,
-    decision: &ItemDecision<'_>,
-) -> io::Result<Report> {
+pub fn decide_item(store: &dyn RegistryBackend, decision: &ItemDecision<'_>) -> io::Result<Report> {
     let stored = item_report(store, decision.operation, decision.report)?;
     if stored.state != ReportState::Open {
         return Err(invalid(format!(
@@ -605,10 +601,7 @@ mod tests {
             Some("duplicate of G-github-o_r_9")
         );
         assert!(
-            closed
-                .links
-                .iter()
-                .any(|link| link.id == "G-github-o_r_9"),
+            closed.links.iter().any(|link| link.id == "G-github-o_r_9"),
             "the duplicate names what it repeats"
         );
         let none = decide(&b, ItemVerdict::NoAction, "a question, not work").unwrap();
@@ -622,7 +615,10 @@ mod tests {
         // Decided once: a second decision on a closed item is refused.
         let again = decide(&a, ItemVerdict::NoAction, "again").unwrap_err();
         assert_eq!(again.kind(), io::ErrorKind::InvalidInput);
-        assert!(decide(&c, ItemVerdict::NoAction, " ").is_err(), "needs a reason");
+        assert!(
+            decide(&c, ItemVerdict::NoAction, " ").is_err(),
+            "needs a reason"
+        );
         assert!(
             decide(&c, ItemVerdict::Later { until: 100.0 }, "soon").is_err(),
             "later needs a time ahead"

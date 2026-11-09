@@ -31,8 +31,8 @@ use crate::directorates::medical::exposure::Restriction;
 use crate::directorates::registry::approvals::{ApprovalRequest, ApprovalStatus, Decision};
 use crate::directorates::registry::bona_fides::Origin;
 use crate::directorates::registry::logbook::Severity;
-use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::mission_ids::MissionEntry;
+use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::store::{
     AuditRecord, Brief, DEFAULT_LEASE, Lease, MissionProposal,
 };

@@ -456,8 +456,7 @@ mod tests {
         assert_eq!(reports.len(), 1, "one Report, however many rounds");
         assert!(
             reports[0].links.iter().any(|link| link.id == request.id
-                && link.kind
-                    == crate::directorates::registry::reports::ReportLinkKind::Decision),
+                && link.kind == crate::directorates::registry::reports::ReportLinkKind::Decision),
             "{:?}",
             reports[0].links
         );

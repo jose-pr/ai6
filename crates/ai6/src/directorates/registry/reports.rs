@@ -20,8 +20,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use super::limits::ReportLimits;
-use super::sources::SourceItem;
 use super::logbook::{Severity, station_key};
+use super::sources::SourceItem;
 use super::store::{FileRegistry, invalid_data, validate_registry_key, validate_station_id};
 use crate::directorates::m::reports::ReportSettings;
 

@@ -79,7 +79,9 @@ fn settle(state: &DaemonState, tag: &str) -> usize {
 fn decision_for(item: &str) -> Value {
     match item {
         "o/r#1" => json!({ "assessment": "mission", "reason": "a real fault" }),
-        "o/r#2" => json!({ "assessment": "duplicate", "of": "G-github-o_r_9", "reason": "the same" }),
+        "o/r#2" => {
+            json!({ "assessment": "duplicate", "of": "G-github-o_r_9", "reason": "the same" })
+        }
         "o/r#3" => json!({ "assessment": "no_action", "reason": "a question, not work" }),
         _ => json!({ "assessment": "later", "wait_seconds": 3600, "reason": "after the release" }),
     }
@@ -224,7 +226,10 @@ async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
     for name in ["source_items", "source_item", "assess_report"] {
         assert!(tools.iter().any(|tool| tool == name), "{name}: {tools:?}");
     }
-    assert!(state.intake.list_new().unwrap().is_empty(), "deciding queues nothing itself");
+    assert!(
+        state.intake.list_new().unwrap().is_empty(),
+        "deciding queues nothing itself"
+    );
 
     // The duplicate and the no-action leave no Mission and record why.
     let by_item = |id: &str| {
@@ -292,7 +297,11 @@ async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
         NOTICES.load(Ordering::SeqCst) > notices
     })
     .await;
-    assert!(state.intake.list_new().unwrap()[0].body.contains("on macOS"));
+    assert!(
+        state.intake.list_new().unwrap()[0]
+            .body
+            .contains("on macOS")
+    );
     assert_eq!(reports(&state, tag).len(), 4, "still one Report per item");
     watches::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);

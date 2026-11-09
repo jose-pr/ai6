@@ -333,7 +333,11 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
         .reports(&crate::directorates::registry::reports::ReportFilter::all().of_kind("evidence"))
         .unwrap();
     assert_eq!(readbacks.len(), 1, "{readbacks:?}");
-    assert!(readbacks[0].about_mission(&mission), "{:?}", readbacks[0].links);
+    assert!(
+        readbacks[0].about_mission(&mission),
+        "{:?}",
+        readbacks[0].links
+    );
     assert!(
         readbacks[0].text.contains("branch:feature-x: missing"),
         "{}",

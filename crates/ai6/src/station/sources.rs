@@ -9,8 +9,8 @@
 //! one stopped. Authorized sleepers queue their briefs from the same pass.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::directorates::m::cover::Disclosure;
@@ -444,7 +444,11 @@ fn notice_of(instance: &str, change: &str, report: &Report) -> (String, String) 
         .and_then(|item| serde_json::to_vec(item).ok())
         .map(|bytes| {
             let digest = <sha2::Sha256 as sha2::Digest>::digest(&bytes);
-            digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect::<String>()
+            digest
+                .iter()
+                .take(8)
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
         })
         .unwrap_or_default();
     (
@@ -588,7 +592,11 @@ fn queue_item(
 }
 
 /// Ties the Report of an item decided `mission` to the Mission its brief became.
-fn tie_mission(registry: &dyn RegistryBackend, (operation, provider): (&str, &str), report: &Report) {
+fn tie_mission(
+    registry: &dyn RegistryBackend,
+    (operation, provider): (&str, &str),
+    report: &Report,
+) {
     let Some(item) = &report.item else {
         return;
     };
@@ -643,8 +651,7 @@ pub(crate) fn settle_items(
     };
     let mut queued = 0;
     for report in waiting {
-        let (ReportFiler::Source { source, .. }, Some(item)) = (&report.filer, &report.item)
-        else {
+        let (ReportFiler::Source { source, .. }, Some(item)) = (&report.filer, &report.item) else {
             continue;
         };
         let Some(setup) = setups.iter().find(|setup| setup.name == *source) else {
@@ -1698,7 +1705,10 @@ impl SourceDesk {
                 });
                 match result {
                     Ok(summary)
-                        if summary.reported + summary.queued + summary.updated + summary.reopened
+                        if summary.reported
+                            + summary.queued
+                            + summary.updated
+                            + summary.reopened
                             > 0 =>
                     {
                         eprintln!(
