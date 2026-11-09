@@ -160,6 +160,42 @@ Mission lists include only Missions with a provider Session registered at the ga
 - `ai6ctl missions --compartment <ID>` keeps what that compartment covers;
   `ai6ctl missions products <MISSION_ID>` prints a Mission's outcome, CX report and refs.
 
+### Records
+
+The records of the configuration provider (`docs/configuration.md`), through the gateway's
+`/v1/user/roster/{kind}` and `/v1/user/resources` routes. A KIND is a family's name or its
+plural (`watch`, `agents`); every verb takes `--station ID` for a Station's own records.
+
+- `ai6ctl api-resources` prints `KIND ROUTE READ MANAGE RESOURCE STATION SINGLETON LIVE ALLOWED`,
+  one line per kind the gateway serves; ALLOWED is the actions you hold.
+- `ai6ctl get KIND [KEY] [FIELD] [-o cfg|toml|json|yaml] [--revisions]` prints the records as a
+  document `apply` reads (`[kind.KEY]` tables), or FIELD (dotted) of one record: a string or
+  number on a line, a table or list in the format. `--revisions` prints `KEY<TAB>REVISION`.
+  A singleton's key is `settings`.
+- `ai6ctl apply -f FILE|DIR|- ... [--format toml|json|yaml] [--dry-run] [-y] [--station ID]`
+  reads every document (a directory's, but `ai6.cfg`; `-` is standard input named `stdin.cfg`)
+  with `ai6::config::parse_document`, sends them to `POST /v1/user/resources/apply` and prints
+  `KIND/KEY created|changed|unchanged` (`would be` for a dry run), then `revision` and each
+  `weakening`. All or none; exit 1 with `refused: REASON` when the configuration they would
+  leave is not acceptable. A record that loosens what is in force is held: the weakenings are
+  printed and the command asks `Store them? [y/N]` on a terminal, else refuses unless `-y`.
+- `ai6ctl set KIND KEY FIELD=VALUE ...` changes fields of the stored record (made when there is
+  none), a dotted FIELD for a nested table. VALUE is read as the field's type in the kind's
+  `/schema` (`4`, `true`, `a,b` or JSON for a list, JSON for a table, `none` for an unbounded
+  limit); a kind with no schema yet reads a number or `true`/`false` as written and anything
+  else, a codename like `007` included, as text; a JSON string (`'"3"'`) forces text. A field the schema does not have is refused,
+  listing the fields.
+- `ai6ctl unset KIND KEY FIELD` removes a field so it has its default. `ai6ctl edit KIND KEY
+  [-o cfg|toml|json|yaml]` writes the record to a temporary file, runs `$EDITOR` (else `$VISUAL`)
+  on it and stores what it holds, or prints `unchanged`; the document must hold that one record.
+- `set`, `unset` and `edit` write against the revision they read (`If-Match`) or `--if-revision
+  REV`; a record changed meanwhile is refused (`the record changed meanwhile and is at revision
+  X`). `ai6ctl delete KIND KEY [--force] [--if-revision REV]` is refused while other records
+  name it, listing them; `--force` removes it and the audit record says what named it.
+- Every write prints `KIND/KEY configured|deleted`, `revision` (the configuration revision) and
+  any `weakening`. A person without the kind's action is refused naming the family
+  (`the watch family needs config.manage on config:watch`).
+
 ### Compartments
 
 - `ai6ctl reviews show --operation OP MISSION` prints each gate's review: `GATE POLICY STATUS iteration round sent back turns tokens`, then `why`, each seat (`seat N AGENT weight W [veto] MODEL`), each vote (`ITERATION.ROUND AGENT VOTE weight W MODEL REASONS`) and an overrule. `ai6ctl reviews overrule --operation OP MISSION [--gate output|plan] --decision pass|redo|refuse --reason TEXT` needs `mission.review`.

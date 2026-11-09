@@ -14,6 +14,9 @@ Station directly. See the [command header](AGENTS.md).
 
 - Reads health, Stations and the Headquarters Station, Operation-scoped Agent roles,
   Missions and provider Sessions.
+- Manages the configuration records kubectl-style: `get`, `apply -f` (any documents, all or
+  none, `--dry-run`), `edit`, `set`, `unset`, `delete` and `api-resources`, each under the
+  person's own actions.
 - Cancels, retries and resumes Missions and interrupts Sessions; the Station holding the
   Mission decides and reports, and `ai6ctl` waits for its outcome.
 - Signs green ink: lists the steps Agents wait to take, approves, rejects or revokes them,

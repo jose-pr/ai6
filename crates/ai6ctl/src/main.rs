@@ -8,6 +8,7 @@ mod access;
 mod compartments;
 mod memories;
 mod reports;
+mod resources;
 mod reviews;
 
 use clap::{Args, Parser, Subcommand};
@@ -184,6 +185,20 @@ enum Command {
         #[command(subcommand)]
         command: reviews::ReviewsCommand,
     },
+    /// Print the records of a kind as a document `apply` reads back, or one record's field.
+    Get(resources::Get),
+    /// Store the records of documents (needs the kind's manage action), all or none.
+    Apply(resources::Apply),
+    /// Change one record in $EDITOR and store it on save.
+    Edit(resources::Edit),
+    /// Set fields of one record, making it when there is none.
+    Set(resources::Set),
+    /// Remove a field from one record, so it has its default.
+    Unset(resources::Unset),
+    /// Delete one record, refused while another record names it.
+    Delete(resources::Delete),
+    /// List the kinds of record this gateway manages and the action each needs.
+    ApiResources,
     /// List the compartments you may read, or show, change, cover or read into one.
     Compartments {
         #[command(subcommand)]
@@ -1759,6 +1774,34 @@ async fn run() -> Result<(), String> {
         Command::Reviews { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             reviews::run(&client, &server, &token, command).await?;
+        }
+        Command::Get(args) => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::get(&resources::Gateway::new(&client, &server, &token), args).await?;
+        }
+        Command::Apply(args) => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::apply(&resources::Gateway::new(&client, &server, &token), args).await?;
+        }
+        Command::Edit(args) => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::edit(&resources::Gateway::new(&client, &server, &token), args).await?;
+        }
+        Command::Set(args) => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::set(&resources::Gateway::new(&client, &server, &token), args).await?;
+        }
+        Command::Unset(args) => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::unset(&resources::Gateway::new(&client, &server, &token), args).await?;
+        }
+        Command::Delete(args) => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::delete(&resources::Gateway::new(&client, &server, &token), args).await?;
+        }
+        Command::ApiResources => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            resources::api_resources(&resources::Gateway::new(&client, &server, &token)).await?;
         }
         Command::Compartments { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

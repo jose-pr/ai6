@@ -21,6 +21,7 @@ toml = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
+ai6 = { path = "../ai6", features = ["sqlite"] }
 axum = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
