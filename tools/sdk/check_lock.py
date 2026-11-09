@@ -253,10 +253,11 @@ class Checker:
         return name in self.trees[parent]
 
     def check_crates(self) -> None:
-        """The deps commit the lock names holds what Cargo.lock names, and no archive or pack file.
+        """The deps commit the lock names holds what Cargo.lock names, and only text and images.
 
-        A scanner refuses archives, compressed data, packs, executables and keys, and a `.git` path
-        cannot be cloned whole; none belongs on the branch, in `crates/` or beside it.
+        Archives, packs, executables, keys, wasm, object files and any other binary are refused,
+        in `crates/` and beside it (`crates.ALLOWED_WASM` aside), and so is a `.git` path, which
+        git cannot carry.
         """
         deps = self.find("app", "deps")
         if len(deps) != 1:

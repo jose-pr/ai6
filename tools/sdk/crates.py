@@ -63,7 +63,11 @@ DROP_TOP = {
 DROP_ANY = {"testdata", "test-data", "test_data", "fixture", "fixtures"}
 # A name Windows cannot create, which would make the checkout differ between platforms.
 INCLUDE = re.compile(r'include_(?:str|bytes)!\s*\(\s*"([^"]+)"\s*,?\s*\)|\binclude!\s*\(\s*"([^"]+)"\s*,?\s*\)')
-INCLUDE_BYTES = re.compile(r'include_bytes!\s*\(\s*"([^"]+)"\s*,?\s*\)')
+INCLUDE_BYTES = re.compile(r'(\*\s*)?include_bytes!\s*\(\s*"([^"]+)"\s*,?\s*\)')
+# A source file only tests, fuzzing or benchmarks compile; what it includes is not worth carrying.
+TEST_ONLY = re.compile(r"(^|/)(fuzz|tests?|test_vectors|test-vectors|benches|bench|examples?)(\.rs)?(/|$)")
+# The big-endian copy of a table; no target of ours has that byte order.
+BIG_ENDIAN = re.compile(r"(^|[._-])bigendian([._-]|$)")
 # The markers of a PEM private key, which one dash fewer no longer reads as.
 PEM_MARKER = re.compile(rb"-----(BEGIN|END) ((?:[A-Z0-9-]+ )?PRIVATE KEY)-----")
 PEM_REPLACEMENT = rb"----\1 \2-----"
@@ -94,6 +98,11 @@ PRIVATE_KEY = re.compile(
     rb"-----BEGIN ([A-Z0-9-]+ )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{16,}\r?\n){2,}"
     rb"[A-Za-z0-9+/=]*\r?\n?-----END ([A-Z0-9-]+ )?PRIVATE KEY-----"
 )
+
+
+# Wasm below these paths is allowed for now. CanvasKit is what the web app downloads from a CDN, and
+# whether the branch keeps it is undecided.
+ALLOWED_WASM = ("cdn/www.gstatic.com/flutter-canvaskit/",)
 
 
 class Problem(Exception):
@@ -142,6 +151,8 @@ class Tree(NamedTuple):
     heads: dict[str, str]
     # Files directly in crates/, which a vendor directory does not have.
     loose: list[str]
+    # Directory name -> the files in it that are not text or images, as "path: kind".
+    binaries: dict[str, list[str]]
 
 
 class Scan(NamedTuple):
@@ -193,7 +204,10 @@ def entropy(data: bytes) -> float:
 
 
 def flagged_kind(body: bytes, name: str) -> str | None:
-    """The kind of data an archive scanner refuses in a file's bytes, or None."""
+    """The kind of data the branch must not hold in a file's bytes, or None.
+
+    Text and images pass. Archives, executables, keys, packs, wasm and any other binary do not.
+    """
     head = body[:600]
     if len(head) >= 262 and head[257:262] == b"ustar":
         return "tar"
@@ -202,8 +216,9 @@ def flagged_kind(body: bytes, name: str) -> str | None:
             return kind
     if KEY_EXT.search(name):
         return "key or keystore file"
-    if head.startswith((b"\x00asm", b"%PDF", b"SQLite format 3")):
-        return None
+    for magic, kind in ((b"\x00asm", "wasm"), (b"%PDF", "pdf"), (b"SQLite format 3", "sqlite")):
+        if head.startswith(magic):
+            return kind
     if any(head.startswith(m) for m in MEDIA) or head[4:8] == b"ftyp":
         return None
     try:
@@ -211,7 +226,7 @@ def flagged_kind(body: bytes, name: str) -> str | None:
         return "private key in text" if PRIVATE_KEY.search(body) else None
     except UnicodeDecodeError:
         pass
-    return "opaque high-entropy data" if entropy(body[:65536]) > 7.5 else None
+    return "opaque high-entropy data" if entropy(body[:65536]) > 7.5 else "unrecognised binary"
 
 
 class Adder:
@@ -226,6 +241,8 @@ class Adder:
             self.tree.loose.append(directory)
             return
         self.tree.dirs.setdefault(directory, {})[rest] = sha256(data)
+        if rest != CHECKSUM and (kind := flagged_kind(data, rest.rsplit("/", 1)[-1])):
+            self.tree.binaries.setdefault(directory, []).append(f"{rest}: {kind}")
         if rest == CHECKSUM:
             try:
                 self.tree.sums[directory] = json.loads(data)
@@ -236,7 +253,7 @@ class Adder:
 
 
 def read_dir(crates: Path) -> Tree:
-    tree = Tree({}, {}, {}, [])
+    tree = Tree({}, {}, {}, [], {})
     adder = Adder(tree)
     if crates.is_dir():
         for path in sorted(crates.rglob("*")):
@@ -282,7 +299,7 @@ def scan_ref(checkout: Path, commit: str) -> Scan | None:
         ["git", "-C", str(checkout), "cat-file", "-e", f"{commit}^{{commit}}"], capture_output=True
     ).returncode:
         return None
-    tree = Tree({}, {}, {}, [])
+    tree = Tree({}, {}, {}, [], {})
     adder = Adder(tree)
     flagged = []
     for path, mode, body in blobs(checkout, commit):
@@ -291,7 +308,8 @@ def scan_ref(checkout: Path, commit: str) -> Scan | None:
         if mode == "120000":
             flagged.append(f"{path}: a symbolic link")
         elif kind := flagged_kind(body, path.rsplit("/", 1)[-1]):
-            flagged.append(f"{path}: {kind}")
+            if not (kind == "wasm" and path.startswith(ALLOWED_WASM)):
+                flagged.append(f"{path}: {kind}")
         if path.startswith("crates/"):
             adder.add(path.removeprefix("crates/"), body)
     return Scan(tree, flagged)
@@ -312,6 +330,7 @@ def package_problems(
         found.append(f"{where}: package checksum {sums.get('package')}, Cargo.lock says {checksum}")
     if repo and f" at {repo.commit}" not in tree.heads.get(name, ""):
         found.append(f"{where}: not {repo.name} at {repo.commit}")
+    found += [f"{where}/{line}; run refresh" for line in tree.binaries.get(name, [])]
     listed = sums.get("files", {})
     have = {p: d for p, d in tree.dirs[name].items() if p != CHECKSUM}
     for path in sorted(set(listed) - set(have)):
@@ -428,21 +447,24 @@ def drop_missing_targets(text: str, present: set[str]) -> str:
 def inline_bytes(kept: dict[str, bytes], files: dict[str, bytes], refused: set[str]) -> None:
     """Writes the bytes of each refused file into the `include_bytes!` that reads it.
 
-    The array literal has the type `include_bytes!` gives, so a crate that embeds a DER file
-    compiles without the binary file being in the branch.
+    The array literal has the type `include_bytes!` gives, so a crate that embeds a DER file or a
+    table compiles without the binary file being in the branch. A file that only tests read, or
+    the big-endian copy of a table, is left out and its `include_bytes!` as it was.
     """
 
     def literal(base: str):
         def replace(found: re.Match[str]) -> str:
-            target = posixpath.normpath(posixpath.join(base, found[1]))
-            if target not in refused:
+            target = posixpath.normpath(posixpath.join(base, found[2]))
+            if target not in refused or BIG_ENDIAN.search(target) or TEST_ONLY.search(base + "/"):
                 return found[0]
             body = files[target]
-            return "&[" + ",".join(f"0x{b:02x}u8" if i == 0 else f"0x{b:02x}" for i, b in enumerate(body)) + "]"
+            array = "[" + ",".join(f"0x{b:02x}u8" if i == 0 else f"0x{b:02x}" for i, b in enumerate(body)) + "]"
+            # `*include_bytes!(..)` is the array itself; plain `include_bytes!(..)` a reference to it.
+            return array if found[1] else "&" + array
 
         return replace
 
-    for path in [p for p in kept if p.endswith(".rs")]:
+    for path in [p for p in kept if p.endswith(".rs") and not TEST_ONLY.search(p)]:
         try:
             text = kept[path].decode("utf-8")
         except UnicodeDecodeError:
@@ -450,6 +472,47 @@ def inline_bytes(kept: dict[str, bytes], files: dict[str, bytes], refused: set[s
         changed = INCLUDE_BYTES.sub(literal(posixpath.dirname(path)), text)
         if changed != text:
             kept[path] = changed.encode("utf-8")
+
+
+RING_OBJECT = re.compile(r"^pregenerated/.+\.o$")
+RING_USE = """            let obj_srcs = asm_srcs
+                .iter()
+                .map(|src| obj_path(generated_dir, src.as_path()))
+                .collect::<Vec<_>>();"""
+RING_FN = """
+/// The object file this crate carries as `<name>.o.hex`, written below `out_dir` for the linker.
+fn object_from_text(generated_dir: &Path, out_dir: &Path, src: &Path) -> PathBuf {
+    let text = fs::read_to_string(format!("{}.hex", obj_path(generated_dir, src).display())).unwrap();
+    let digits: Vec<u8> = text.bytes().filter(|b| b.is_ascii_hexdigit()).collect();
+    let bytes: Vec<u8> = digits
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect();
+    let path = obj_path(out_dir, src);
+    fs::write(&path, bytes).unwrap();
+    path
+}
+"""
+
+
+def patch_ring(name: str, kept: dict[str, bytes], refused: dict[str, bytes]) -> None:
+    """Keeps ring's prebuilt nasm objects (linked on x86 Windows) as hex, decoded by build.rs."""
+    objects = sorted(p for p in refused if RING_OBJECT.match(p))
+    if not objects:
+        return
+    build = kept["build.rs"].decode("utf-8")
+    if build.count(RING_USE) != 1:
+        raise Problem(f"{name}: build.rs no longer links its objects as crates.py expects")
+    for path in objects:
+        digits = refused.pop(path).hex()
+        lines = [digits[i : i + 128] for i in range(0, len(digits), 128)]
+        kept[f"{path}.hex"] = ("\n".join(lines) + "\n").encode("ascii")
+    fixed = build.replace(RING_USE, RING_USE.replace("obj_path(generated_dir, src.as_path())", "object_from_text(generated_dir, out_dir, src.as_path())"))
+    kept["build.rs"] = (fixed.rstrip("\n") + "\n" + RING_FN).encode("utf-8")
+
+
+# Crates whose build links binary files that cannot be inlined, by crate name.
+PATCHES = {"ring": patch_ring}
 
 
 def include_closure(files: dict[str, bytes]) -> dict[str, bytes]:
@@ -494,6 +557,9 @@ def write_package(target: Path, everything: dict[str, bytes], checksum: str | No
             kept[path] = body
     if refused:
         inline_bytes(kept, files, set(refused))
+        patch = PATCHES.get(target.name.rsplit("-", 1)[0])
+        if patch:
+            patch(target.name, kept, refused)
     if "Cargo.toml" in kept:
         text = kept["Cargo.toml"].decode("utf-8")
         fixed = drop_missing_targets(text, set(kept))
