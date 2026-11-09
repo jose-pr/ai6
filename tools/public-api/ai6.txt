@@ -1399,6 +1399,13 @@ pub fn ai6::directorates::m::identity::SessionId::to_value_in(&self, guatiao::va
 pub const ai6::directorates::m::identity::MAX_ID_BYTES: usize
 pub mod ai6::directorates::m::inherit
 pub const ai6::directorates::m::inherit::NOT_INHERITED: [&str; 10]
+pub mod ai6::directorates::m::intake
+#[non_exhaustive] pub enum ai6::directorates::m::intake::SourceIntake
+pub ai6::directorates::m::intake::SourceIntake::Direct
+pub ai6::directorates::m::intake::SourceIntake::Watch
+impl ai6::directorates::m::intake::SourceIntake
+pub const fn ai6::directorates::m::intake::SourceIntake::as_str(self) -> &'static str
+pub fn ai6::directorates::m::intake::SourceIntake::non_default(self) -> core::option::Option<&'static str>
 pub mod ai6::directorates::m::issues
 pub enum ai6::directorates::m::issues::IssueCreate
 pub ai6::directorates::m::issues::IssueCreate::Direct
@@ -2139,6 +2146,7 @@ pub ai6::directorates::m::roster::Operation::green_ink: ai6::directorates::m::ap
 pub ai6::directorates::m::roster::Operation::harness: ai6::directorates::m::harness::HarnessPolicy
 pub ai6::directorates::m::roster::Operation::id: alloc::string::String
 pub ai6::directorates::m::roster::Operation::inherit: bool
+pub ai6::directorates::m::roster::Operation::intake: ai6::directorates::m::intake::SourceIntake
 pub ai6::directorates::m::roster::Operation::issues: ai6::directorates::m::issues::IssuePolicy
 pub ai6::directorates::m::roster::Operation::limit_fallback_secs: u64
 pub ai6::directorates::m::roster::Operation::lost_after_secs: u64
@@ -5837,6 +5845,7 @@ pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::resul
 pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::CableRelay::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
+pub fn ai6::CableRelay::notice(&self, &ai6::CablePrincipal, &str, &str, alloc::string::String, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
 pub fn ai6::CableRelay::reply(&self, &ai6::CablePrincipal, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
@@ -6795,6 +6804,7 @@ pub ai6::directorates::registry::reports::Report::filer: ai6::directorates::regi
 pub ai6::directorates::registry::reports::Report::from: core::option::Option<f64>
 pub ai6::directorates::registry::reports::Report::handling: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::reports::Report::id: alloc::string::String
+pub ai6::directorates::registry::reports::Report::item: core::option::Option<ai6::directorates::registry::sources::SourceItem>
 pub ai6::directorates::registry::reports::Report::kind: alloc::string::String
 pub ai6::directorates::registry::reports::Report::links: alloc::vec::Vec<ai6::directorates::registry::reports::ReportLink>
 pub ai6::directorates::registry::reports::Report::priority: core::option::Option<alloc::string::String>
@@ -6812,6 +6822,7 @@ pub fn ai6::directorates::registry::reports::Report::about_mission(&self, &str) 
 pub fn ai6::directorates::registry::reports::Report::believed(self, u8) -> Self
 pub fn ai6::directorates::registry::reports::Report::classified(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::reports::Report::due(self, f64) -> Self
+pub fn ai6::directorates::registry::reports::Report::from_item(self, ai6::directorates::registry::sources::SourceItem) -> Self
 pub fn ai6::directorates::registry::reports::Report::handled(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::reports::Report::in_compartments(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::reports::Report::information_from(self, f64) -> Self
@@ -7323,6 +7334,42 @@ pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&
 pub fn ai6::directorates::registry::sleepers::sleeper_brief(&str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, core::option::Option<&str>) -> ai6::directorates::registry::store::Brief
 pub fn ai6::directorates::registry::sleepers::window_label(i64) -> alloc::string::String
 pub fn ai6::directorates::registry::sleepers::window_of(&ai6::directorates::registry::store::Brief) -> core::option::Option<&str>
+pub mod ai6::directorates::registry::source_items
+#[non_exhaustive] pub enum ai6::directorates::registry::source_items::ItemVerdict
+pub ai6::directorates::registry::source_items::ItemVerdict::Duplicate
+pub ai6::directorates::registry::source_items::ItemVerdict::Duplicate::of: alloc::string::String
+pub ai6::directorates::registry::source_items::ItemVerdict::Later
+pub ai6::directorates::registry::source_items::ItemVerdict::Later::until: f64
+pub ai6::directorates::registry::source_items::ItemVerdict::Mission
+pub ai6::directorates::registry::source_items::ItemVerdict::NoAction
+impl ai6::directorates::registry::source_items::ItemVerdict
+pub fn ai6::directorates::registry::source_items::ItemVerdict::parse(&str, core::option::Option<&str>, core::option::Option<u64>, f64) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::registry::source_items::ItemVerdict::word(&self) -> &'static str
+#[non_exhaustive] pub enum ai6::directorates::registry::source_items::Offered
+pub ai6::directorates::registry::source_items::Offered::Changed
+pub ai6::directorates::registry::source_items::Offered::Changed::reopened: bool
+pub ai6::directorates::registry::source_items::Offered::Changed::report: ai6::directorates::registry::reports::Report
+pub ai6::directorates::registry::source_items::Offered::Filed(ai6::directorates::registry::reports::Report)
+pub ai6::directorates::registry::source_items::Offered::Unchanged(ai6::directorates::registry::reports::Report)
+impl ai6::directorates::registry::source_items::Offered
+pub fn ai6::directorates::registry::source_items::Offered::report(&self) -> &ai6::directorates::registry::reports::Report
+#[non_exhaustive] pub struct ai6::directorates::registry::source_items::ItemDecision<'a>
+pub ai6::directorates::registry::source_items::ItemDecision::at: f64
+pub ai6::directorates::registry::source_items::ItemDecision::by: &'a str
+pub ai6::directorates::registry::source_items::ItemDecision::operation: &'a str
+pub ai6::directorates::registry::source_items::ItemDecision::reason: &'a str
+pub ai6::directorates::registry::source_items::ItemDecision::report: &'a str
+pub ai6::directorates::registry::source_items::ItemDecision::verdict: ai6::directorates::registry::source_items::ItemVerdict
+impl<'a> ai6::directorates::registry::source_items::ItemDecision<'a>
+pub fn ai6::directorates::registry::source_items::ItemDecision<'a>::new(&'a str, &'a str, ai6::directorates::registry::source_items::ItemVerdict, &'a str, &'a str, f64) -> Self
+pub const ai6::directorates::registry::source_items::ITEM_KIND: &str
+pub fn ai6::directorates::registry::source_items::awaiting_queue(&dyn ai6::directorates::registry::backend::RegistryBackend, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::source_items::decide_item(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::source_items::ItemDecision<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::source_items::is_mission(&ai6::directorates::registry::reports::Report) -> bool
+pub fn ai6::directorates::registry::source_items::item_report(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::source_items::offer(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &ai6::directorates::registry::sources::SourceItem, f64) -> core::io::error::Result<ai6::directorates::registry::source_items::Offered>
+pub fn ai6::directorates::registry::source_items::reopen_due(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::source_items::report_id(&str, &str, &str) -> alloc::string::String
 pub mod ai6::directorates::registry::sources
 pub enum ai6::directorates::registry::sources::Ingest
 pub ai6::directorates::registry::sources::Ingest::Finished
@@ -11194,6 +11241,7 @@ pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::resul
 pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::CableRelay::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
+pub fn ai6::CableRelay::notice(&self, &ai6::CablePrincipal, &str, &str, alloc::string::String, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
 pub fn ai6::CableRelay::release(&self, &ai6::CablePrincipal, &str) -> core::result::Result<ai6::CableRelease, ai6::CableRelayError>
 pub fn ai6::CableRelay::reply(&self, &ai6::CablePrincipal, &str, alloc::string::String, alloc::string::String) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
@@ -12274,6 +12322,7 @@ pub ai6::Operation::green_ink: ai6::directorates::m::approvals::GreenInkPolicy
 pub ai6::Operation::harness: ai6::directorates::m::harness::HarnessPolicy
 pub ai6::Operation::id: alloc::string::String
 pub ai6::Operation::inherit: bool
+pub ai6::Operation::intake: ai6::directorates::m::intake::SourceIntake
 pub ai6::Operation::issues: ai6::directorates::m::issues::IssuePolicy
 pub ai6::Operation::limit_fallback_secs: u64
 pub ai6::Operation::lost_after_secs: u64
