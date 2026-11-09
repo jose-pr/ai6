@@ -835,10 +835,11 @@ refused, and a running Station keeps the last good one.
 ### Families
 
 Every family is a record of the configuration provider (the shared database in a deployment);
-the "File" column is the name its records take in the import and export form. "Edited in"
-says where a person changes it: the Roster page of Outer Office and the gateway's
-`/v1/user/roster/{kind}` routes (with `/schema` for the form), or, for the families not yet
-there, `ai6 config import` of a file.
+the "File" column is the name its records take in a family file, and so what a document named for it holds. "Edited in"
+says where a person changes it: `ai6ctl` (above) and the gateway's `/v1/user/roster/{kind}`
+routes (with `/schema` for the form), with Outer Office's Roster page for the ones it shows. The
+`cables`, `plugin`, `tls` and `unex` families are not served by the gateway yet, so nothing
+changes them but a file provider's files, and `ai6 plugins pin --import` for `plugin` pins.
 
 | Family | File | Station's own | Singleton | Applies | Edited in | Holds |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -846,15 +847,15 @@ there, `ai6 config import` of a file.
 | `agent`, `role` | `agents` | no | no | live | Roster page, route | `[agent.<codename>]`, `[role.<id>]` |
 | `assistant` | `agents` | no | yes | live | Roster page, route | `[assistant]`, Moneypenny's settings |
 | `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
-| `theater` | `theaters` | yes | no | restart | `ai6 config import` | `[theater.<id>]` |
-| `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool` | `loadouts` | yes | no | live | `ai6 config import` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
-| `cables` | `cables` | yes | yes | restart | `ai6 config import` | the whole file: grants, inbound, channels, limits |
-| `plugin` | `plugins` | yes | no | restart | `ai6 config import` | `[[library]]` entries, keyed by their `file` |
+| `theater` | `theaters` | yes | no | restart | `ai6ctl`, route `theaters` | `[theater.<id>]` |
+| `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool` | `loadouts` | yes | no | live | `ai6ctl`, routes `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, each under `config.read` and `config.manage` on `config:<family>` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
+| `cables` | `cables` | yes | yes | restart | not yet served | the whole file: grants, inbound, channels, limits |
+| `plugin` | `plugins` | yes | no | restart | not yet served | `[[library]]` entries, keyed by their `file` |
 | `station` | `station` | yes | yes | restart | Outer Office Stations page | the whole file: the Station's runtime settings |
-| `tls` | `tls` | yes | yes | restart | `ai6 config import` | the whole file: the Station TLS policy |
+| `tls` | `tls` | yes | yes | restart | not yet served | the whole file: the Station TLS policy |
 | `access` | `access` | no | yes | live, in Universal Exports | Outer Office Access page | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
 | `operation_access` | `operation_access` | no | no | live, in Universal Exports | Outer Office Access page | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
-| `unex` | `unex` | no | yes | restart | `ai6 config import` | the whole file: Universal Exports' sign-in, limits and assistant |
+| `unex` | `unex` | no | yes | restart | not yet served | the whole file: Universal Exports' sign-in, limits and assistant |
 | `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 | `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
 | `watch` | `watches` | no | no | live | Roster page (Watches), route `/v1/user/roster/watches` | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
@@ -1590,44 +1591,68 @@ provider's database when that is SQL, so one PostgreSQL location configures a wh
 deployment, else `registry/` in the state directory. Configuration can live in a git
 checkout while the Registry lives in PostgreSQL.
 
-## `ai6 config`
+## `ai6 config` and `ai6ctl`
+
+The `ai6` command reads its bootstrap and serves; it does not change records. `ai6 config`
+keeps only what concerns the bootstrap file:
 
 ```console
 ai6 config schema                          # every section of ai6.cfg and of the records, with its title
 ai6 config schema record.station.scheduler # one section's JSON Schema: titles, defaults, units
 ai6 config path                            # the ai6.cfg in use
 ai6 config public --output web/ai6.cfg     # the public file a web page reads
-ai6 config show agent 007                  # one record, as TOML
-ai6 config show theater --scope station:hq-1
-ai6 config import ./config                 # a directory's records into a SQL provider
-ai6 config import ./hq-1 --scope station:hq-1
-ai6 config rm agent 007                    # one record; refused while another names it
-ai6 config export ./backup                 # every family and Station scope as TOML files
 ```
 
-`import` checks the whole directory first and stores its records in one transaction: all of
-them or none. `export` writes files readable by their owner only on Unix, since a family may
-hold a credential.
+Records are managed with `ai6ctl`, through Universal Exports and under the person's actions, as
+`kubectl` manages a cluster through its API server. A kind is a family's name (`watch`, `agent`,
+`loadout`), or its plural.
 
-`rm` deletes from the configuration every Station reads, so it is careful:
+```console
+ai6ctl api-resources                        # the kinds, the action each needs and which you hold
+ai6ctl get agent                            # every Agent, as a document `apply` reads back
+ai6ctl get agent 007 -o yaml                # one record; -o cfg (the default), toml, json or yaml
+ai6ctl get watch operation:G wake_every     # one field, dotted for a nested table
+ai6ctl apply -f ./config/                   # every document of a directory (but ai6.cfg)
+ai6ctl apply -f agents.cfg -f watches.yaml  # any documents, each with any kinds' tables
+ai6 config public | ai6ctl apply -f -       # standard input, read as a .cfg is
+ai6ctl apply --dry-run -f agents.cfg        # check against the stored records; store nothing
+ai6ctl set watch operation:G max_turns_per_hour=4   # fields of the stored record, values by their type
+ai6ctl unset watch operation:G max_turns_per_hour   # back to the default
+ai6ctl edit agent 007                       # the record in $EDITOR, stored on save
+ai6ctl delete agent 007                     # refused while another record names it
+ai6ctl apply --station hq-1 -f hq-1.cfg     # a Station's own records (--station on every verb)
+```
 
-- It reads every family at every scope first. If anything cannot be read, nothing is removed.
-- While another record names this one it refuses and lists them, with where in each the name is. Any
-  whole string or table key equal to the name counts (`handler`, `provider`, `model` and `effort`
-  name something else), so a field that only happens to hold the same text is listed too, and a
-  person judges. A secret, often named like a setting (`path`, `token`), is named only where a
-  record takes a secret's name: a `secrets` list (a loadout's, a route's), a `secret` value (a pool
-  account's), and a pool account of its name that reads a secret and names none. `--force` removes
-  it anyway and says what still names it. The provider's own checks
-  still apply: the removal is refused if the configuration it leaves is not acceptable, such as an
-  Agent another `extends`.
-- Each removal and refusal is an audit record in the Registry, `roster.remove` or `roster.refused`
-  under `config:roster`, actor `cli:<user>`, written before the removal: a removal the Registry
-  cannot record does not happen. A forced one names what still named it.
-- On a directory of files, the record leaves its family file and the rest stays as it was, comments
-  included, for a TOML file of `[family.key]` tables; a table written another way, a JSON or YAML file
-  and a `[[library]]` entry mean the file is written again, without its comments. Universal Exports
-  still takes no edit of a directory of files.
+A document is read by extension (`.cfg` and `.toml` are TOML, `.json`, `.yaml`, `.yml`), a `.cfg`
+may name another format on its first line (`#!yaml`), and `--format` overrides both. Its top-level
+tables name the kinds: `[agent.007]`, `[watch."operation:G"]`, a singleton's `[assistant]`, the
+plugins' `[[library]]` entries. A document named for a whole-file family's file (`access.toml`,
+`station.json`) that has no table of that family's name is the record itself.
+
+`apply` is all or none: every document is read first, the gateway checks the whole configuration
+the records would leave and stores them in one transaction, and a refusal names why. It needs the
+manage action of each kind named, audits each record it stores, and prints the revision it moved
+to. A record that loosens what is in force (today the `assistant` record) is held until the
+request is repeated with `--yes`. `set`, `unset`, `edit` and `delete` read the record first and
+write it back against the revision they read, so an edit made meanwhile is refused; `--if-revision`
+names one instead. `delete` is refused while another record names the one it removes, listing
+them and where in each the name is; `--force` removes it anyway and the audit record says what
+still named it.
+
+- A word counts as naming a record when it is a whole string or table key equal to its name
+  (`handler`, `provider`, `model` and `effort` name something else), so a field that only happens
+  to hold the same text is listed too, and a person judges. A secret, often named like a setting
+  (`path`, `token`), is named only where a record takes a secret's name: a `secrets` list (a
+  loadout's, a route's), a `secret` value (a pool account's), and a pool account of its name that
+  reads a secret and names none. The provider's own checks still apply: the removal is refused
+  if the configuration it leaves is not acceptable, such as an Agent another `extends`.
+- Each store, removal and refusal is an audit record, `roster.update`, `roster.remove` or
+  `roster.refused`, on the kind's resource.
+- A directory of files takes no changes: edit its files, or move the configuration to SQL.
+
+A first install starts every service on an empty database. The bootstrap's `chief` is the first
+person, holding every action, and loads the rest: `ai6ctl apply -f ./config/` with that
+person's token.
 
 ## Who can write the provider
 

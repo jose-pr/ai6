@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Records of the configuration provider are managed by `ai6ctl`, through Universal Exports, as `kubectl`
+  does: `ai6ctl get KIND [KEY] [FIELD] [-o cfg|toml|json|yaml]`, `apply -f FILE|DIR|-` (any
+  documents, each with any kinds' tables, read by extension or first line; all or none; `--dry-run`),
+  `edit`, `set FIELD=VALUE` (read by the field's schema type), `unset`, `delete` (refused while another
+  record names it) and `api-resources`, with `--station ID` for a Station's own records and
+  `--if-revision`. The gateway gains `POST /v1/user/resources/apply` and `GET /v1/user/resources`;
+  `/v1/user/roster/{kind}` takes a family's name as well as its plural, refuses a delete another
+  record names (`?force=true` goes anyway) and refuses a person naming the family. The `theater`,
+  `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` families are served
+  under `config.read` and `config.manage` on `config:<family>`.
+- `ai6 config import`, `show`, `rm` and `export` are gone, with `config::export` and
+  `config::family_document`; `ai6 config` keeps `schema`, `path` and `public`. A first install starts
+  on an empty database, the bootstrap's `chief` holds every action and loads the rest with `ai6ctl
+  apply`.
 - `[scheduler] retry_delay` is now `retry_backoff` (5 seconds): each further failed start of a
   Mission doubles the wait, up to the new `retry_backoff_max` (600 seconds). Neither has a floor.
 

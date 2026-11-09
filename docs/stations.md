@@ -420,8 +420,8 @@ ai6 plugins pin --import --scope station:s1 --config ai6.cfg lib/*.dll  # one St
 
 Each entry replaces the record of its file name, and records for other names stay as they are.
 It prints a line per library, `added`, `changed` (with the old entry and the new) or
-`unchanged`, and how many records it wrote; the change is checked and kept whole, as `ai6
-config import` does. A directory of family files takes no changes, so `--import` is refused
+`unchanged`, and how many records it wrote; the change is checked and kept whole, as `ai6ctl
+apply` does. A directory of family files takes no changes, so `--import` is refused
 there and writes nothing: add the printed entries to its `plugins.toml`. A Station applies
 `plugin` records at restart.
 

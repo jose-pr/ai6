@@ -853,8 +853,8 @@ env = { PATH = "/opt/tools/bin:/usr/bin:/bin", TZ = "UTC" }
 - **Exposure does not take it away.** A Session an Operation's [exposure](medical.md) policy
   restricts with `secrets` loses its secrets, which is how a Mission from a Source runs under
   `strict`, and keeps this table. A `PATH` given as a secret would be lost with them.
-- **A value here is config, and anyone who can read the record reads it** (`ai6 config show
-  loadout 007`, an export, the database). Put tool locations, modes and proxies without credentials
+- **A value here is config, and anyone who can read the record reads it** (`ai6ctl get
+  loadout 007`, the database). Put tool locations, modes and proxies without credentials
   here. Never a token, a password, a key or a URL that holds one: those are a `[secret.<name>]`.
 - To keep that mistake from being made by name, a loadout is refused at load when an `env` name, in
   any case, is a provider credential's variable (`ANTHROPIC_API_KEY`, `CODEX_HOME` and the rest of
