@@ -74,5 +74,5 @@ tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
 # Libraries to load, never to link: depending on them has Cargo build each beside the test
 # binaries, where the page tests load the real page authenticators.
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "af03569c43e1abc6599b95366e6df99bc88234b9" }
-coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "af03569c43e1abc6599b95366e6df99bc88234b9" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
+coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
