@@ -15,7 +15,13 @@
 //! handler cannot resume it, a fresh Session starts with the watch's logbook.
 //!
 //! A watch is not a Mission: none of this makes a Mission, a brief, a placement or an attempt.
+//!
+//! An Operation's watch is its 00 Agent in charge, and it decides the Operation's Missions: woken
+//! for each one entering `verifying` with the final report, the brief and the declared
+//! deliverables, it probes and reads the work, then decides through [`decide::DecisionDesk`].
 
+#[cfg(feature = "cables-mcp")]
+pub(super) mod decide;
 mod turn;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -28,6 +34,7 @@ use super::{DaemonState, StationRole, unix_now};
 use crate::directorates::m::watches::{Watch, WatchScope};
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::cables::CablePrincipal;
+use crate::directorates::registry::sessions::SessionRecord;
 use crate::directorates::registry::store::DEFAULT_LEASE;
 use crate::directorates::registry::watches::{
     TURN_WINDOW_SECS, WatchError, WatchLogEntry, WatchRecord, WatchUpdate,
@@ -415,6 +422,15 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
                             watch.settings.agent.clone(),
                         ));
                     }
+                    if let Some(operation) = watch.scope.operation() {
+                        endpoint.open_green_ink(super::green_ink::Desk::new(state.clone()));
+                        endpoint.open_decision_tools(decide::DecisionDesk::new(
+                            state.clone(),
+                            operation.to_owned(),
+                            watch.settings.agent.clone(),
+                            session_key(&watch.scope),
+                        ));
+                    }
                     if let Ok(mut slot) = live.endpoint.lock() {
                         *slot = Some(endpoint);
                     }
@@ -465,6 +481,37 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
     );
 }
 
+/// An attempt as a watch reads it to verify: its brief and final report (untrusted text), what it
+/// was to deliver, what the probes found, and what has been decided or recommended.
+fn attempt_detail(state: &DaemonState, record: &SessionRecord) -> serde_json::Value {
+    let report = state
+        .intake
+        .final_report(&record.session_id)
+        .ok()
+        .flatten()
+        .map(|report| report.text);
+    let brief = state
+        .intake
+        .filed_brief(&record.mission_id)
+        .ok()
+        .flatten()
+        .map(|filed| serde_json::json!({ "title": filed.brief.title, "body": filed.brief.body }));
+    serde_json::json!({
+        "mission": record.mission_id,
+        "handle": record.handle,
+        "attempt": record.attempt,
+        "station": record.station,
+        "state": record.result.as_ref().map(|result| result.state.as_str()),
+        "agent": record.launch.as_ref().and_then(|launch| launch.agent.as_deref()),
+        "brief": brief,
+        "final_report": report,
+        "deliverables": record.deliverables,
+        "evidence": record.evidence,
+        "verdict": record.verdict,
+        "recommendation": record.recommendation,
+    })
+}
+
 /// What the watch's area holds that it has not been told: controls, Missions entering
 /// `verifying`, quarantines and dark Stations. Blocks on the Registry.
 fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEvent> {
@@ -490,19 +537,10 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
                             .as_ref()
                             .is_some_and(|result| result.state == "verifying")
                 }) {
+                    // The final report and the brief are text written outside AI6.
                     found.push(
-                        WatchEvent::new(
-                            "verifying",
-                            !session.deliverables.is_empty(),
-                            serde_json::json!({
-                                "mission": session.mission_id,
-                                "handle": session.handle,
-                                "attempt": session.attempt,
-                                "station": session.station,
-                                "deliverables": session.deliverables,
-                            }),
-                        )
-                        .keyed(format!("verifying:{}", session.session_id)),
+                        WatchEvent::new("verifying", true, attempt_detail(state, &session))
+                            .keyed(format!("verifying:{}", session.session_id)),
                     );
                 }
             }

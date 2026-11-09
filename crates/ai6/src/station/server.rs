@@ -1366,7 +1366,8 @@ fn cable_endpoints(
 }
 
 /// Where a Cable waits when its addressee has no live Session: the Agent `target` names in each
-/// Operation it serves, or the 00 Agents of the Operation it names (its coordinating role).
+/// Operation it serves, or for the Operation it names (its coordinating role) the Agent of its
+/// watch or, with no watch, its 00 Agents.
 fn cable_residents(roster: &Roster, station: &str, target: &CableTarget) -> Vec<CableEndpoint> {
     let now = unix_now() as i64;
     let mut found = Vec::new();
@@ -1395,12 +1396,23 @@ fn cable_residents(roster: &Roster, station: &str, target: &CableTarget) -> Vec<
         }
         (CableScope::Operation, Some(name)) => {
             if let Ok(operation) = roster.operation(name) {
-                for agent in roster
-                    .agents_for_operation(&operation.id)
-                    .unwrap_or_default()
-                {
-                    if agent.clearance == "00" {
+                let watch = roster.watches().get(&format!(
+                    "{}{}",
+                    crate::directorates::m::watches::OPERATION_PREFIX,
+                    operation.id
+                ));
+                if let Some(watch) = watch {
+                    if let Ok(agent) = roster.agent(Some(&operation.id), &watch.settings.agent) {
                         serve(operation, &agent);
+                    }
+                } else {
+                    for agent in roster
+                        .agents_for_operation(&operation.id)
+                        .unwrap_or_default()
+                    {
+                        if agent.clearance == "00" {
+                            serve(operation, &agent);
+                        }
                     }
                 }
             }

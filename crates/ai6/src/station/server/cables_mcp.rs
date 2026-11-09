@@ -26,6 +26,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 mod compartment_tools;
+mod decision_tools;
 mod issue_tools;
 mod memory_tools;
 mod report_tools;
@@ -38,6 +39,7 @@ use super::memories::MemoryDesk;
 use super::reports::ReportDesk;
 use super::review;
 use super::unix_now;
+use super::watches::decide::DecisionDesk;
 use crate::bounds::{Limit, TimeLimit};
 use crate::directorates::m::assistant::AssistantDeskLimits;
 use crate::directorates::m::identity::{MissionId, SessionId};
@@ -77,6 +79,7 @@ pub(super) struct Endpoint {
     mission_role: Arc<OnceLock<String>>,
     station: Arc<OnceLock<head_of_station::Desk>>,
     plan: Arc<OnceLock<review::PlanDesk>>,
+    decision_desk: Arc<OnceLock<DecisionDesk>>,
 }
 
 impl Endpoint {
@@ -113,6 +116,7 @@ impl Endpoint {
         let mission_role = Arc::new(OnceLock::new());
         let station = Arc::new(OnceLock::new());
         let plan = Arc::new(OnceLock::new());
+        let decision_desk = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -130,6 +134,7 @@ impl Endpoint {
                 let mission_role = mission_role.clone();
                 let station = station.clone();
                 let plan = plan.clone();
+                let decision_desk = decision_desk.clone();
                 let identity = identity.clone();
                 move || {
                     Ok(CableTools::new(
@@ -147,6 +152,7 @@ impl Endpoint {
                         mission_role.clone(),
                         station.clone(),
                         plan.clone(),
+                        decision_desk.clone(),
                     ))
                 }
             },
@@ -176,7 +182,14 @@ impl Endpoint {
             mission_role,
             station,
             plan,
+            decision_desk,
         })
+    }
+
+    /// Gives an Operation's watch the tools to see its Missions and decide the verifying ones;
+    /// without this they do not exist for the Session. Open it before the harness connects.
+    pub(super) fn open_decision_tools(&self, desk: DecisionDesk) {
+        let _ = self.decision_desk.set(desk);
     }
 
     /// Lets the Session read other Operations' work through the compartments it holds; without
@@ -1731,6 +1744,7 @@ struct CableTools {
     mission_role: Arc<OnceLock<String>>,
     station: Arc<OnceLock<head_of_station::Desk>>,
     plan: Arc<OnceLock<review::PlanDesk>>,
+    decision_desk: Arc<OnceLock<DecisionDesk>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -1751,6 +1765,7 @@ impl CableTools {
         mission_role: Arc<OnceLock<String>>,
         station: Arc<OnceLock<head_of_station::Desk>>,
         plan: Arc<OnceLock<review::PlanDesk>>,
+        decision_desk: Arc<OnceLock<DecisionDesk>>,
     ) -> Self {
         // The Station's own tools exist only for a Head of Station round, and the issue tools
         // only where the Station opened them.
@@ -1771,6 +1786,7 @@ impl CableTools {
                 mission_role,
                 station,
                 plan,
+                decision_desk,
                 tool_router: Self::plan_router(),
             };
         }
@@ -1790,6 +1806,9 @@ impl CableTools {
         if report_desk.get().is_some() {
             tool_router += Self::report_router();
         }
+        if decision_desk.get().is_some() {
+            tool_router += Self::decision_router();
+        }
         Self {
             relay,
             identity,
@@ -1805,6 +1824,7 @@ impl CableTools {
             mission_role,
             station,
             plan,
+            decision_desk,
             tool_router,
         }
     }
@@ -2200,9 +2220,13 @@ impl CableTools {
         if !allowed {
             return "Mission proposal permission is unavailable".to_owned();
         }
-        let (Some(parent_mission_id), Some(provider_session_id)) =
-            (principal.mission_id(), principal.session_id())
-        else {
+        // A watch proposes as itself: its Session name stands where a Mission's would.
+        let (Some(parent_mission_id), Some(provider_session_id)) = (
+            principal
+                .mission_id()
+                .or_else(|| self.decision_desk.get().map(DecisionDesk::key)),
+            principal.session_id(),
+        ) else {
             return "Mission proposal requires a bound provider Session".to_owned();
         };
         let elsewhere = args

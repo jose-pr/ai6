@@ -1002,6 +1002,13 @@ impl AgentEntry {
             Self::Built(agent) => &agent.aliases,
         }
     }
+
+    fn clearance(&self) -> &str {
+        match self {
+            Self::Defined(definition) => definition.clearance.unwrap_or_default().as_str(),
+            Self::Built(agent) => &agent.clearance,
+        }
+    }
 }
 
 /// Collects the typed records of a [`Roster`]; [`RosterBuilder::build`] checks them.
@@ -1271,9 +1278,21 @@ impl Roster {
             let agent = &watch.settings.agent;
             let roster = &self.agents;
             let aliased = |entry: &AgentEntry| entry.aliases().iter().any(|alias| alias == agent);
-            if !roster.contains_key(agent) && !roster.values().any(aliased) {
+            let Some(entry) = roster
+                .get(agent)
+                .or_else(|| roster.values().find(|entry| aliased(entry)))
+            else {
                 return Err(error(format!(
                     "watch {scope:?}: its Agent {agent:?} is not on the roster"
+                )));
+            };
+            // An Operation's watch is its 00 Agent in charge: it decides whether the Operation's
+            // Missions are done.
+            if watch.scope.operation().is_some() && entry.clearance() != "00" {
+                return Err(error(format!(
+                    "watch {scope:?}: its Agent {agent:?} holds clearance {:?}, and an Operation's \
+                     watch is kept by an Agent that holds 00",
+                    entry.clearance()
                 )));
             }
             if let Some(operation) = watch.settings.cable_operation(&watch.scope)

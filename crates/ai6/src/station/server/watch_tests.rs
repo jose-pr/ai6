@@ -2,10 +2,13 @@
 //! restart, starts fresh with its logbook when it cannot, moves to another Station when its own
 //! goes dark, stops at its turn quota, and never becomes a Mission.
 
+#[cfg(feature = "cables-mcp")]
+mod decides;
+
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use guatiao::Provider;
@@ -32,6 +35,20 @@ struct Call {
 }
 
 static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
+
+/// What a stand-in watch does in a turn, as a model would: it is given the wake's text and the
+/// environment naming its AI6 tools, and runs before the turn ends.
+type Turn = Arc<dyn Fn(&str, &BTreeMap<String, String>) + Send + Sync>;
+
+/// The turns the stand-in takes, by the watch's Session name.
+static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
+
+fn act(key: &str, text: &str, environment: &BTreeMap<String, String>) {
+    let turn = TURNS.lock().unwrap().get(key).cloned();
+    if let Some(turn) = turn {
+        turn(text, environment);
+    }
+}
 static NEXT_SESSION: AtomicUsize = AtomicUsize::new(1);
 
 fn calls(key: &str) -> Vec<Call> {
@@ -73,10 +90,18 @@ impl AgentHandler for MockWatchHandler {
             text: request.prompt.clone(),
             context: request.initial_context.clone(),
         });
-        Ok(
-            WatchSession::answering(request.mission_id.to_string(), session, terminal)
-                .into_object(),
+        act(
+            request.mission_id.as_str(),
+            &request.prompt,
+            &request.environment,
+        );
+        Ok(WatchSession::answering(
+            request.mission_id.to_string(),
+            session,
+            request.environment,
+            terminal,
         )
+        .into_object())
     }
 
     fn resume(
@@ -92,6 +117,11 @@ impl AgentHandler for MockWatchHandler {
             text: request.message.clone().unwrap_or_default(),
             context: request.initial_context.clone(),
         });
+        act(
+            request.mission_id.as_str(),
+            request.message.as_deref().unwrap_or_default(),
+            &request.environment,
+        );
         match request
             .environment
             .get("MOCK_WATCH_RESUME")
@@ -108,13 +138,17 @@ impl AgentHandler for MockWatchHandler {
                     "failed",
                     Some("no conversation found".to_owned()),
                 )])),
+                environment: request.environment,
                 _terminal: terminal,
             }
             .into_object()),
-            _ => Ok(
-                WatchSession::answering(request.mission_id.to_string(), session, terminal)
-                    .into_object(),
-            ),
+            _ => Ok(WatchSession::answering(
+                request.mission_id.to_string(),
+                session,
+                request.environment,
+                terminal,
+            )
+            .into_object()),
         }
     }
 }
@@ -122,15 +156,22 @@ impl AgentHandler for MockWatchHandler {
 struct WatchSession {
     key: String,
     session: String,
+    environment: BTreeMap<String, String>,
     events: Mutex<VecDeque<AgentEvent>>,
     _terminal: Object<dyn AgentTerminal>,
 }
 
 impl WatchSession {
     /// A Session answering the message it was started or resumed with.
-    fn answering(key: String, session: String, terminal: Object<dyn AgentTerminal>) -> Self {
+    fn answering(
+        key: String,
+        session: String,
+        environment: BTreeMap<String, String>,
+        terminal: Object<dyn AgentTerminal>,
+    ) -> Self {
         Self {
             key,
+            environment,
             events: Mutex::new(VecDeque::from([
                 event("text", Some(format!("noted on {session}"))),
                 event("completed", None),
@@ -151,9 +192,10 @@ impl AgentSession for WatchSession {
             how: "message",
             key: self.key.clone(),
             session: self.session.clone(),
-            text: message.text,
+            text: message.text.clone(),
             context: Vec::new(),
         });
+        act(&self.key, &message.text, &self.environment);
         let mut events = self.events.lock().unwrap();
         events.push_back(event("text", Some(format!("noted on {}", self.session))));
         events.push_back(event("completed", None));
@@ -191,6 +233,28 @@ fn names(tag: &str) -> (String, String) {
 /// watch kept by Agent `kTAG` on the stand-in, with `settings` added to the watch's table and
 /// `env` to the Agent's environment. The relay lets 007 and the watch's Agent exchange Cables.
 fn station(root: &Path, tag: &str, station: &str, settings: &str, env: &str) -> DaemonState {
+    station_with(root, tag, station, settings, env, &Extra::default())
+}
+
+/// What a test adds to its Station: Agent tables, Operation settings, and the Cable grants of the
+/// Operation scope (007 sends to the Operation, its watch's Agent receives).
+#[derive(Default)]
+struct Extra<'a> {
+    /// Settings of the watch's Agent itself.
+    watch_agent: &'a str,
+    agents: &'a str,
+    operation: &'a str,
+    operation_cables: bool,
+}
+
+fn station_with(
+    root: &Path,
+    tag: &str,
+    station: &str,
+    settings: &str,
+    env: &str,
+    extra: &Extra<'_>,
+) -> DaemonState {
     let (operation, agent) = names(tag);
     std::fs::write(
         root.join("watches.toml"),
@@ -201,12 +265,15 @@ fn station(root: &Path, tag: &str, station: &str, settings: &str, env: &str) -> 
     let mut state = test_state(
         root,
         &format!(
-            "\n[operation.{operation}]\npath = {:?}\n",
-            checkout.to_string_lossy()
+            "\n[operation.{operation}]\npath = {:?}\nclearance = \"00\"\n{}",
+            checkout.to_string_lossy(),
+            extra.operation
         ),
         &format!(
-            "[agent.007]\nhandler = \"mock-agent\"\n[agent.{agent}]\nhandler = \"mock-watch\"\n\
-             [agent.{agent}.env]\nMOCK_WATCH = \"1\"\n{env}"
+            "[agent.007]\nhandler = \"mock-agent\"\n\
+             [agent.{agent}]\nhandler = \"mock-watch\"\nclearance = \"00\"\n{}\
+             [agent.{agent}.env]\nMOCK_WATCH = \"1\"\n{env}\n{}",
+            extra.watch_agent, extra.agents
         ),
     );
     state.station_id = station.to_owned();
@@ -214,7 +281,7 @@ fn station(root: &Path, tag: &str, station: &str, settings: &str, env: &str) -> 
         .station
         .clone()
         .with_state_dir(root.join(format!("state-{station}")));
-    let grants = ["007", agent.as_str()]
+    let mut grants: Vec<CableGrant> = ["007", agent.as_str()]
         .into_iter()
         .flat_map(|who| {
             let target =
@@ -223,6 +290,15 @@ fn station(root: &Path, tag: &str, station: &str, settings: &str, env: &str) -> 
                 .map(|action| CableGrant::try_new(who.to_owned(), action, target.clone()).unwrap())
         })
         .collect();
+    if extra.operation_cables {
+        let target = CableTarget::try_new(CableScope::Operation, Some(operation.clone())).unwrap();
+        for (who, action) in [
+            ("007", CableAction::Send),
+            (agent.as_str(), CableAction::Receive),
+        ] {
+            grants.push(CableGrant::try_new(who.to_owned(), action, target.clone()).unwrap());
+        }
+    }
     let (roster, missions, sessions, station_id) = (
         state.roster.clone(),
         state.missions.clone(),
