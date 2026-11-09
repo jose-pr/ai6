@@ -336,23 +336,22 @@ fn a_deferred_item_is_told_to_the_watch_again_when_it_is_due() {
     let source = Items::of(vec![item("o/r#1", "After the release.")]);
     poll(&registry, &source, &intake);
     let id = reports(&registry)[0].id.clone();
-    let now = unix_seconds() as f64;
+    // Decided a while ago for a time that has since passed; the clock is not waited on.
+    let then = unix_seconds() as f64 - 100.0;
     decide_item(
         &registry,
         &ItemDecision::new(
             "G",
             &id,
-            ItemVerdict::Later { until: now + 1.0 },
+            ItemVerdict::Later { until: then + 50.0 },
             "after the release",
             "watch:operation:G",
-            now,
+            then,
         ),
     )
     .unwrap();
+    assert!(told.lock().unwrap().len() == 1, "deciding tells nobody");
     let polled = setup();
-    settle_items(&registry, "station-a", "G", &[&polled], &intake);
-    assert_eq!(told.lock().unwrap().len(), 1, "not yet due");
-    std::thread::sleep(Duration::from_millis(1_200));
     settle_items(&registry, "station-a", "G", &[&polled], &intake);
     let told_now = told.lock().unwrap().clone();
     assert_eq!(told_now.len(), 2);

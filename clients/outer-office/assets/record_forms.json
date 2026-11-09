@@ -1485,6 +1485,22 @@
           "x-advanced": true,
           "default": {}
         },
+        "intake": {
+          "type": "string",
+          "enum": [
+            "watch",
+            "direct"
+          ],
+          "x-enum-labels": {
+            "watch": "Report to the watch, which decides",
+            "direct": "Queue each item as a brief"
+          },
+          "title": "Source intake",
+          "description": "Whether Source items are reported to the watch, which decides what each becomes, or queued as briefs at once.",
+          "x-section": "sources",
+          "x-advanced": true,
+          "default": "watch"
+        },
         "sleepers": {
           "type": "object",
           "additionalProperties": {
