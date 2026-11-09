@@ -15,11 +15,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use guatiao::ToValue;
-
 use super::*;
 use crate::directorates::registry::mission_issues::{IssueProposal, ProposalState, ProposedIssue};
-use crate::directorates::registry::sources::SourceConfig;
 use crate::directorates::registry::store::FileRegistry;
 use crate::station::plugins::Plugins;
 use crate::station::sources::source_link;
@@ -86,9 +83,7 @@ impl Live {
     }
 
     fn tracker(&self, provider: &str, table: toml::Table) -> Box<dyn Tracker> {
-        let settings_toml = toml::to_string(&table).unwrap();
-        let config = SourceConfig { settings_toml }.to_value().unwrap();
-        self.plugins.tracker(provider, Some(&config)).unwrap()
+        self.plugins.tracker_with(provider, &table).unwrap()
     }
 
     fn instance(&self, name: &str) -> Box<dyn Tracker> {
@@ -98,12 +93,8 @@ impl Live {
 
     fn drain(&self) {
         let build = |provider: &str, settings: &toml::Table| -> Result<Box<dyn Tracker>, String> {
-            let settings_toml = toml::to_string(settings).map_err(|e| e.to_string())?;
-            let config = SourceConfig { settings_toml }
-                .to_value()
-                .map_err(|e| e.to_string())?;
             self.plugins
-                .tracker(provider, Some(&config))
+                .tracker_with(provider, settings)
                 .map_err(|e| e.to_string())
         };
         for _ in 0..4 {

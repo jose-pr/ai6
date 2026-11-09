@@ -26,16 +26,6 @@ use super::store::{
 /// The Brief `source` prefix that marks a brief as created from a [`Source`] provider.
 pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 
-/// Provider configuration: one Operation's settings for the provider, as TOML text.
-///
-/// The provider parses and validates the text itself and refuses unknown keys.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
-#[map(crate = ::guatiao)]
-pub struct SourceConfig {
-    /// The `[operation.<id>.sources.<provider>]` table, serialized as TOML.
-    pub settings_toml: String,
-}
-
 /// One unit of work found at a source.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]

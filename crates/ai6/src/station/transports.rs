@@ -4,11 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use guatiao::ToValue;
-
 use crate::directorates::m::placement::Resources;
 use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary, Theaters};
-use crate::directorates::q::ephemeral::{TheaterMaker, TheaterProviderConfig};
+use crate::directorates::q::ephemeral::TheaterMaker;
 use crate::directorates::q::provision::{self, ProbeReport};
 use crate::directorates::q::transport::{Capabilities, TransportClient, describe};
 use crate::station::limits::StationLimits;
@@ -96,19 +94,9 @@ impl Transports {
         let transports = Self::none();
         for theater in theaters.reachable() {
             if let TheaterAccess::Ephemeral(template) = &theater.access {
-                let maker = template
-                    .settings_toml()
+                let maker = plugins
+                    .theater_provider_with(&template.provider, template.settings())
                     .map_err(|error| error.to_string())
-                    .and_then(|settings_toml| {
-                        TheaterProviderConfig { settings_toml }
-                            .to_value()
-                            .map_err(|error| error.to_string())
-                    })
-                    .and_then(|config| {
-                        plugins
-                            .theater_provider(&template.provider, Some(&config))
-                            .map_err(|error| error.to_string())
-                    })
                     .map(|provider| Arc::new(TheaterMaker::new(provider)));
                 transports.insert(Entry::new(
                     theater,

@@ -84,13 +84,8 @@ fn adopt(
     made: &MadeTheater,
     operation: Option<&Operation>,
 ) -> Result<Theater, String> {
-    let settings: toml::Table = toml::from_str(&made.settings_toml)
-        .map_err(|error| format!("the Theater provider's transport settings: {error}"))?;
     let mut access = TransportAccess::new(made.transport.clone());
-    access.config = match serde_json::to_value(settings) {
-        Ok(serde_json::Value::Object(config)) => config,
-        _ => return Err("the Theater provider's transport settings are not a table".to_owned()),
-    };
+    access.config.clone_from(&made.settings);
     let mut theater = template.clone();
     theater.id.clone_from(&made.name);
     theater.access = TheaterAccess::Transport(access);
@@ -277,25 +272,30 @@ pub(super) mod testing {
     use std::path::PathBuf;
 
     use guatiao::library::ProviderError;
-    use guatiao::{FromValue, Provider, Status, ToValue, Value};
+    use guatiao::{FromValue, Provider, Schema, Status, ToValue, Value};
 
     use crate::directorates::q::ephemeral::{
-        MadeTheater, MadeTheaters, TheaterProvider, TheaterProviderConfig, TheaterRequest,
+        MadeTheater, MadeTheaters, TheaterProvider, TheaterRequest,
     };
-    use crate::directorates::q::transport::{Capabilities, Transport, TransportConfig};
+    use crate::directorates::q::transport::{Capabilities, Transport};
     use crate::station::transports::testing::DirTransport;
 
     fn refuse(error: impl std::fmt::Display) -> ProviderError {
         ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
     }
 
-    fn root_of(settings_toml: &str) -> Result<PathBuf, ProviderError> {
-        let table: toml::Table = toml::from_str(settings_toml).map_err(refuse)?;
-        table
-            .get("root")
-            .and_then(toml::Value::as_str)
-            .map(PathBuf::from)
-            .ok_or_else(|| refuse("root is required"))
+    /// A mock provider's settings: the directory it works in.
+    #[derive(ToValue, FromValue, Schema)]
+    #[map(crate = crate::guatiao, deny_unknown_fields)]
+    pub(crate) struct RootSettings {
+        root: String,
+    }
+
+    fn root_settings(dir: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::from_iter([(
+            "root".to_owned(),
+            serde_json::Value::String(dir.to_string_lossy().into_owned()),
+        )])
     }
 
     #[derive(Provider)]
@@ -303,19 +303,19 @@ pub(super) mod testing {
         TheaterProvider,
         id = "mock-maker",
         name = "Mock Theater maker",
-        config = TheaterProviderConfig,
+        config = RootSettings,
         crate = crate::guatiao
     )]
     pub(crate) struct MockMaker {
         root: PathBuf,
     }
 
-    impl TryFrom<TheaterProviderConfig> for MockMaker {
+    impl TryFrom<RootSettings> for MockMaker {
         type Error = ProviderError;
 
-        fn try_from(config: TheaterProviderConfig) -> Result<Self, Self::Error> {
+        fn try_from(config: RootSettings) -> Result<Self, Self::Error> {
             Ok(Self {
-                root: root_of(&config.settings_toml)?,
+                root: PathBuf::from(config.root),
             })
         }
     }
@@ -348,11 +348,7 @@ pub(super) mod testing {
                 mission: request.mission,
                 created_at,
                 transport: "mock-dir".to_owned(),
-                settings_toml: toml::to_string(&toml::Table::from_iter([(
-                    "root".to_owned(),
-                    toml::Value::String(dir.to_string_lossy().into_owned()),
-                )]))
-                .map_err(refuse)?,
+                settings: root_settings(&dir),
             };
             std::fs::write(
                 dir.with_extension("made"),
@@ -395,11 +391,7 @@ pub(super) mod testing {
                     mission: mission.to_owned(),
                     created_at: created_at.parse().map_err(refuse)?,
                     transport: "mock-dir".to_owned(),
-                    settings_toml: toml::to_string(&toml::Table::from_iter([(
-                        "root".to_owned(),
-                        toml::Value::String(dir.to_string_lossy().into_owned()),
-                    )]))
-                    .map_err(refuse)?,
+                    settings: root_settings(&dir),
                 });
             }
             MadeTheaters { theaters }.to_value().map_err(refuse)
@@ -412,16 +404,16 @@ pub(super) mod testing {
         Transport,
         id = "mock-dir",
         name = "Mock directory transport",
-        config = TransportConfig,
+        config = RootSettings,
         crate = crate::guatiao
     )]
     pub(crate) struct MockDir(DirTransport);
 
-    impl TryFrom<TransportConfig> for MockDir {
+    impl TryFrom<RootSettings> for MockDir {
         type Error = ProviderError;
 
-        fn try_from(config: TransportConfig) -> Result<Self, Self::Error> {
-            Ok(Self(DirTransport::new(&root_of(&config.settings_toml)?)))
+        fn try_from(config: RootSettings) -> Result<Self, Self::Error> {
+            Ok(Self(DirTransport::new(std::path::Path::new(&config.root))))
         }
     }
 

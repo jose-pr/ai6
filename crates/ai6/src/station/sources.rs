@@ -27,7 +27,7 @@ use crate::directorates::registry::reports::{Report, ReportFiler, ReportLink};
 use crate::directorates::registry::sleepers::{Fire, Sleeper, SleeperMark, window_label};
 use crate::directorates::registry::source_items::{self, Offered};
 use crate::directorates::registry::sources::{
-    FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
+    FinishedSourceBrief, Ingest, Source, SourcePoll, reportable,
 };
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::registry::tracker::Tracker;
@@ -359,12 +359,8 @@ pub(crate) fn build_source(
     provider: &str,
     settings: &toml::Table,
 ) -> Result<Box<dyn Source>, String> {
-    let settings_toml = toml::to_string(settings).map_err(|error| error.to_string())?;
-    let config = SourceConfig { settings_toml }
-        .to_value()
-        .map_err(|error| error.to_string())?;
     plugins
-        .source(provider, Some(&config))
+        .source_with(provider, settings)
         .map_err(|error| error.to_string())
 }
 
@@ -374,12 +370,8 @@ pub(crate) fn build_tracker(
     provider: &str,
     settings: &toml::Table,
 ) -> Result<Box<dyn Tracker>, String> {
-    let settings_toml = toml::to_string(settings).map_err(|error| error.to_string())?;
-    let config = SourceConfig { settings_toml }
-        .to_value()
-        .map_err(|error| error.to_string())?;
     plugins
-        .tracker(provider, Some(&config))
+        .tracker_with(provider, settings)
         .map_err(|error| error.to_string())
 }
 
@@ -1851,33 +1843,30 @@ mod tests {
 
     /// Serves the ids listed in its settings; remembers every comment and update it is given.
     #[derive(Provider)]
-    #[provider(Source, Tracker, id = "fake", name = "fake", config = SourceConfig)]
+    #[provider(Source, Tracker, id = "fake", name = "fake", config = FakeSettings)]
     struct Fake {
         ids: Vec<String>,
         body: String,
     }
 
-    impl TryFrom<SourceConfig> for Fake {
+    /// The fake provider's settings.
+    #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+    #[map(crate = ::guatiao, deny_unknown_fields)]
+    struct FakeSettings {
+        #[map(default)]
+        ids: Vec<String>,
+        #[map(default = "Please look.".to_owned())]
+        body: String,
+    }
+
+    impl TryFrom<FakeSettings> for Fake {
         type Error = ProviderError;
 
-        fn try_from(config: SourceConfig) -> Result<Self, Self::Error> {
-            let table: toml::Table = toml::from_str(&config.settings_toml)
-                .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &e.to_string()))?;
-            let ids = table
-                .get("ids")
-                .and_then(toml::Value::as_array)
-                .map(|ids| {
-                    ids.iter()
-                        .filter_map(|id| id.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let body = table
-                .get("body")
-                .and_then(toml::Value::as_str)
-                .unwrap_or("Please look.")
-                .to_owned();
-            Ok(Self { ids, body })
+        fn try_from(settings: FakeSettings) -> Result<Self, Self::Error> {
+            Ok(Self {
+                ids: settings.ids,
+                body: settings.body,
+            })
         }
     }
 
@@ -1981,6 +1970,32 @@ mod tests {
             .register_local("ai6-source-test-providers", library)
             .expect("fake source should register");
         Plugins::from_registry(registry)
+    }
+
+    #[test]
+    fn a_key_the_providers_schema_does_not_know_is_refused_naming_the_provider_and_the_key() {
+        let plugins = plugins();
+        let settings: toml::Table = toml::from_str(
+            "ids = [\"1\"]
+bogus = true
+",
+        )
+        .unwrap();
+        for error in [
+            build_source(&plugins, "fake", &settings).err().unwrap(),
+            build_tracker(&plugins, "fake", &settings).err().unwrap(),
+        ] {
+            assert!(
+                error.contains("\"fake\"") && error.contains("\"bogus\""),
+                "{error}"
+            );
+        }
+        let known: toml::Table = toml::from_str(
+            "ids = [\"1\"]
+",
+        )
+        .unwrap();
+        assert!(build_source(&plugins, "fake", &known).is_ok());
     }
 
     fn roster_with(cover: &str, sources: &str) -> (tempfile::TempDir, Roster) {

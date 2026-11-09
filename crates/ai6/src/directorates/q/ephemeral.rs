@@ -17,14 +17,6 @@ use guatiao::{FromValue, Schema, Status, ToValue, Value};
 
 use crate::directorates::q::transport::Capabilities;
 
-/// A template's settings, serialized as TOML. Crosses as a value.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
-#[map(crate = ::guatiao)]
-pub struct TheaterProviderConfig {
-    /// The template's `config` table as TOML; the provider refuses unknown keys.
-    pub settings_toml: String,
-}
-
 /// What to make. Crosses as a value.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
@@ -53,8 +45,9 @@ pub struct MadeTheater {
     pub created_at: u64,
     /// The transport provider that reaches it.
     pub transport: String,
-    /// That transport's settings, as TOML.
-    pub settings_toml: String,
+    /// That transport's settings.
+    #[map(with = guatiao_serde::adapt::object, default)]
+    pub settings: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The Theaters a provider made from one template. Crosses as a value.
@@ -143,7 +136,10 @@ mod tests {
             mission: "m1".to_owned(),
             created_at: 7,
             transport: "container".to_owned(),
-            settings_toml: "container = \"ai6-scratch-m1\"\n".to_owned(),
+            settings: serde_json::Map::from_iter([(
+                "container".to_owned(),
+                "ai6-scratch-m1".into(),
+            )]),
         };
         let mut value = made.to_value().unwrap();
         assert_eq!(MadeTheater::from_value(&value).unwrap(), made);

@@ -68,15 +68,6 @@ pub struct Capabilities {
     pub notes: Vec<String>,
 }
 
-/// Settings a Theater passes to the transport that reaches it. Crosses as a value.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
-#[map(crate = ::guatiao)]
-pub struct TransportConfig {
-    /// The Theater's access settings, serialized as TOML. The provider parses and
-    /// validates the text itself and refuses unknown keys.
-    pub settings_toml: String,
-}
-
 /// A command to run to completion. Crosses as a value.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]

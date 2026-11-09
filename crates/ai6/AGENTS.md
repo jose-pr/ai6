@@ -1413,9 +1413,9 @@ pub const LOCAL_THEATER: &str; // "local"
 #[non_exhaustive]
 pub enum TheaterAccess { Local, Ssh(SshAccess), Transport(TransportAccess), Ephemeral(EphemeralAccess) }
 impl TheaterAccess {
-    /// The transport provider ID and its settings as TOML text (a `TransportConfig`);
-    /// an error for an ephemeral template, which has none of its own.
-    pub fn transport(&self) -> Result<(String, String), TheaterError>;
+    /// The transport provider ID and its settings, which the provider's own configuration type
+    /// reads; an error for an ephemeral template, which has none of its own.
+    pub fn transport(&self) -> Result<(String, serde_json::Map<String, serde_json::Value>), TheaterError>;
 }
 pub const DEFAULT_KEEP_FAILED: usize = 3;
 pub const DEFAULT_KEEP_FAILED_HOURS: u64 = 24;
@@ -1426,7 +1426,7 @@ impl EphemeralAccess {
     pub fn new(provider: impl Into<String>) -> Self;
     pub fn with_setting(self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self;
     pub fn keeping_failed(self, count: usize, hours: u64) -> Self;
-    pub fn settings_toml(&self) -> Result<String, TheaterError>;   // a TheaterProviderConfig
+    pub fn settings(&self) -> &serde_json::Map<String, serde_json::Value>;   // the Theater provider's own configuration type reads it
 }
 #[non_exhaustive]
 pub struct SshAccess {
@@ -1567,10 +1567,10 @@ pub trait TheaterProvider: Send + Sync {
     fn destroy(&self, name: &str) -> Result<(), ProviderError>; // one already gone is Ok
     fn list(&self, template: &str) -> Result<Value, ProviderError>; // MadeTheaters, oldest first
 }
-pub struct TheaterProviderConfig { pub settings_toml: String }    // the template's `config`
 pub struct TheaterRequest { pub name: String, pub template: String, pub mission: String }
 pub struct MadeTheater { pub name: String, pub template: String, pub mission: String,
-    pub created_at: u64 /* default 0 */, pub transport: String, pub settings_toml: String }
+    pub created_at: u64 /* default 0 */, pub transport: String,
+    pub settings: serde_json::Map<String, serde_json::Value> /* the transport's settings */ }
 pub struct MadeTheaters { pub theaters: Vec<MadeTheater> }
 pub struct TheaterMaker;   // typed wrapper: new(Box<dyn TheaterProvider>), capabilities, create, destroy, list
 ```
@@ -1669,7 +1669,7 @@ pub trait Transport: Send + Sync {
 pub trait TransportForward: Send + Sync { fn info(&self) -> Result<Value, ProviderError>; fn close(&self) -> Result<(), ProviderError>; }
 pub struct Capabilities { pub terminal: bool, pub run: bool, pub files: bool, pub forward: bool,
     pub os: Option<String>, pub arch: Option<String>, pub notes: Vec<String> }
-pub struct TransportConfig { pub settings_toml: String }   // a provider with settings; it parses them and refuses unknown keys
+// A transport provider declares its own settings type as its Guatiao `config`; unknown keys are refused.
 pub struct RunSpec { pub argv: Vec<String>, pub cwd: Option<String>, pub env: Option<BTreeMap<String, String>>,
     pub stdin: Option<Bytes>, pub timeout_ms: u64 /* 0 waits */, pub max_output: u64 /* per stream; DEFAULT_MAX_OUTPUT */ }
 pub struct Output { pub code: Option<i64>, pub signal: Option<i64>, pub stdout: Bytes, pub stderr: Bytes,
@@ -3374,7 +3374,8 @@ is then called only for an item decided `mission` (and, afterwards, to follow it
 Station that polls the Source; `intake = "direct"` calls it for every item, as it always did.
 
 ```rust
-pub struct SourceConfig { pub settings_toml: String }  // the Operation's `sources.<provider>` table as TOML
+// A Source provider declares its own settings type as its Guatiao `config` (the Operation's
+// `sources.<provider>` table is read into it).
 pub struct SourceItem {    // also serde Serialize/Deserialize: a Report keeps the item as last polled
     pub id: String,            // provider-local, stable across polls, e.g. "owner/repo#12"
     pub title: String,         // untrusted
@@ -3410,7 +3411,7 @@ SourceStore::unreported_source_briefs() -> io::Result<Vec<FinishedSourceBrief>>
 SourceStore::mark_source_reported(finished: &FinishedSourceBrief, reported: bool) -> io::Result<()>
 ```
 
-A provider receives its settings as `SourceConfig::settings_toml` and validates them itself;
+A provider receives its settings as the value of the type its `config` names and refuses unknown keys;
 the Station removes its own `provider`, `intake` and `interval_secs` keys first. `poll` blocks
 on the network and is called off the async runtime. Writing to a tracker is the Tracker kind
 below. A provider returns an error for a rate limit
@@ -3442,7 +3443,7 @@ wording follows `Cover::disclosure()`: `Hidden` (covert), `Assisted` (partial) o
 ## Trackers (`ai6::directorates::registry::tracker`)
 
 A Tracker is the second Guatiao kind (`ai6_tracker`) the tracker providers (`github`, `gitlab`,
-`jira`) serve, built from the same `SourceConfig` as their Source. Every method is blocking and
+`jira`) serve, built from the same settings as their Source. Every method is blocking and
 names an issue by its item ID (`owner/repo#12`, `group/project#12`, `GUA-12`). An item outside the instance's
 repository or project fails `GUATIAO_ERR_BAD_VALUE` (`foreign item ...`); a call the
 instance cannot make fails `GUATIAO_ERR_UNSUPPORTED` naming what it can do.
@@ -4182,8 +4183,7 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
 Station use: every Session a Station supervises itself (local, detached wrapper, Moneypenny's
 desk) is an `AcpSession` over an in-process `AcpFacade` of its handler (`station::acp`), with no
 start, resume or close limit (`UNBOUNDED_MS`, as before). `Plugins::handler_with(provider,
-&agent.handler_settings)` builds a handler with an Agent's settings as `HandlerConfig {
-settings_toml }` (the provider refuses unknown keys); empty settings build it with defaults.
+&agent.handler_settings)` builds a handler with an Agent's settings as the value of the type the handler's `config` names (an unknown key is refused naming the provider and the key, by the provider's schema); empty settings build it with defaults.
 `GateDecider::from_environment(&environment, cwd)` (feature `gate`) is a `PermissionDecider` that
 asks the Session's Cable endpoint, through the same `gate()` a Claude `PreToolUse` hook calls,
 whether an `execute` request's command may run; other tool kinds are allowed. Each answer is a
@@ -6249,8 +6249,21 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
 `plugins_weakened` when the list is not empty.
 
 `Plugins::handler_with(provider, settings)` builds a handler with an Agent's `handler_settings`
-beside its provider's `[providers.<id>]` table: `HandlerConfig`'s `settings_toml` is one more key of
-that table, so a provider with a configuration of its own declares it too.
+beside its provider's `[providers.<id>]` table: both are keys of the provider's own configuration type.
+
+`ai6::provider_settings` carries a record's settings to a provider as its Guatiao value, never as text:
+
+```rust
+pub fn settings_value(&serde_json::Map<String, serde_json::Value>) -> Result<guatiao::Value, String>;  // handler_settings, Theater access
+pub fn table_value(&toml::Table) -> Result<guatiao::Value, String>;                                  // an Operation's sources
+pub fn check_settings(provider: &str, schema: &guatiao::Value, settings: &guatiao::Value) -> Result<(), String>;
+pub fn settings_of<T: FromValue>(&serde_json::Map<..>) -> Result<T, String>;
+pub fn settings_from_text<T: FromValue>(&str) -> Result<T, String>;                                  // a provider's own tests
+```
+
+`Plugins::check_settings(provider, &value)` refuses a key the provider's configuration schema does not
+declare (or a value it does not accept), naming the provider and the key. `handler_with`,
+`source_with`, `tracker_with`, `theater_provider_with` and `theater_transport` run it before building.
 
 ## Command line
 

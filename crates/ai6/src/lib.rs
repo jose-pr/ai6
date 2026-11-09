@@ -11,6 +11,7 @@ extern crate alloc;
 
 pub mod bootstrap;
 pub mod bounds;
+pub mod provider_settings;
 pub mod settings;
 #[cfg(feature = "tls-roots")]
 pub mod tls;
@@ -134,7 +135,7 @@ pub use directorates::medical::watchdog::{
     Watchdog, WatchdogConfig, WatchdogOverrides,
 };
 pub use directorates::q::ephemeral::{
-    MadeTheater, MadeTheaters, TheaterMaker, TheaterProvider, TheaterProviderConfig, TheaterRequest,
+    MadeTheater, MadeTheaters, TheaterMaker, TheaterProvider, TheaterRequest,
 };
 pub use directorates::q::provision::{
     DEFAULT_INSTALL_TIMEOUT_SECS, ProbeReport, ProvisionSpec, ProvisionStep, RequiredProgram,
@@ -152,7 +153,7 @@ pub use directorates::q::terminal::{
 pub use directorates::q::transport::{
     Capabilities, DEFAULT_MAX_OUTPUT, DEFAULT_READ_LIMIT, DirEntry, DirListing, FileData, Forward,
     ForwardInfo, ForwardSpec, Output, ReadSpec, RunSpec, Transport, TransportClient,
-    TransportConfig, TransportForward, WriteSpec, describe, is_unsupported, unsupported,
+    TransportForward, WriteSpec, describe, is_unsupported, unsupported,
 };
 pub use directorates::q::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
@@ -225,8 +226,8 @@ pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization, SleeperMark,
 };
 pub use directorates::registry::sources::{
-    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceConfig,
-    SourceItem, SourcePoll, settled_cursor, source_brief,
+    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, Source, SourceBatch, SourceItem, SourcePoll,
+    settled_cursor, source_brief,
 };
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::registry::sql::{SqlOptions, SqlRegistry};
@@ -261,6 +262,7 @@ pub use directorates::section_00::assistant::{
 };
 pub use directorates::section_00::content::{MessageContent, MessageImage};
 pub use guatiao;
+pub use guatiao_serde;
 #[cfg(feature = "daemon")]
 pub use station::server::{
     DEFAULT_CONFIG_POLL, DEFAULT_LISTEN, DEFAULT_MAX_CONCURRENT_MISSIONS, DEFAULT_RESOURCES_EVERY,

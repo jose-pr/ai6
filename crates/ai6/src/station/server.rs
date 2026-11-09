@@ -9046,10 +9046,11 @@ queue = 1
     /// What a [`MockDeniedHandler`] is built with: an Agent's `handler_settings`, as a handler
     /// that takes them is.
     #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone, Default)]
-    #[map(crate = crate::guatiao)]
+    #[map(crate = crate::guatiao, deny_unknown_fields)]
     pub(super) struct MockDeniedConfig {
-        #[map(default = String::new())]
-        settings_toml: String,
+        #[map(default)]
+        allowed_tools: Vec<String>,
+        command: Option<String>,
     }
 
     /// A provider whose harness refuses calls of `Write` and `Bash` in a turn that then completes,
@@ -9063,15 +9064,25 @@ queue = 1
         config = MockDeniedConfig
     )]
     pub(super) struct MockDeniedHandler {
-        settings_toml: String,
+        notice: String,
     }
 
     impl TryFrom<MockDeniedConfig> for MockDeniedHandler {
         type Error = ProviderError;
 
         fn try_from(config: MockDeniedConfig) -> Result<Self, ProviderError> {
+            let mut lines = Vec::new();
+            if !config.allowed_tools.is_empty() {
+                lines.push(format!("allowed_tools = {:?}", config.allowed_tools));
+            }
+            if let Some(command) = &config.command {
+                lines.push(format!("command = {command:?}"));
+            }
             Ok(Self {
-                settings_toml: config.settings_toml,
+                notice: lines.join(
+                    "
+",
+                ),
             })
         }
     }
@@ -9109,11 +9120,11 @@ queue = 1
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             let mut session = MockSession::new(request.session_id, "completed");
             if let Ok(events) = session.events.get_mut()
-                && !self.settings_toml.is_empty()
+                && !self.notice.is_empty()
             {
                 events.push_front(AgentEvent {
                     kind: "notice".to_owned(),
-                    text: Some(self.settings_toml.clone()),
+                    text: Some(self.notice.clone()),
                     data: None,
                     limit: None,
                     usage: None,
@@ -9125,7 +9136,7 @@ queue = 1
         }
 
         fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
-            Ok(self.settings_toml.lines().map(str::to_owned).collect())
+            Ok(self.notice.lines().map(str::to_owned).collect())
         }
     }
 
@@ -9667,6 +9678,45 @@ queue = 1
             .register_local("ai6-server-test-providers", library)
             .expect("mock providers should register");
         plugins::Plugins::from_registry(registry)
+    }
+
+    #[test]
+    fn a_key_the_providers_schema_does_not_know_is_refused_naming_the_provider_and_the_key() {
+        use crate::directorates::m::theaters::{TheaterAccess, TransportAccess};
+        let plugins = test_plugins();
+        let named = |error: &str, provider: &str| {
+            assert!(
+                error.contains(&format!("{provider:?}")) && error.contains("\"bogus\""),
+                "{error}"
+            );
+        };
+        let handler = serde_json::json!({"allowed_tools": ["x"], "bogus": 1});
+        let error = plugins
+            .handler_with("mock-denied", handler.as_object().unwrap())
+            .err()
+            .unwrap();
+        named(&error.to_string(), "mock-denied");
+        let access = TheaterAccess::Transport(
+            TransportAccess::new("mock-dir")
+                .with_setting("root", "/tmp")
+                .with_setting("bogus", 1),
+        );
+        named(
+            &plugins.theater_transport(&access).err().unwrap(),
+            "mock-dir",
+        );
+        let maker = serde_json::json!({"root": "/tmp", "bogus": 1});
+        let error = plugins
+            .theater_provider_with("mock-maker", maker.as_object().unwrap())
+            .err()
+            .unwrap();
+        named(&error.to_string(), "mock-maker");
+        let ok = serde_json::json!({"root": "/tmp"});
+        assert!(
+            plugins
+                .theater_provider_with("mock-maker", ok.as_object().unwrap())
+                .is_ok()
+        );
     }
 
     #[test]

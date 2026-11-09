@@ -61,21 +61,27 @@ pub enum TheaterAccess {
     Ephemeral(EphemeralAccess),
 }
 
-fn toml_text(value: &impl Serialize, what: &str) -> Result<String, TheaterError> {
-    toml::to_string(value).map_err(|error| TheaterError(format!("{what} settings: {error}")))
+fn settings_map(
+    value: &impl Serialize,
+    what: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, TheaterError> {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::Object(map)) => Ok(map),
+        Ok(_) => Err(TheaterError(format!("{what} settings: not a table"))),
+        Err(error) => Err(TheaterError(format!("{what} settings: {error}"))),
+    }
 }
 
 impl TheaterAccess {
-    /// The transport provider that reaches the Theater and its settings as TOML text. An
+    /// The transport provider that reaches the Theater and its settings. An
     /// ephemeral template has none: the Theaters made from it do.
-    pub fn transport(&self) -> Result<(String, String), TheaterError> {
+    pub fn transport(
+        &self,
+    ) -> Result<(String, serde_json::Map<String, serde_json::Value>), TheaterError> {
         match self {
-            Self::Local => Ok(("local".to_owned(), String::new())),
-            Self::Ssh(ssh) => Ok(("ssh".to_owned(), toml_text(ssh, "transport")?)),
-            Self::Transport(access) => Ok((
-                access.provider.clone(),
-                toml_text(&access.config, "transport")?,
-            )),
+            Self::Local => Ok(("local".to_owned(), serde_json::Map::new())),
+            Self::Ssh(ssh) => Ok(("ssh".to_owned(), settings_map(ssh, "transport")?)),
+            Self::Transport(access) => Ok((access.provider.clone(), access.config.clone())),
             Self::Ephemeral(_) => Err(TheaterError(
                 "an ephemeral Theater is made per Mission; reach the Theater made from it"
                     .to_owned(),
@@ -142,9 +148,9 @@ impl EphemeralAccess {
         self
     }
 
-    /// The provider's settings as TOML text (a `TheaterProviderConfig`).
-    pub fn settings_toml(&self) -> Result<String, TheaterError> {
-        toml_text(&self.config, "Theater provider")
+    /// The provider's settings.
+    pub fn settings(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.config
     }
 }
 
@@ -1092,7 +1098,13 @@ harnesses = ["claude", "codex"]
         assert_eq!(phone.workdir.as_deref(), Some("/sdcard/work"));
         assert_eq!(
             phone.access.transport().unwrap(),
-            ("adb".to_owned(), "serial = \"emulator-5554\"\n".to_owned())
+            (
+                "adb".to_owned(),
+                serde_json::json!({"serial": "emulator-5554"})
+                    .as_object()
+                    .unwrap()
+                    .clone()
+            )
         );
         let lab = theaters.find("lab").unwrap();
         assert_eq!(lab.harnesses, ["claude", "codex"]);
@@ -1200,8 +1212,8 @@ agents = "remote-hands"
             (Some(1), None)
         );
         assert_eq!(
-            template.settings_toml().unwrap(),
-            "engine = \"podman\"\nimage = \"fedora:44\"\n"
+            serde_json::Value::Object(template.settings().clone()),
+            serde_json::json!({"engine": "podman", "image": "fedora:44"})
         );
         assert!(scratch.access.transport().is_err());
         let published = serde_json::to_value(scratch.summary()).unwrap();
@@ -1227,11 +1239,11 @@ agents = "remote-hands"
         );
         let (provider, settings) = access.transport().unwrap();
         assert_eq!(provider, "ssh");
-        let parsed: SshAccess = toml::from_str(&settings).unwrap();
+        let parsed: SshAccess = serde_json::from_value(settings.into()).unwrap();
         assert_eq!(TheaterAccess::Ssh(parsed), access);
         assert_eq!(
             TheaterAccess::Local.transport().unwrap(),
-            ("local".to_owned(), String::new())
+            ("local".to_owned(), serde_json::Map::new())
         );
     }
 
@@ -1254,7 +1266,7 @@ keepalive_max = 9
             (Some(50), Some(0), Some(9))
         );
         let (_, settings) = TheaterAccess::Ssh(access).transport().unwrap();
-        assert!(settings.contains("keepalive_secs = 0"), "{settings}");
+        assert_eq!(settings["keepalive_secs"], 0);
         assert!(SshAccess::new("h").exit_grace_ms.is_none());
     }
 

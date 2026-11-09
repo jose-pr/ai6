@@ -508,11 +508,9 @@ impl Plugins {
             provider: provider.to_owned(),
             reason,
         };
-        let settings_toml = toml::to_string(settings)
-            .map_err(|error| invalid(format!("handler_settings: {error}")))?;
-        let config = crate::directorates::section_00::agent::HandlerConfig { settings_toml }
-            .to_value()
-            .map_err(|error| invalid(error.to_string()))?;
+        let config = self
+            .checked(provider, crate::provider_settings::settings_value(settings))
+            .map_err(|reason| invalid(format!("handler_settings: {reason}")))?;
         let read = |value: &Value| {
             BTreeMap::<String, Value>::from_value(value).map_err(|error| invalid(error.to_string()))
         };
@@ -603,20 +601,104 @@ impl Plugins {
         access: &crate::directorates::m::theaters::TheaterAccess,
     ) -> Result<crate::directorates::q::transport::TransportClient, String> {
         use crate::directorates::m::theaters::TheaterAccess;
-        use crate::directorates::q::transport::{TransportClient, TransportConfig};
-        use guatiao::ToValue;
-        let (provider, settings_toml) = access.transport().map_err(|error| error.to_string())?;
+        use crate::directorates::q::transport::TransportClient;
+        let (provider, settings) = access.transport().map_err(|error| error.to_string())?;
         let config = match access {
             TheaterAccess::Local => None,
-            _ => Some(
-                TransportConfig { settings_toml }
-                    .to_value()
-                    .map_err(|error| error.to_string())?,
-            ),
+            _ => Some(self.checked(
+                &provider,
+                crate::provider_settings::settings_value(&settings),
+            )?),
         };
         self.transport(&provider, config.as_ref())
             .map(TransportClient::new)
             .map_err(|error| error.to_string())
+    }
+
+    /// `settings` as the configuration of `provider`, once the provider's schema has accepted every
+    /// key; the message names the provider and the key it refused.
+    fn checked(&self, provider: &str, settings: Result<Value, String>) -> Result<Value, String> {
+        let settings = settings.map_err(|reason| format!("provider {provider:?}: {reason}"))?;
+        self.check_settings(provider, &settings)?;
+        Ok(settings)
+    }
+
+    /// Refuses `settings` when the schema of provider `provider`'s configuration does not declare
+    /// one of its keys or is not met by its value. A provider that is not loaded, or declares no
+    /// schema, is not judged here.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the provider and the key.
+    pub fn check_settings(&self, provider: &str, settings: &Value) -> Result<(), String> {
+        match self
+            .registry
+            .providers_of(provider)
+            .find_map(|found| found.config_schema())
+        {
+            Some(schema) => crate::provider_settings::check_settings(provider, schema, settings),
+            None => Ok(()),
+        }
+    }
+
+    /// Constructs a Source from its provider ID and an Operation's settings for it.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginBuildError::InvalidConfiguration`] naming the provider and the key when the
+    /// provider's schema does not declare a key of `settings`.
+    pub fn source_with(
+        &self,
+        provider: &str,
+        settings: &toml::Table,
+    ) -> Result<Box<dyn Source>, PluginBuildError> {
+        let config = self.source_config(provider, settings)?;
+        self.source(provider, Some(&config))
+    }
+
+    /// Constructs a Tracker from its provider ID and the same settings table the Source takes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Plugins::source_with`].
+    pub fn tracker_with(
+        &self,
+        provider: &str,
+        settings: &toml::Table,
+    ) -> Result<Box<dyn Tracker>, PluginBuildError> {
+        let config = self.source_config(provider, settings)?;
+        self.tracker(provider, Some(&config))
+    }
+
+    fn source_config(
+        &self,
+        provider: &str,
+        settings: &toml::Table,
+    ) -> Result<Value, PluginBuildError> {
+        self.checked(provider, crate::provider_settings::table_value(settings))
+            .map_err(|reason| PluginBuildError::InvalidConfiguration {
+                provider: provider.to_owned(),
+                reason,
+            })
+    }
+
+    /// Constructs a Theater provider from its ID and a template's settings.
+    ///
+    /// # Errors
+    ///
+    /// As [`Plugins::source_with`].
+    pub fn theater_provider_with(
+        &self,
+        provider: &str,
+        settings: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<Box<dyn TheaterProvider>, PluginBuildError> {
+        let config = self
+            .checked(provider, crate::provider_settings::settings_value(settings))
+            .map_err(|reason| PluginBuildError::InvalidConfiguration {
+                provider: provider.to_owned(),
+                reason,
+            })?;
+        self.theater_provider(provider, Some(&config))
     }
 
     /// Constructs a Source from its provider ID and Guatiao config.
@@ -628,8 +710,8 @@ impl Plugins {
         self.build::<dyn Source>(provider, config)
     }
 
-    /// Constructs a Tracker from its provider ID and Guatiao config (a `SourceConfig`: the
-    /// same settings table builds the Source).
+    /// Constructs a Tracker from its provider ID and Guatiao config (the same settings the
+    /// Source takes).
     pub fn tracker(
         &self,
         provider: &str,
@@ -1205,35 +1287,11 @@ pub fn provider_configs(
     configs
         .iter()
         .map(|(id, config)| {
-            json_value(config)
+            guatiao_serde::from_serde(config.clone())
                 .map(|value| (id.clone(), value))
-                .map_err(|reason| format!("providers.{id}: {reason}"))
+                .map_err(|reason: serde_json::Error| format!("providers.{id}: {reason}"))
         })
         .collect()
-}
-
-fn json_value(value: &serde_json::Value) -> Result<Value, String> {
-    use guatiao::ToValue;
-    use std::collections::VecDeque;
-    let encoded = match value {
-        serde_json::Value::Null => ().to_value(),
-        serde_json::Value::Bool(value) => value.to_value(),
-        serde_json::Value::Number(value) => guatiao::value::Number::new(&value.to_string())
-            .map_err(|_| format!("{value} is not a number a provider can read"))?
-            .to_value(),
-        serde_json::Value::String(value) => value.to_value(),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .map(json_value)
-            .collect::<Result<VecDeque<_>, _>>()?
-            .to_value(),
-        serde_json::Value::Object(values) => values
-            .iter()
-            .map(|(key, value)| json_value(value).map(|value| (key.clone(), value)))
-            .collect::<Result<BTreeMap<_, _>, _>>()?
-            .to_value(),
-    };
-    encoded.map_err(|error| error.to_string())
 }
 
 fn build<K>(

@@ -17,10 +17,13 @@ use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentSta
 
 /// What a [`MockProgramHandler`] is built with: an Agent's or route's `handler_settings`.
 #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone, Default)]
-#[map(crate = crate::guatiao)]
+#[map(crate = crate::guatiao, deny_unknown_fields)]
 pub(super) struct MockProgramConfig {
-    #[map(default = String::new())]
-    settings_toml: String,
+    program: Option<String>,
+    #[map(default)]
+    models_ms: u64,
+    #[map(default)]
+    key: String,
 }
 
 /// A handler whose settings name its program (`program`), how long its model listing takes
@@ -43,23 +46,10 @@ impl TryFrom<MockProgramConfig> for MockProgramHandler {
     type Error = ProviderError;
 
     fn try_from(config: MockProgramConfig) -> Result<Self, ProviderError> {
-        let table: toml::Table = toml::from_str(&config.settings_toml).map_err(|error| {
-            ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &error.to_string())
-        })?;
         Ok(Self {
-            program: table
-                .get("program")
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned),
-            models_ms: table
-                .get("models_ms")
-                .and_then(toml::Value::as_integer)
-                .map_or(0, |ms| ms.unsigned_abs()),
-            key: table
-                .get("key")
-                .and_then(toml::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
+            program: config.program,
+            models_ms: config.models_ms,
+            key: config.key,
         })
     }
 }
