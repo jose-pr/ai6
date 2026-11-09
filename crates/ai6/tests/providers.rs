@@ -143,7 +143,10 @@ fn write_every_family(dir: &Path) {
             "station.toml",
             "max_concurrent_missions = 2\nstall_timeout = 120\nlabels = { gpu = \"yes\" }\n",
         ),
-        ("tls.toml", "profile = \"intermediate\"\n"),
+        (
+            "tls.toml",
+            "tls_versions = [\"1.2\", \"1.3\"]\nrequire_ems = true\n",
+        ),
         (
             "operation_access.toml",
             "[operation_access.G.role.reviewer]
