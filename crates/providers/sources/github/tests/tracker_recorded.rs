@@ -205,3 +205,14 @@ fn every_request_asks_for_the_api_version_that_carries_no_deprecation() {
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[0].api_version.as_deref(), Some("2026-03-10"));
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Github {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Github::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}

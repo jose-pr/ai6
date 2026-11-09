@@ -3,9 +3,8 @@
 
 use std::sync::Once;
 
-use ai6::guatiao::ToValue;
+use ai6::SourcePoll;
 use ai6::station::plugins::{PluginBuildError, Plugins};
-use ai6::{SourceConfig, SourcePoll};
 
 mod support;
 use support::{canned, serve};
@@ -17,11 +16,8 @@ fn config(settings: &str) -> ai6::guatiao::Value {
         // SAFETY: runs once, before this test binary reads the environment.
         unsafe { std::env::set_var("AI6_TEST_JIRA_PLUGIN_TOKEN", "plugin-token") };
     });
-    SourceConfig {
-        settings_toml: settings.to_owned(),
-    }
-    .to_value()
-    .unwrap()
+    let table: toml::Table = toml::from_str(settings).unwrap();
+    ai6::provider_settings::table_value(&table).unwrap()
 }
 
 /// The cdylib is built into the directory that holds this test binary.

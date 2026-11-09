@@ -18,9 +18,9 @@ use std::time::{Duration, Instant};
 use ai6::guatiao::library::ProviderError;
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
-    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceConfig,
-    SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
-    TrackerUpdate, settings_from_table, settled_cursor,
+    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceItem,
+    SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
+    TrackerUpdate, settled_cursor,
 };
 use url::Url;
 
@@ -59,7 +59,7 @@ enum Auth {
 /// what Agents may touch) and passes the rest here.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
 #[map(crate = ::ai6::guatiao, deny_unknown_fields)]
-struct Settings {
+pub struct Settings {
     /// The site root, for example `https://example.atlassian.net`.
     #[schema(title = "Site")]
     site: String,
@@ -70,6 +70,9 @@ struct Settings {
     /// The project key; a bare string under `sources` is this value.
     #[schema(title = "Project")]
     project: Option<String>,
+    /// Another spelling of `project`, which a bare string under `sources` is; set at most one.
+    #[schema(title = "Target")]
+    target: Option<String>,
     /// An extra JQL condition, combined with the project and label filters by AND.
     #[schema(title = "Extra JQL")]
     jql: Option<String>,
@@ -146,7 +149,7 @@ struct Discovered {
     Tracker,
     id = "jira",
     name = "Jira issues",
-    config = SourceConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct Jira {
@@ -158,18 +161,19 @@ pub struct Jira {
 }
 
 impl Jira {
-    /// Builds the provider from the instance's settings table, serialized as TOML.
+    /// Builds the provider from the instance's settings.
     ///
     /// # Errors
     ///
     /// Returns a message for an unknown key, a missing project and JQL, a malformed key or
     /// an insecure site address.
-    pub fn from_settings(settings_toml: &str) -> Result<Self, String> {
-        let mut table: toml::Table = toml::from_str(settings_toml).map_err(|e| e.to_string())?;
-        if let Some(target) = table.remove("target") {
-            table.insert("project".to_owned(), target);
+    pub fn new(mut settings: Settings) -> Result<Self, String> {
+        if let Some(target) = settings.target.take() {
+            if settings.project.is_some() {
+                return Err("set `project` or `target`, not both".to_owned());
+            }
+            settings.project = Some(target);
         }
-        let settings: Settings = settings_from_table(table)?;
         if settings.project.is_none() && settings.jql.is_none() {
             return Err("set `project` or `jql`".to_owned());
         }
@@ -568,12 +572,11 @@ impl Jira {
     }
 }
 
-impl TryFrom<SourceConfig> for Jira {
+impl TryFrom<Settings> for Jira {
     type Error = ProviderError;
 
-    fn try_from(config: SourceConfig) -> Result<Self, Self::Error> {
-        Self::from_settings(&config.settings_toml)
-            .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &e))
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        Self::new(settings).map_err(|e| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &e))
     }
 }
 
@@ -1295,6 +1298,16 @@ fn failure(message: &str) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    trait FromText: Sized {
+        fn from_settings(text: &str) -> Result<Self, String>;
+    }
+
+    impl FromText for Jira {
+        fn from_settings(text: &str) -> Result<Self, String> {
+            Jira::new(ai6::provider_settings::settings_from_text(text)?)
+        }
+    }
 
     #[test]
     fn timestamps_order_by_the_instant_they_name_and_not_their_text() {

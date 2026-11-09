@@ -16,9 +16,9 @@ pub const PROVIDER_ID: &str = "github";
 pub struct Github { /* settings, API origin, HTTP agent */ }
 
 impl Github {
-    pub fn from_settings(settings_toml: &str) -> Result<Self, String>;
+    pub fn new(settings: Settings) -> Result<Self, String>;   // Settings: Guatiao config (Schema, FromValue)
 }
-impl TryFrom<ai6::SourceConfig> for Github { /* same validation; BAD_VALUE on refusal */ }
+impl TryFrom<Settings> for Github { /* same validation; BAD_VALUE on refusal */ }
 impl ai6::Source for Github {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
 }
@@ -35,7 +35,7 @@ impl ai6::Tracker for Github {
 
 Provider ID `github`, kinds `ai6_source` and `ai6_tracker`; one table builds both. The host
 passes the instance's `sources.<name>` table (its `provider` key names this one), serialized
-as TOML, in `SourceConfig::settings_toml`.
+as the value of `Settings` (the provider's `config`).
 
 ## Settings
 

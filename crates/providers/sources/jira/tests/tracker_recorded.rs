@@ -301,3 +301,14 @@ fn recorded_refusals_name_what_was_rejected_and_not_what_jira_said() {
     let error = jira.issue("AI6-99999".to_owned()).unwrap_err().to_string();
     assert!(error.contains(TOKEN_VAR), "{error}");
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Jira {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Jira::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}

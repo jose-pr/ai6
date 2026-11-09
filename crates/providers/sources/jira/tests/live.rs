@@ -696,3 +696,14 @@ fn a_refused_credential_on_each_tracker_call_names_the_variable() {
         assert!(!text.contains("not-a-token"), "{text}");
     }
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Jira {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Jira::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}

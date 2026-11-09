@@ -16,9 +16,9 @@ pub const PROVIDER_ID: &str = "jira";
 pub struct Jira { /* settings, site origin, HTTP agent */ }
 
 impl Jira {
-    pub fn from_settings(settings_toml: &str) -> Result<Self, String>;
+    pub fn new(settings: Settings) -> Result<Self, String>;   // Settings: Guatiao config (Schema, FromValue)
 }
-impl TryFrom<ai6::SourceConfig> for Jira { /* same validation; BAD_VALUE on refusal */ }
+impl TryFrom<Settings> for Jira { /* same validation; BAD_VALUE on refusal */ }
 impl ai6::Source for Jira {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
 }
@@ -35,7 +35,7 @@ impl ai6::Tracker for Jira {
 
 Provider ID `jira`, kinds `ai6_source` and `ai6_tracker`; one table builds both. The host
 passes the instance's `sources.<name>` table (its `provider` key names this one), serialized
-as TOML, in `SourceConfig::settings_toml`.
+as the value of `Settings` (the provider's `config`).
 
 ## Settings
 

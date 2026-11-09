@@ -129,3 +129,14 @@ fn a_ca_file_that_trusts_nothing_is_refused_naming_it() {
     .unwrap_err();
     assert!(refused.contains("absolute"), "{refused}");
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Jira {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Jira::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}

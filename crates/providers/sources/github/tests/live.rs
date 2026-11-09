@@ -592,3 +592,14 @@ fn the_api_version_asked_for_carries_no_deprecation_on_a_create() {
     live.opened.push(created["number"].as_u64().unwrap());
     assert!(created.get("assignees").is_some());
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Github {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Github::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}

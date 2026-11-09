@@ -21,9 +21,9 @@ use std::time::{Duration, Instant};
 use ai6::guatiao::library::ProviderError;
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
-    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceConfig,
-    SourceItem, SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
-    TrackerUpdate, settings_from_table, settled_cursor,
+    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, Source, SourceBatch, SourceItem,
+    SourcePoll, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink, TrackerPost,
+    TrackerUpdate, settled_cursor,
 };
 use url::Url;
 
@@ -39,10 +39,14 @@ const MARKER_PREFIX: &str = "<!-- ai6:";
 /// what Agents may touch) and passes the rest here.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
 #[map(crate = ::ai6::guatiao, deny_unknown_fields)]
-struct Settings {
+pub struct Settings {
     /// `group/name`, or `group/subgroup/name`; a bare string under `sources` is this value.
     #[schema(title = "Project")]
+    #[map(default)]
     project: String,
+    /// Another spelling of `project`, which a bare string under `sources` is; set at most one.
+    #[schema(title = "Target")]
+    target: Option<String>,
     /// An issue needs every one of these labels to become a Mission.
     #[schema(title = "Intake labels")]
     #[map(default = vec!["ai6:ready".to_owned()])]
@@ -103,7 +107,7 @@ struct Settings {
     Tracker,
     id = "gitlab",
     name = "GitLab issues",
-    config = SourceConfig,
+    config = Settings,
     crate = ::ai6::guatiao
 )]
 pub struct Gitlab {
@@ -115,18 +119,19 @@ pub struct Gitlab {
 }
 
 impl Gitlab {
-    /// Builds the provider from the instance's settings table, serialized as TOML.
+    /// Builds the provider from the instance's settings.
     ///
     /// # Errors
     ///
     /// Returns a message for an unknown key, a malformed project path, a limit of 0 or an
     /// insecure API address.
-    pub fn from_settings(settings_toml: &str) -> Result<Self, String> {
-        let mut table: toml::Table = toml::from_str(settings_toml).map_err(|e| e.to_string())?;
-        if let Some(target) = table.remove("target") {
-            table.insert("project".to_owned(), target);
+    pub fn new(mut settings: Settings) -> Result<Self, String> {
+        if let Some(target) = settings.target.take() {
+            if !settings.project.is_empty() {
+                return Err("set `project` or `target`, not both".to_owned());
+            }
+            settings.project = target;
         }
-        let settings: Settings = settings_from_table(table)?;
         let valid_part = |part: &str| {
             !part.is_empty()
                 && !part.starts_with('.')
@@ -551,12 +556,11 @@ impl Gitlab {
     }
 }
 
-impl TryFrom<SourceConfig> for Gitlab {
+impl TryFrom<Settings> for Gitlab {
     type Error = ProviderError;
 
-    fn try_from(config: SourceConfig) -> Result<Self, Self::Error> {
-        Self::from_settings(&config.settings_toml)
-            .map_err(|e| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &e))
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        Self::new(settings).map_err(|e| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &e))
     }
 }
 
@@ -1053,6 +1057,16 @@ fn failure(message: &str) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    trait FromText: Sized {
+        fn from_settings(text: &str) -> Result<Self, String>;
+    }
+
+    impl FromText for Gitlab {
+        fn from_settings(text: &str) -> Result<Self, String> {
+            Gitlab::new(ai6::provider_settings::settings_from_text(text)?)
+        }
+    }
 
     #[test]
     fn link_headers_yield_the_next_page() {

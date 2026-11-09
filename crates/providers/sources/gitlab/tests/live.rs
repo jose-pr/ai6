@@ -614,3 +614,14 @@ fn every_tracker_write_reaches_the_issue() {
         .unwrap_err();
     assert_eq!(error.status, Status::GUATIAO_ERR_UNSUPPORTED);
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Gitlab {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Gitlab::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}

@@ -345,3 +345,14 @@ fn a_recorded_missing_project_names_no_response_text() {
     assert!(!error.contains("Project Not Found"), "{error}");
     assert!(recorded(PROJECT_NOT_FOUND).contains("Project Not Found"));
 }
+
+/// Reads settings written as TOML text, as a record's settings reach the provider.
+trait FromText: Sized {
+    fn from_settings(text: &str) -> Result<Self, String>;
+}
+
+impl FromText for Gitlab {
+    fn from_settings(text: &str) -> Result<Self, String> {
+        Gitlab::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}
