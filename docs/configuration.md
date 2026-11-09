@@ -1067,7 +1067,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | --- | --- | --- |
 | `event_queue` | 256 | **Events queued per Session.** Events of one Session queued for its event pump; past it the oldest is dropped. |
 | `interval` | 0.5 | **Between scheduler rounds.** Seconds between scheduler rounds. |
-| `retry_delay` | 5 | **Retry a failed Mission start after.** Seconds before a Mission whose start failed is tried again. |
+| `retry_backoff` | 5 | **Retry a failed Mission start after.** Seconds before a Mission whose start failed is tried again; each further failure in a row doubles the wait, up to `retry_backoff_max`. `0` retries on the next round. |
+| `retry_backoff_max` | 600 | **Longest wait between start retries.** Seconds the wait between tries of a Mission start grows to, at most. |
 | `check_in` | 15 | **Between check-ins with the Registry.** Seconds between the Station's check-ins with the Registry. |
 | `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |

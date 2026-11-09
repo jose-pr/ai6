@@ -227,13 +227,28 @@ Session, stops the Mission; one retried since runs on.
 
 ### A brief that settles before its Mission starts
 
-A Mission waiting to start reads its brief first. A brief the Registry has filed as done or failed
-while it waited, as when a restart lapsed its lease and intake could no longer place it, is not
+A Mission waiting to start reads its brief first, when the Station starts and again before each
+retry. A brief the Registry has filed as done or failed while it waited (a withdrawal, or a restart
+that lapsed its lease), put back in the queue or held, or claimed by another Station, is not
 started or tried again: the Mission is dropped from the Station's book, and the timeline says so
-(`mission`, `dropped`). A retry an operator or a review asks for after the brief was filed still
-runs. A start that cannot succeed whatever is tried, because the Mission's Agent is not posted to the
-Operation, fails the Mission at once with that reason, and its brief with it; other start failures
-are tried again after `[scheduler] retry_delay`.
+once (`mission`, `dropped`). A retry an operator or a review asks for after the brief was filed
+still runs.
+
+A Mission that was working when the Station stopped is checked the same way at start: a brief that
+ended or went elsewhere ends the Mission without resuming it, and one whose Session record is gone,
+ended, lost or another Station's has its attempt handed back as "Session lost at restart" under the
+Operation's `on_lost`.
+
+A start that cannot succeed whatever is tried fails the Mission at once with that reason, and its
+brief with it: an Agent not posted to the Operation, an Operation with no checkout path, a safe
+house provider that is not there, or a safe house that cannot be opened. A start that fails any other
+way is tried again after `[scheduler] retry_backoff` (5 seconds), each further failure in a row
+doubling the wait up to `[scheduler] retry_backoff_max` (600 seconds); neither has a floor. A failed
+start leaves no Session record.
+
+If a claimed Mission's Station no longer answers, `ai6ctl mission settle HANDLE --reason TEXT` files
+its brief as failed with that reason (needs `mission.control`, audited). A Station that answers is
+asked with `mission cancel`.
 
 ## Checking an outcome
 
@@ -1079,6 +1094,10 @@ ai6 sleeper revoke G nightly-deps
 - **Authorization.** `authorize` approves the sleeper exactly as written. Editing its
   schedule, title, prompt or assignment withdraws the approval until it is authorized
   again. Windows at or before the approval never fire.
+- **Disable and enable.** `ai6ctl sleeper disable G nightly-deps` stops it minting briefs while
+  keeping its definition and authorization; windows that pass are on the timeline as skipped
+  ("disabled by an operator"), and authorizing it again keeps it stopped. `ai6ctl sleeper enable G
+  nightly-deps` lets it mint again. Both need `mission.control` and are audited.
 - **One brief per window.** The Station holding the Headquarters lease checks the clock
   every 20 seconds and queues the brief for the latest scheduled minute. The brief's key
   comes from the Operation, the sleeper and that minute, so a Station that takes over the

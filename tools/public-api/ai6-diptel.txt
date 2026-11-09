@@ -1,11 +1,13 @@
 pub mod ai6_diptel
 #[non_exhaustive] pub enum ai6_diptel::ControlAction
 pub ai6_diptel::ControlAction::Cancel
+pub ai6_diptel::ControlAction::Drop
 pub ai6_diptel::ControlAction::Interrupt
+pub ai6_diptel::ControlAction::Reload
 pub ai6_diptel::ControlAction::Resume
 pub ai6_diptel::ControlAction::Retry
 impl ai6_diptel::ControlAction
-pub const ai6_diptel::ControlAction::ALL: [Self; 4]
+pub const ai6_diptel::ControlAction::ALL: [Self; 6]
 pub const fn ai6_diptel::ControlAction::as_str(self) -> &'static str
 pub fn ai6_diptel::ControlAction::parse(&str) -> core::option::Option<Self>
 pub enum ai6_diptel::IncomingFrame

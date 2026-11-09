@@ -5397,18 +5397,21 @@ pub fn ai6::directorates::registry::backend::SleeperStore::authorize_sleeper(&se
 pub fn ai6::directorates::registry::backend::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::backend::SleeperStore::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::SleeperStore::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::directorates::registry::backend::SourceStore
 pub fn ai6::directorates::registry::backend::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
@@ -7285,6 +7288,7 @@ pub fn ai6::directorates::registry::sleepers::Sleeper::window_before(&self, i64,
 pub struct ai6::directorates::registry::sleepers::SleeperAuthorization
 pub ai6::directorates::registry::sleepers::SleeperAuthorization::at: i64
 pub ai6::directorates::registry::sleepers::SleeperAuthorization::authorized_by: alloc::string::String
+pub ai6::directorates::registry::sleepers::SleeperAuthorization::disabled: bool
 pub ai6::directorates::registry::sleepers::SleeperAuthorization::fingerprint: alloc::string::String
 pub ai6::directorates::registry::sleepers::SleeperAuthorization::mark: core::option::Option<ai6::directorates::registry::sleepers::SleeperMark>
 pub struct ai6::directorates::registry::sleepers::SleeperMark
@@ -7300,18 +7304,21 @@ pub fn ai6::directorates::registry::sleepers::SleeperStore::authorize_sleeper(&s
 pub fn ai6::directorates::registry::sleepers::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sleepers::SleeperStore::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sleepers::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub fn ai6::directorates::registry::sleepers::sleeper_brief(&str, &str, &ai6::directorates::registry::sleepers::Sleeper, i64, core::option::Option<&str>) -> ai6::directorates::registry::store::Brief
 pub fn ai6::directorates::registry::sleepers::window_label(i64) -> alloc::string::String
@@ -7539,6 +7546,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
@@ -7826,6 +7834,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
@@ -9175,7 +9184,8 @@ pub ai6::station::limits::SchedulerLimits::check_in: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::event_queue: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::intake_attempts: u32
 pub ai6::station::limits::SchedulerLimits::interval: ai6::bounds::Seconds
-pub ai6::station::limits::SchedulerLimits::retry_delay: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::retry_backoff: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::retry_backoff_max: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::role_catalog_bytes: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::shutdown_wait: ai6::bounds::Seconds
 impl core::default::Default for ai6::station::limits::SchedulerLimits
@@ -11730,6 +11740,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
@@ -13261,6 +13272,7 @@ pub fn ai6::directorates::registry::sleepers::Sleeper::window_before(&self, i64,
 pub struct ai6::SleeperAuthorization
 pub ai6::SleeperAuthorization::at: i64
 pub ai6::SleeperAuthorization::authorized_by: alloc::string::String
+pub ai6::SleeperAuthorization::disabled: bool
 pub ai6::SleeperAuthorization::fingerprint: alloc::string::String
 pub ai6::SleeperAuthorization::mark: core::option::Option<ai6::directorates::registry::sleepers::SleeperMark>
 #[non_exhaustive] pub struct ai6::SleeperLimits
@@ -13523,6 +13535,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
@@ -14975,18 +14988,21 @@ pub fn ai6::SleeperStore::authorize_sleeper(&self, &str, &str, &ai6::directorate
 pub fn ai6::SleeperStore::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::SleeperStore::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::SleeperStore::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::SleeperStore::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::SleeperStore::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sleepers::SleeperStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::authorize_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, &str, i64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::fire_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::Sleeper, (i64, core::option::Option<&str>), &str) -> core::io::error::Result<ai6::directorates::registry::sleepers::Fire>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_sleeper(&self, &str, &str, &ai6::directorates::registry::sleepers::SleeperMark) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &str, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::Source: core::marker::Send + core::marker::Sync
 pub fn ai6::Source::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>

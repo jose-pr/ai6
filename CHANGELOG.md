@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `[scheduler] retry_delay` is now `retry_backoff` (5 seconds): each further failed start of a
+  Mission doubles the wait, up to the new `retry_backoff_max` (600 seconds). Neither has a floor.
+
 ### Fixed
+
+- A Station checks a queued Mission against the Registry when it starts and before each retry: a brief
+  filed, put back in the queue, held or claimed by another Station drops the entry (once, on the
+  timeline). A working Mission found at restart is settled instead of resumed when its brief ended or
+  its Session record is gone ("Session lost at restart"). A start that cannot succeed (no checkout
+  path, a safe house provider that is missing, a safe house that cannot be opened) fails the brief
+  once with its reason instead of looping.
 
 - `GET /v1/user/profile` reads its Operation and Station actions from `ai6::OPERATION_ACTIONS` and the new
   `ai6::STATION_ACTIONS` instead of a list of its own, which left out `mission.review` (so Outer Office
@@ -21,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Moneypenny's `/` commands: the composer's menu lists her skills and what her harness announced
   (`GET /v1/user/moneypenny/commands`, `EVENT_COMMANDS`, `ai6::AssistantCommand`,
   `skill_summary`); `/name args` runs a skill of hers, and an unknown name goes as text with a notice.
+- `ai6ctl mission settle HANDLE --reason`, `ai6ctl station queue list|drop|reload STATION [ENTRY]` and
+  `ai6ctl sleeper disable|enable OPERATION NAME`. A Sleeper that is disabled mints nothing, keeps its
+  definition and authorization, and keeps being disabled when authorized again. A standing Sleeper
+  authorized again after an edit briefs its next window anew and says so on the timeline
+  (`sleeper`, `revised`). A Station asking for its controls after a restart is handed again the ones
+  it took and never reported on.
 - Watches: a standing Session per scope (`m`, `operation:<codename>`, `station:<id>`), configured
   as `[watch.<scope>]` (the `watch` family: `agent`, `operation`, `wake_every`,
   `max_turns_per_hour`, `max_events_per_turn`, `max_waiting_events`, `turn_timeout`, `lease`). The

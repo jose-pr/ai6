@@ -167,6 +167,14 @@ pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorat
 #[non_exhaustive] pub struct universal_exports::BoardOperation
 pub universal_exports::BoardOperation::operation_id: alloc::string::String
 pub universal_exports::BoardOperation::parent: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::BoardQueueEntry
+pub universal_exports::BoardQueueEntry::agent: core::option::Option<alloc::string::String>
+pub universal_exports::BoardQueueEntry::failures: u32
+pub universal_exports::BoardQueueEntry::mission_id: alloc::string::String
+pub universal_exports::BoardQueueEntry::operation_id: alloc::string::String
+pub universal_exports::BoardQueueEntry::retry_in_secs: core::option::Option<f64>
+pub universal_exports::BoardQueueEntry::state: alloc::string::String
+pub universal_exports::BoardQueueEntry::waiting: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardSession
 pub universal_exports::BoardSession::agent: core::option::Option<alloc::string::String>
 pub universal_exports::BoardSession::exposure: alloc::vec::Vec<alloc::string::String>
@@ -187,6 +195,7 @@ pub universal_exports::BoardStation::headquarters: bool
 pub universal_exports::BoardStation::healthy: bool
 pub universal_exports::BoardStation::issues_weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::operations: alloc::vec::Vec<alloc::string::String>
+pub universal_exports::BoardStation::queue: alloc::vec::Vec<universal_exports::BoardQueueEntry>
 pub universal_exports::BoardStation::resources: core::option::Option<ai6::directorates::m::placement::Resources>
 pub universal_exports::BoardStation::roles: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::running: usize
