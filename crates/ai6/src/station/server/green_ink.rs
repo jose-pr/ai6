@@ -655,7 +655,7 @@ async fn resume_with(state: &DaemonState, mission_id: &str, untold: &[Approval],
             if let Ok(mut retries) = state.retry_after.lock() {
                 retries.insert(
                     mission_id.to_owned(),
-                    Instant::now() + state.station.limits().scheduler.retry_delay.0,
+                    Instant::now() + state.station.limits().scheduler.retry_backoff.0,
                 );
             }
         }

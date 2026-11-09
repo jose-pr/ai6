@@ -70,7 +70,12 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
         };
     };
     let current = Some(mission.state.as_str());
-    if let Err(reason) = check_lease(state, mission_id) {
+    // An entry in this Station's queue is this Station's to end, whoever holds the Session.
+    let own_queue = matches!(
+        control.action(),
+        ControlAction::Drop | ControlAction::Reload
+    );
+    if !own_queue && let Err(reason) = check_lease(state, mission_id) {
         return ControlOutcome::rejected(current, reason);
     }
     if let Some(expected) = control.session_id()
@@ -83,6 +88,8 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
         ControlAction::Retry => retry(state, &mission, control.agent()).await,
         ControlAction::Resume => resume(state, &mission, control.message()).await,
         ControlAction::Interrupt => interrupt(state, &mission).await,
+        ControlAction::Drop => drop_entry(state, &mission).await,
+        ControlAction::Reload => reload_entry(state, &mission),
         _ => Err("this Station does not support the action".to_owned()),
     };
     match result {
@@ -279,6 +286,53 @@ async fn resume(
     })
 }
 
+/// Forgets the retry wait and the failed start tries of a queue entry.
+fn clear_waits(state: &DaemonState, mission_id: &str) {
+    if let Ok(mut retries) = state.retry_after.lock() {
+        retries.remove(mission_id);
+    }
+    super::forget_start_failures(state, |id| id == mission_id);
+}
+
+/// Ends an entry of this Station's queue: a Mission waiting to start fails with the reason, any
+/// other that is not over is abandoned, and neither is tried again.
+async fn drop_entry(state: &DaemonState, mission: &Mission) -> Result<Applied, String> {
+    if is_terminal_state(mission.state) {
+        return Ok(Applied {
+            state: mission.state,
+            announced: true,
+        });
+    }
+    let mission_id = mission.mission_id.as_str();
+    if let Ok(mut pending) = state.startup_recovery.lock() {
+        pending.remove(mission_id);
+    }
+    clear_waits(state, mission_id);
+    if mission.state == MissionState::Queued {
+        super::fail_unstartable(
+            state,
+            mission_id,
+            "dropped from the Station's queue by an operator",
+        )
+        .await;
+        return Ok(Applied {
+            state: MissionState::Failed,
+            announced: true,
+        });
+    }
+    cancel(state, mission).await
+}
+
+/// Clears an entry's retry wait, so the next scheduler round checks it against the Registry and
+/// tries it.
+fn reload_entry(state: &DaemonState, mission: &Mission) -> Result<Applied, String> {
+    clear_waits(state, mission.mission_id.as_str());
+    Ok(Applied {
+        state: mission.state,
+        announced: true,
+    })
+}
+
 async fn interrupt(state: &DaemonState, mission: &Mission) -> Result<Applied, String> {
     if mission.state != MissionState::Working || !has_live_session(state, mission) {
         return Err(format!(
@@ -426,8 +480,10 @@ pub(super) async fn stop_settled(state: &DaemonState) {
             .filter_map(|id| {
                 let filed = reading.intake.filed_brief(&id).ok().flatten()?;
                 let outcome = filed.outcome?;
-                (filed.state == "failed" && outcome["reason"] == CANCEL_UNCONFIRMED)
-                    .then(|| (id, outcome["session_id"].as_str().map(str::to_owned)))
+                (filed.state == "failed"
+                    && (outcome["reason"] == CANCEL_UNCONFIRMED
+                        || outcome.get("settled_by").is_some()))
+                .then(|| (id, outcome["session_id"].as_str().map(str::to_owned)))
             })
             .collect::<Vec<_>>()
     })

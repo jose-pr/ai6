@@ -171,11 +171,23 @@ pub enum ControlAction {
     Resume,
     /// Stop the Session's current turn; the Mission stays, blocked, until resumed.
     Interrupt,
+    /// End an entry in the Station's own queue: a Mission that waits to start, or to be resumed,
+    /// is failed or abandoned there with a reason, whoever holds its claim.
+    Drop,
+    /// Clear an entry's retry wait and check it against the Registry now.
+    Reload,
 }
 
 impl ControlAction {
     /// Every action, in display order.
-    pub const ALL: [Self; 4] = [Self::Cancel, Self::Retry, Self::Resume, Self::Interrupt];
+    pub const ALL: [Self; 6] = [
+        Self::Cancel,
+        Self::Retry,
+        Self::Resume,
+        Self::Interrupt,
+        Self::Drop,
+        Self::Reload,
+    ];
 
     /// The wire spelling of the action.
     pub const fn as_str(self) -> &'static str {
@@ -184,6 +196,8 @@ impl ControlAction {
             Self::Retry => "retry",
             Self::Resume => "resume",
             Self::Interrupt => "interrupt",
+            Self::Drop => "drop",
+            Self::Reload => "reload",
         }
     }
 

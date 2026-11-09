@@ -1241,7 +1241,7 @@ async fn send_back(state: &DaemonState, mission_id: &str, gate: ReviewGate, mess
             if let Ok(mut retries) = state.retry_after.lock() {
                 retries.insert(
                     mission_id.to_owned(),
-                    tokio::time::Instant::now() + state.station.limits().scheduler.retry_delay.0,
+                    tokio::time::Instant::now() + state.station.limits().scheduler.retry_backoff.0,
                 );
             }
         }
@@ -1565,7 +1565,7 @@ async fn go_on_after_plan(state: &DaemonState, mission_id: &str) {
         if let Ok(mut retries) = state.retry_after.lock() {
             retries.insert(
                 mission_id.to_owned(),
-                tokio::time::Instant::now() + state.station.limits().scheduler.retry_delay.0,
+                tokio::time::Instant::now() + state.station.limits().scheduler.retry_backoff.0,
             );
         }
     }

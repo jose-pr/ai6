@@ -142,10 +142,15 @@ pub struct SchedulerLimits {
     #[schema(title = "Between scheduler rounds")]
     #[map(default = SchedulerLimits::default().interval)]
     pub interval: Seconds,
-    /// Seconds before a Mission whose start failed is tried again.
+    /// Seconds before a Mission whose start failed is tried again; each further failure in a row
+    /// doubles the wait, up to `retry_backoff_max`. `0` retries on the next round.
     #[schema(title = "Retry a failed Mission start after")]
-    #[map(default = SchedulerLimits::default().retry_delay)]
-    pub retry_delay: Seconds,
+    #[map(default = SchedulerLimits::default().retry_backoff)]
+    pub retry_backoff: Seconds,
+    /// Seconds the wait between tries of a Mission start grows to, at most.
+    #[schema(title = "Longest wait between start retries")]
+    #[map(default = SchedulerLimits::default().retry_backoff_max)]
+    pub retry_backoff_max: Seconds,
     /// Seconds between the Station's check-ins with the Registry.
     #[schema(title = "Between check-ins with the Registry")]
     #[map(default = SchedulerLimits::default().check_in)]
@@ -173,7 +178,8 @@ impl Default for SchedulerLimits {
         Self {
             event_queue: Limit::at(256),
             interval: Seconds(std::time::Duration::from_millis(500)),
-            retry_delay: Seconds::new(5),
+            retry_backoff: Seconds::new(5),
+            retry_backoff_max: Seconds::new(600),
             check_in: Seconds::new(15),
             intake_attempts: 3,
             role_catalog_bytes: Limit::at(512 * KIB),

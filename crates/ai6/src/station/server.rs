@@ -2018,6 +2018,15 @@ async fn schedule_recovered_once(state: &DaemonState) {
         if should_wait {
             continue;
         }
+        if settle_at_restart(state, &mission_id).await {
+            if let Ok(mut pending) = state.startup_recovery.lock() {
+                pending.remove(&mission_id);
+            }
+            if let Ok(mut retries) = state.retry_after.lock() {
+                retries.remove(&mission_id);
+            }
+            continue;
+        }
 
         let result = resume_mission(
             State(state.clone()),
@@ -2045,7 +2054,7 @@ async fn schedule_recovered_once(state: &DaemonState) {
                     .unwrap_or_else(|_| {
                         Some(
                             std::time::Instant::now()
-                                + state.station.limits().scheduler.retry_delay.0,
+                                + state.station.limits().scheduler.retry_backoff.0,
                         )
                     })
                     .map(Instant::from_std)
@@ -2067,6 +2076,80 @@ async fn schedule_recovered_once(state: &DaemonState) {
             }
         }
     }
+}
+
+/// Settles a Mission the restart found working when nothing is left to resume: its brief ended
+/// or went to another Station, or its Session record is gone, ended, lost or another Station's.
+/// The Mission ends here, an attempt lost at restart is handed back to the Registry under the
+/// Operation's `on_lost`, and `true` is answered. `false` leaves the Mission to be resumed.
+async fn settle_at_restart(state: &DaemonState, mission_id: &str) -> bool {
+    let worker = state.clone();
+    let id = mission_id.to_owned();
+    let verdict = tokio::task::spawn_blocking(move || {
+        let mission = worker.missions.lock().ok()?.get(&id).cloned()?;
+        if let Some(why) = superseded_by_registry(&worker, &mission) {
+            return Some((why, false));
+        }
+        let gone = match session_hold(&worker, &id) {
+            None => Some("no Session was recorded".to_owned()),
+            Some(hold) => match worker.intake.session(&hold.id) {
+                Ok(None) => Some("its Session record is gone".to_owned()),
+                Ok(Some(record))
+                    if record.station != worker.station_id
+                        || matches!(record.status, SessionStatus::Ended | SessionStatus::Lost) =>
+                {
+                    Some("its Session record is no longer this Station's to run".to_owned())
+                }
+                _ => None,
+            },
+        };
+        gone.map(|why| (why, true))
+    })
+    .await
+    .ok()
+    .flatten();
+    let Some((why, lost)) = verdict else {
+        return false;
+    };
+    let worker = state.clone();
+    let id = mission_id.to_owned();
+    if lost {
+        eprintln!("ai6: Mission {mission_id:?} lost its Session at restart: {why}");
+        let _ = tokio::task::spawn_blocking(move || {
+            recovery::give_up(&worker, &id, None, "Session lost at restart")
+        })
+        .await;
+        return true;
+    }
+    eprintln!("ai6: Mission {mission_id:?} is not resumed: {why}");
+    let ended = transition_mission(
+        State(state.clone()),
+        axum::extract::Path(mission_id.to_owned()),
+        Json(TransitionMission {
+            state: MissionState::Abandoned,
+        }),
+    )
+    .await;
+    if let Err(ApiErrorResponse(_, Json(error))) = &ended {
+        eprintln!(
+            "ai6: Mission {mission_id:?} could not be ended: {}",
+            error.error
+        );
+    }
+    if ended.is_ok()
+        && let Some(operation) = state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| missions.get(mission_id)?.operation_id.clone())
+    {
+        let event = TimelineEvent::new("mission", "dropped", &operation, state.clock.now() as f64)
+            .station(state.station_id.clone())
+            .mission(mission_id)
+            .detail("reason", why);
+        let _ = state.intake.record_event(&event);
+    }
+    true
 }
 
 /// The Registry lease this Station holds on a Mission's Session, if any.
@@ -2499,6 +2582,10 @@ fn publish_station_check_in(state: &DaemonState) {
                 serde_json::json!(assistant_weakened),
             );
         }
+    }
+    let queue = queue_entries(state);
+    if !queue.is_empty() {
+        info.insert("queue".to_owned(), serde_json::json!(queue));
     }
     head_of_station::check_in(state, &mut info);
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
@@ -3735,9 +3822,20 @@ async fn schedule_queued_once(state: &DaemonState) {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let queued = without_settled(state, queued).await;
-    let queued_ids = queued
+    // An entry waiting out a backoff is checked against the Registry when its wait ends.
+    let now = Instant::now();
+    let (waiting, ready): (Vec<Mission>, Vec<Mission>) = queued.into_iter().partition(|mission| {
+        state
+            .retry_after
+            .lock()
+            .ok()
+            .and_then(|retries| retries.get(mission.mission_id.as_str()).copied())
+            .is_some_and(|retry_at| retry_at > now)
+    });
+    let ready = without_settled(state, ready).await;
+    let queued_ids = ready
         .iter()
+        .chain(&waiting)
         .map(|mission| mission.mission_id.to_string())
         .collect::<BTreeSet<_>>();
     let parked_ids = state
@@ -3759,23 +3857,16 @@ async fn schedule_queued_once(state: &DaemonState) {
                 || parked_ids.contains(mission_id)
         });
     }
+    forget_start_failures(state, |mission_id| {
+        !queued_ids.contains(mission_id) && !recovery_ids.contains(mission_id)
+    });
 
-    for mission in queued {
+    for mission in ready {
         if state.stopping.load(Ordering::Acquire) {
             break;
         }
         let mission_id = mission.mission_id.to_string();
         if !agents::reassign_if_unavailable(state, &mission) {
-            continue;
-        }
-        let now = Instant::now();
-        let should_wait = state
-            .retry_after
-            .lock()
-            .ok()
-            .and_then(|retries| retries.get(&mission_id).copied())
-            .is_some_and(|retry_at| retry_at > now);
-        if should_wait {
             continue;
         }
 
@@ -3794,6 +3885,7 @@ async fn schedule_queued_once(state: &DaemonState) {
                 if let Ok(mut retries) = state.retry_after.lock() {
                     retries.remove(&mission_id);
                 }
+                forget_start_failures(state, |id| id == mission_id);
             }
             Err(ApiErrorResponse(StatusCode::TOO_MANY_REQUESTS, _)) => break,
             // Trying again finds the same: the Mission fails, and its brief with it.
@@ -3805,48 +3897,149 @@ async fn schedule_queued_once(state: &DaemonState) {
                 fail_unstartable(state, &mission_id, &error.error).await;
             }
             Err(ApiErrorResponse(_, Json(error))) => {
+                let wait = start_backoff(state, &mission_id);
                 eprintln!(
-                    "ai6: Mission {mission_id:?} did not start and will be tried again: {}",
+                    "ai6: Mission {mission_id:?} did not start and will be tried again in {} s: {}",
+                    wait.as_secs(),
                     error.error
                 );
                 if let Ok(mut retries) = state.retry_after.lock() {
-                    retries.insert(
-                        mission_id,
-                        Instant::now() + state.station.limits().scheduler.retry_delay.0,
-                    );
+                    retries.insert(mission_id, Instant::now() + wait);
                 }
             }
         }
     }
 }
 
-/// `queued` without the Missions whose brief the Registry has filed while they waited to start, as
-/// when a lease lapsed and intake failed the brief: nothing would ever settle them, and they would
-/// be tried for good. Each is dropped from the book, where it would come back after a restart.
+/// Start tries that failed in a row, by Station and Mission.
+static START_FAILURES: Mutex<BTreeMap<(String, String), u32>> = Mutex::new(BTreeMap::new());
+
+/// How long to wait before the next try of a start that failed once more: `retry_backoff`,
+/// doubled for each failure in a row before it, up to `retry_backoff_max`.
+fn start_backoff(state: &DaemonState, mission_id: &str) -> Duration {
+    let failures = {
+        let mut tries = START_FAILURES.lock().unwrap_or_else(|e| e.into_inner());
+        let count = tries
+            .entry((state.station_id.clone(), mission_id.to_owned()))
+            .or_insert(0);
+        *count = count.saturating_add(1);
+        *count
+    };
+    let limits = &state.station.limits().scheduler;
+    backoff_delay(limits.retry_backoff.0, limits.retry_backoff_max.0, failures)
+}
+
+/// `base` doubled for each failure after the first, at most `most`.
+fn backoff_delay(base: Duration, most: Duration, failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(31);
+    base.saturating_mul(1u32 << doublings).min(most)
+}
+
+/// The entries of this Station's own queue as its check-in lists them: Missions waiting to start
+/// and those waiting to be resumed after a restart.
+fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
+    let recovering = state
+        .startup_recovery
+        .lock()
+        .map(|pending| pending.clone())
+        .unwrap_or_default();
+    let now = Instant::now();
+    let Ok(missions) = state.missions.lock() else {
+        return Vec::new();
+    };
+    let tries = START_FAILURES.lock().unwrap_or_else(|e| e.into_inner());
+    missions
+        .list()
+        .into_iter()
+        .filter_map(|mission| {
+            let id = mission.mission_id.to_string();
+            let recovering = recovering.contains(&id);
+            if !recovering && !(mission.state == MissionState::Queued && mission.agent_id.is_some())
+            {
+                return None;
+            }
+            let operation = mission.operation_id.clone()?;
+            let retry_in = state
+                .retry_after
+                .lock()
+                .ok()
+                .and_then(|retries| retries.get(&id).copied())
+                .map(|at| at.saturating_duration_since(now).as_secs_f64());
+            Some(serde_json::json!({
+                "mission_id": id,
+                "operation_id": operation,
+                "agent": mission.agent_id,
+                "state": if recovering { "recovering" } else { "queued" },
+                "failures": tries.get(&(state.station_id.clone(), id.clone())).copied().unwrap_or(0),
+                "retry_in_secs": retry_in,
+                "waiting": mission.waiting,
+            }))
+        })
+        .collect()
+}
+
+/// Forgets the failed start tries of every Mission of this Station that `gone` names.
+fn forget_start_failures(state: &DaemonState, gone: impl Fn(&str) -> bool) {
+    if let Ok(mut tries) = START_FAILURES.lock() {
+        tries.retain(|(station, mission), _| *station != state.station_id || !gone(mission));
+    }
+}
+
+/// Why a queued Mission's brief no longer calls for it on this Station, from the Registry:
+/// it is filed, back in the queue or held, claimed by another Station, or gone. `None` for a
+/// Mission that came from no brief and for one the Registry cannot be asked about.
+fn superseded_by_registry(state: &DaemonState, mission: &Mission) -> Option<String> {
+    if mission.brief_digest.is_none() || mission.runs_past_brief {
+        return None;
+    }
+    let id = mission.mission_id.as_str();
+    let Some(filed) = state.intake.filed_brief(id).ok()? else {
+        return Some("its brief is gone from the Registry".to_owned());
+    };
+    match filed.state.as_str() {
+        "done" | "failed" => Some(format!("its brief is filed {}", filed.state)),
+        "claimed" => match state.intake.lease(id).ok()? {
+            Some(lease) if lease.station() == state.station_id => None,
+            Some(lease) => Some(format!(
+                "its brief is claimed by Station {:?}",
+                lease.station()
+            )),
+            None => Some("its brief is no longer claimed".to_owned()),
+        },
+        other => Some(format!(
+            "its brief is {other} again, not claimed by this Station"
+        )),
+    }
+}
+
+/// `queued` without the Missions the Registry no longer wants started here (see
+/// [`superseded_by_registry`]), as when a brief was withdrawn or a lease lapsed and the brief
+/// went elsewhere: nothing would ever settle them, and they would be tried for good. Each is
+/// dropped from the book, where it would come back after a restart, and logged once.
 async fn without_settled(state: &DaemonState, queued: Vec<Mission>) -> Vec<Mission> {
-    let tied: Vec<String> = queued
-        .iter()
-        .filter(|mission| mission.brief_digest.is_some() && !mission.runs_past_brief)
-        .map(|mission| mission.mission_id.to_string())
-        .collect();
-    if tied.is_empty() {
+    if queued.is_empty() {
         return queued;
     }
     let reading = state.clone();
-    let settled: BTreeMap<String, String> = tokio::task::spawn_blocking(move || {
-        tied.into_iter()
-            .filter_map(|id| {
-                let filed = reading.intake.filed_brief(&id).ok().flatten()?;
-                matches!(filed.state.as_str(), "done" | "failed").then_some((id, filed.state))
+    let (queued, superseded) = tokio::task::spawn_blocking(move || {
+        let superseded: BTreeMap<String, String> = queued
+            .iter()
+            .filter_map(|mission| {
+                superseded_by_registry(&reading, mission)
+                    .map(|why| (mission.mission_id.to_string(), why))
             })
-            .collect()
+            .collect();
+        (queued, superseded)
     })
     .await
     .unwrap_or_default();
+    if superseded.is_empty() {
+        return queued;
+    }
     let mut kept = Vec::with_capacity(queued.len());
     for mission in queued {
         let id = mission.mission_id.as_str();
-        let Some(filed) = settled.get(id) else {
+        let Some(why) = superseded.get(id) else {
             kept.push(mission);
             continue;
         };
@@ -3857,13 +4050,14 @@ async fn without_settled(state: &DaemonState, queued: Vec<Mission>) -> Vec<Missi
         if !dropped {
             continue;
         }
-        eprintln!("ai6: Mission {id:?} is dropped: its brief is filed {filed}, nothing to start");
+        forget_start_failures(state, |gone| gone == id);
+        eprintln!("ai6: Mission {id:?} is dropped: {why}, nothing to start");
         if let Some(operation) = &mission.operation_id {
             let event =
                 TimelineEvent::new("mission", "dropped", operation, state.clock.now() as f64)
                     .station(state.station_id.clone())
                     .mission(id)
-                    .detail("reason", format!("its brief is filed {filed}"));
+                    .detail("reason", why.clone());
             if let Err(error) = state.intake.record_event(&event) {
                 eprintln!("ai6: timeline event of Mission {id:?} was not written: {error}");
             }
@@ -3872,7 +4066,7 @@ async fn without_settled(state: &DaemonState, queued: Vec<Mission>) -> Vec<Missi
     kept
 }
 
-/// Fails a queued Mission whose harness cannot be started, with the reason; its brief is filed
+// Fails a queued Mission whose harness cannot be started, with the reason; its brief is filed
 /// failed with it on the next intake pass.
 async fn fail_unstartable(state: &DaemonState, mission_id: &str, reason: &str) {
     let failed = state
@@ -4161,6 +4355,42 @@ struct WorkingArea {
     safe_house: Option<SafeHouse>,
 }
 
+/// Why a Mission has no working area, and whether trying again would find the same: a safe
+/// house that is missing or corrupt, or an Operation with no checkout, does not mend itself.
+#[derive(Debug)]
+struct AreaError {
+    reason: String,
+    permanent: bool,
+}
+
+impl AreaError {
+    fn permanent(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            permanent: true,
+        }
+    }
+}
+
+impl From<String> for AreaError {
+    fn from(reason: String) -> Self {
+        Self {
+            reason,
+            permanent: false,
+        }
+    }
+}
+
+impl From<AreaError> for ApiErrorResponse {
+    fn from(error: AreaError) -> Self {
+        if error.permanent {
+            unstartable(error.reason)
+        } else {
+            configuration_error(error.reason)
+        }
+    }
+}
+
 fn resolve_working_area(
     roster: &Roster,
     plugins: &plugins::Plugins,
@@ -4169,7 +4399,7 @@ fn resolve_working_area(
     state_root: Option<&Path>,
     mission: &Mission,
     checkpoint: Option<SafeHouseCheckpoint>,
-) -> Result<WorkingArea, String> {
+) -> Result<WorkingArea, AreaError> {
     let requested = requested.filter(|path| !path.trim().is_empty());
     let Some(operation_id) = operation_id else {
         let path = requested.ok_or_else(|| {
@@ -4177,7 +4407,9 @@ fn resolve_working_area(
         })?;
         let path = Path::new(path);
         if !path.is_absolute() || !path.is_dir() {
-            return Err("working_directory must be an existing absolute directory".to_owned());
+            return Err("working_directory must be an existing absolute directory"
+                .to_owned()
+                .into());
         }
         return Ok(WorkingArea {
             path: path.to_string_lossy().into_owned(),
@@ -4187,16 +4419,19 @@ fn resolve_working_area(
     let operation = roster
         .operation(operation_id)
         .map_err(|error| error.to_string())?;
-    let checkout = operation
-        .path
-        .as_ref()
-        .ok_or_else(|| format!("Operation {:?} has no local checkout path", operation.id))?;
+    let checkout = operation.path.as_ref().ok_or_else(|| {
+        AreaError::permanent(format!(
+            "Operation {:?} has no local checkout path",
+            operation.id
+        ))
+    })?;
     if !checkout.is_dir() {
         return Err(format!(
             "Operation {:?} checkout {} is not an existing directory",
             operation.id,
             checkout.display()
-        ));
+        )
+        .into());
     }
     let has_provider = operation.safe_house_provider().is_some();
     let isolate = has_provider && operation.workspace.isolate;
@@ -4204,7 +4439,8 @@ fn resolve_working_area(
         return Err(format!(
             "Operation {:?} workdirs are allocated by AI6 safe-house policy",
             operation.id
-        ));
+        )
+        .into());
     }
     let in_place = match requested {
         Some(path) => {
@@ -4213,7 +4449,8 @@ fn resolve_working_area(
                 return Err(format!(
                     "working_directory must be an existing absolute directory inside Operation {:?}",
                     operation.id
-                ));
+                )
+                .into());
             }
             path.to_owned()
         }
@@ -4232,7 +4469,8 @@ fn resolve_working_area(
         // A later attempt continues in the safe house the earlier one left.
         mission.safe_house.clone().filter(|report| report.kept),
         checkpoint,
-    )?;
+    )
+    .map_err(AreaError::permanent)?;
     let path = match safe_house.as_ref().filter(|house| house.is_isolated()) {
         Some(house) => house.path().to_string_lossy().into_owned(),
         None => in_place,
@@ -4662,17 +4900,19 @@ async fn start_mission(
     let area_checkpoint = checkpoint.clone();
     let area_state = state.station.state_dir();
     let area = tokio::task::spawn_blocking(move || {
-        let state_dir = area_state.map_err(|error| error.to_string())?;
+        let state_dir = area_state.map_err(|error| AreaError::from(error.to_string()))?;
         if remote_hands {
             remote_hands_area(requested_directory.as_deref(), &area_mission, &state_dir)
+                .map_err(AreaError::from)
         } else if remote_field {
             theater_area(
                 requested_directory.as_deref(),
                 area_root.as_deref(),
                 &area_theater,
             )
+            .map_err(AreaError::from)
         } else if review {
-            vetting::review_area()
+            vetting::review_area().map_err(AreaError::from)
         } else {
             resolve_working_area(
                 &roster,
@@ -4686,8 +4926,7 @@ async fn start_mission(
         }
     })
     .await
-    .map_err(|error| runtime_error(format!("working-area worker failed: {error}")))?
-    .map_err(configuration_error)?;
+    .map_err(|error| runtime_error(format!("working-area worker failed: {error}")))??;
     let cover_audit = station_cover_audit(
         &state.roster,
         mission.operation_id.as_deref(),
@@ -7670,7 +7909,7 @@ async fn schedule_parked_once(state: &DaemonState) {
                 if let Ok(mut retries) = state.retry_after.lock() {
                     retries.insert(
                         mission_id,
-                        Instant::now() + state.station.limits().scheduler.retry_delay.0,
+                        Instant::now() + state.station.limits().scheduler.retry_backoff.0,
                     );
                 }
             }
@@ -8220,6 +8459,16 @@ fn runtime_error(error: impl std::fmt::Display) -> ApiErrorResponse {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ApiError {
             error: error.to_string(),
+        }),
+    )
+}
+
+/// A start refusal no later try changes: the Mission fails with the reason, once.
+fn unstartable(reason: impl std::fmt::Display) -> ApiErrorResponse {
+    ApiErrorResponse(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(ApiError {
+            error: reason.to_string(),
         }),
     )
 }

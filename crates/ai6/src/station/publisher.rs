@@ -593,10 +593,19 @@ fn take_controls(
         return;
     };
     let mut retry = Retry::new(link.limits.input_retry_delay.0, &link.limits);
+    // Controls this process never saw were handed to an earlier one, which did not report them.
+    let mut fresh = endpoint.clone();
+    fresh.query_pairs_mut().append_pair("fresh", "true");
+    let mut first = true;
     while running.load(Ordering::Acquire) {
+        let asked = if std::mem::take(&mut first) {
+            &fresh
+        } else {
+            &endpoint
+        };
         let response = link
             .agent
-            .get(endpoint.as_str())
+            .get(asked.as_str())
             .header("Authorization", &format!("Bearer {}", link.token))
             .call();
         let Ok(mut response) = response else {
@@ -2570,7 +2579,7 @@ mod tests {
         let poll = requests.recv_timeout(Duration::from_secs(3)).unwrap();
         assert_eq!(
             poll.path,
-            "/v1/station/controls/next?station=station-7&wait_ms=1000"
+            "/v1/station/controls/next?station=station-7&wait_ms=1000&fresh=true"
         );
         assert!(poll.headers.contains("Bearer test-token"));
         let report = requests.recv_timeout(Duration::from_secs(3)).unwrap();

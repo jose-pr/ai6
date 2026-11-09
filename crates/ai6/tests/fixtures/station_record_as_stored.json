@@ -114,7 +114,8 @@
     "event_queue": null,
     "intake_attempts": 3,
     "interval": 0.5,
-    "retry_delay": 5.0,
+    "retry_backoff": 5.0,
+    "retry_backoff_max": 600.0,
     "role_catalog_bytes": 524288,
     "shutdown_wait": 2.0
   },

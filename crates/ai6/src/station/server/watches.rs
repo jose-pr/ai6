@@ -867,7 +867,14 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<WatchEvent>
             now,
         ));
         if let Ok(mut retry) = live.retry_at.lock() {
-            *retry = now + state.station.limits().scheduler.retry_delay.0.as_secs_f64();
+            *retry = now
+                + state
+                    .station
+                    .limits()
+                    .scheduler
+                    .retry_backoff
+                    .0
+                    .as_secs_f64();
         }
         if let Ok(mut waiting) = live.waiting.lock() {
             for event in events.into_iter().rev() {

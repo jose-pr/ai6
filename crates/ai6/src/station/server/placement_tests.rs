@@ -980,3 +980,244 @@ async fn a_retry_no_agent_can_take_is_refused_with_the_reason() {
         outcome.reason
     );
 }
+
+/// The brief's lease lapses and the Registry queues it again, as when another Station may take it.
+fn lapse_the_lease(state: &DaemonState, key: &str) {
+    assert!(
+        state
+            .intake
+            .renew(key, "test", Duration::from_nanos(1))
+            .unwrap()
+    );
+    let lapsed = loop {
+        if let Some(lease) = state.intake.expired().unwrap().into_iter().next() {
+            break lease;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    state.intake.recover(&lapsed, 5, "test").unwrap().unwrap();
+}
+
+fn dropped_events(state: &DaemonState) -> usize {
+    state
+        .intake
+        .timeline_events("G")
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "mission" && event.action == "dropped")
+        .count()
+}
+
+/// A brief back in the Registry queue is no claim of this Station: its entry is dropped once.
+#[tokio::test]
+async fn an_entry_whose_brief_went_back_to_the_queue_is_dropped_once() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, key) = placed_on_a_durable_book(root.path(), "pinned-requeued");
+    lapse_the_lease(&state, &key);
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "new"
+    );
+
+    schedule_queued_once(&state).await;
+    assert!(state.missions.lock().unwrap().get(&key).is_none());
+    assert_eq!(dropped_events(&state), 1);
+    schedule_queued_once(&state).await;
+    assert_eq!(dropped_events(&state), 1, "logged once");
+}
+
+/// A safe house provider that is not there stays missing: the brief fails once with the reason.
+#[tokio::test]
+async fn a_missing_safe_house_provider_fails_the_brief_once_with_its_reason() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut state, key) = placed_on_a_durable_book(root.path(), "pinned-nohouse");
+    fs::write(
+        root.path().join("operations.toml"),
+        format!(
+            "[operation.G]\npath = {:?}\nroster = [\"007\"]\n\
+             [operation.G.workspace]\nprovider = \"no-such-safehouse\"\n",
+            root.path().join("checkout").to_string_lossy()
+        ),
+    )
+    .unwrap();
+    state.roster = Arc::new(Roster::load(root.path()).unwrap());
+
+    schedule_queued_once(&state).await;
+    let mission = super::tests::mission_state(&state, &key);
+    assert_eq!(mission.state, MissionState::Failed, "{:?}", mission.failure);
+    assert!(mission.failure.unwrap().contains("no-such-safehouse"));
+    assert!(state.retry_after.lock().unwrap().is_empty());
+    assert!(
+        !state
+            .intake
+            .sessions()
+            .unwrap()
+            .iter()
+            .any(|record| record.mission_id == key),
+        "a start that failed leaves no Session record"
+    );
+    assert!(schedule_intake_once(&state));
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "failed"
+    );
+}
+
+#[test]
+fn start_retries_back_off_to_their_bound() {
+    let delays: Vec<u64> = (1..=9)
+        .map(|failures| {
+            backoff_delay(Duration::from_secs(5), Duration::from_secs(600), failures).as_secs()
+        })
+        .collect();
+    assert_eq!(delays, [5, 10, 20, 40, 80, 160, 320, 600, 600]);
+    assert_eq!(
+        backoff_delay(Duration::ZERO, Duration::from_secs(600), 40),
+        Duration::ZERO,
+        "no floor"
+    );
+    assert_eq!(
+        backoff_delay(Duration::from_secs(5), Duration::from_secs(2), 1),
+        Duration::from_secs(2),
+        "the bound wins"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_start_waits_longer_each_time() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut state, key) = placed_on_a_durable_book(root.path(), "pinned-backoff");
+    fs::write(root.path().join("agents.toml"), "[agent.007]\n").unwrap();
+    state.roster = Arc::new(Roster::load(root.path()).unwrap());
+    let mut waits = Vec::new();
+    for _ in 0..3 {
+        state.retry_after.lock().unwrap().clear();
+        schedule_queued_once(&state).await;
+        let at = *state.retry_after.lock().unwrap().get(&key).unwrap();
+        waits.push(at.saturating_duration_since(Instant::now()).as_secs_f64());
+    }
+    assert!(waits[0] <= 5.0 && waits[0] > 4.0, "{waits:?}");
+    assert!(waits[1] > 9.0 && waits[2] > 19.0, "{waits:?}");
+}
+
+/// A brief settled while the Station was down is not resumed by the restart.
+#[tokio::test]
+async fn a_restart_does_not_resume_a_settled_brief() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, key) = placed_on_a_durable_book(root.path(), "pinned-restart");
+    super::tests::start_mission_by_id(&state, &key).await;
+    let brief = state.intake.read_claimed(&key).unwrap().unwrap();
+    state
+        .intake
+        .finish(
+            &brief,
+            &serde_json::json!({"state": "failed", "reason": "settled by an operator"}),
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+    state.sessions.lock().unwrap().clear();
+    let mut recovered = MissionStore::open(root.path().join("missions.json")).unwrap();
+    let pending = recover_startup_missions(&mut recovered).unwrap();
+    *state.missions.lock().unwrap() = recovered;
+    *state.startup_recovery.lock().unwrap() = pending;
+
+    schedule_recovered_once(&state).await;
+    assert!(state.startup_recovery.lock().unwrap().is_empty());
+    assert!(state.sessions.lock().unwrap().is_empty(), "nothing resumed");
+    assert_eq!(
+        super::tests::mission_state(&state, &key).state,
+        MissionState::Abandoned
+    );
+}
+
+/// A Mission whose Session record has ended is not waited on: its attempt is lost at restart.
+#[tokio::test]
+async fn a_restart_settles_a_mission_whose_session_is_gone() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, key) = placed_on_a_durable_book(root.path(), "pinned-gone");
+    super::tests::start_mission_by_id(&state, &key).await;
+    let hold = session_hold(&state, &key).unwrap();
+    state
+        .intake
+        .update_session(
+            &hold.id,
+            &state.station_id,
+            hold.fence,
+            SessionUpdate::default().status(SessionStatus::Ended),
+        )
+        .unwrap();
+    state.sessions.lock().unwrap().clear();
+    let mut recovered = MissionStore::open(root.path().join("missions.json")).unwrap();
+    let pending = recover_startup_missions(&mut recovered).unwrap();
+    *state.missions.lock().unwrap() = recovered;
+    *state.startup_recovery.lock().unwrap() = pending;
+
+    schedule_recovered_once(&state).await;
+    assert!(state.startup_recovery.lock().unwrap().is_empty());
+    let mission = super::tests::mission_state(&state, &key);
+    assert!(
+        matches!(
+            mission.state,
+            MissionState::Abandoned | MissionState::Failed
+        ),
+        "{:?}",
+        mission.state
+    );
+}
+
+fn queue_control(key: &str, action: ai6_diptel::ControlAction) -> ai6_diptel::MissionControl {
+    ai6_diptel::MissionControl::new(
+        ai6_diptel::ControlId::new(format!("c-{}", action.as_str())).unwrap(),
+        ai6_diptel::OperationId::new("G").unwrap(),
+        ai6_diptel::MissionId::new(key.to_owned()).unwrap(),
+        action,
+    )
+}
+
+/// An operator clears a looping entry's wait, then ends it: its brief fails once with the reason.
+#[cfg(feature = "publisher")]
+#[tokio::test]
+async fn a_queue_entry_is_reloaded_and_then_dropped_by_its_station() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut state, key) = placed_on_a_durable_book(root.path(), "pinned-poisoned");
+    fs::write(root.path().join("agents.toml"), "[agent.007]\n").unwrap();
+    state.roster = Arc::new(Roster::load(root.path()).unwrap());
+    schedule_queued_once(&state).await;
+    assert!(state.retry_after.lock().unwrap().contains_key(&key));
+    let listed = queue_entries(&state);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["mission_id"], key.as_str());
+    assert_eq!(listed[0]["failures"], 1);
+
+    let reloaded = controls::apply(
+        &state,
+        &queue_control(&key, ai6_diptel::ControlAction::Reload),
+    )
+    .await;
+    assert_eq!(
+        reloaded,
+        crate::station::publisher::ControlOutcome::applied("queued")
+    );
+    assert!(state.retry_after.lock().unwrap().is_empty());
+
+    let dropped = controls::apply(
+        &state,
+        &queue_control(&key, ai6_diptel::ControlAction::Drop),
+    )
+    .await;
+    assert_eq!(
+        dropped,
+        crate::station::publisher::ControlOutcome::applied("failed")
+    );
+    let mission = super::tests::mission_state(&state, &key);
+    assert_eq!(mission.state, MissionState::Failed);
+    assert!(mission.failure.unwrap().contains("dropped"));
+    assert!(queue_entries(&state).is_empty());
+    assert!(schedule_intake_once(&state));
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "failed"
+    );
+}
