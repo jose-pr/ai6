@@ -47,14 +47,14 @@ async fn said_after(tag: &str, count: usize) -> Vec<String> {
 }
 
 /// The watch's AI6 tools, called over the endpoint its environment names.
-struct Tools {
-    client: rmcp::service::RunningService<rmcp::RoleClient, ()>,
-    runtime: tokio::runtime::Runtime,
+pub(super) struct Tools {
+    pub(super) client: rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    pub(super) runtime: tokio::runtime::Runtime,
     key: String,
 }
 
 impl Tools {
-    fn connect(key: &str, environment: &BTreeMap<String, String>) -> Self {
+    pub(super) fn connect(key: &str, environment: &BTreeMap<String, String>) -> Self {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -78,7 +78,7 @@ impl Tools {
         }
     }
 
-    fn names(&self) -> Vec<String> {
+    pub(super) fn names(&self) -> Vec<String> {
         self.runtime
             .block_on(self.client.list_all_tools())
             .unwrap()
@@ -87,7 +87,7 @@ impl Tools {
             .collect()
     }
 
-    fn call(&self, tool: &str, arguments: Value) -> String {
+    pub(super) fn call(&self, tool: &str, arguments: Value) -> String {
         let answer = self
             .runtime
             .block_on(
@@ -118,7 +118,7 @@ impl Tools {
 }
 
 /// The events of a wake's text.
-fn events_of(text: &str) -> Vec<Value> {
+pub(super) fn events_of(text: &str) -> Vec<Value> {
     text.split_once("\n\n")
         .and_then(|(_, events)| serde_json::from_str(events).ok())
         .unwrap_or_default()

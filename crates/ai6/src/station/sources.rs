@@ -9,18 +9,23 @@
 //! one stopped. Authorized sleepers queue their briefs from the same pass.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::directorates::m::cover::Disclosure;
+use crate::directorates::m::intake::SourceIntake;
 use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster::{Operation, Roster};
+use crate::directorates::m::watches::WatchScope;
 use crate::directorates::registry::backend::*;
+use crate::directorates::registry::cables::{CablePrincipal, CableRelay};
 use crate::directorates::registry::mission_issues::{
     IssueLink, IssueSnapshot, LinkRelation, LinkState,
 };
+use crate::directorates::registry::reports::{Report, ReportFiler, ReportLink};
 use crate::directorates::registry::sleepers::{Fire, Sleeper, SleeperMark, window_label};
+use crate::directorates::registry::source_items::{self, Offered};
 use crate::directorates::registry::sources::{
     FinishedSourceBrief, Ingest, Source, SourceConfig, SourcePoll, reportable,
 };
@@ -148,9 +153,33 @@ impl StatusWords {
     }
 }
 
+/// What each Operation's `intake` changes from the default, worded for a log line and the
+/// check-in.
+pub(crate) fn intake_non_defaults(roster: &Roster) -> Vec<String> {
+    roster
+        .operations()
+        .filter(|operation| !operation.sources.is_empty())
+        .filter_map(|operation| {
+            operation
+                .intake
+                .non_default()
+                .map(|line| format!("Operation {:?}: {line}", operation.id))
+        })
+        .collect()
+}
+
+/// Logs each non-default `intake` once, as the Station starts.
+pub(crate) fn log_non_defaults(roster: &Roster) {
+    for line in intake_non_defaults(roster) {
+        eprintln!("ai6: {line}");
+    }
+}
+
 /// What one poll of one source changed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct PollSummary {
+    /// Items filed or updated as Reports for the watch.
+    pub reported: usize,
     pub queued: usize,
     pub updated: usize,
     pub unchanged: usize,
@@ -185,6 +214,24 @@ pub(crate) struct SourceSetup {
 }
 
 impl SourceSetup {
+    /// An instance named `name` that polls for work, with every other setting at its default.
+    #[cfg(test)]
+    pub(crate) fn stand_in(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            provider: name.to_owned(),
+            settings: toml::Table::new(),
+            interval: Duration::from_secs(60),
+            intake: true,
+            status_labels: StatusWords::default(),
+            status_transitions: StatusWords::default(),
+            agent_labels: Vec::new(),
+            agent_transitions: Vec::new(),
+            priority_map: BTreeMap::new(),
+            reopen: Reopen::default(),
+        }
+    }
+
     /// How a poll of this instance treats an item whose Mission settled.
     pub(crate) fn reopening(&self) -> Reopening {
         let own = self
@@ -336,10 +383,101 @@ pub(crate) fn build_tracker(
         .map_err(|error| error.to_string())
 }
 
-/// Polls one source once and queues what it found; the cursor advances after the items
+/// What a poll of a Source tells the Operation's watch, and how.
+pub(crate) struct Intake<'a> {
+    /// Whether items are reported to the watch or queued as briefs.
+    pub mode: SourceIntake,
+    /// Tells the watch of an item; `None` when the Operation has no watch Agent, and the items
+    /// wait for a person.
+    pub notify: Option<&'a Notifier<'a>>,
+}
+
+impl Intake<'_> {
+    /// Items queued as briefs at once.
+    #[cfg(test)]
+    pub(crate) fn direct() -> Intake<'static> {
+        Intake {
+            mode: SourceIntake::Direct,
+            notify: None,
+        }
+    }
+
+    /// Items held as Reports, nobody told.
+    #[cfg(test)]
+    pub(crate) fn held() -> Intake<'static> {
+        Intake {
+            mode: SourceIntake::Watch,
+            notify: None,
+        }
+    }
+}
+
+/// Tells the watch of an item's Report: the Source instance it is from, the Cable's body, then
+/// the key that makes telling it twice one Cable.
+pub(crate) type Notifier<'a> = dyn Fn(&str, &str, &str) -> Result<(), String> + 'a;
+
+/// The body of the notice of `report` and the key it is sent under. `change` is `new`,
+/// `changed` or `due`. The title and labels are the Source's words; the Cable is untrusted.
+fn notice_of(instance: &str, change: &str, report: &Report) -> (String, String) {
+    let item = report.item.as_ref();
+    let body = serde_json::json!({
+        "source_item": {
+            "change": change,
+            "report": report.id,
+            "source": instance,
+            "item": item.map(|item| item.id.as_str()),
+            "url": item.and_then(|item| item.url.as_deref()),
+            "title": report.title,
+            "labels": item.map(|item| item.labels.clone()).unwrap_or_default(),
+            "state": report.state.as_str(),
+            "previous_decision": report
+                .assessment
+                .as_ref()
+                .map(|assessment| assessment.verdict.as_str()),
+        },
+        "next": "read_report shows the item; assess_report decides what it becomes",
+    });
+    // Each version of an item is its own Cable, however close together they were polled.
+    let version = report
+        .item
+        .as_ref()
+        .and_then(|item| serde_json::to_vec(item).ok())
+        .map(|bytes| {
+            let digest = <sha2::Sha256 as sha2::Digest>::digest(&bytes);
+            digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect::<String>()
+        })
+        .unwrap_or_default();
+    (
+        body.to_string(),
+        format!(
+            "source-item-{}-{change}-{version}-{:x}",
+            report.id,
+            report.updated.to_bits()
+        ),
+    )
+}
+
+fn tell(intake: &Intake<'_>, instance: &str, change: &str, report: &Report) {
+    let Some(notify) = intake.notify else {
+        return;
+    };
+    let (body, key) = notice_of(instance, change, report);
+    if let Err(error) = notify(instance, &body, &key) {
+        eprintln!(
+            "ai6: source {instance}: the watch was not told of item {:?}: {error}",
+            report.id
+        );
+    }
+}
+
+/// Polls one source once and takes what it found; the cursor advances after the items
 /// are stored, so a crash repeats work that is already idempotent. `shared` says the instance is
 /// not its provider's only one in the Operation: its name replaces an item's code tag. An item
 /// whose Mission settled is reopened as `reopening` says.
+///
+/// With `intake.mode` watch, each item is a Report and the watch is told of a new or changed
+/// one; only an item the watch or a person decided `mission` is queued. With `direct`, each item
+/// is queued as a brief.
 pub(crate) fn poll_source(
     registry: &dyn RegistryBackend,
     station: &str,
@@ -347,6 +485,7 @@ pub(crate) fn poll_source(
     shared: bool,
     source: &dyn Source,
     reopening: &Reopening,
+    intake: &Intake<'_>,
 ) -> Result<PollSummary, String> {
     let cursor = registry
         .source_cursor(operation, provider)
@@ -355,45 +494,38 @@ pub(crate) fn poll_source(
         .poll(SourcePoll { cursor })
         .map_err(|error| format!("poll failed: {error}"))?;
     let mut summary = PollSummary::default();
+    let ids = (operation, provider);
     for mut item in batch.items {
         if shared && item.code_tag.is_some() {
             item.code_tag = Some(provider.to_owned());
         }
         let item = &item;
-        match registry.ingest_source_item(operation, provider, item, station) {
-            Ok(Ingest::Queued) => {
-                summary.queued += 1;
-                link_source(registry, operation, provider, item);
+        if intake.mode == SourceIntake::Direct {
+            queue_item(registry, station, ids, item, reopening, &mut summary);
+            continue;
+        }
+        match source_items::offer(registry, operation, provider, item, unix_seconds() as f64) {
+            Ok(Offered::Filed(report)) => {
+                summary.reported += 1;
+                tell(intake, provider, "new", &report);
             }
-            Ok(Ingest::Updated) => {
-                summary.updated += 1;
-                link_source(registry, operation, provider, item);
-            }
-            Ok(Ingest::Unchanged) => {
-                summary.unchanged += 1;
-                link_source(registry, operation, provider, item);
-            }
-            Ok(Ingest::Finished)
-                if reopen_on_labels(registry, station, (operation, provider), item, reopening) =>
-            {
-                summary.reopened += 1;
-            }
-            Ok(Ingest::InFlight) => {
-                summary.skipped += 1;
-                // What the item says while its Mission works is what a reopen compares with.
-                if let Some(link) = item_link(registry, (operation, provider), item) {
-                    let _ = registry.set_issue_snapshot(
-                        &link.mission_id,
-                        provider,
-                        &item.id,
-                        item.url.as_deref(),
-                        &snapshot_of(item),
-                    );
+            Ok(Offered::Changed { report, .. }) => {
+                summary.reported += 1;
+                tell(intake, provider, "changed", &report);
+                if source_items::is_mission(&report) {
+                    queue_item(registry, station, ids, item, reopening, &mut summary);
+                    tie_mission(registry, ids, &report);
                 }
             }
-            Ok(Ingest::Finished) => summary.skipped += 1,
+            Ok(Offered::Unchanged(report)) => {
+                summary.unchanged += 1;
+                if source_items::is_mission(&report) {
+                    queue_item(registry, station, ids, item, reopening, &mut summary);
+                    tie_mission(registry, ids, &report);
+                }
+            }
             Err(error) => eprintln!(
-                "ai6: source {provider}: item {:?} not queued: {error}",
+                "ai6: source {provider}: item {:?} not reported: {error}",
                 item.id
             ),
         }
@@ -404,6 +536,133 @@ pub(crate) fn poll_source(
             .map_err(|error| format!("cursor not stored: {error}"))?;
     }
     Ok(summary)
+}
+
+/// Queues `item` as its Mission's brief, or updates the queued brief, and ties the issue it
+/// came from to the Mission.
+fn queue_item(
+    registry: &dyn RegistryBackend,
+    station: &str,
+    (operation, provider): (&str, &str),
+    item: &crate::directorates::registry::sources::SourceItem,
+    reopening: &Reopening,
+    summary: &mut PollSummary,
+) {
+    match registry.ingest_source_item(operation, provider, item, station) {
+        Ok(Ingest::Queued) => {
+            summary.queued += 1;
+            link_source(registry, operation, provider, item);
+        }
+        Ok(Ingest::Updated) => {
+            summary.updated += 1;
+            link_source(registry, operation, provider, item);
+        }
+        Ok(Ingest::Unchanged) => {
+            summary.unchanged += 1;
+            link_source(registry, operation, provider, item);
+        }
+        Ok(Ingest::Finished)
+            if reopen_on_labels(registry, station, (operation, provider), item, reopening) =>
+        {
+            summary.reopened += 1;
+        }
+        Ok(Ingest::InFlight) => {
+            summary.skipped += 1;
+            // What the item says while its Mission works is what a reopen compares with.
+            if let Some(link) = item_link(registry, (operation, provider), item) {
+                let _ = registry.set_issue_snapshot(
+                    &link.mission_id,
+                    provider,
+                    &item.id,
+                    item.url.as_deref(),
+                    &snapshot_of(item),
+                );
+            }
+        }
+        Ok(Ingest::Finished) => summary.skipped += 1,
+        Err(error) => eprintln!(
+            "ai6: source {provider}: item {:?} not queued: {error}",
+            item.id
+        ),
+    }
+}
+
+/// Ties the Report of an item decided `mission` to the Mission its brief became.
+fn tie_mission(registry: &dyn RegistryBackend, (operation, provider): (&str, &str), report: &Report) {
+    let Some(item) = &report.item else {
+        return;
+    };
+    let entry = crate::directorates::registry::sources::source_entry(operation, provider, item);
+    let Ok(Some(mission)) = registry.entered_mission_id(&entry) else {
+        return;
+    };
+    if report.about_mission(&mission) {
+        return;
+    }
+    let result = registry.change_report(&report.id, &mut |report| {
+        if !report.about_mission(&mission) {
+            report.links.push(ReportLink::mission(mission.clone()));
+        }
+        Ok(())
+    });
+    if let Err(error) = result {
+        eprintln!(
+            "ai6: source {provider}: Report {} not tied to its Mission: {error}",
+            report.id
+        );
+    }
+}
+
+/// Queues the items the watch or a person decided `mission` and that are not queued yet, and
+/// opens again those deferred until now, telling the watch of them. Returns how many items it
+/// queued or updated.
+pub(crate) fn settle_items(
+    registry: &dyn RegistryBackend,
+    station: &str,
+    operation: &str,
+    setups: &[&SourceSetup],
+    intake: &Intake<'_>,
+) -> usize {
+    let now = unix_seconds() as f64;
+    match source_items::reopen_due(registry, operation, now) {
+        Ok(opened) => {
+            for report in opened {
+                if let ReportFiler::Source { source, .. } = &report.filer {
+                    tell(intake, source, "due", &report);
+                }
+            }
+        }
+        Err(error) => eprintln!("ai6: Operation {operation}: deferred items unreadable: {error}"),
+    }
+    let waiting = match source_items::awaiting_queue(registry, operation) {
+        Ok(waiting) => waiting,
+        Err(error) => {
+            eprintln!("ai6: Operation {operation}: decided items unreadable: {error}");
+            return 0;
+        }
+    };
+    let mut queued = 0;
+    for report in waiting {
+        let (ReportFiler::Source { source, .. }, Some(item)) = (&report.filer, &report.item)
+        else {
+            continue;
+        };
+        let Some(setup) = setups.iter().find(|setup| setup.name == *source) else {
+            continue;
+        };
+        let mut summary = PollSummary::default();
+        queue_item(
+            registry,
+            station,
+            (operation, source),
+            item,
+            &setup.reopening(),
+            &mut summary,
+        );
+        tie_mission(registry, (operation, source), &report);
+        queued += summary.queued + summary.updated;
+    }
+    queued
 }
 
 /// The link from the Mission `item` entered as to the item, when there is one.
@@ -1294,6 +1553,8 @@ pub(crate) struct SourceDesk {
     /// This Station: the provenance of the briefs it queues names it.
     station: String,
     limits: SourceLimits,
+    /// How a watch is told of an item; without it, items wait for a person.
+    cables: Option<Arc<CableRelay>>,
 }
 
 impl SourceDesk {
@@ -1302,6 +1563,7 @@ impl SourceDesk {
         Self {
             station: station.into(),
             limits,
+            cables: None,
             busy: AtomicBool::new(false),
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
@@ -1312,6 +1574,42 @@ impl SourceDesk {
             next_sleepers: Mutex::new(Instant::now()),
             warned: Mutex::new(BTreeSet::new()),
         }
+    }
+
+    /// Tells watches of items through `cables`.
+    #[must_use]
+    pub(crate) fn with_cables(mut self, cables: Arc<CableRelay>) -> Self {
+        self.cables = Some(cables);
+        self
+    }
+
+    /// How an Operation's items are taken: reported to its watch Agent through the Cable relay,
+    /// or held for a person when it has no watch Agent or this desk has no relay.
+    pub(crate) fn notify_for<'a>(
+        &'a self,
+        roster: &'a Roster,
+        operation: &'a Operation,
+    ) -> Option<Box<Notifier<'a>>> {
+        let relay = self.cables.as_ref()?;
+        let agent = roster
+            .watches()
+            .get(&WatchScope::Operation(operation.id.clone()).to_string())
+            .map(|watch| watch.settings.agent.as_str())?;
+        Some(Box::new(move |instance: &str, body: &str, key: &str| {
+            let from = CablePrincipal::try_new(
+                format!("source:{instance}"),
+                operation.id.clone(),
+                None,
+                self.station.clone(),
+                None,
+                None,
+            )
+            .map_err(|error| error.to_string())?;
+            relay
+                .notice(&from, &operation.id, agent, body.to_owned(), key)
+                .map(|_| ())
+                .map_err(|error| format!("{error:?}"))
+        }))
     }
 
     /// Claims the single pass slot; `false` means a previous pass is still running.
@@ -1354,7 +1652,16 @@ impl SourceDesk {
                 .flatten()
                 .map(|setup| setup.provider.clone())
                 .collect();
-            for setup in setups {
+            let notify = self.notify_for(roster, operation);
+            let intake = Intake {
+                mode: operation.intake,
+                notify: notify.as_deref(),
+            };
+            let polled: Vec<&SourceSetup> = setups.iter().flatten().collect();
+            if intake.mode == SourceIntake::Watch && !polled.is_empty() {
+                settle_items(registry, &self.station, &operation.id, &polled, &intake);
+            }
+            for setup in &setups {
                 let setup = match setup {
                     Ok(setup) => setup,
                     Err(error) => {
@@ -1386,14 +1693,19 @@ impl SourceDesk {
                         providers.iter().filter(|p| **p == setup.provider).count() > 1,
                         source.as_ref(),
                         &setup.reopening(),
+                        &intake,
                     )
                 });
                 match result {
-                    Ok(summary) if summary.queued + summary.updated + summary.reopened > 0 => {
+                    Ok(summary)
+                        if summary.reported + summary.queued + summary.updated + summary.reopened
+                            > 0 =>
+                    {
                         eprintln!(
-                            "ai6: source {} for Operation {}: {} queued, {} updated, {} reopened",
+                            "ai6: source {} for Operation {}: {} reported, {} queued, {} updated,                              {} reopened",
                             setup.name,
                             operation.id,
+                            summary.reported,
                             summary.queued,
                             summary.updated,
                             summary.reopened
@@ -1666,7 +1978,7 @@ mod tests {
         fs::write(
             dir.path().join("operations.toml"),
             format!(
-                "[operation.G]\nclearance = \"field\"\ncover = \"{cover}\"\nsources = {sources}\n"
+                "[operation.G]\nintake = \"direct\"\nclearance = \"field\"\ncover = \"{cover}\"\nsources = {sources}\n"
             ),
         )
         .unwrap();
@@ -1761,6 +2073,7 @@ mod tests {
                 shared,
                 &source,
                 &Reopening::never(),
+                &Intake::direct(),
             )
             .unwrap();
             registry
@@ -1819,6 +2132,7 @@ mod tests {
                 false,
                 &Repeating,
                 &Reopening::never(),
+                &Intake::direct(),
             )
             .unwrap()
         };
@@ -2737,7 +3051,7 @@ title = \"Update dependencies\"
         fs::write(
             dir.path().join("operations.toml"),
             format!(
-                "[operation.G]\nclearance = \"field\"\ncover = \"overt\"\nsources = {sources}\n\
+                "[operation.G]\nintake = \"direct\"\nclearance = \"field\"\ncover = \"overt\"\nsources = {sources}\n\
                  [operation.G.issues]\n{issues}\n"
             ),
         )
@@ -3365,7 +3679,7 @@ mod reopen_tests {
         std::fs::write(
             dir.path().join("operations.toml"),
             format!(
-                "[operation.G]\nsources = {{ gh = {{ provider = \"fake\", reopen = \"{reopen}\", \
+                "[operation.G]\nintake = \"direct\"\nsources = {{ gh = {{ provider = \"fake\", reopen = \"{reopen}\", \
                  status_labels = {{ done = \"ai6:done\" }} }} }}\n"
             ),
         )
@@ -3385,6 +3699,7 @@ mod reopen_tests {
             false,
             issue,
             &setup.reopening(),
+            &Intake::direct(),
         )
         .unwrap()
     }
@@ -3573,3 +3888,6 @@ mod reopen_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod intake_tests;

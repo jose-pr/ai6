@@ -15,7 +15,11 @@ use super::super::{DaemonState, agents, verification};
 use crate::directorates::m::memories::fenced;
 use crate::directorates::m::mission::MissionState;
 use crate::directorates::registry::decisions::{self, VerifyingDecision};
+use crate::directorates::registry::reports::{
+    Report, ReportFilter, ReportFiler, ReportScope, ReportState,
+};
 use crate::directorates::registry::sessions::{OutcomeVerdict, SessionRecord};
+use crate::directorates::registry::source_items::{self, ITEM_KIND, ItemDecision, ItemVerdict};
 use crate::directorates::registry::store::AuditRecord;
 
 /// The prefix of the name a watch's decisions are recorded under.
@@ -242,6 +246,100 @@ impl DecisionDesk {
         })
         .to_string())
     }
+}
+
+impl DecisionDesk {
+    /// The Operation's Source items that wait for a decision, the longest waiting first.
+    pub(in crate::station::server) fn items(&self) -> Result<String, String> {
+        let open = self
+            .state
+            .intake
+            .reports(
+                &ReportFilter::all()
+                    .in_scope(ReportScope::Operation(self.operation.clone()))
+                    .of_kind(ITEM_KIND)
+                    .in_state(ReportState::Open),
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows: Vec<&Report> = open.iter().collect();
+        rows.sort_by(|a, b| a.created.total_cmp(&b.created));
+        let rows: Vec<Value> = rows.into_iter().map(item_row).collect();
+        Ok(fenced("source_items", &Value::Array(rows)))
+    }
+
+    /// One Source item as the Source reported it, with the words of the item.
+    pub(in crate::station::server) fn item(&self, id: &str) -> Result<String, String> {
+        let report = source_items::item_report(self.state.intake.as_ref(), &self.operation, id)
+            .map_err(|error| error.to_string())?;
+        let mut row = item_row(&report);
+        row["text"] = json!(report.text);
+        row["labels"] = json!(report.item.as_ref().map(|item| item.labels.clone()));
+        row["author"] = json!(report.item.as_ref().and_then(|item| item.author.clone()));
+        row["links"] = json!(report.links);
+        row["assessment"] = json!(report.assessment);
+        Ok(fenced("source_item", &row))
+    }
+
+    /// Decides what an open Source item becomes: `mission`, `duplicate` of what `of` names,
+    /// `no_action`, or `later` after `wait_seconds`. A `mission` is queued as a brief by the
+    /// Station that polls the Source, and vetted as any brief is. At `desk` clearance the watch
+    /// decides nothing and a person does.
+    pub(in crate::station::server) fn assess(
+        &self,
+        id: &str,
+        word: &str,
+        reason: &str,
+        of: Option<&str>,
+        wait_seconds: Option<u64>,
+    ) -> Result<String, String> {
+        let at = unix_seconds();
+        let verdict = ItemVerdict::parse(word, of, wait_seconds, at)?;
+        let clearance = agents::effective(&self.state, Some(&self.operation), &self.agent)
+            .map_err(|error| error.to_string())?
+            .clearance;
+        if clearance == "desk" {
+            return Err(
+                "your clearance is desk, so a person decides what a Source item becomes".to_owned(),
+            );
+        }
+        let by = self.by();
+        let report = source_items::decide_item(
+            self.state.intake.as_ref(),
+            &ItemDecision::new(&self.operation, id, verdict, reason, &by, at),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(json!({
+            "assessed": word,
+            "report": report.id,
+            "state": report.state.as_str(),
+            "note": if word == "mission" {
+                "the Station that polls the Source queues the brief on its next pass; vetting and \
+                 placement apply as to any brief"
+            } else {
+                "recorded on the item and audited"
+            },
+        })
+        .to_string())
+    }
+}
+
+/// An item Report as a row of a list.
+fn item_row(report: &Report) -> Value {
+    let item = report.item.as_ref();
+    json!({
+        "report": report.id,
+        "source": match &report.filer {
+            ReportFiler::Source { source, .. } => Some(source.as_str()),
+            _ => None,
+        },
+        "item": item.map(|item| item.id.as_str()),
+        "url": item.and_then(|item| item.url.as_deref()),
+        "title": report.title,
+        "state": report.state.as_str(),
+        "decision": report.assessment.as_ref().map(|assessment| assessment.verdict.as_str()),
+        "filed": report.created,
+        "changed": report.updated,
+    })
 }
 
 fn unix_seconds() -> f64 {

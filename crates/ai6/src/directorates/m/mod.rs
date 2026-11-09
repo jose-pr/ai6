@@ -11,6 +11,7 @@ pub mod deliverables;
 pub mod harness;
 pub mod identity;
 pub mod inherit;
+pub mod intake;
 pub mod issues;
 pub mod limits;
 pub mod memories;

@@ -20,6 +20,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use super::limits::ReportLimits;
+use super::sources::SourceItem;
 use super::logbook::{Severity, station_key};
 use super::store::{FileRegistry, invalid_data, validate_registry_key, validate_station_id};
 use crate::directorates::m::reports::ReportSettings;
@@ -431,6 +432,10 @@ pub struct Report {
     /// When it needs an answer by, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline: Option<f64>,
+    /// The Source item a Report of kind `source-item` was made from, as last polled: what a
+    /// `mission` assessment queues. Untrusted text, like the rest of the Report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<SourceItem>,
     /// Where it stands.
     pub state: ReportState,
     /// What the watch decided, once it has.
@@ -476,6 +481,7 @@ impl Report {
             tearline: None,
             priority: None,
             deadline: None,
+            item: None,
             state: ReportState::Open,
             assessment: None,
             resolution: None,
@@ -551,6 +557,13 @@ impl Report {
     #[must_use]
     pub fn due(mut self, deadline: f64) -> Self {
         self.deadline = Some(deadline);
+        self
+    }
+
+    /// Keeps the Source item it was made from.
+    #[must_use]
+    pub fn from_item(mut self, item: SourceItem) -> Self {
+        self.item = Some(item);
         self
     }
 

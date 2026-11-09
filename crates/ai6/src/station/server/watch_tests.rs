@@ -4,6 +4,7 @@
 
 #[cfg(feature = "cables-mcp")]
 mod decides;
+mod sources;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;

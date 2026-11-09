@@ -37,7 +37,7 @@ pub struct SourceConfig {
 }
 
 /// One unit of work found at a source.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct SourceItem {
     /// The provider-local identity, stable across polls (for example `owner/repo#12`).

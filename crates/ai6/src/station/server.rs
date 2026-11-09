@@ -980,6 +980,7 @@ where
     }
     vetting::log_weakenings(&roster);
     crate::station::issues::log_weakenings(&roster);
+    crate::station::sources::log_non_defaults(&roster);
     for weakened in roster.settings().weakenings() {
         eprintln!("ai6: {weakened}");
     }
@@ -1749,10 +1750,13 @@ fn reserve_existing_session_resume(
 }
 
 async fn scheduler_loop(base: DaemonState) {
-    let desk = Arc::new(SourceDesk::new(
-        base.station_id.clone(),
-        base.station.limits().sources.clone(),
-    ));
+    let desk = Arc::new(
+        SourceDesk::new(
+            base.station_id.clone(),
+            base.station.limits().sources.clone(),
+        )
+        .with_cables(base.cables.clone()),
+    );
     let mut next_station_check_in = Instant::now();
     while !base.stopping.load(Ordering::Acquire) {
         let state = base.current();
@@ -2557,6 +2561,13 @@ fn publish_station_check_in(state: &DaemonState) {
         info.insert(
             "issues_weakened".to_owned(),
             serde_json::json!(issues_weakened),
+        );
+    }
+    let intake_non_default = crate::station::sources::intake_non_defaults(&state.roster);
+    if !intake_non_default.is_empty() {
+        info.insert(
+            "intake_non_default".to_owned(),
+            serde_json::json!(intake_non_default),
         );
     }
     let agents_weakened = agents::handler_weakenings(&state.plugins, &state.roster);

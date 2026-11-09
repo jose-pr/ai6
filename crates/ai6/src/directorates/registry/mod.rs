@@ -30,6 +30,7 @@ pub mod reviews;
 pub mod sealed;
 pub mod sessions;
 pub mod sleepers;
+pub mod source_items;
 pub mod sources;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub mod sql;

@@ -22,6 +22,7 @@ use crate::directorates::m::harness::HarnessPolicy;
 use crate::directorates::m::inherit;
 use crate::directorates::m::issues::IssuePolicy;
 use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit};
+use crate::directorates::m::intake::SourceIntake;
 use crate::directorates::m::placement::PlacementStrategy;
 use crate::directorates::m::promotion::{PromotionDefinition, PromotionPolicy};
 use crate::directorates::m::records;
@@ -672,6 +673,8 @@ pub struct Operation {
     pub review: ReviewChoice,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
+    /// Who decides what a Source item becomes; the Operation's watch unless configured.
+    pub intake: SourceIntake,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
     pub sleepers: BTreeMap<String, Sleeper>,
     /// The account pools its Missions may draw from; `None` (the default) is every pool
@@ -2103,6 +2106,11 @@ pub(crate) struct OperationDefinition {
     #[schema(title = "Work sources", section = "sources", advanced)]
     #[map(with = guatiao_serde::adapt::object, default)]
     sources: toml::Table,
+    /// Whether Source items are reported to the watch, which decides what each becomes, or
+    /// queued as briefs at once.
+    #[schema(title = "Source intake", section = "sources", advanced)]
+    #[map(default)]
+    intake: SourceIntake,
     /// Briefs queued on a schedule, once an operator authorizes them.
     #[schema(title = "Standing orders", section = "sources", advanced)]
     #[map(default)]
@@ -2148,6 +2156,7 @@ impl Default for OperationDefinition {
             promotion: PromotionDefinition::default(),
             scorecard: ScorecardDefinition::default(),
             sources: toml::Table::new(),
+            intake: SourceIntake::default(),
             sleepers: BTreeMap::new(),
         }
     }
@@ -2299,6 +2308,7 @@ impl OperationDefinition {
             vetting,
             review: self.review,
             sources: self.sources,
+            intake: self.intake,
             sleepers: self.sleepers,
             pools: self.pools,
             overlays: self.overlays,

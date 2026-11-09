@@ -2153,6 +2153,76 @@ impl CableRelay {
         Ok(accepted)
     }
 
+    /// Tells `agent`, an Operation's watch, something the Station itself saw, as a Cable from
+    /// `from`, a name such as `source:github` that is no Agent: no grant lets it send, so only
+    /// the receiver's grant and inbound mode apply, and the notice is audited like any send.
+    /// Sent again under the same `key`, it is the Cable already sent.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidRequest` for a body or key out of bounds, `Unavailable` when no Agent may receive
+    /// it, or an error from the Registry.
+    pub fn notice(
+        &self,
+        from: &CablePrincipal,
+        operation: &str,
+        agent: &str,
+        body: String,
+        key: &str,
+    ) -> Result<Cable, CableRelayError> {
+        let target = CableTarget::try_new(CableScope::Operation, Some(operation.to_owned()))
+            .map_err(|_| CableRelayError::InvalidRequest)?;
+        let request = CableSendRequest::new(target.clone(), body, key.to_owned());
+        if request.body.trim().is_empty()
+            || !self.body_bytes.allows(request.body.len())
+            || super::validate_text("Cable idempotency_key", Some(key), 256, true).is_err()
+        {
+            return Err(CableRelayError::InvalidRequest);
+        }
+        let now = (self.now)();
+        if !now.is_finite() || now <= 0.0 {
+            return Err(CableRelayError::RegistryUnavailable);
+        }
+        if let Some(existing) = self
+            .registry
+            .find_cable(&from.agent, key)
+            .map_err(|_| CableRelayError::RegistryUnavailable)?
+        {
+            return Ok(existing);
+        }
+        let policy = self
+            .policy
+            .read()
+            .map_err(|_| CableRelayError::RegistryUnavailable)?;
+        // Only the watch is told, whichever of the Operation's Sessions are live: the Cable
+        // waits for its Session between turns or its next one.
+        let mut recipients = Vec::new();
+        if self.allows(&policy, agent, CableAction::Receive, &target) {
+            let state = match policy.inbound_mode(agent) {
+                CableInboundMode::Deliver => CableState::Queued,
+                CableInboundMode::Hold => CableState::Held,
+                CableInboundMode::Refuse => CableState::Refused,
+            };
+            recipients.push(
+                CableRecipient::try_new(agent.to_owned(), None, state)
+                    .map_err(|_| CableRelayError::InvalidRequest)?,
+            );
+        }
+        if recipients.is_empty() {
+            self.record_event("cable_send", from, &target, "denied", None);
+            return Err(CableRelayError::Unavailable);
+        }
+        let draft = self.draft(from, &request, recipients, now)?;
+        let cable = Cable::try_new(draft, &self.registry.limits().cables)
+            .map_err(|_| CableRelayError::InvalidRequest)?;
+        let accepted = self
+            .registry
+            .submit_cable(&cable)
+            .map_err(|_| CableRelayError::Unavailable)?;
+        self.record_event("cable_send", from, &target, "accepted", Some(&accepted));
+        Ok(accepted)
+    }
+
     fn draft(
         &self,
         principal: &CablePrincipal,
