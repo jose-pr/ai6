@@ -504,6 +504,12 @@ async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audi
         "a duplicate names what: {said}"
     );
 
+    let queued_before: Vec<String> = registry
+        .list_new()
+        .unwrap()
+        .into_iter()
+        .map(|brief| brief.id)
+        .collect();
     let (status, decided) = fixture
         .call(&operator, Method::PUT, &path(&first), Some(body.clone()))
         .await;
@@ -512,8 +518,14 @@ async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audi
     assert_eq!(decided["assessment"]["verdict"], "mission");
     assert_eq!(decided["assessment"]["by"], "operator-007");
     assert_eq!(decided["assessment"]["comment"], "a real fault");
-    assert!(
-        registry.list_new().unwrap().is_empty(),
+    let queued: Vec<String> = registry
+        .list_new()
+        .unwrap()
+        .into_iter()
+        .map(|brief| brief.id)
+        .collect();
+    assert_eq!(
+        queued, queued_before,
         "deciding queues nothing itself: the Station that polls the Source does"
     );
     let (status, _) = fixture
