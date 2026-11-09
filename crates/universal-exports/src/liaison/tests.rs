@@ -592,8 +592,12 @@ fn a_role_reaches_the_agent_the_roster_selects_and_a_stream_follows_it_to_the_re
                 .unwrap()
         })
         .unwrap();
+    // The first Task says where the cable is when the stream opens: the stand-in may have had it,
+    // or answered it, by then.
     assert!(
-        matches!(&items[0], StreamResponse::Task(task) if task.status.state == TaskState::Submitted)
+        matches!(&items[0], StreamResponse::Task(task) if matches!(task.status.state,
+            TaskState::Submitted | TaskState::Working | TaskState::Completed)),
+        "the stream opens on its Task: {items:?}"
     );
     assert!(items.iter().any(|item| matches!(item,
         StreamResponse::ArtifactUpdate(update) if update.artifact.parts[0].text.as_deref() == Some("re: who coordinates?"))));
