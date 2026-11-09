@@ -198,6 +198,16 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   `MISSION STATE REASON`: a Mission whose brief is queued or held is filed as failed with who
   withdrew it and the note. HTTP 404 (none queued or held) and 409 (a Station took it, or it ended:
   use `mission cancel`) fail the command with that said.
+- `ai6ctl mission settle <MISSION_ID> --reason <TEXT> [--operation <ID>]` files a claimed Mission's brief
+  as failed with the reason when its Station no longer answers (HTTP 409 otherwise: use
+  `mission cancel`); prints `MISSION STATION STATE`.
+- `ai6ctl station queue list <STATION>` prints the Missions waiting in that Station's own queue
+  (`MISSION OPERATION STATE FAILURES RETRY_IN AGENT WAITING`, as it last checked in);
+  `ai6ctl station queue drop|reload <STATION> <ENTRY> [control options]` ask the Station to end an
+  entry (a Mission waiting to start fails with a reason, one waiting to resume is abandoned) or to
+  clear its retry wait, and print the control's outcome as `mission cancel` does.
+- `ai6ctl sleeper disable|enable <OPERATION> <NAME>` stops or resumes a Sleeper minting briefs;
+  prints `SLEEPER STATE`. Needs `mission.control`.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
 - `ai6ctl session interrupt <SESSION_ID>` stops the Session's current turn; it finds the

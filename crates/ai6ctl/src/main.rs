@@ -69,15 +69,74 @@ enum OperationsCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum StationCommand {
+    /// The Missions waiting in a Station's own queue, and end or retry them there (the Station
+    /// acts on its own store; needs mission.control on the entry's Operation).
+    Queue {
+        #[command(subcommand)]
+        command: QueueCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum QueueCommand {
+    /// List the entries waiting to start or to be resumed, with their failed tries and waits.
+    List {
+        /// AI6 Station ID.
+        station_id: String,
+    },
+    /// End an entry: a Mission waiting to start fails with a reason, one waiting to resume is
+    /// abandoned. Neither is tried again.
+    Drop {
+        /// AI6 Station ID.
+        station_id: String,
+        /// The entry's Mission ID, as `queue list` shows it.
+        entry: String,
+        #[command(flatten)]
+        request: ControlOptions,
+    },
+    /// Clear an entry's retry wait so it is checked against the Registry and tried now.
+    Reload {
+        /// AI6 Station ID.
+        station_id: String,
+        /// The entry's Mission ID, as `queue list` shows it.
+        entry: String,
+        #[command(flatten)]
+        request: ControlOptions,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SleeperCommand {
+    /// Stop minting briefs.
+    Disable,
+    /// Mint briefs again.
+    Enable,
+}
+
+#[derive(Debug, Subcommand)]
 enum Command {
     /// Check that the Universal Exports API is responding.
     Health,
+    /// Stop a Sleeper minting briefs, or let it mint again; its definition and authorization stay
+    /// (needs mission.control).
+    Sleeper {
+        #[command(subcommand)]
+        command: SleeperCommand,
+        /// AI6 Operation ID.
+        operation: String,
+        /// The Sleeper's name.
+        name: String,
+    },
     /// List visible Stations and their health and Headquarters status.
     Stations,
-    /// Show one visible Station by its Station ID.
+    /// Show one visible Station by its Station ID, or act on its own queue.
+    #[command(args_conflicts_with_subcommands = true)]
     Station {
         /// AI6 Station ID.
-        station_id: String,
+        station_id: Option<String>,
+        #[command(subcommand)]
+        queue: Option<StationCommand>,
     },
     /// List the Agents of one Operation and their records there: Missions done, failed,
     /// blown, abandoned and stalled, incidents, and the model that occupies each codename
@@ -773,6 +832,18 @@ enum MissionCommand {
         #[arg(long)]
         operation: Option<String>,
     },
+    /// File a claimed Mission as failed with a reason, when the Station holding its claim no
+    /// longer answers (needs mission.control). A Station that answers is asked with `cancel`.
+    Settle {
+        /// AI6 Mission ID.
+        mission_id: String,
+        /// Why, filed as the brief's failure reason.
+        #[arg(long)]
+        reason: String,
+        /// The Operation, when the Mission is not on the visible board.
+        #[arg(long)]
+        operation: Option<String>,
+    },
     /// Stop the Mission's live Session, if any, and abandon the Mission. One no Station has taken
     /// yet is withdrawn instead, and one that already ended stays as it is and answers applied.
     Cancel {
@@ -1079,6 +1150,21 @@ struct BoardStation {
     operations: Vec<String>,
     #[serde(default)]
     resources: Option<StationResources>,
+    #[serde(default)]
+    queue: Vec<QueueRow>,
+}
+
+/// One entry of a Station's own queue.
+#[derive(Debug, Deserialize)]
+struct QueueRow {
+    mission_id: String,
+    operation_id: String,
+    agent: Option<String>,
+    state: String,
+    #[serde(default)]
+    failures: u32,
+    retry_in_secs: Option<f64>,
+    waiting: Option<String>,
 }
 
 /// The host figures a Station published; each is absent when the host did not give it.
@@ -1234,7 +1320,69 @@ async fn run() -> Result<(), String> {
             let board = stations(&client, &server, &token).await?;
             print_stations(&board);
         }
-        Command::Station { station_id } => {
+        Command::Station {
+            queue: Some(StationCommand::Queue { command }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let board = stations(&client, &server, &token).await?;
+            let (station_id, entry, action, request) = match command {
+                QueueCommand::List { station_id } => (station_id, None, "list", None),
+                QueueCommand::Drop {
+                    station_id,
+                    entry,
+                    request,
+                } => (station_id, Some(entry), "drop", Some(request)),
+                QueueCommand::Reload {
+                    station_id,
+                    entry,
+                    request,
+                } => (station_id, Some(entry), "reload", Some(request)),
+            };
+            let station = board
+                .stations
+                .iter()
+                .find(|station| station.station_id == station_id)
+                .ok_or_else(|| "Station was not found".to_owned())?;
+            let (Some(entry), Some(request)) = (entry, request) else {
+                println!("MISSION	OPERATION	STATE	FAILURES	RETRY_IN	AGENT	WAITING");
+                for row in &station.queue {
+                    println!(
+                        "{}	{}	{}	{}	{}	{}	{}",
+                        plain(&row.mission_id),
+                        plain(&row.operation_id),
+                        plain(&row.state),
+                        row.failures,
+                        row.retry_in_secs
+                            .map_or_else(|| "-".to_owned(), |secs| format!("{secs:.0}s")),
+                        plain(row.agent.as_deref().unwrap_or("-")),
+                        plain(row.waiting.as_deref().unwrap_or("-")),
+                    );
+                }
+                return Ok(());
+            };
+            let row = station
+                .queue
+                .iter()
+                .find(|row| row.mission_id == entry)
+                .ok_or_else(|| "the Station's queue has no such entry".to_owned())?;
+            let body = serde_json::json!({ "action": action, "station": station_id });
+            let status = control(
+                &client,
+                &server,
+                &token,
+                (&row.operation_id, &row.mission_id),
+                body,
+                &request,
+            )
+            .await?;
+            print_control(&status);
+            control_verdict(&status)?;
+        }
+        Command::Station {
+            station_id: Some(station_id),
+            ..
+        } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let board = stations(&client, &server, &token).await?;
             let Some(station) = board
@@ -1249,6 +1397,7 @@ async fn run() -> Result<(), String> {
                 station_row(station, board.headquarters_station.as_deref())
             );
         }
+        Command::Station { .. } => return Err("pass a Station ID, or `queue`".to_owned()),
         Command::Agents { operation, command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let operation = operation.ok_or("pass --operation")?;
@@ -1694,6 +1843,63 @@ async fn run() -> Result<(), String> {
         }
         Command::Mission {
             control:
+                Some(MissionCommand::Settle {
+                    mission_id,
+                    reason,
+                    operation,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let request = operation_request(
+                &client,
+                &server,
+                &token,
+                Method::POST,
+                &[&operation, "missions", &mission_id, "settle"],
+            )?
+            .json(&serde_json::json!({ "reason": reason }));
+            let settled: serde_json::Value = send(request, "mission.control", "settlement").await?;
+            println!("MISSION	STATION	STATE");
+            println!(
+                "{}	{}	{}",
+                plain(settled["mission_id"].as_str().unwrap_or_default()),
+                plain(settled["station_id"].as_str().unwrap_or_default()),
+                plain(settled["state"].as_str().unwrap_or_default())
+            );
+        }
+        Command::Sleeper {
+            command,
+            operation,
+            name,
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let verb = match command {
+                SleeperCommand::Disable => "disable",
+                SleeperCommand::Enable => "enable",
+            };
+            let request = operation_request(
+                &client,
+                &server,
+                &token,
+                Method::POST,
+                &[&operation, "sleepers", &name, verb],
+            )?;
+            let state: serde_json::Value =
+                send(request, "mission.control", "Sleeper state").await?;
+            println!("SLEEPER	STATE");
+            println!(
+                "{}	{}",
+                plain(&name),
+                plain(state["state"].as_str().unwrap_or_default())
+            );
+        }
+        Command::Mission {
+            control:
                 Some(MissionCommand::Withdraw {
                     mission_id,
                     note,
@@ -1752,7 +1958,9 @@ async fn run() -> Result<(), String> {
                     "resume",
                     message.map(|message| ("message", message)),
                 ),
-                MissionCommand::Issues { .. } | MissionCommand::Withdraw { .. } => {
+                MissionCommand::Issues { .. }
+                | MissionCommand::Withdraw { .. }
+                | MissionCommand::Settle { .. } => {
                     unreachable!("handled above")
                 }
             };

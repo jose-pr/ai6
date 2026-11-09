@@ -18,6 +18,7 @@ mod login_limit;
 mod memories;
 mod models;
 mod moneypenny;
+mod orders;
 mod page_access;
 mod pools;
 #[cfg(test)]
@@ -1673,6 +1674,18 @@ impl Gateway {
                 post(controls::request_control),
             )
             .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/settle",
+                post(orders::settle),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/sleepers/{name}/disable",
+                post(orders::disable_sleeper),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/sleepers/{name}/enable",
+                post(orders::enable_sleeper),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/withdraw",
                 post(held::withdraw),
             )
@@ -2142,6 +2155,14 @@ fn board_station(
         head_of_station: info
             .get("head_of_station")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        queue: info
+            .get("queue")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| serde_json::from_value::<BoardQueueEntry>(entry.clone()).ok())
+            .filter(|entry| operations.contains(&entry.operation_id))
+            .collect(),
     }
 }
 
@@ -5113,6 +5134,33 @@ pub struct BoardStation {
     pub head_of_station: Option<ai6::StationReport>,
     /// Each Operation's issue settings looser than the default, one line each.
     pub issues_weakened: Vec<String>,
+    /// The Missions waiting in the Station's own queue, to start or to be resumed, of the
+    /// Operations this user may read.
+    pub queue: Vec<BoardQueueEntry>,
+}
+
+/// One entry of a Station's own queue.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoardQueueEntry {
+    /// The Mission, as the entry is named to `drop` and `reload` it.
+    pub mission_id: String,
+    /// The Operation it belongs to.
+    pub operation_id: String,
+    /// The Agent assigned, when there is one.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// `queued` (waiting to start) or `recovering` (waiting to be resumed after a restart).
+    pub state: String,
+    /// Start tries that failed in a row.
+    #[serde(default)]
+    pub failures: u32,
+    /// Seconds until the next try, while it waits out a backoff.
+    #[serde(default)]
+    pub retry_in_secs: Option<f64>,
+    /// Why it waits, when the Station knows.
+    #[serde(default)]
+    pub waiting: Option<String>,
 }
 
 /// One Theater a Station reaches, as the Station published it at check-in.

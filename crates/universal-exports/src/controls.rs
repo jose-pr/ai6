@@ -204,6 +204,31 @@ impl ControlBook {
         self.entries.insert(id, entry);
     }
 
+    /// Queues again the controls handed to `station` that it never reported on, as when it
+    /// restarted after taking them; each goes ahead of the ones still waiting.
+    fn redeliver(&mut self, station: &str) {
+        let mut back: Vec<&String> = self
+            .order
+            .iter()
+            .filter(|id| {
+                self.entries.get(*id).is_some_and(|entry| {
+                    entry.status.station_id == station && entry.status.status == "delivered"
+                })
+            })
+            .collect();
+        back.reverse();
+        let back: Vec<String> = back.into_iter().cloned().collect();
+        for id in back {
+            if let Some(entry) = self.entries.get_mut(&id) {
+                entry.status.status = "queued".to_owned();
+            }
+            self.pending
+                .entry(station.to_owned())
+                .or_default()
+                .push_front(id);
+        }
+    }
+
     /// Hands the oldest queued control for `station` over and marks it delivered.
     fn take(&mut self, station: &str) -> Option<MissionControl> {
         let queue = self.pending.get_mut(station)?;
@@ -260,7 +285,11 @@ impl Gateway {
         &self,
         station: &str,
         wait: Duration,
+        fresh: bool,
     ) -> Result<Option<MissionControl>, ApiError> {
+        if fresh {
+            self.with_controls(|book| book.redeliver(station))?;
+        }
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             let notified = self.control_ready.notified();
@@ -287,6 +316,10 @@ pub(crate) struct ControlRequest {
     message: Option<String>,
     #[serde(default)]
     session_id: Option<String>,
+    /// The Station to ask, whether or not it holds the Mission's claim: for the entries of its
+    /// own queue (`drop`, `reload`).
+    #[serde(default)]
+    station: Option<String>,
     idempotency_key: String,
 }
 
@@ -424,6 +457,8 @@ fn audit_action(action: ControlAction) -> &'static str {
         ControlAction::Retry => "mission.retry",
         ControlAction::Resume => "mission.resume",
         ControlAction::Interrupt => "session.interrupt",
+        ControlAction::Drop => "station.queue.drop",
+        ControlAction::Reload => "station.queue.reload",
         _ => "mission.control",
     }
 }
@@ -448,6 +483,12 @@ pub(crate) async fn request_control(
         gateway.config.unex().controls.idempotency_key_bytes,
     ) || (request.agent.is_some() && action != ControlAction::Retry)
         || (request.message.is_some() && action != ControlAction::Resume)
+        || (request.station.is_some()
+            && !matches!(action, ControlAction::Drop | ControlAction::Reload))
+        || request
+            .station
+            .as_deref()
+            .is_some_and(|station| StationSettings::try_new(station.to_owned(), 1).is_err())
     {
         return Err(ApiError::bad_request());
     }
@@ -534,8 +575,23 @@ pub(crate) async fn request_control(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let lookup = registry.clone();
     let (wanted_operation, wanted) = (operation.to_string(), mission.to_string());
-    let routing = tokio::task::spawn_blocking(move || {
-        control_target(lookup.as_ref(), &wanted_operation, &wanted, on_board)
+    let named = request.station.clone();
+    let routing = tokio::task::spawn_blocking(move || match named {
+        Some(station) => {
+            let known = lookup
+                .stations(std::time::Duration::MAX)?
+                .iter()
+                .any(|record| record.station() == station);
+            Ok(if known {
+                Routing::To(Target {
+                    station,
+                    session: None,
+                })
+            } else {
+                Routing::Unknown
+            })
+        }
+        None => control_target(lookup.as_ref(), &wanted_operation, &wanted, on_board),
     })
     .await
     .map_err(|_| ApiError::internal())?
@@ -703,6 +759,10 @@ pub(crate) async fn control_status(
 pub(crate) struct ControlPoll {
     station: String,
     wait_ms: Option<u64>,
+    /// Set by a Station on its first ask after starting: what it was handed before and never
+    /// reported on is handed to it again.
+    #[serde(default)]
+    fresh: bool,
 }
 
 pub(crate) async fn next_station_control(
@@ -720,7 +780,10 @@ pub(crate) async fn next_station_control(
         .max_poll_wait
         .get()
         .map_or(wait, |most| wait.min(most));
-    let Some(control) = gateway.next_control(&poll.station, wait).await? else {
+    let Some(control) = gateway
+        .next_control(&poll.station, wait, poll.fresh)
+        .await?
+    else {
         return Response::builder()
             .status(StatusCode::NO_CONTENT)
             .body(Body::empty())
@@ -1514,6 +1577,85 @@ pub(crate) mod tests {
             },
             created: Instant::now(),
         }
+    }
+
+    #[tokio::test]
+    async fn a_queue_control_names_the_station_that_acts_on_it() {
+        let served = served().await;
+        // No claim, Session or board entry ties this Mission to `worker`.
+        let asked = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-queued-only",
+            serde_json::json!({"action": "drop", "station": "worker", "idempotency_key": "d"}),
+        )
+        .await;
+        assert_eq!(asked.status(), StatusCode::ACCEPTED);
+        let status: serde_json::Value = asked.json().await.unwrap();
+        assert_eq!(status["station_id"], "worker");
+        assert_eq!(status["action"], "drop");
+        let taken = take(&served, "worker").await.unwrap();
+        assert_eq!(taken.action(), ControlAction::Drop);
+        let unknown = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-queued-only",
+            serde_json::json!({"action": "reload", "station": "nowhere", "idempotency_key": "r"}),
+        )
+        .await;
+        assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+        let wrong = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-g",
+            serde_json::json!({"action": "cancel", "station": "worker", "idempotency_key": "c"}),
+        )
+        .await;
+        assert_eq!(
+            wrong.status(),
+            StatusCode::BAD_REQUEST,
+            "only queue controls name one"
+        );
+    }
+
+    #[test]
+    fn a_control_handed_to_a_station_that_restarted_is_handed_again() {
+        let mut book = ControlBook::default();
+        // Ids 0 and 32 are for station-0, id 1 for station-1.
+        for id in [0, 32, 1] {
+            book.insert(entry(id)).unwrap();
+        }
+        let first = book.take("station-0").unwrap();
+        assert_eq!(first.control_id().as_str(), "control-0");
+        // The Station never reports on it and starts again.
+        book.redeliver("station-0");
+        assert_eq!(
+            book.take("station-0").unwrap().control_id().as_str(),
+            "control-0",
+            "the one it took goes first"
+        );
+        assert_eq!(
+            book.take("station-0").unwrap().control_id().as_str(),
+            "control-32"
+        );
+        assert!(book.take("station-0").is_none());
+        assert_eq!(
+            book.take("station-1").unwrap().control_id().as_str(),
+            "control-1"
+        );
+        // A control already reported on is not handed again.
+        let report = ControlReport {
+            station: "station-1".to_owned(),
+            outcome: "applied".to_owned(),
+            state: None,
+            reason: None,
+        };
+        book.finish("control-1", "station-1", &report, 2.0).unwrap();
+        book.redeliver("station-1");
+        assert!(book.take("station-1").is_none());
     }
 
     #[test]
