@@ -1,4 +1,20 @@
 pub mod ai6_transport_ssh
+pub struct ai6_transport_ssh::Settings
+pub ai6_transport_ssh::Settings::connect_timeout_secs: core::option::Option<u64>
+pub ai6_transport_ssh::Settings::exit_grace_ms: core::option::Option<u64>
+pub ai6_transport_ssh::Settings::host: alloc::string::String
+pub ai6_transport_ssh::Settings::host_key: core::option::Option<alloc::string::String>
+pub ai6_transport_ssh::Settings::identity: core::option::Option<alloc::string::String>
+pub ai6_transport_ssh::Settings::keepalive_max: core::option::Option<usize>
+pub ai6_transport_ssh::Settings::keepalive_secs: core::option::Option<u64>
+pub ai6_transport_ssh::Settings::port: core::option::Option<u16>
+pub ai6_transport_ssh::Settings::trust_on_first_use: bool
+pub ai6_transport_ssh::Settings::user: core::option::Option<alloc::string::String>
+impl ai6_transport_ssh::Settings
+pub fn ai6_transport_ssh::Settings::checked(self) -> core::result::Result<Self, alloc::string::String>
+impl core::convert::TryFrom<ai6_transport_ssh::Settings> for ai6_transport_ssh::Ssh
+pub type ai6_transport_ssh::Ssh::Error = guatiao::library::kind::ProviderError
+pub fn ai6_transport_ssh::Ssh::try_from(ai6_transport_ssh::Settings) -> core::result::Result<Self, Self::Error>
 pub struct ai6_transport_ssh::Ssh
 impl ai6::directorates::q::transport::Transport for ai6_transport_ssh::Ssh
 pub fn ai6_transport_ssh::Ssh::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
@@ -9,9 +25,9 @@ pub fn ai6_transport_ssh::Ssh::probe(&self) -> core::result::Result<guatiao::val
 pub fn ai6_transport_ssh::Ssh::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
-impl core::convert::TryFrom<ai6::directorates::q::transport::TransportConfig> for ai6_transport_ssh::Ssh
+impl core::convert::TryFrom<ai6_transport_ssh::Settings> for ai6_transport_ssh::Ssh
 pub type ai6_transport_ssh::Ssh::Error = guatiao::library::kind::ProviderError
-pub fn ai6_transport_ssh::Ssh::try_from(ai6::directorates::q::transport::TransportConfig) -> core::result::Result<Self, Self::Error>
+pub fn ai6_transport_ssh::Ssh::try_from(ai6_transport_ssh::Settings) -> core::result::Result<Self, Self::Error>
 impl core::ops::drop::Drop for ai6_transport_ssh::Ssh
 pub fn ai6_transport_ssh::Ssh::drop(&mut self)
 impl guatiao::library::kind::parts::ProviderDecl for ai6_transport_ssh::Ssh

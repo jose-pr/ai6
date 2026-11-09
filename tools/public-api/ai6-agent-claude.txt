@@ -1,12 +1,13 @@
 pub mod ai6_agent_claude
 pub struct ai6_agent_claude::ClaudeConfig
+pub ai6_agent_claude::ClaudeConfig::allowed_tools: alloc::vec::Vec<alloc::string::String>
 pub ai6_agent_claude::ClaudeConfig::close_wait_ms: u64
 pub ai6_agent_claude::ClaudeConfig::csi_bytes: u64
+pub ai6_agent_claude::ClaudeConfig::denied_tools: alloc::vec::Vec<alloc::string::String>
 pub ai6_agent_claude::ClaudeConfig::executable: alloc::string::String
 pub ai6_agent_claude::ClaudeConfig::exit_wait_ms: u64
 pub ai6_agent_claude::ClaudeConfig::json_line_bytes: u64
 pub ai6_agent_claude::ClaudeConfig::models_wait_ms: u64
-pub ai6_agent_claude::ClaudeConfig::settings_toml: alloc::string::String
 pub ai6_agent_claude::ClaudeConfig::tail_line_bytes: u64
 pub ai6_agent_claude::ClaudeConfig::tail_lines: u64
 impl core::convert::TryFrom<ai6_agent_claude::ClaudeConfig> for ai6_agent_claude::ClaudeHandler

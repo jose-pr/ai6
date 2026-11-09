@@ -1,14 +1,18 @@
 pub mod ai6_agent_antigravity
 pub struct ai6_agent_antigravity::AntigravityConfig
+pub ai6_agent_antigravity::AntigravityConfig::allowed_tools: alloc::vec::Vec<alloc::string::String>
+pub ai6_agent_antigravity::AntigravityConfig::auto_update: bool
 pub ai6_agent_antigravity::AntigravityConfig::close_wait_ms: u64
 pub ai6_agent_antigravity::AntigravityConfig::context_file_bytes: u64
 pub ai6_agent_antigravity::AntigravityConfig::csi_bytes: u64
+pub ai6_agent_antigravity::AntigravityConfig::denied_tools: alloc::vec::Vec<alloc::string::String>
 pub ai6_agent_antigravity::AntigravityConfig::executable: alloc::string::String
 pub ai6_agent_antigravity::AntigravityConfig::exit_wait_ms: u64
 pub ai6_agent_antigravity::AntigravityConfig::gate_timeout_secs: u64
 pub ai6_agent_antigravity::AntigravityConfig::json_line_bytes: u64
+pub ai6_agent_antigravity::AntigravityConfig::limit_phrases: alloc::vec::Vec<alloc::string::String>
 pub ai6_agent_antigravity::AntigravityConfig::mcp_timeout_secs: i64
-pub ai6_agent_antigravity::AntigravityConfig::settings_toml: alloc::string::String
+pub ai6_agent_antigravity::AntigravityConfig::settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6_agent_antigravity::AntigravityConfig::tail_line_bytes: u64
 pub ai6_agent_antigravity::AntigravityConfig::tail_lines: u64
 impl core::convert::TryFrom<ai6_agent_antigravity::AntigravityConfig> for ai6_agent_antigravity::AntigravityHandler

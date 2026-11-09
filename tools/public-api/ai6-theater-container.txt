@@ -1,18 +1,32 @@
 pub mod ai6_theater_container
 pub struct ai6_theater_container::ContainerTheaters
 impl ai6_theater_container::ContainerTheaters
-pub fn ai6_theater_container::ContainerTheaters::with_engine(alloc::sync::Arc<dyn ai6_theater_container::Engine>, &str) -> core::result::Result<Self, guatiao::library::kind::ProviderError>
+pub fn ai6_theater_container::ContainerTheaters::with_engine(alloc::sync::Arc<dyn ai6_theater_container::Engine>, ai6_theater_container::Settings) -> core::result::Result<Self, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::ephemeral::TheaterProvider for ai6_theater_container::ContainerTheaters
 pub fn ai6_theater_container::ContainerTheaters::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_theater_container::ContainerTheaters::create(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_theater_container::ContainerTheaters::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6_theater_container::ContainerTheaters::list(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
-impl core::convert::TryFrom<ai6::directorates::q::ephemeral::TheaterProviderConfig> for ai6_theater_container::ContainerTheaters
+impl core::convert::TryFrom<ai6_theater_container::Settings> for ai6_theater_container::ContainerTheaters
 pub type ai6_theater_container::ContainerTheaters::Error = guatiao::library::kind::ProviderError
-pub fn ai6_theater_container::ContainerTheaters::try_from(ai6::directorates::q::ephemeral::TheaterProviderConfig) -> core::result::Result<Self, Self::Error>
+pub fn ai6_theater_container::ContainerTheaters::try_from(ai6_theater_container::Settings) -> core::result::Result<Self, Self::Error>
 impl guatiao::library::kind::parts::ProviderDecl for ai6_theater_container::ContainerTheaters
 pub const ai6_theater_container::ContainerTheaters::KINDS: &'static [&'static str]
 pub fn ai6_theater_container::ContainerTheaters::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6_theater_container::Settings
+pub ai6_theater_container::Settings::command: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6_theater_container::Settings::engine: core::option::Option<alloc::string::String>
+pub ai6_theater_container::Settings::engine_output_bytes: core::option::Option<u64>
+pub ai6_theater_container::Settings::engine_timeout_ms: core::option::Option<u64>
+pub ai6_theater_container::Settings::image: alloc::string::String
+pub ai6_theater_container::Settings::reader_grace_ms: core::option::Option<u64>
+pub ai6_theater_container::Settings::run_args: alloc::vec::Vec<alloc::string::String>
+pub ai6_theater_container::Settings::user: core::option::Option<alloc::string::String>
+impl ai6_theater_container::Settings
+pub fn ai6_theater_container::Settings::checked(self) -> core::result::Result<Self, alloc::string::String>
+impl core::convert::TryFrom<ai6_theater_container::Settings> for ai6_theater_container::ContainerTheaters
+pub type ai6_theater_container::ContainerTheaters::Error = guatiao::library::kind::ProviderError
+pub fn ai6_theater_container::ContainerTheaters::try_from(ai6_theater_container::Settings) -> core::result::Result<Self, Self::Error>
 pub const ai6_theater_container::CREATED_LABEL: &str
 pub const ai6_theater_container::MISSION_LABEL: &str
 pub const ai6_theater_container::TEMPLATE_LABEL: &str

@@ -9,11 +9,20 @@ pub fn ai6_transport_qemu::Qemu::run(&self, &guatiao::value::value::Value) -> co
 pub fn ai6_transport_qemu::Qemu::write_file(&self, &guatiao::value::value::Value) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::transport::kit::Shell for ai6_transport_qemu::Qemu
 pub fn ai6_transport_qemu::Qemu::sh(&self, &str, core::option::Option<&[u8]>, u64) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
-impl core::convert::TryFrom<ai6::directorates::q::transport::TransportConfig> for ai6_transport_qemu::Qemu
+impl core::convert::TryFrom<ai6_transport_qemu::Settings> for ai6_transport_qemu::Qemu
 pub type ai6_transport_qemu::Qemu::Error = guatiao::library::kind::ProviderError
-pub fn ai6_transport_qemu::Qemu::try_from(ai6::directorates::q::transport::TransportConfig) -> core::result::Result<Self, Self::Error>
+pub fn ai6_transport_qemu::Qemu::try_from(ai6_transport_qemu::Settings) -> core::result::Result<Self, Self::Error>
 impl guatiao::library::kind::parts::ProviderDecl for ai6_transport_qemu::Qemu
 pub const ai6_transport_qemu::Qemu::KINDS: &'static [&'static str]
 pub fn ai6_transport_qemu::Qemu::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
+pub struct ai6_transport_qemu::Settings
+pub ai6_transport_qemu::Settings::address: core::option::Option<alloc::string::String>
+pub ai6_transport_qemu::Settings::reply_timeout_secs: core::option::Option<u64>
+pub ai6_transport_qemu::Settings::socket: core::option::Option<alloc::string::String>
+impl ai6_transport_qemu::Settings
+pub fn ai6_transport_qemu::Settings::checked(self) -> core::result::Result<Self, alloc::string::String>
+impl core::convert::TryFrom<ai6_transport_qemu::Settings> for ai6_transport_qemu::Qemu
+pub type ai6_transport_qemu::Qemu::Error = guatiao::library::kind::ProviderError
+pub fn ai6_transport_qemu::Qemu::try_from(ai6_transport_qemu::Settings) -> core::result::Result<Self, Self::Error>
 #[no_mangle] pub static ai6_transport_qemu::guatiao_declares: [u8; 20]
 #[no_mangle] pub unsafe c fn ai6_transport_qemu::guatiao_library_entry(*const guatiao::library::desc::HostInfo<'static>) -> *const guatiao::library::desc::LibraryInfo<'static>

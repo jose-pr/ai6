@@ -31,6 +31,7 @@ pub use ai6::UsageLimit
 pub use ai6::Verdict
 pub use ai6::Waiting
 pub use ai6::guatiao
+pub use ai6::guatiao_serde
 pub mod ai6::bootstrap
 pub mod ai6::bootstrap::format
 #[non_exhaustive] pub enum ai6::bootstrap::format::Format
@@ -2393,7 +2394,7 @@ pub ai6::directorates::m::theaters::TheaterAccess::Local
 pub ai6::directorates::m::theaters::TheaterAccess::Ssh(ai6::directorates::m::theaters::SshAccess)
 pub ai6::directorates::m::theaters::TheaterAccess::Transport(ai6::directorates::m::theaters::TransportAccess)
 impl ai6::directorates::m::theaters::TheaterAccess
-pub fn ai6::directorates::m::theaters::TheaterAccess::transport(&self) -> core::result::Result<(alloc::string::String, alloc::string::String), ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::TheaterAccess::transport(&self) -> core::result::Result<(alloc::string::String, serde_json::map::Map<alloc::string::String, serde_json::value::Value>), ai6::directorates::m::theaters::TheaterError>
 #[non_exhaustive] pub enum ai6::directorates::m::theaters::TheaterKind
 pub ai6::directorates::m::theaters::TheaterKind::Ephemeral
 pub ai6::directorates::m::theaters::TheaterKind::Local
@@ -2409,7 +2410,7 @@ pub ai6::directorates::m::theaters::EphemeralAccess::provider: alloc::string::St
 impl ai6::directorates::m::theaters::EphemeralAccess
 pub fn ai6::directorates::m::theaters::EphemeralAccess::keeping_failed(self, usize, u64) -> Self
 pub fn ai6::directorates::m::theaters::EphemeralAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::m::theaters::EphemeralAccess::settings_toml(&self) -> core::result::Result<alloc::string::String, ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::EphemeralAccess::settings(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub fn ai6::directorates::m::theaters::EphemeralAccess::with_setting(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<serde_json::value::Value>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::theaters::RunnerSettings
 pub ai6::directorates::m::theaters::RunnerSettings::command: core::option::Option<alloc::string::String>
@@ -2919,7 +2920,7 @@ pub struct ai6::directorates::q::ephemeral::MadeTheater
 pub ai6::directorates::q::ephemeral::MadeTheater::created_at: u64
 pub ai6::directorates::q::ephemeral::MadeTheater::mission: alloc::string::String
 pub ai6::directorates::q::ephemeral::MadeTheater::name: alloc::string::String
-pub ai6::directorates::q::ephemeral::MadeTheater::settings_toml: alloc::string::String
+pub ai6::directorates::q::ephemeral::MadeTheater::settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::directorates::q::ephemeral::MadeTheater::template: alloc::string::String
 pub ai6::directorates::q::ephemeral::MadeTheater::transport: alloc::string::String
 pub struct ai6::directorates::q::ephemeral::MadeTheaters
@@ -2931,8 +2932,6 @@ pub fn ai6::directorates::q::ephemeral::TheaterMaker::create(&self, &ai6::direct
 pub fn ai6::directorates::q::ephemeral::TheaterMaker::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::ephemeral::TheaterMaker::list(&self, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::ephemeral::MadeTheater>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::ephemeral::TheaterMaker::new(alloc::boxed::Box<dyn ai6::directorates::q::ephemeral::TheaterProvider>) -> Self
-pub struct ai6::directorates::q::ephemeral::TheaterProviderConfig
-pub ai6::directorates::q::ephemeral::TheaterProviderConfig::settings_toml: alloc::string::String
 pub struct ai6::directorates::q::ephemeral::TheaterRequest
 pub ai6::directorates::q::ephemeral::TheaterRequest::mission: alloc::string::String
 pub ai6::directorates::q::ephemeral::TheaterRequest::name: alloc::string::String
@@ -3999,8 +3998,6 @@ pub fn ai6::directorates::q::transport::TransportClient::probe(&self) -> core::r
 pub fn ai6::directorates::q::transport::TransportClient::read_file(&self, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::TransportClient::run(&self, &ai6::directorates::q::transport::RunSpec) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
-pub struct ai6::directorates::q::transport::TransportConfig
-pub ai6::directorates::q::transport::TransportConfig::settings_toml: alloc::string::String
 pub struct ai6::directorates::q::transport::WriteSpec
 pub ai6::directorates::q::transport::WriteSpec::append: bool
 pub ai6::directorates::q::transport::WriteSpec::create_dirs: bool
@@ -7384,8 +7381,6 @@ pub ai6::directorates::registry::sources::FinishedSourceBrief::outcome: serde_js
 pub struct ai6::directorates::registry::sources::SourceBatch
 pub ai6::directorates::registry::sources::SourceBatch::cursor: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sources::SourceBatch::items: alloc::vec::Vec<ai6::directorates::registry::sources::SourceItem>
-pub struct ai6::directorates::registry::sources::SourceConfig
-pub ai6::directorates::registry::sources::SourceConfig::settings_toml: alloc::string::String
 pub struct ai6::directorates::registry::sources::SourceItem
 pub ai6::directorates::registry::sources::SourceItem::author: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sources::SourceItem::body: alloc::string::String
@@ -8708,8 +8703,6 @@ pub fn ai6::directorates::section_00::agent::AssistantNetwork::open(&self) -> bo
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::reaches_nothing(&self) -> bool
 impl core::default::Default for ai6::directorates::section_00::agent::AssistantNetwork
 pub fn ai6::directorates::section_00::agent::AssistantNetwork::default() -> Self
-pub struct ai6::directorates::section_00::agent::HandlerConfig
-pub ai6::directorates::section_00::agent::HandlerConfig::settings_toml: alloc::string::String
 pub struct ai6::directorates::section_00::agent::McpServerRef
 pub ai6::directorates::section_00::agent::McpServerRef::env_prefix: alloc::string::String
 pub ai6::directorates::section_00::agent::McpServerRef::name: alloc::string::String
@@ -9031,6 +9024,12 @@ pub fn ai6::directorates::section_00::records::configured_dir(&alloc::collection
 pub fn ai6::directorates::section_00::records::file_safe(&str) -> bool
 pub fn ai6::directorates::section_00::records::find_file(&std::path::Path, usize, &dyn core::ops::function::Fn(&str) -> bool) -> core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::section_00::records::home(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
+pub mod ai6::provider_settings
+pub fn ai6::provider_settings::check_settings(&str, &guatiao::value::value::Value, &guatiao::value::value::Value) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::provider_settings::settings_from_text<T: guatiao::value::convert::FromValue>(&str) -> core::result::Result<T, alloc::string::String>
+pub fn ai6::provider_settings::settings_of<T: guatiao::value::convert::FromValue>(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<T, alloc::string::String>
+pub fn ai6::provider_settings::settings_value(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<guatiao::value::value::Value, alloc::string::String>
+pub fn ai6::provider_settings::table_value(&toml::table::Table) -> core::result::Result<guatiao::value::value::Value, alloc::string::String>
 pub mod ai6::settings
 pub mod ai6::settings::reference
 pub const ai6::settings::reference::DOCS: [&str; 6]
@@ -9380,6 +9379,7 @@ pub fn ai6::station::plugins::Plugins::authorizer(&self, &str, core::option::Opt
 pub fn ai6::station::plugins::Plugins::authorizers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::cached_authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Authorizer>>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::cached_directory(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Directory>>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::check_settings(&self, &str, &guatiao::value::value::Value) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::station::plugins::Plugins::choose_terminal(&self, ai6::directorates::q::terminal::HarnessStdio, core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::station::plugins::Plugins::config_schema(&self, &str) -> core::option::Option<serde_json::value::Value>
 pub fn ai6::station::plugins::Plugins::directories(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
@@ -9396,14 +9396,17 @@ pub fn ai6::station::plugins::Plugins::scan_with(&[std::path::PathBuf], &ai6::st
 pub fn ai6::station::plugins::Plugins::secret_provider(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::secret_kind::SecretProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::secret_providers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::source(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::sources::Source>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::source_with(&self, &str, &toml::table::Table) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::sources::Source>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::sources(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::terminal(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::terminal::Terminal>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::terminal_offers(&self) -> alloc::vec::Vec<ai6::directorates::q::terminal::TerminalOffer>
 pub fn ai6::station::plugins::Plugins::terminals(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::theater_provider(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::ephemeral::TheaterProvider>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::theater_provider_with(&self, &str, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::ephemeral::TheaterProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::theater_providers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::theater_transport(&self, &ai6::directorates::m::theaters::TheaterAccess) -> core::result::Result<ai6::directorates::q::transport::TransportClient, alloc::string::String>
 pub fn ai6::station::plugins::Plugins::tracker(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::tracker::Tracker>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::tracker_with(&self, &str, &toml::table::Table) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::tracker::Tracker>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::trackers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::transport(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::transport::Transport>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::transports(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
@@ -10165,7 +10168,7 @@ pub ai6::TheaterAccess::Local
 pub ai6::TheaterAccess::Ssh(ai6::directorates::m::theaters::SshAccess)
 pub ai6::TheaterAccess::Transport(ai6::directorates::m::theaters::TransportAccess)
 impl ai6::directorates::m::theaters::TheaterAccess
-pub fn ai6::directorates::m::theaters::TheaterAccess::transport(&self) -> core::result::Result<(alloc::string::String, alloc::string::String), ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::TheaterAccess::transport(&self) -> core::result::Result<(alloc::string::String, serde_json::map::Map<alloc::string::String, serde_json::value::Value>), ai6::directorates::m::theaters::TheaterError>
 #[non_exhaustive] pub enum ai6::TheaterKind
 pub ai6::TheaterKind::Ephemeral
 pub ai6::TheaterKind::Local
@@ -11561,7 +11564,7 @@ pub ai6::EphemeralAccess::provider: alloc::string::String
 impl ai6::directorates::m::theaters::EphemeralAccess
 pub fn ai6::directorates::m::theaters::EphemeralAccess::keeping_failed(self, usize, u64) -> Self
 pub fn ai6::directorates::m::theaters::EphemeralAccess::new(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn ai6::directorates::m::theaters::EphemeralAccess::settings_toml(&self) -> core::result::Result<alloc::string::String, ai6::directorates::m::theaters::TheaterError>
+pub fn ai6::directorates::m::theaters::EphemeralAccess::settings(&self) -> &serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub fn ai6::directorates::m::theaters::EphemeralAccess::with_setting(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<serde_json::value::Value>) -> Self
 #[non_exhaustive] pub struct ai6::Evidence
 pub ai6::Evidence::at: f64
@@ -12116,7 +12119,7 @@ pub struct ai6::MadeTheater
 pub ai6::MadeTheater::created_at: u64
 pub ai6::MadeTheater::mission: alloc::string::String
 pub ai6::MadeTheater::name: alloc::string::String
-pub ai6::MadeTheater::settings_toml: alloc::string::String
+pub ai6::MadeTheater::settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6::MadeTheater::template: alloc::string::String
 pub ai6::MadeTheater::transport: alloc::string::String
 pub struct ai6::MadeTheaters
@@ -13341,8 +13344,6 @@ pub fn ai6::directorates::registry::sleepers::SleeperMark::new(i64, i64) -> Self
 pub struct ai6::SourceBatch
 pub ai6::SourceBatch::cursor: core::option::Option<alloc::string::String>
 pub ai6::SourceBatch::items: alloc::vec::Vec<ai6::directorates::registry::sources::SourceItem>
-pub struct ai6::SourceConfig
-pub ai6::SourceConfig::settings_toml: alloc::string::String
 pub struct ai6::SourceItem
 pub ai6::SourceItem::author: core::option::Option<alloc::string::String>
 pub ai6::SourceItem::body: alloc::string::String
@@ -13891,8 +13892,6 @@ pub fn ai6::directorates::q::ephemeral::TheaterMaker::create(&self, &ai6::direct
 pub fn ai6::directorates::q::ephemeral::TheaterMaker::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::ephemeral::TheaterMaker::list(&self, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::ephemeral::MadeTheater>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::ephemeral::TheaterMaker::new(alloc::boxed::Box<dyn ai6::directorates::q::ephemeral::TheaterProvider>) -> Self
-pub struct ai6::TheaterProviderConfig
-pub ai6::TheaterProviderConfig::settings_toml: alloc::string::String
 pub struct ai6::TheaterRequest
 pub ai6::TheaterRequest::mission: alloc::string::String
 pub ai6::TheaterRequest::name: alloc::string::String
@@ -14046,8 +14045,6 @@ pub fn ai6::directorates::q::transport::TransportClient::probe(&self) -> core::r
 pub fn ai6::directorates::q::transport::TransportClient::read_file(&self, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::TransportClient::run(&self, &ai6::directorates::q::transport::RunSpec) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
-pub struct ai6::TransportConfig
-pub ai6::TransportConfig::settings_toml: alloc::string::String
 #[non_exhaustive] pub struct ai6::UnexGatewayLimits
 pub ai6::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
 pub ai6::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
