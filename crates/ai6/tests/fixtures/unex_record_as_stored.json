@@ -45,6 +45,7 @@
     "input_queue": 64,
     "origin_bytes": 2048,
     "scrollback_events": 64,
+    "session_idle": null,
     "session_max": null,
     "sessions": 16,
     "station_token_min_bytes": 32,
