@@ -601,8 +601,19 @@ fn a_role_reaches_the_agent_the_roster_selects_and_a_stream_follows_it_to_the_re
             TaskState::Submitted | TaskState::Working | TaskState::Completed)),
         "the stream opens on its Task: {items:?}"
     );
-    assert!(items.iter().any(|item| matches!(item,
-        StreamResponse::ArtifactUpdate(update) if update.artifact.parts[0].text.as_deref() == Some("re: who coordinates?"))));
+    // A reply given before the stream opened is already among the first Task's artifacts.
+    let reply = Some("re: who coordinates?");
+    assert!(
+        items.iter().any(|item| match item {
+            StreamResponse::ArtifactUpdate(update) =>
+                update.artifact.parts[0].text.as_deref() == reply,
+            StreamResponse::Task(task) => task.artifacts.iter().flatten().any(|artifact| {
+                artifact.parts.first().and_then(|part| part.text.as_deref()) == reply
+            }),
+            _ => false,
+        }),
+        "the reply reaches the stream: {items:?}"
+    );
     let StreamResponse::StatusUpdate(last) = items.last().unwrap() else {
         panic!("the stream ends on its state: {items:?}");
     };
