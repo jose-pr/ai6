@@ -100,7 +100,7 @@ impl AccessTokenRecord {
     }
 
     /// The same record as a sign-in's session cookie. [`find_access_token`] never answers with
-    /// one, and its expiry never moves.
+    /// one.
     ///
     /// [`find_access_token`]: crate::AccessTokenStore::find_access_token
     #[must_use]

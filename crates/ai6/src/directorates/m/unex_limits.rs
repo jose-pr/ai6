@@ -99,8 +99,15 @@ pub struct UnexGatewayLimits {
     #[schema(title = "Longest token a request may ask for")]
     #[map(default = UnexGatewayLimits::default().access_token_max_ttl)]
     pub access_token_max_ttl: TimeLimit,
+    /// Seconds a sign-in may go without a renewal before it ends; each renewal, which an open app
+    /// makes while its person works, moves the deadline on. A token lasts the shorter of this and
+    /// `access_token_ttl`. `"none"` turns the idle limit off.
+    #[schema(title = "Idle sign-in ends after")]
+    #[map(default = UnexGatewayLimits::default().session_idle)]
+    pub session_idle: TimeLimit,
     /// How long renewing keeps a sign-in going, in seconds from when it was made; the password is not
-    /// asked again until then. `0` turns renewal off, `"none"` lets it run on.
+    /// asked again until then. `0` turns renewal off, `"none"` (the default) lets it run on while the
+    /// person keeps working.
     #[schema(title = "Longest renewed sign-in")]
     #[map(default = UnexGatewayLimits::default().session_max)]
     pub session_max: TimeLimit,
@@ -140,7 +147,8 @@ impl Default for UnexGatewayLimits {
             origin_bytes: Limit::at(2048),
             access_token_ttl: Seconds::new(3_600),
             access_token_max_ttl: TimeLimit::secs(DAY),
-            session_max: TimeLimit::secs(43_200),
+            session_idle: TimeLimit::secs(1_800),
+            session_max: TimeLimit::UNBOUNDED,
             session_cookie: true,
             compartment_audit: Seconds::new(60),
             socket_buffer_bytes: Limit::at(256 * KIB),
@@ -452,14 +460,14 @@ mod tests {
         limits.gateway.station_token_min_bytes = 8;
         limits.controls.pending_per_station = Limit::at(128);
         limits.controls.poll_wait = Seconds::new(9);
-        limits.gateway.session_max = TimeLimit::secs(86_400);
+        limits.gateway.session_idle = TimeLimit::secs(7_200);
         limits.gateway.access_token_ttl = Seconds::new(7_200);
         let found = limits.weakenings();
         assert_eq!(found.len(), 5, "{found:?}");
         assert!(
             found
                 .iter()
-                .any(|line| line.starts_with("unex.gateway.session_max 86400")),
+                .any(|line| line.starts_with("unex.gateway.session_idle 7200")),
             "{found:?}"
         );
         assert!(

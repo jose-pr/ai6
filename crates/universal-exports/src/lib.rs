@@ -3196,6 +3196,8 @@ struct IssuedAccessToken {
     expires_in: f64,
     /// When renewing stops ([`session_end`]).
     ends_at: Option<f64>,
+    /// When the sign-in goes idle without another renewal; `None` with no idle limit.
+    idle_ends_at: Option<f64>,
 }
 
 /// What `POST /v1/auth/renew` answers: the token's times, and no secret.
@@ -3207,6 +3209,19 @@ struct RenewedAccessToken {
     expires_in: f64,
     /// When renewing stops ([`session_end`]).
     ends_at: Option<f64>,
+    /// When the sign-in goes idle without another renewal; `None` with no idle limit.
+    idle_ends_at: Option<f64>,
+}
+
+/// Seconds a sign-in may go without a renewal (`session_idle`); `None` with no limit.
+fn idle_seconds(table: &ai6::UnexGatewayLimits) -> Option<f64> {
+    table.session_idle.get().map(|idle| idle.as_secs_f64())
+}
+
+/// How long a token granted now lasts: `ttl`, or the idle limit when that is shorter, since a
+/// token not renewed in time is a sign-in that went idle.
+fn sign_in_ttl(table: &ai6::UnexGatewayLimits, ttl: Duration) -> Duration {
+    table.session_idle.get().map_or(ttl, |idle| ttl.min(idle))
 }
 
 /// When renewing a token stops: `session_max` after it was issued, or its own expiry when that
@@ -3370,7 +3385,10 @@ async fn login(
     if from_browser {
         require_origin(&gateway, &headers)?;
     }
-    let ttl = access_token_ttl(&gateway, request.ttl_seconds)?;
+    let ttl = sign_in_ttl(
+        &gateway.config.unex().gateway,
+        access_token_ttl(&gateway, request.ttl_seconds)?,
+    );
     let wants_cookie = from_browser && request.session_cookie != Some(false);
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
     let person = match proxy_person(&gateway, &providers, &headers).await? {
@@ -3382,7 +3400,16 @@ async fn login(
     let session_max = table.session_max;
     let issued_at = unix_timestamp()?;
     let cookie = if wants_cookie && session_cookies_on(table) {
-        Some(store_session_cookie(registry.clone(), &person.id, issued_at, session_max).await?)
+        Some(
+            store_session_cookie(
+                registry.clone(),
+                &person.id,
+                issued_at,
+                session_max,
+                idle_seconds(table),
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -3394,6 +3421,7 @@ async fn login(
             issued_at,
             expires_at: issued_at + ttl.as_secs_f64(),
             now: issued_at,
+            idle: idle_seconds(table),
         },
         session_max,
         sign_in.clone(),
@@ -3555,19 +3583,31 @@ async fn resumed_token(
     if ends <= now {
         return Ok(None);
     }
-    store_bearer(
-        registry,
+    let session_end = cookie.issued_at() + table.session_max.as_secs_f64();
+    let ttl = sign_in_ttl(table, table.access_token_ttl.0).as_secs_f64();
+    let issued = store_bearer(
+        registry.clone(),
         person.id,
         Times {
             issued_at: cookie.issued_at(),
-            expires_at: (now + table.access_token_ttl.0.as_secs_f64()).min(ends),
+            expires_at: (now + ttl).min(ends),
             now,
+            idle: idle_seconds(table),
         },
         table.session_max,
         Some(cookie.token_id().to_owned()),
     )
-    .await
-    .map(|issued| Some((issued, cookie.token_id().to_owned())))
+    .await?;
+    // A resumed sign-in is in use: its cookie goes on from now.
+    keep_cookie(
+        registry,
+        cookie.token_id(),
+        now,
+        idle_seconds(table),
+        session_end,
+    )
+    .await;
+    Ok(Some((issued, cookie.token_id().to_owned())))
 }
 
 /// `POST /v1/auth/renew`: moves the presented token's expiry on by `access_token_ttl`, up to
@@ -3588,8 +3628,10 @@ async fn renew(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Res
         .ok_or_else(ApiError::unauthorized)?;
     let table = &gateway.config.unex().gateway;
     let session_max = table.session_max;
-    let expires_at = (unix_timestamp()? + table.access_token_ttl.0.as_secs_f64())
-        .min(record.issued_at() + session_max.as_secs_f64());
+    let now = unix_timestamp()?;
+    let session_end_at = record.issued_at() + session_max.as_secs_f64();
+    let expires_at =
+        (now + sign_in_ttl(table, table.access_token_ttl.0).as_secs_f64()).min(session_end_at);
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let token_id = record.token_id().to_owned();
     let extended =
@@ -3598,11 +3640,24 @@ async fn renew(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Res
             .map_err(|_| ApiError::internal())?
             .map_err(|_| ApiError::internal())?
             .ok_or_else(ApiError::unauthorized)?;
+    let ends_at = session_end(extended.issued_at(), extended.expires_at(), session_max);
+    if let Some(cookie) = extended.sign_in() {
+        keep_cookie(
+            gateway.registry.clone().ok_or_else(ApiError::unavailable)?,
+            cookie,
+            now,
+            idle_seconds(table),
+            session_end_at,
+        )
+        .await;
+    }
     let renewed = RenewedAccessToken {
         token_id: extended.token_id().to_owned(),
         expires_at: extended.expires_at(),
         expires_in: extended.expires_at() - unix_timestamp()?,
-        ends_at: session_end(extended.issued_at(), extended.expires_at(), session_max),
+        ends_at,
+        idle_ends_at: idle_seconds(table)
+            .map(|idle| (now + idle).min(ends_at.unwrap_or(f64::INFINITY))),
     };
     // A browser's renewal keeps its page cookie as long as the sign-in it names.
     let page_cookie = headers.contains_key(ORIGIN).then(|| {
@@ -3685,6 +3740,7 @@ async fn issue_access_token_record(
             issued_at,
             expires_at: issued_at + ttl.as_secs_f64(),
             now: issued_at,
+            idle: None,
         },
         session_max,
         None,
@@ -3698,6 +3754,8 @@ struct Times {
     issued_at: f64,
     expires_at: f64,
     now: f64,
+    /// Seconds the sign-in may go idle from `now`; `None` with no limit.
+    idle: Option<f64>,
 }
 
 /// A new secret. Two independent UUIDs provide 256 random bits without a separate token crate.
@@ -3718,6 +3776,7 @@ async fn store_bearer(
         issued_at,
         expires_at,
         now,
+        idle,
     } = times;
     let token_id = Uuid::new_v4().to_string();
     let token = new_secret();
@@ -3746,6 +3805,10 @@ async fn store_bearer(
         expires_at,
         expires_in: expires_at - now,
         ends_at: session_end(issued_at, expires_at, session_max),
+        idle_ends_at: idle.map(|idle| {
+            (now + idle)
+                .min(session_end(issued_at, expires_at, session_max).unwrap_or(f64::INFINITY))
+        }),
     })
 }
 
@@ -3761,21 +3824,40 @@ fn session_cookies_on(table: &ai6::UnexGatewayLimits) -> bool {
     table.session_cookie && table.session_max.get() != Some(Duration::ZERO)
 }
 
-/// Stores a sign-in's session cookie, which ends `session_max` after `issued_at` and never later.
+/// Moves a sign-in's session cookie on to `idle` seconds from `now`, and never past `ends`: the
+/// cookie stands while the sign-in is used, and a failure to write that down is not the
+/// request's.
+async fn keep_cookie(
+    registry: Arc<dyn RegistryBackend>,
+    cookie: &str,
+    now: f64,
+    idle: Option<f64>,
+    ends: f64,
+) {
+    let until = idle.map_or(ends, |idle| (now + idle).min(ends));
+    let until = if until.is_finite() { until } else { f64::MAX };
+    let cookie = cookie.to_owned();
+    let _ = tokio::task::spawn_blocking(move || registry.extend_access_token(&cookie, until)).await;
+}
+
+/// Stores a sign-in's session cookie, which ends `session_max` after `issued_at` and never
+/// later, and `idle` seconds after `issued_at` unless the sign-in is renewed.
 async fn store_session_cookie(
     registry: Arc<dyn RegistryBackend>,
     person_id: &str,
     issued_at: f64,
     session_max: TimeLimit,
+    idle: Option<f64>,
 ) -> Result<NewSessionCookie, ApiError> {
     let lifetime = session_max.as_secs_f64();
     // No bound leaves nothing to write down but the largest time there is. Past about a year a
     // browser keeps a cookie only as long as it chooses, whatever Max-Age says.
-    let expires_at = if lifetime.is_finite() {
+    let ends = if lifetime.is_finite() {
         issued_at + lifetime
     } else {
         f64::MAX
     };
+    let expires_at = idle.map_or(ends, |idle| (issued_at + idle).min(ends));
     let max_age = lifetime.ceil().min(f64::from(u32::MAX)) as u64;
     let value = new_secret();
     let sign_in = Uuid::new_v4().to_string();
@@ -7187,6 +7269,8 @@ mod tests {
             providers: impl FnOnce(AccessProviders) -> AccessProviders,
         ) -> Self {
             let mut limits = ai6::UnexLimits::default();
+            // The idle limit is its own tests': the others judge renewal by the cap alone.
+            limits.gateway.session_idle = TimeLimit::UNBOUNDED;
             change(&mut limits.gateway);
             let config = GatewayConfig::new(
                 "https://localhost",
@@ -7778,6 +7862,163 @@ mod tests {
         let refused = signing.resume(&cookie).await;
         assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
         assert_clears_cookie(&refused);
+    }
+
+    #[tokio::test]
+    async fn renewals_within_the_idle_limit_keep_a_sign_in_alive_past_twelve_hours() {
+        let signing = Signing::new(|gateway| {
+            gateway.access_token_ttl = ai6::Seconds::new(3_600);
+            gateway.session_idle = TimeLimit::secs(1_800);
+            gateway.session_max = TimeLimit::UNBOUNDED;
+        })
+        .await;
+        let now = unix_timestamp().ok().unwrap();
+
+        // A token lasts the idle limit when that is shorter than its lifetime, and says when
+        // the sign-in goes idle.
+        let signed_in: serde_json::Value = signing.login(None).await.json().await.unwrap();
+        assert!(
+            (time_in(&signed_in, "expires_in") - 1_800.0).abs() < 1e-3,
+            "{signed_in}"
+        );
+        assert!(
+            (time_in(&signed_in, "idle_ends_at") - time_in(&signed_in, "expires_at")).abs() < 1.0,
+            "{signed_in}"
+        );
+        assert!(signed_in["ends_at"].is_null(), "no fixed cut: {signed_in}");
+
+        // Thirteen hours after signing in, a renewal still within the limit goes on.
+        let token = signing.token(now - 13.0 * 3_600.0, now + 120.0);
+        let renewed = body_of(signing.renew(&token).await).await;
+        assert!(renewed["ends_at"].is_null(), "{renewed}");
+        let left = time_in(&renewed, "expires_in");
+        assert!((1_790.0..=1_800.0).contains(&left), "{renewed}");
+        assert!(
+            (time_in(&renewed, "idle_ends_at") - (now + 1_800.0)).abs() < 5.0,
+            "{renewed}"
+        );
+        // And again, so a person who keeps working is never cut off.
+        assert_eq!(signing.renew(&token).await.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_renewal_after_the_idle_deadline_is_refused() {
+        let signing = Signing::new(|gateway| gateway.session_idle = TimeLimit::secs(1_800)).await;
+        let now = unix_timestamp().ok().unwrap();
+        let idle = signing.token(now - 2_000.0, now - 10.0);
+        assert_eq!(
+            signing.renew(&idle).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let live = signing.token(now - 100.0, now + 100.0);
+        assert_eq!(signing.renew(&live).await.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_set_session_max_still_ends_a_sign_in_that_keeps_working() {
+        let signing = Signing::new(|gateway| {
+            gateway.session_idle = TimeLimit::secs(1_800);
+            gateway.session_max = TimeLimit::secs(7_200);
+        })
+        .await;
+        let now = unix_timestamp().ok().unwrap();
+        let issued_at = now - 7_000.0;
+        let token = signing.token(issued_at, now + 120.0);
+        let capped = body_of(signing.renew(&token).await).await;
+        assert!(
+            (time_in(&capped, "expires_at") - (issued_at + 7_200.0)).abs() < 1e-3,
+            "{capped}"
+        );
+        assert!(
+            (time_in(&capped, "idle_ends_at") - (issued_at + 7_200.0)).abs() < 1e-3,
+            "{capped}"
+        );
+        let past = signing.token(now - 8_000.0, now + 120.0);
+        let ended = body_of(signing.renew(&past).await).await;
+        assert!(
+            time_in(&ended, "expires_at") < now + 130.0,
+            "it does not go on: {ended}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cookie_resume_follows_the_idle_limit_and_a_renewal_keeps_the_cookie() {
+        let signing = Signing::new(|gateway| {
+            gateway.session_idle = TimeLimit::secs(1_800);
+            gateway.session_max = TimeLimit::UNBOUNDED;
+        })
+        .await;
+        let now = unix_timestamp().ok().unwrap();
+
+        // A cookie nobody renewed has gone idle.
+        let idle = signing.cookie(now - 13.0 * 3_600.0, now - 10.0);
+        assert_eq!(
+            signing.resume(&idle).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        // One still within the limit signs back in, however long ago the sign-in began, and is
+        // kept for another idle limit from the resume.
+        let value = new_secret();
+        let record = AccessTokenRecord::try_new(
+            Uuid::new_v4().to_string(),
+            session_cookie_digest(&value),
+            "alice-id",
+            now - 13.0 * 3_600.0,
+            now + 600.0,
+            None,
+        )
+        .unwrap()
+        .into_session_cookie();
+        signing.registry.store_access_token(&record).unwrap();
+        let resumed = signing.resume(&format!("{SESSION_COOKIE}={value}")).await;
+        assert_eq!(resumed.status(), StatusCode::CREATED);
+        let body: serde_json::Value = resumed.json().await.unwrap();
+        assert!(
+            (time_in(&body, "expires_in") - 1_800.0).abs() < 5.0,
+            "{body}"
+        );
+        let kept = signing
+            .registry
+            .find_session_cookie(&session_cookie_digest(&value))
+            .unwrap()
+            .unwrap();
+        assert!((kept.expires_at() - (now + 1_800.0)).abs() < 5.0);
+
+        // A renewal of a browser's sign-in moves its cookie on too.
+        let cookie_id = Uuid::new_v4().to_string();
+        let cookie_value = new_secret();
+        let cookie = AccessTokenRecord::try_new(
+            cookie_id.clone(),
+            session_cookie_digest(&cookie_value),
+            "alice-id",
+            now - 100.0,
+            now + 100.0,
+            None,
+        )
+        .unwrap()
+        .into_session_cookie();
+        signing.registry.store_access_token(&cookie).unwrap();
+        let token = new_secret();
+        let bearer = AccessTokenRecord::try_new(
+            Uuid::new_v4().to_string(),
+            access_token_digest(&token),
+            "alice-id",
+            now - 100.0,
+            now + 100.0,
+            None,
+        )
+        .unwrap()
+        .in_sign_in(cookie_id)
+        .unwrap();
+        signing.registry.store_access_token(&bearer).unwrap();
+        assert_eq!(signing.renew(&token).await.status(), StatusCode::OK);
+        let after = signing
+            .registry
+            .find_session_cookie(&session_cookie_digest(&cookie_value))
+            .unwrap()
+            .unwrap();
+        assert!((after.expires_at() - (now + 1_800.0)).abs() < 5.0);
     }
 
     #[tokio::test]

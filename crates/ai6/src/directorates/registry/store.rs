@@ -2476,8 +2476,8 @@ pub trait AccessTokenStore {
 
     /// Moves an active token's expiry to `expires_at` (Unix seconds) when that is later, and
     /// answers the record as it now stands; a time no later leaves it as it was. Its value,
-    /// issue time and revocation never change. `None` when unknown, revoked or expired, and
-    /// for a session cookie, whose end stays where signing in put it.
+    /// issue time and revocation never change. `None` when unknown, revoked or expired. A
+    /// session cookie moves the same way, which is how a sign-in that is used stays signed in.
     fn extend_access_token(
         &self,
         token_id: &str,
@@ -3628,7 +3628,7 @@ pub(super) fn extended_token(
             "an access token's expiry must be a finite time",
         ));
     }
-    if record.is_session_cookie() || !record.active_at(now) {
+    if !record.active_at(now) {
         return Ok(None);
     }
     record
