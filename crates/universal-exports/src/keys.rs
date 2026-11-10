@@ -326,7 +326,7 @@ pub(crate) async fn create(
         Some(seconds) => seconds,
         None => keys.lifetime,
     };
-    let expires_at = (lifetime > 0.0).then(|| now + lifetime);
+    let expires_at = (lifetime > 0.0).then_some(now + lifetime);
     let account = format!("{PERSONAL_PREFIX}{}", Uuid::new_v4().simple());
     let put = AccountPut {
         name: account.clone(),

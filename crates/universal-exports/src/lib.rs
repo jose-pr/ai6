@@ -2641,7 +2641,7 @@ async fn create_with_issue(
     .await?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: crate::actor_of(&person),
+        actor: crate::actor_of(person),
         action: "mission.create.requested".to_owned(),
         operation: operation_id.to_string(),
         resource: None,

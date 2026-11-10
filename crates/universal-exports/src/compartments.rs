@@ -163,7 +163,7 @@ impl CompartmentAccess {
         registry
             .record_audit(&ai6::AuditRecord {
                 id: format!("compartment-{}", Uuid::new_v4().simple()),
-                actor: crate::actor_of(&person),
+                actor: crate::actor_of(person),
                 action: "compartment.read".to_owned(),
                 operation,
                 resource: Some(resource.to_string()),
@@ -522,7 +522,7 @@ async fn write_audit(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let record = ai6::AuditRecord {
         id: format!("compartment-{}", Uuid::new_v4().simple()),
-        actor: crate::actor_of(&person),
+        actor: crate::actor_of(person),
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(scope(id)),

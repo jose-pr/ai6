@@ -79,7 +79,7 @@ async fn audit(
         .ok_or_else(|| AdminError::Api(ApiError::unavailable()))?;
     let record = ai6::AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: crate::actor_of(&person),
+        actor: crate::actor_of(person),
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(CONFIG_ACCOUNTS.to_owned()),
