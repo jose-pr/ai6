@@ -28,7 +28,7 @@ use super::{
     Assistant, AssistantConfig, Control, audit, control_job, digest, now, proposals_full,
     room_for_proposal,
 };
-use crate::{Gateway, authorize_resource_action, resolve_user};
+use crate::{Gateway, authorize_resource_action, resolve_signed_in};
 
 /// What to do once the desk lock is released: audit records to write and notes to give
 /// Moneypenny with a message of their own (conversation, person, note).
@@ -361,7 +361,7 @@ impl Assistant {
         if !ai6::directorates::section_00::assistant::valid_identity(operation) {
             return (false, false);
         }
-        let Ok(person) = resolve_user(gateway, &token).await else {
+        let Ok(person) = resolve_signed_in(gateway, &token).await else {
             return (false, false);
         };
         let Ok(authorizer) = gateway.authorizer() else {

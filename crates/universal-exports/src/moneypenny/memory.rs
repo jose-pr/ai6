@@ -36,7 +36,7 @@ use super::{Assistant, Granted, now};
 use crate::memories::{
     Asking, PersonCaller, Refused, caller_of, every_scope, on_registry, refused,
 };
-use crate::{Gateway, bearer, resolve_user};
+use crate::{Gateway, bearer, resolve_signed_in};
 
 pub(crate) const SEARCH: &str = "memory_search";
 pub(crate) const READ: &str = "memory_read";
@@ -107,7 +107,7 @@ async fn signed_in(gateway: &Gateway, headers: &HeaderMap) -> Result<Person, Ref
             "Universal Exports does not serve Moneypenny here.",
         ));
     }
-    Ok(resolve_user(gateway, bearer(headers)?).await?)
+    Ok(resolve_signed_in(gateway, bearer(headers)?).await?)
 }
 
 /// The entry `id` when it is of `owner`'s memory; this route is no way to another scope.
@@ -443,7 +443,7 @@ impl Assistant {
         {
             return invalid(problem);
         }
-        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+        let Ok(person) = resolve_signed_in(gateway, &granted.bearer).await else {
             return Outcome::error("The person's sign-in has ended; nothing was done.");
         };
         let chars = super::gateway_limits(gateway).result_chars;

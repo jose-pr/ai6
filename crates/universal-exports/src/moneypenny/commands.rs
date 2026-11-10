@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::assistant_settings;
-use crate::{ApiError, Gateway, bearer, resolve_user};
+use crate::{ApiError, Gateway, bearer, resolve_signed_in};
 
 /// The roster handler that keeps no list of allowed skills: the Station installs none for it,
 /// so the menu offers none.
@@ -78,7 +78,7 @@ pub(crate) async fn list(
     headers: HeaderMap,
     Query(query): Query<CommandsQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
     let settings = assistant_settings(&gateway)
         .await

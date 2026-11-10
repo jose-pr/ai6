@@ -73,7 +73,7 @@ use tokio::sync::{Notify, broadcast};
 use uuid::Uuid;
 
 use crate::{
-    ApiError, Gateway, GatewayError, authorize_resource_action, bearer, resolve_user,
+    ApiError, Gateway, GatewayError, authorize_resource_action, bearer, resolve_signed_in,
     unix_timestamp,
 };
 use store::{Bounds, Conversation, Entry, Pending, Role, Store};
@@ -639,7 +639,7 @@ impl Assistant {
             .map(|conversation| conversation.bearer.clone())
             .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
         // The tools run with this token: a message after it ended starts nothing.
-        resolve_user(gateway, &bearer).await.map_err(|_| {
+        resolve_signed_in(gateway, &bearer).await.map_err(|_| {
             (
                 "unauthorized",
                 "Sign in again to talk to Moneypenny.".to_owned(),
@@ -712,7 +712,7 @@ impl Assistant {
             .owned(conversation_id, person_id)
             .map(|conversation| conversation.bearer.clone())
             .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
-        let person = resolve_user(gateway, &bearer).await.map_err(|_| {
+        let person = resolve_signed_in(gateway, &bearer).await.map_err(|_| {
             (
                 "unauthorized",
                 "Sign in again to talk to Moneypenny.".to_owned(),
@@ -1287,7 +1287,7 @@ impl Assistant {
             Ok(draft) => draft,
             Err(outcome) => return outcome,
         };
-        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+        let Ok(person) = resolve_signed_in(gateway, &granted.bearer).await else {
             return tools::Outcome::error("The person's sign-in has ended; nothing was proposed.");
         };
         if authorize_resource_action(gateway, person, draft.scope.resource(), draft.action)
@@ -1546,7 +1546,7 @@ impl Assistant {
                 Ok(change) => change,
                 Err(outcome) => return outcome,
             };
-        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+        let Ok(person) = resolve_signed_in(gateway, &granted.bearer).await else {
             return tools::Outcome::error("The person's sign-in has ended; nothing was proposed.");
         };
         let settings = match assistant_settings(gateway).await {
@@ -2464,7 +2464,7 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
         let _ = sender.send(close(1008, "say hello first")).await;
         return;
     };
-    let Ok(person) = resolve_user(&gateway, &token).await else {
+    let Ok(person) = resolve_signed_in(&gateway, &token).await else {
         let _ = sender
             .send(frame(&problem(
                 "unauthorized",
@@ -2739,7 +2739,7 @@ pub(crate) async fn user_image(
     headers: HeaderMap,
     Path(sha256): Path<String>,
 ) -> Result<Response, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let store = gateway.images.clone().ok_or_else(ApiError::not_found)?;
     let (media_type, bytes) = store
         .get(&person.id, &sha256)

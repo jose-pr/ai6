@@ -19,7 +19,7 @@ use super::pages::{self, Feed, Kind, Page, PageStore, Serve, classify};
 use super::store::{Entry, Role};
 use super::tools::{self, Outcome, check, object, text};
 use super::{Assistant, Granted, assistant_settings, audit, cut, now};
-use crate::{ApiError, Gateway, bearer, resolve_user};
+use crate::{ApiError, Gateway, bearer, resolve_signed_in};
 
 use super::pages::RESOURCE;
 
@@ -119,7 +119,7 @@ impl Assistant {
             return refused("the roster could not be read");
         };
         let limits = settings.pages().clone();
-        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+        let Ok(person) = resolve_signed_in(gateway, &granted.bearer).await else {
             return refused("the person's sign-in has ended");
         };
         let field = |name: &str| input.get(name).and_then(Value::as_str);
@@ -328,7 +328,7 @@ impl Assistant {
             return Outcome::error(format!("INVALID_INPUT: {problem}"));
         }
         let id = input["id"].as_str().unwrap_or_default();
-        let Ok(person) = resolve_user(gateway, &granted.bearer).await else {
+        let Ok(person) = resolve_signed_in(gateway, &granted.bearer).await else {
             return Outcome::error("The person's sign-in has ended.");
         };
         match store.get(id) {
@@ -468,7 +468,7 @@ pub(crate) async fn list(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     let limits = page_limits(&gateway).await?;
     let base = pages::pages_base(&gateway);
@@ -507,7 +507,7 @@ pub(crate) async fn open(
     request: Option<Json<OpenRequest>>,
 ) -> Result<Json<Value>, ApiError> {
     let token = bearer(&headers)?;
-    let person = resolve_user(&gateway, token).await?;
+    let person = resolve_signed_in(&gateway, token).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     let page = store.get(&id).ok_or_else(ApiError::not_found)?;
     let limits = page_limits(&gateway).await?;
@@ -582,7 +582,7 @@ pub(crate) async fn remember(
     UrlPath(id): UrlPath<String>,
     Json(request): Json<RememberRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     match store.get(&id) {
         Some(page) if page.person_id == person.id => {}
@@ -632,7 +632,7 @@ pub(crate) async fn share(
     UrlPath(id): UrlPath<String>,
     Json(request): Json<SharesRequest>,
 ) -> Result<Response, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     match store.get(&id) {
         Some(page) if page.person_id == person.id => {}
@@ -731,7 +731,7 @@ pub(crate) async fn public(
     UrlPath(id): UrlPath<String>,
     Json(request): Json<PublicRequest>,
 ) -> Result<Response, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     match store.get(&id) {
         Some(page) if page.person_id == person.id => {}
@@ -767,7 +767,7 @@ pub(crate) async fn delete(
     headers: HeaderMap,
     UrlPath(id): UrlPath<String>,
 ) -> Result<StatusCode, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     match store.get(&id) {
         Some(page) if page.person_id == person.id => {}
