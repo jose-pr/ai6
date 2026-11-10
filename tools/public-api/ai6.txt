@@ -247,9 +247,14 @@ pub ai6::bootstrap::ProviderSettings::location: core::option::Option<alloc::stri
 pub ai6::bootstrap::ProviderSettings::password: core::option::Option<ai6::bootstrap::SecretRef>
 pub ai6::bootstrap::ProviderSettings::poll: core::option::Option<ai6::bounds::Seconds>
 pub ai6::bootstrap::ProviderSettings::replace_retry: ai6::bounds::TimeLimit
+pub ai6::bootstrap::ProviderSettings::retry_factor: core::option::Option<f64>
+pub ai6::bootstrap::ProviderSettings::retry_first: core::option::Option<ai6::bounds::Seconds>
+pub ai6::bootstrap::ProviderSettings::retry_for: core::option::Option<ai6::bounds::Seconds>
+pub ai6::bootstrap::ProviderSettings::retry_longest: core::option::Option<ai6::bounds::Seconds>
 impl ai6::bootstrap::ProviderSettings
 pub fn ai6::bootstrap::ProviderSettings::limits(&self) -> ai6::directorates::m::config::ConfigLimits
 pub fn ai6::bootstrap::ProviderSettings::poll(&self) -> core::time::Duration
+pub fn ai6::bootstrap::ProviderSettings::start_retry(&self) -> core::result::Result<ai6::bootstrap::StartRetry, alloc::string::String>
 impl core::default::Default for ai6::bootstrap::ProviderSettings
 pub fn ai6::bootstrap::ProviderSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::bootstrap::RegistrySettings
@@ -270,6 +275,13 @@ pub fn ai6::bootstrap::SearchPath::locate(&self) -> core::result::Result<core::o
 pub fn ai6::bootstrap::SearchPath::new(&str, &str, core::option::Option<&std::path::Path>) -> Self
 #[non_exhaustive] pub struct ai6::bootstrap::SecretSettings
 pub ai6::bootstrap::SecretSettings::dir: core::option::Option<std::path::PathBuf>
+pub struct ai6::bootstrap::StartRetry
+impl ai6::bootstrap::StartRetry
+pub const ai6::bootstrap::StartRetry::DEFAULT_FACTOR: f64
+pub const ai6::bootstrap::StartRetry::DEFAULT_FIRST: core::time::Duration
+pub const ai6::bootstrap::StartRetry::DEFAULT_LONGEST: core::time::Duration
+pub fn ai6::bootstrap::StartRetry::new(core::time::Duration, f64, core::time::Duration, core::option::Option<core::time::Duration>) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::bootstrap::StartRetry::next_wait(&self, core::option::Option<core::time::Duration>, core::time::Duration) -> core::option::Option<core::time::Duration>
 #[non_exhaustive] pub struct ai6::bootstrap::StationSettings
 pub ai6::bootstrap::StationSettings::id: core::option::Option<alloc::string::String>
 pub ai6::bootstrap::StationSettings::identity: ai6::bootstrap::IdentitySettings

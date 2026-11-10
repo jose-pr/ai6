@@ -596,7 +596,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
     own.listen = listen.or(own.listen);
     own.plugins.paths.extend(plugin_paths);
     own.plugins.profile = plugin_profile.or(own.plugins.profile);
-    let opened = match open_station(&located) {
+    let opened = match open_station_retrying(&located, shutdown_signal()).await {
         Ok(opened) => opened,
         Err(error) => {
             eprintln!("ai6: {error}");
@@ -667,14 +667,93 @@ struct Opened {
 }
 
 fn open_station(located: &Located<Bootstrap>) -> Result<Opened, String> {
-    let text = |error: ai6::bootstrap::BootstrapError| error.to_string();
-    let lease = located.value.registry.headquarters_lease();
-    if lease.is_zero() {
+    check_lease(located)?;
+    let provider = open_provider(&station_provider_location(located)?, &located.value)?;
+    let registry = open_registry(located)?;
+    assemble_station(located, provider, registry)
+}
+
+/// [`open_station`] for `ai6 serve`: an unreachable provider or Registry is tried again under
+/// `[provider]`'s retry settings until `stop` is ready, and a refusal retrying cannot fix exits at
+/// once.
+async fn open_station_retrying(
+    located: &Located<Bootstrap>,
+    stop: impl Future<Output = ()>,
+) -> Result<Opened, String> {
+    check_lease(located)?;
+    let retry = located.value.provider.start_retry()?;
+    let provider_location = station_provider_location(located)?;
+    let mut stop = std::pin::pin!(stop);
+    let provider = retrying("configuration provider", retry, &mut stop, || {
+        open_provider(&provider_location, &located.value)
+    })
+    .await?;
+    let registry = retrying("Registry", retry, &mut stop, || open_registry(located)).await?;
+    assemble_station(located, provider, registry)
+}
+
+/// Runs `open` until it succeeds, waiting between attempts as `retry` says and saying so on
+/// standard error each time; ends with the last failure when the time to keep trying is spent,
+/// when it cannot be retried, or when `stop` is ready.
+async fn retrying<T>(
+    what: &str,
+    retry: ai6::bootstrap::StartRetry,
+    stop: &mut (impl Future<Output = ()> + Unpin),
+    mut open: impl FnMut() -> Result<T, OpenFailure>,
+) -> Result<T, String> {
+    let mut last = None;
+    let mut waited = Duration::ZERO;
+    let mut attempt = 1_u64;
+    loop {
+        let failure = match open() {
+            Ok(opened) => return Ok(opened),
+            Err(failure) if !failure.retryable => return Err(failure.message),
+            Err(failure) => failure.message,
+        };
+        let Some(wait) = retry.next_wait(last, waited) else {
+            return Err(failure);
+        };
+        eprintln!(
+            "ai6: attempt {attempt} to open the {what} failed: {failure}; trying again in {}",
+            humanize(wait)
+        );
+        tokio::select! {
+            () = tokio::time::sleep(wait) => {}
+            () = &mut *stop => return Err(format!("stopped while waiting to open the {what}: {failure}")),
+        }
+        last = Some(wait);
+        waited = waited.saturating_add(wait);
+        attempt += 1;
+    }
+}
+
+/// `wait` as seconds for a log line.
+fn humanize(wait: Duration) -> String {
+    format!("{} s", wait.as_secs_f64())
+}
+
+fn check_lease(located: &Located<Bootstrap>) -> Result<(), String> {
+    if located.value.registry.headquarters_lease().is_zero() {
         return Err("[registry] headquarters_lease must be positive".to_owned());
     }
-    let provider_location = located.provider_location().map_err(text)?;
-    let provider = open_provider(&provider_location, &located.value)?;
-    let registry = open_registry(located)?;
+    Ok(())
+}
+
+fn station_provider_location(located: &Located<Bootstrap>) -> Result<String, String> {
+    located
+        .provider_location()
+        .map_err(|error| error.to_string())
+}
+
+/// A Station's parts, once its provider and Registry are open.
+fn assemble_station(
+    located: &Located<Bootstrap>,
+    provider: Arc<dyn ai6::ConfigProvider>,
+    registry: Arc<dyn ai6::RegistryBackend>,
+) -> Result<Opened, String> {
+    let text = |error: ai6::bootstrap::BootstrapError| error.to_string();
+    let lease = located.value.registry.headquarters_lease();
+    let provider_location = station_provider_location(located)?;
     let config_dir = if is_sql_location(&provider_location) {
         match located.dir() {
             Some(dir) => dir.to_path_buf(),
@@ -764,7 +843,7 @@ fn station_in(located: &Located<Bootstrap>, state_dir: &Path) -> String {
 fn open_provider(
     location: &str,
     bootstrap: &Bootstrap,
-) -> Result<Arc<dyn ai6::ConfigProvider>, String> {
+) -> Result<Arc<dyn ai6::ConfigProvider>, OpenFailure> {
     let options = sql_options(
         &bootstrap.registry,
         bootstrap.provider.password.as_ref(),
@@ -774,14 +853,50 @@ fn open_provider(
     let provider =
         ai6::directorates::m::config::open_with(location, &options, bootstrap.provider.limits())
             .map_err(|error| {
-                format!("the configuration provider at {shown} cannot be opened: {error}")
+                let message =
+                    format!("the configuration provider at {shown} cannot be opened: {error}");
+                OpenFailure::of(message, &error)
             })?;
     warn_weakenings("configuration provider", location);
     Ok(provider)
 }
 
+/// Why a provider or Registry did not open, and whether trying again could help.
+struct OpenFailure {
+    message: String,
+    retryable: bool,
+}
+
+impl OpenFailure {
+    /// A failure `error` explains: retryable when the server could not be reached for now (the
+    /// SQL backends report that as `ConnectionRefused`).
+    fn of(message: String, error: &std::io::Error) -> Self {
+        Self {
+            message,
+            retryable: error.kind() == std::io::ErrorKind::ConnectionRefused,
+        }
+    }
+}
+
+impl From<String> for OpenFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            retryable: false,
+        }
+    }
+}
+
+impl From<OpenFailure> for String {
+    fn from(failure: OpenFailure) -> Self {
+        failure.message
+    }
+}
+
 /// Opens the Registry the bootstrap file names.
-fn open_registry(located: &Located<Bootstrap>) -> Result<Arc<dyn ai6::RegistryBackend>, String> {
+fn open_registry(
+    located: &Located<Bootstrap>,
+) -> Result<Arc<dyn ai6::RegistryBackend>, OpenFailure> {
     let location = located
         .registry_location()
         .map_err(|error| error.to_string())?;
@@ -794,7 +909,10 @@ fn open_registry(located: &Located<Bootstrap>) -> Result<Arc<dyn ai6::RegistryBa
     let registry =
         ai6::directorates::registry::backend::open_with(&location, &options).map_err(|error| {
             let location = ai6::directorates::registry::sql::redact(&location);
-            format!("the Registry at {location} cannot be opened: {error}")
+            OpenFailure::of(
+                format!("the Registry at {location} cannot be opened: {error}"),
+                &error,
+            )
         })?;
     warn_weakenings("Registry", &location);
     Ok(registry)
@@ -1707,10 +1825,99 @@ fn overlay_pin(dir: &std::path::Path) -> ExitCode {
 mod tests {
     use clap::CommandFactory;
 
-    use super::Cli;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    use ai6::bootstrap::StartRetry;
+
+    use super::{Cli, OpenFailure, retrying};
 
     #[test]
     fn cli_definition_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    fn quick(keep_trying_for: Option<Duration>) -> StartRetry {
+        StartRetry::new(
+            Duration::from_millis(1),
+            1.0,
+            Duration::from_millis(1),
+            keep_trying_for,
+        )
+        .unwrap()
+    }
+
+    fn refused() -> OpenFailure {
+        OpenFailure {
+            message: "no route".to_owned(),
+            retryable: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_location_is_tried_again_until_it_opens() {
+        let attempts = Cell::new(0);
+        let opened = retrying("Registry", quick(None), &mut std::future::pending(), || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() < 4 {
+                Err(refused())
+            } else {
+                Ok("open")
+            }
+        })
+        .await;
+        assert_eq!(opened, Ok("open"));
+        assert_eq!(attempts.get(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_refusal_retrying_cannot_fix_is_not_tried_again() {
+        let attempts = Cell::new(0);
+        let failed: Result<(), String> =
+            retrying("Registry", quick(None), &mut std::future::pending(), || {
+                attempts.set(attempts.get() + 1);
+                Err(OpenFailure::from("malformed location".to_owned()))
+            })
+            .await;
+        assert_eq!(failed, Err("malformed location".to_owned()));
+        assert_eq!(attempts.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_last_error_ends_the_trying_when_its_time_is_spent() {
+        let attempts = Cell::new(0);
+        let failed: Result<(), String> = retrying(
+            "Registry",
+            quick(Some(Duration::from_millis(5))),
+            &mut std::future::pending(),
+            || {
+                attempts.set(attempts.get() + 1);
+                Err(refused())
+            },
+        )
+        .await;
+        assert_eq!(failed, Err("no route".to_owned()));
+        assert!(attempts.get() > 1);
+    }
+
+    #[tokio::test]
+    async fn a_stop_while_waiting_ends_the_trying_with_the_reason() {
+        let slow = StartRetry::new(
+            Duration::from_secs(3600),
+            1.0,
+            Duration::from_secs(3600),
+            None,
+        )
+        .unwrap();
+        let failed: Result<(), String> =
+            retrying("Registry", slow, &mut std::future::ready(()), || {
+                Err(refused())
+            })
+            .await;
+        let said = failed.unwrap_err();
+        assert!(
+            said.contains("stopped while waiting") && said.contains("no route"),
+            "{said}"
+        );
     }
 }

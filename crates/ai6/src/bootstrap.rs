@@ -367,6 +367,22 @@ pub struct ProviderSettings {
     /// Seconds between checks for changes; 0 turns reloading off. Default: 5.
     #[schema(title = "Between checks for changes")]
     pub poll: Option<Seconds>,
+    /// Seconds before the first new attempt to open the configuration provider or the Registry at
+    /// start, when one cannot be reached. Default: 1; 0 tries again at once.
+    #[schema(title = "First wait before opening again", format = "seconds")]
+    pub retry_first: Option<Seconds>,
+    /// What each wait is multiplied by after a failed attempt. Default: 2.
+    #[schema(title = "Growth of the wait between attempts")]
+    pub retry_factor: Option<f64>,
+    /// Seconds the wait stops growing at. Default: 60.
+    #[schema(title = "Longest wait between attempts", format = "seconds")]
+    pub retry_longest: Option<Seconds>,
+    /// Seconds to keep trying from the first failure before the Station exits with the last
+    /// error; 0 exits at the first failure. Default: none, and it tries until it opens or is
+    /// stopped. A refusal retrying cannot fix (a malformed location, a failed certificate check, a
+    /// wrong password) exits at once whatever this says.
+    #[schema(title = "How long to keep trying to open", format = "seconds")]
+    pub retry_for: Option<Seconds>,
     /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`,
     /// `secret_provider` and `pool` records together).
     #[schema(title = "Loadout document", format = "bytes")]
@@ -394,10 +410,70 @@ impl Default for ProviderSettings {
             location: None,
             password: None,
             poll: None,
+            retry_first: None,
+            retry_factor: None,
+            retry_longest: None,
+            retry_for: None,
             loadout_bytes: limits.loadout_bytes,
             loadout_value_chars: limits.loadout_value_chars,
             access_policy_bytes: limits.access_policy_bytes,
             replace_retry: limits.replace_retry,
+        }
+    }
+}
+
+/// How a Station keeps trying to open its configuration provider and Registry at start.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StartRetry {
+    first: Duration,
+    factor: f64,
+    longest: Duration,
+    keep_trying_for: Option<Duration>,
+}
+
+impl StartRetry {
+    /// The first wait when the file says nothing.
+    pub const DEFAULT_FIRST: Duration = Duration::from_secs(1);
+    /// The growth of the wait when the file says nothing.
+    pub const DEFAULT_FACTOR: f64 = 2.0;
+    /// The longest wait when the file says nothing.
+    pub const DEFAULT_LONGEST: Duration = Duration::from_secs(60);
+
+    /// Retries with these waits, giving up `keep_trying_for` after the first failure; `None` never
+    /// gives up. `factor` is finite and not negative.
+    pub fn new(
+        first: Duration,
+        factor: f64,
+        longest: Duration,
+        keep_trying_for: Option<Duration>,
+    ) -> Result<Self, String> {
+        if !factor.is_finite() || factor < 0.0 {
+            return Err(format!(
+                "[provider] retry_factor must be a finite number, not negative, not {factor}"
+            ));
+        }
+        Ok(Self {
+            first,
+            factor,
+            longest,
+            keep_trying_for,
+        })
+    }
+
+    /// The wait before the next attempt after `waited` of waiting so far and a wait of `last` just
+    /// made (`None` before the first), or `None` when the time to keep trying is spent.
+    pub fn next_wait(&self, last: Option<Duration>, waited: Duration) -> Option<Duration> {
+        let wait = match last {
+            None => self.first,
+            Some(last) => Duration::try_from_secs_f64(last.as_secs_f64() * self.factor)
+                .unwrap_or(Duration::MAX),
+        }
+        .min(self.longest);
+        match self.keep_trying_for {
+            Some(limit) if waited >= limit => None,
+            // The last wait ends at the limit, not past it.
+            Some(limit) => Some(wait.min(limit - waited)),
+            None => Some(wait),
         }
     }
 }
@@ -1019,6 +1095,20 @@ impl ProviderSettings {
     /// The poll interval: [`DEFAULT_POLL`] unless the file says otherwise.
     pub fn poll(&self) -> Duration {
         self.poll.map_or(DEFAULT_POLL, |seconds| seconds.0)
+    }
+
+    /// How start keeps trying to open the provider and the Registry.
+    ///
+    /// # Errors
+    /// When `retry_factor` is not a finite number, or is negative.
+    pub fn start_retry(&self) -> Result<StartRetry, String> {
+        StartRetry::new(
+            self.retry_first.map_or(StartRetry::DEFAULT_FIRST, |s| s.0),
+            self.retry_factor.unwrap_or(StartRetry::DEFAULT_FACTOR),
+            self.retry_longest
+                .map_or(StartRetry::DEFAULT_LONGEST, |s| s.0),
+            self.retry_for.map(|s| s.0),
+        )
     }
 
     /// The limits the configuration provider reads documents within.

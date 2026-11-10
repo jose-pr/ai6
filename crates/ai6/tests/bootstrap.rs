@@ -820,3 +820,120 @@ fn config_public_holds_only_the_allow_list_and_names_what_it_left_out() {
     assert!(said.contains("nobody") && !said.contains(PLANTED), "{said}");
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn the_start_retry_settings_default_to_a_growing_wait_with_no_end() {
+    use std::time::Duration;
+    let retry = read("").unwrap().provider.start_retry().unwrap();
+    let mut waits = Vec::new();
+    let mut last = None;
+    let mut waited = Duration::ZERO;
+    for _ in 0..9 {
+        let wait = retry.next_wait(last, waited).expect("never gives up");
+        waits.push(wait.as_secs());
+        last = Some(wait);
+        waited += wait;
+    }
+    assert_eq!(waits, [1, 2, 4, 8, 16, 32, 60, 60, 60]);
+}
+
+#[test]
+fn the_start_retry_settings_have_no_floor_and_a_time_to_give_up() {
+    use std::time::Duration;
+    let read = read(
+        "[provider]\nretry_first = 0\nretry_factor = 1.5\nretry_longest = 10\nretry_for = 3\n",
+    )
+    .unwrap();
+    let retry = read.provider.start_retry().unwrap();
+    assert_eq!(retry.next_wait(None, Duration::ZERO), Some(Duration::ZERO));
+    // The last wait stops at the limit, then there is none.
+    let wait = retry
+        .next_wait(Some(Duration::from_secs(4)), Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(wait, Duration::from_secs(1));
+    assert_eq!(
+        retry.next_wait(Some(wait), Duration::from_secs(3)),
+        None,
+        "spent"
+    );
+    let now = read_provider("retry_for = 0");
+    assert_eq!(now.next_wait(None, Duration::ZERO), None);
+}
+
+fn read_provider(lines: &str) -> ai6::bootstrap::StartRetry {
+    read(&format!("[provider]\n{lines}\n"))
+        .unwrap()
+        .provider
+        .start_retry()
+        .unwrap()
+}
+
+#[test]
+fn a_retry_factor_that_is_not_a_number_is_refused() {
+    let read = read("[provider]\nretry_factor = -1\n").unwrap();
+    let said = read.provider.start_retry().unwrap_err();
+    assert!(said.contains("retry_factor"), "{said}");
+}
+
+/// Runs `ai6 serve` on a Registry at `location`, with `provider` lines, to its end.
+fn serve_with_registry(
+    location: &str,
+    provider: &str,
+) -> (Option<i32>, String, std::time::Duration) {
+    let dir = tempfile::tempdir().unwrap();
+    let config = write(
+        dir.path(),
+        "ai6.cfg",
+        &format!("[provider]\n{provider}\n[registry]\nlocation = \"{location}\"\n"),
+    );
+    let started = std::time::Instant::now();
+    let (code, said) = stopped(
+        ai6()
+            .args(["serve", "--listen", "127.0.0.1:0", "--config"])
+            .arg(&config)
+            .arg("--state-dir")
+            .arg(dir.path().join("state")),
+    );
+    (code, said, started.elapsed())
+}
+
+#[test]
+fn a_station_whose_registry_refuses_connections_says_so_and_tries_again_until_its_time_is_up() {
+    let port = free_port();
+    let (code, said, _) = serve_with_registry(
+        &format!("postgres://u@127.0.0.1:{port}/db?sslmode=disable"),
+        "retry_first = 0.05\nretry_longest = 0.1\nretry_for = 1",
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("attempt 2 to open the Registry failed"),
+        "{said}"
+    );
+    assert!(said.contains("trying again in"), "{said}");
+    assert!(said.contains("the Registry at"), "{said}");
+    assert!(said.contains("cannot be opened"), "{said}");
+}
+
+#[test]
+fn a_station_that_may_not_retry_exits_at_the_first_refusal() {
+    let port = free_port();
+    let (code, said, _) = serve_with_registry(
+        &format!("postgres://u@127.0.0.1:{port}/db?sslmode=disable"),
+        "retry_for = 0",
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("trying again"), "{said}");
+    assert!(said.contains("cannot be opened"), "{said}");
+}
+
+#[test]
+fn a_registry_location_retrying_cannot_fix_exits_at_once_with_its_reason() {
+    // Retry for ever: the exit proves the refusal was not retried.
+    let (code, said, took) =
+        serve_with_registry("postgres://u@127.0.0.1:notaport/db", "retry_first = 3600");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("trying again"), "{said}");
+    assert!(said.contains("the Registry at"), "{said}");
+    assert!(said.contains("cannot be opened"), "{said}");
+    assert!(took.as_secs() < 100, "{took:?}");
+}
