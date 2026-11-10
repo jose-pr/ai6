@@ -167,6 +167,11 @@ pub struct SchedulerLimits {
     )]
     #[map(default = SchedulerLimits::default().role_catalog_bytes)]
     pub role_catalog_bytes: Limit,
+    /// Bytes of the provider catalog (each loaded provider with its configuration's schema and
+    /// form) a check-in carries; past it, the schemas and forms are left out.
+    #[schema(title = "Largest provider catalog", format = "bytes")]
+    #[map(default = SchedulerLimits::default().provider_catalog_bytes)]
+    pub provider_catalog_bytes: Limit,
     /// Seconds the Station waits for each of its loops when it stops.
     #[schema(title = "Wait for each loop when stopping")]
     #[map(default = SchedulerLimits::default().shutdown_wait)]
@@ -183,6 +188,7 @@ impl Default for SchedulerLimits {
             check_in: Seconds::new(15),
             intake_attempts: 3,
             role_catalog_bytes: Limit::at(512 * KIB),
+            provider_catalog_bytes: Limit::at(512 * KIB),
             shutdown_wait: Seconds::new(2),
         }
     }

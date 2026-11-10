@@ -1089,6 +1089,7 @@ fn api(state: DaemonState, token: String) -> Router {
         .route("/internal/agent-roles", get(list_agent_roles))
         .route("/internal/terminals", get(list_terminals))
         .route("/internal/plugins", get(plugin_scan_summary))
+        .route("/internal/providers", get(list_providers))
         .route("/internal/intake/briefs", get(list_intake_briefs))
         .route(
             "/internal/missions",
@@ -1183,6 +1184,12 @@ async fn publisher_health(State(state): State<DaemonState>) -> Json<publisher::H
 
 async fn list_terminals(State(state): State<DaemonState>) -> Json<Vec<plugins::ProviderInfo>> {
     Json(state.plugins.terminals())
+}
+
+async fn list_providers(
+    State(state): State<DaemonState>,
+) -> Json<Vec<crate::providers::ProviderEntry>> {
+    Json(state.plugins.catalog())
 }
 
 async fn plugin_scan_summary(State(state): State<DaemonState>) -> Json<plugins::PluginScanSummary> {
@@ -2546,6 +2553,7 @@ fn publish_station_check_in(state: &DaemonState) {
         "handlers".to_owned(),
         serde_json::json!(available_handlers(state)),
     );
+    info.insert("providers".to_owned(), provider_catalog(state));
     let mut theaters = state
         .transports
         .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok());
@@ -3529,6 +3537,31 @@ fn station_terminal(state: &DaemonState, stdio: HarnessStdio) -> Result<String, 
         .plugins
         .choose_terminal(stdio, state.station.terminal.as_deref())
         .map_err(|refusal| format!("this Station cannot start the harness: {refusal}"))
+}
+
+/// The providers this Station has loaded, with the schema and form of each one's configuration.
+/// Past `[scheduler] provider_catalog_bytes` the schemas and forms are left out and each entry
+/// keeps its digest, so Universal Exports still lists what is loaded.
+fn provider_catalog(state: &DaemonState) -> serde_json::Value {
+    let budget = state.station.limits().scheduler.provider_catalog_bytes;
+    let entries = state.plugins.catalog();
+    match serde_json::to_vec(&entries) {
+        Ok(encoded) if budget.allows(encoded.len()) => serde_json::json!(entries),
+        Ok(_) => {
+            eprintln!(
+                "ai6: the provider catalog exceeds the {budget}-byte check-in budget                  ([scheduler] provider_catalog_bytes); schemas and forms are left out"
+            );
+            let bare: Vec<_> = entries
+                .into_iter()
+                .map(crate::providers::ProviderEntry::without_schema)
+                .collect();
+            serde_json::json!(bare)
+        }
+        Err(error) => {
+            eprintln!("ai6: could not encode the provider catalog: {error}");
+            serde_json::json!([])
+        }
+    }
 }
 
 fn available_handlers(state: &DaemonState) -> Vec<String> {
@@ -12094,7 +12127,7 @@ queue = 1
         fs::write(
             root.join("operations.toml"),
             format!(
-                "[operation.G]\nname = \"project\"\npath = {:?}\nworkspace = {{ provider = \"mock-safehouse\", branch = \"{{operation}}/{{id}}-{{slug}}\" }}\n",
+                "[operation.G]\nname = \"project\"\npath = {:?}\nworkspace = {{ provider = \"mock-safehouse\", settings = {{ branch = \"{{operation}}/{{id}}-{{slug}}\" }} }}\n",
                 checkout.to_string_lossy()
             ),
         )
@@ -12195,7 +12228,7 @@ queue = 1
         fs::write(
             root.path().join("operations.toml"),
             format!(
-                "[operation.G]\npath = {:?}\nworkspace = {{ provider = \"mock-plain\", isolate = false }}\n",
+                "[operation.G]\npath = {:?}\nworkspace = {{ provider = \"mock-plain\", settings = {{ isolate = false }} }}\n",
                 checkout.to_string_lossy()
             ),
         )

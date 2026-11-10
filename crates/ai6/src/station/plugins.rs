@@ -25,6 +25,7 @@ use crate::directorates::registry::bona_fides::{
     KeepVerified, LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin,
     publisher_message,
 };
+use crate::providers::ProviderEntry;
 
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::ephemeral::TheaterProvider;
@@ -381,6 +382,59 @@ impl Plugins {
             defaults: BTreeMap::new(),
             _held_copies: ManuallyDrop::new(Vec::new()),
         }
+    }
+
+    /// Every loaded provider of every kind, with the schema and form of its configuration as
+    /// its library declared them. Kinds are whatever the libraries serve; nothing here lists
+    /// them.
+    pub fn catalog(&self) -> Vec<ProviderEntry> {
+        let digests: BTreeMap<&str, &str> = self
+            .summary
+            .checked
+            .iter()
+            .flat_map(|check| {
+                [Some(check.path.as_str()), check.loaded_from.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .map(|path| (path, check.digest.as_str()))
+            })
+            .collect();
+        self.registry
+            .all_ranked()
+            .map(|provider| {
+                let json = |value: &Value| {
+                    serde_json::to_value(guatiao_serde::Serializable::from(value)).ok()
+                };
+                let schema = provider.config_schema().and_then(json);
+                let form = guatiao_intake::provider_form(
+                    provider.config_schema(),
+                    provider.meta(),
+                    guatiao::Alloc::rust(),
+                )
+                .ok()
+                .flatten()
+                .as_ref()
+                .and_then(json);
+                let digest = PeerId::of(&serde_json::to_vec(&(&schema, &form)).unwrap_or_default())
+                    .to_string();
+                ProviderEntry {
+                    id: provider.id().to_string(),
+                    name: provider.display_name().to_string(),
+                    version: provider.version().to_string(),
+                    kinds: provider.kinds().to_vec(),
+                    library: provider
+                        .from()
+                        .to_str()
+                        .and_then(|path| digests.get(path))
+                        .map(|digest| (*digest).to_string()),
+                    unavailable: provider.available().err().map(str::to_string),
+                    schema,
+                    form,
+                    schema_omitted: false,
+                    digest,
+                }
+            })
+            .collect()
     }
 
     /// Returns the AgentHandler providers and their reported availability.
@@ -1368,14 +1422,18 @@ mod tests {
 
     /// A terminal whose `tty` answer comes from its configuration, `true` without one.
     #[derive(guatiao::Provider)]
-    #[provider(Terminal, id = "mock-x", name = "Configured mock", config = MockXConfig)]
+    #[provider(Terminal, id = "mock-x", name = "Configured mock", config = MockXConfig, form = MockXConfig)]
     struct MockX {
         tty: bool,
     }
 
-    #[derive(guatiao::ToValue, guatiao::FromValue, guatiao::Schema, Debug, Clone)]
+    #[derive(
+        guatiao::ToValue, guatiao::FromValue, guatiao::Schema, guatiao_intake::Form, Debug, Clone,
+    )]
     #[map(crate = ::guatiao)]
     struct MockXConfig {
+        /// Whether the terminal has a tty.
+        #[schema(title = "Has a tty")]
         #[map(default = true)]
         tty: bool,
     }
@@ -1417,6 +1475,32 @@ mod tests {
             .register_local("ai6-mock-x", mock_x::library)
             .expect("the mock registers");
         Plugins::from_registry(registry)
+    }
+
+    #[test]
+    fn the_catalog_reports_each_provider_with_its_schema_and_form() {
+        let catalog = mock_x().catalog();
+        let entry = catalog
+            .iter()
+            .find(|entry| entry.id == "mock-x")
+            .expect("the provider is reported");
+        assert!(entry.serves(<dyn Terminal>::NAME), "{:?}", entry.kinds);
+        assert_eq!(entry.name, "Configured mock");
+        let schema = entry.schema.as_ref().expect("it takes a configuration");
+        assert_eq!(schema["properties"]["tty"]["title"], "Has a tty");
+        let form = entry.form.as_ref().expect("it declares a form");
+        assert!(form.is_object(), "{form}");
+        assert!(entry.digest.starts_with("sha256:"));
+        // A built-in secret provider is reported in the same way, with no change here.
+        assert!(
+            catalog
+                .iter()
+                .any(|entry| entry.serves(<dyn SecretProvider>::NAME))
+        );
+        // Past the budget the schema and form go and the digest stays.
+        let bare = entry.clone().without_schema();
+        assert!(bare.schema.is_none() && bare.form.is_none() && bare.schema_omitted);
+        assert_eq!(bare.digest, entry.digest);
     }
 
     #[test]

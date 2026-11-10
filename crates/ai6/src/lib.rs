@@ -12,6 +12,7 @@ extern crate alloc;
 pub mod bootstrap;
 pub mod bounds;
 pub mod provider_settings;
+pub mod providers;
 pub mod settings;
 #[cfg(feature = "tls-roots")]
 pub mod tls;
