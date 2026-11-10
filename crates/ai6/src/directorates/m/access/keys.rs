@@ -51,7 +51,7 @@ impl KeyScope {
         self.action == request.action
             && (self.scope == "*"
                 || self.scope == request.resource
-                || request.ancestors.iter().any(|above| *above == self.scope))
+                || request.ancestors.contains(&self.scope))
     }
 }
 
