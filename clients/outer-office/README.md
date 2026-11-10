@@ -283,12 +283,11 @@ password form, the button of an organization proxy that vouches for the person, 
 and desktop alike. The bearer token is kept in memory only, and signing out revokes it. On the web
 a sign-in also gets an HttpOnly session cookie that this code cannot read, nothing else is kept, and
 a reload asks `POST /v1/auth/resume` for a new token and goes back to the page the URL names and the
-last conversation. So someone with the browser open on that machine stays signed in up to `[gateway]
-session_max` (twelve hours) after signing in, until they sign out; `[gateway] session_cookie = false`
+last conversation. So someone with the browser open on that machine stays signed in while it is used and up to `[gateway]
+session_idle` (thirty minutes) after, until they sign out; `[gateway] session_cookie = false`
 turns that off and a reload signs in again. The desktop app has no cookie: closing it signs out. An
-open app renews its token `[refresh] renew_before` ahead of its end, on its own
-timer, so the person never sees the hour, and says once when the sign-in can be renewed no
-further. Signing in again goes back to the last conversation, kept per person on the device
+open app renews its token `[refresh] renew_before` ahead of the idle deadline while the person
+works, and with no input asks "Stay signed in?" with a countdown instead. Signing in again goes back to the last conversation, kept per person on the device
 ([Staying signed in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).
 
 The board reads what the page shown displays every three seconds (`[refresh] sessions`), such

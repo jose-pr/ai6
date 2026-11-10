@@ -190,33 +190,39 @@ cookie below.
 
 ### Staying signed in
 
-A token lasts `[gateway] access_token_ttl` (an hour), and an open app renews it before it ends:
-`POST /v1/auth/renew` with the token moves its expiry on, its value stays the same, and so the
-chat, her tools and a proposal waiting for **Confirm** carry on. The app asks `[refresh]
-renew_before` (ten minutes) ahead, on its own timer, and tries again after a failure until the
-gateway answers; only a `401` ends the sign-in. Renewing stops `[gateway] session_max` (twelve
-hours) after signing in, with `ends_at` in the answer saying when, and `renew_before` ahead of that
-the app says so once. There is no idle sign-out: an open app renews until then. It schedules by
-`expires_in`, the seconds the gateway says are left, so a wrong clock on the person's machine does not
-change when it asks.
+A sign-in lasts while it is used. A token lasts `[gateway] access_token_ttl` (an hour) or
+`[gateway] session_idle` (thirty minutes), whichever is shorter, and an open app renews it while
+its person works: `POST /v1/auth/renew` with the token moves its expiry and the sign-in's idle
+deadline on, its value stays the same, and so the chat, her tools and a proposal waiting for
+**Confirm** carry on. The answer's `idle_ends_at` says when the sign-in goes idle without another
+renewal. The app renews `[refresh] renew_before` (ten minutes) ahead of that, on its own timer,
+but only when the person has used the page since the last renewal (keys, pointer, scroll). With
+no input it does not renew, and `renew_before` ahead of the idle deadline it asks **Stay signed
+in?** with a countdown: **Stay signed in** renews, and when the countdown ends the app signs out
+and keeps the route for after. A renewal after the idle deadline is a `401`, so a closed laptop
+does not stay signed in. It schedules by `expires_in`, the seconds the gateway says are left, so a
+wrong clock on the person's machine does not change when it asks.
 
-`session_max` is a choice to weigh. A token copied out of memory stays usable until then rather
-than for an hour, renewing does not ask for the password again, and a directory that does not
-report a disabled account leaves it working until then; a person removed from the directory
-cannot renew. Lower it, or set it to `0` to turn renewal off; one larger than the default, or
-`"none"`, is reported as a weakening at start.
+`[gateway] session_max` is unset by default: there is no fixed cut while the person keeps working.
+A deployment may set one, in seconds after signing in, and then renewing stops there, with `ends_at`
+in the answer saying when, and `renew_before` ahead of that the app says so once. `session_idle`
+and `session_max` are choices to weigh. A token copied out of memory stays usable until the idle
+limit passes, renewing does not ask for the password again, and a directory that does not report a
+disabled account leaves a sign-in working while it is used; a person removed from the directory
+cannot renew. Lower `session_idle`, set `session_max`, or set it to `0` to turn renewal off; an
+idle limit longer than the default, or `"none"`, is reported as a weakening at start.
 
 A sign-in from a browser also gets a cookie, so a reload does not ask for the password:
-`ai6_session`, `HttpOnly; Secure; SameSite=Strict; Path=/v1/auth`, ending `session_max` after
-signing in. Script on the page cannot read it, and the app keeps no token in browser storage. The
+`ai6_session`, `HttpOnly; Secure; SameSite=Strict; Path=/v1/auth`, ending `session_idle` after the
+last renewal (and `session_max` after signing in, when set). Script on the page cannot read it, and the app keeps no token in browser storage. The
 gateway stores only its digest. When the app starts on the web with no token it calls `POST
 /v1/auth/resume`, which answers as a login does, with a new token; no cookie or a bad one answers
-`401` and the sign-in page shows with no message. A resume does not move the end of the sign-in: the
-time runs from when the person signed in, however often the page reloads. The person must still be
+`401` and the sign-in page shows with no message. A resume goes on from now, within the idle limit and `session_max`: a cookie not renewed for the idle limit is refused, and
+reloading never lengthens a sign-in past `session_max`. The person must still be
 in the directory, and a front proxy naming someone else on that request ends it.
 
 **What this gives up.** Someone with the browser open on that machine stays signed in, with the
-person's own access, until `session_max` runs out or they sign out, and no password is asked for
+person's own access, until the sign-in goes idle (or `session_max` runs out) or they sign out, and no password is asked for
 again. Closing the browser does not end it. On a shared machine, sign out, or turn the cookie off.
 
 `[gateway] session_cookie = false` turns it off: a sign-in lives in the tab's memory and a reload

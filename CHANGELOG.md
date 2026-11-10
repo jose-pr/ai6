@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A sign-in lasts while it is used: `[gateway] session_idle` (thirty minutes) ends one that is not renewed, each
+  `POST /v1/auth/renew` moves the idle deadline on and answers `idle_ends_at`, and `session_max` is unset by
+  default, so there is no fixed twelve-hour cut. The session cookie follows the same rules.
 - Records of the configuration provider are managed by `ai6ctl`, through Universal Exports, as `kubectl`
   does: `ai6ctl get KIND [KEY] [FIELD] [-o cfg|toml|json|yaml]`, `apply -f FILE|DIR|-` (any
   documents, each with any kinds' tables, read by extension or first line; all or none; `--dry-run`),
