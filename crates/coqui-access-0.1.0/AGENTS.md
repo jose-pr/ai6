@@ -6,7 +6,7 @@ ships inside the package and is self-contained. Development documentation lives 
 source at <https://github.com/Boriken-Dev/coqui-access>.
 
 MSRV Rust 1.89. No Cargo features. A default build depends on `guatiao` with its `provider`
-feature only. The crate holds no `unsafe` code. Everything is re-exported at the root, plus
+feature and on `coqui-builder` (for `Limit`). The crate holds no `unsafe` code. Everything is re-exported at the root, plus
 `guatiao`, `error` and `takes`.
 
 ## Kinds
@@ -104,7 +104,7 @@ pub struct SubjectError;                                // non_exhaustive, Error
 ## Limits
 
 ```rust
-pub struct Limit;                       // Copy, Eq, Hash, Debug, Display; guatiao derives (transparent)
+pub struct Limit;                       // Copy, Eq, Hash, Debug, Display; coqui_builder::Leaf (text: N or `none`)
 impl Limit {
     pub const UNBOUNDED: Limit;
     pub const fn at(count: u32) -> Limit;
@@ -117,9 +117,10 @@ impl From<u32> for Limit; impl From<Option<u32>> for Limit;
 
 - The resource bounds of the crates here (roles, rules, record fields, password bytes) are
   `Limit`s with defaults a caller changes or lifts; none is a security property.
-- As configuration a `Limit` is a number or `null` (no bound). A struct field of this type
-  with `#[map(default = Limit::at(n))]` reads an absent key as `n` and writes `null` for
-  unbounded, so a lifted bound survives a round trip (a bare `Option` field could not).
+- As configuration a `Limit` is a count or `none` (no bound): `max_chain = 16`, `max_chain = "none"`.
+  A struct field of this type with `#[map(default = Limit::at(n))]` reads an absent key as `n`.
+  A document's `null` is a key that is not given, so it reads that default, never "no bound";
+  `Display` stays the human wording (`at most 5`, `unbounded`).
 
 ## Errors (`coqui_access::error`)
 

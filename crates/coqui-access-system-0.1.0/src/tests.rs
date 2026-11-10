@@ -1,4 +1,4 @@
-use coqui_access::guatiao::Status;
+use coqui_access::guatiao::{FromValue, Status, ToValue};
 
 use super::*;
 
@@ -32,20 +32,27 @@ fn the_defaults_are_the_documented_ones_and_list_no_non_default() {
 fn a_configuration_omitting_every_key_reads_as_the_defaults() {
     let empty = coqui_access::guatiao::Map::new().into();
     assert_eq!(
-        SystemAccountsConfig::from_value(&empty).unwrap(),
+        Described::<SystemAccountsConfig>::from_value(&empty)
+            .unwrap()
+            .0,
         SystemAccountsConfig::default()
     );
     // Windows accounts carry no uid, so a min_uid there is refused and the default is kept.
     let uid = if cfg!(unix) { 5 } else { DEFAULT_MIN_UID };
-    let written = SystemAccounts::builder()
-        .min_uid(uid)
-        .groups(["wheel"])
-        .build()
+    let written = Described(
+        SystemAccounts::builder()
+            .min_uid(uid)
+            .groups(["wheel"])
+            .build()
+            .unwrap()
+            .config()
+            .clone(),
+    )
+    .to_value()
+    .unwrap();
+    let read = Described::<SystemAccountsConfig>::from_value(&written)
         .unwrap()
-        .config()
-        .to_value()
-        .unwrap();
-    let read = SystemAccountsConfig::from_value(&written).unwrap();
+        .0;
     assert_eq!(read.min_uid, uid);
     assert_eq!(read.groups, ["wheel"]);
 }
@@ -54,7 +61,7 @@ fn a_configuration_omitting_every_key_reads_as_the_defaults() {
 fn a_misspelled_key_is_refused() {
     let mut map = coqui_access::guatiao::Map::new();
     map.set("min_id", 5u32.to_value().unwrap());
-    assert!(SystemAccountsConfig::from_value(&map.into()).is_err());
+    assert!(Described::<SystemAccountsConfig>::from_value(&map.into()).is_err());
 }
 
 #[test]

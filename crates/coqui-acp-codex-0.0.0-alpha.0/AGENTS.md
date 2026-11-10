@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `coqui-acp-codex` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/coqui-acp>.
 
-There are no Cargo features. MSRV Rust 1.89. A default build depends on `coqui-acp-harness`, `serde_json` and, for the command, `clap`. Version `0.0.0-alpha.0`, not published; the API may change in any release before 1.0. Tested with Codex 0.164.0 and 0.166.0 (`TESTED_VERSIONS`).
+There are no Cargo features. MSRV Rust 1.89. A default build depends on `coqui-acp-api`, `coqui-acp-harness` (with its `kind` feature), `serde_json` and, for the command, `clap`. Version `0.0.0-alpha.0`, not published; the API may change in any release before 1.0. Tested with Codex 0.164.0 and 0.166.0 (`TESTED_VERSIONS`).
 
 Imports: everything is at the crate root, and `parse` is public. `coqui_acp_codex::harness` is `coqui-acp-harness`, for its events, processes and ACP server; `Launch`, `PlainSpawn`, `Spawn` and `Spawned` are re-exported from it.
 
@@ -63,6 +63,7 @@ pub fn interrupt(&self) -> Result<(), Error>
 pub fn steer(&self, turn: &str, content: &[Content]) -> Result<(), Error>   // turn/steer, its answer not awaited
 pub fn request(&self, method: &str, params: Value, limit: Duration) -> Result<Value, Error>
 pub fn read_usage(&self) -> Result<Vec<Bucket>, Error>      // account/rateLimits/read: needs no turn; the answer is the base later updates merge into
+pub fn CodexSession::read_models(launch: &CodexLaunch, spawn: &dyn Spawn, settings: CodexSettings) -> Result<Option<Vec<Model>>, Error>   // starts app-server, initializes, lists models, ends it: no thread, no turn
 pub fn CodexSession::read_account_usage(launch: &CodexLaunch, spawn: &dyn Spawn, settings: CodexSettings) -> Result<Vec<Bucket>, Error>   // starts app-server, initializes, reads, ends it: no thread, no turn
 pub fn close(&self)                                              // also on drop
 #[non_exhaustive] pub struct Model { pub id: String, pub name: String, pub description: Option<String>,
@@ -158,6 +159,33 @@ What a client may choose is capped by the host: the mode the launch's `approval_
 The current mode at the start is read from `thread/start`'s `approvalPolicy`, `approvalsReviewer` and `sandbox`, exactly: it is a mode only when all three are what the mode sets (Plan never reads back: a thread has no collaboration mode to report, so its `on-request`, `readOnly`, `user` is shown as it is (`custom`) until a client chooses Plan). Any other pair shows as `custom` with its real values (`Custom: untrusted, readOnly`), never as a mode, and cannot be chosen. Choosing the mode shown still applies it from the next turn. Until a client chooses a mode no turn names any of the four settings, and the thread's own configuration holds; once one has, each `turn/start` carries all four (`sandboxPolicy` keeps the thread's `sandbox_workspace_write` roots and network setting), so a switch holds from the next turn, not the one running. `collaborationMode.settings` names the model (the turn's, else the thread's, else Codex's default; with none the turn carries the approval and sandbox only and a warning), the session's effort (else the thread's `reasoningEffort`) and the launch's developer instructions, each only when there is one: Codex's schema says a collaboration mode takes precedence over the thread's model, effort and developer instructions, and that `null` instructions mean the mode's built-in ones, so nothing is sent as `null`. A session with developer instructions has them replace Plan's built-in ones in a Plan turn. A `workspace-write` sandbox falls back to `readOnly` in a directory the Codex home does not trust, as `thread/start` answers show.
 
 Config options: `model` (category `model`): `default` and the models Codex lists; `effort` (category `thought_level`): `default` and the current model's efforts. Setting one not offered is refused; a choice applies from the next turn.
+
+## Provider (`CodexProvider`, id `codex`)
+
+```rust
+#[derive(Provider)] pub struct CodexProvider;                        // an `acp_harness` provider; Debug
+pub fn CodexProvider::new(settings: ProviderSettings) -> CodexProvider    // also From<ProviderSettings>
+pub struct ProviderSettings {                                        // FromValue, Schema, Default; every field defaults
+    pub executable: String,              // "codex": a path, or a name looked up where the spawner runs it
+    pub model: Option<String>, pub effort: Option<String>,
+    pub approval_policy: Option<String>, pub sandbox: Option<String>,
+    pub allow_bypass: bool,              // false
+    pub max_acp_version: u64,            // 2 (1 or 2)
+    pub max_sessions: u64,               // 8
+    pub max_requests: u64,               // 32: requests worked on at once; a request past it is refused
+    pub max_message_bytes: u64,          // 64 MiB: one byte more ends the connection GUATIAO_ERR_BAD_VALUE
+    pub client_mcp_servers: bool,        // true
+}
+pub mod accounts { pub fn catalog() -> AccountCatalog;  pub const CHATGPT, API_KEY, ACCESS_TOKEN: &str; }
+```
+
+Register it with `Registry::register_local`, or build it into a library with `guatiao::providers!` (`examples/codex_provider.rs`, built by `cargo test`). Each connection serves a `CodexAgent` over the channel with `coqui_acp_harness::provider::Serving`; it starts `codex app-server` through the host's spawner. `examples/fake_codex.rs` is a stand-in for the app server that behaves as the contract agent does (it needs `CODEX_HOME` or the suite's home, keeps threads and the five-hour window there, and with `COQUI_ACP_FAKE_CODEX_LOG` logs its arguments and environment names); the suite runs against it as `acp-harness-check --library <codex_provider> --provider codex --settings '{"executable": "<fake_codex>"}' --program-agent --no-imports --no-logins --holds none --account harness-login`; `--program-agent` runs the checker in a home of its own, which the stand-in uses when `CODEX_HOME` is not set.
+
+- `describe`: title `Codex`, ACP versions 1 and 2, what `CodexAgent` takes and `session/resume`, `resumes_wider`, usage `reported` and `inferred` with spend, readable with no turn, and the cache hint: `cache_lifetime` says `ignored`, since Codex's app server has no setting for how long its prompt cache lives (`app-server generate-json-schema` of 0.166.0 names none).
+- `refusal`, `start`: holds no requirement; each is `GUATIAO_ERR_UNSUPPORTED` with its name. `read_only` is not the read-only sandbox alone: an approval policy that asks lets Codex escalate, Bypass is still offered unless `allow_bypass` is off, Plan mode applies `on-request` again, and the MCP servers of the person's own configuration start outside the sandbox. What would make it enforceable: Bypass off and never offered, the harness declining file-change and escalation approvals itself instead of asking the person, and the configuration's MCP servers disabled with an override measured on the Codex in use (`-c mcp_servers={}` is the candidate; unmeasured).
+- `accounts`: `harness-login` and the kinds measured on Codex 0.166.0 (`codex-chatgpt`, rotating; `codex-api-key`; `codex-access-token`, whose success path was not run, so rotating and with a directory), with every credential variable. `renews` is false and no login method is listed; accounts are taken as `ClaudeProvider` takes them.
+- `models`: starts the app server through the spawner, lists `model/list` and ends it (no thread, no turn). `usage`: reads `account/rateLimits/read` the same way and merges it with what connections saw (`Reports`); a login with no allowances reports nothing.
+- `import_session`, `export_session`, `login`, `renew`: `GUATIAO_ERR_UNSUPPORTED` with a reason. `session_record`, `non_defaults`: the kind's defaults.
 
 ## Errors
 

@@ -77,7 +77,7 @@ class SpawnedProcess(KindProtocol, Protocol, kind="spawned_process", floor_hash=
         ...
 
 
-class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=1466370631, is_object=True):
+class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=4134697914, is_object=True):
     """Starts programs where the host chooses: on this machine, on another over SSH, in a container or
     a virtual machine. The host implements it and hands one to every
     [`AcpHarness::start`](crate::AcpHarness::start); the provider owns it from then on, starts its
@@ -99,6 +99,49 @@ class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=
         """Starts `spec` and hands over the process. Refuses `GUATIAO_ERR_UNSUPPORTED` a spec asking
         what [`describe`](Self::describe) says it cannot give, `GUATIAO_ERR_NOT_FOUND` a program
         that is not there, `GUATIAO_ERR_BAD_VALUE` a spec it cannot read.
+        """
+        ...
+
+    @required
+    @fallible
+    def write_file(self, path: str, bytes: Ref, private: bool) -> None:
+        """Writes `bytes` to the file `path` in the private directory the host granted this spawner (an
+        account's `state_dir`, or a login's), making directories on the way and replacing a file
+        there; `private` makes it readable by its owner alone where the system has such a notion.
+
+        **The host resolves every path** against that directory and never trusts the provider's:
+        `path` is relative, and an absolute path, a `..` part, or a link leading out of the directory
+        is `GUATIAO_ERR_NOT_FOUND`, as is any call on a spawner with no such directory. A file
+        with another name for the same data (a hard link) is `GUATIAO_ERR_NOT_FOUND` too, where the
+        system lets the host see it. `private` is honoured where the file is made: on Unix the file
+        is created owner-only (mode 0600) before it holds a byte; on Windows the granted
+        directory's ACL is the guard. A spawner that cannot give files says `files` false in [`describe`](Self::describe) and refuses all four
+        file methods `GUATIAO_ERR_UNSUPPORTED`.
+        """
+        ...
+
+    @required
+    @fallible
+    def read_file(self, path: str, max_bytes: U64) -> ValueAnswer:
+        """The content of the file `path`, whole. `GUATIAO_ERR_NOT_FOUND` for a file that is not there
+        or a path [`write_file`](Self::write_file) refuses; `GUATIAO_ERR_BAD_VALUE` for one longer
+        than `max_bytes`, or a file that is not a regular file `GUATIAO_ERR_NOT_FOUND`.
+        """
+        ...
+
+    @required
+    @fallible
+    def file_info(self, path: str) -> ValueAnswer:
+        """How long the file `path` is and when it last changed; `None` when it is not there.
+        `GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses.
+        """
+        ...
+
+    @required
+    @fallible
+    def remove_file(self, path: str) -> None:
+        """Removes the file `path`; removing a file that is not there is no error.
+        `GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses.
         """
         ...
 
@@ -137,6 +180,38 @@ class ChannelSink(KindProtocol, Protocol, kind="channel_sink", floor_hash=411526
         ...
 
 
+class AccountKeeper(KindProtocol, Protocol, kind="account_keeper", floor_hash=708146915, is_object=True):
+    """Where a provider reports what happens to an account's credentials behind the host's back. The
+    host implements it and hands one to every call that runs the harness; the provider owns it from
+    then on, and destroys it by the time it calls the sink's `closed` (or when the call returns).
+
+    **Every live keeper of the account hears each event**, not the first to ask: a connection's
+    keeper hears a rotation a `models` call noticed, and the other way round. An event carries a
+    sequence the provider counts per account; **the host deduplicates by (account, sequence)** and
+    orders chained rotations by it, so a keeper that hears an event twice, or two keepers of one
+    host that hear it once each, store it once.
+
+    A provider of a kind with files watches them through the spawner while the connection runs
+    (every `renew_poll_ms`, 30000 by default) and after each import, export, models call and close,
+    and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost), never
+    [`renewed`](Self::renewed).
+    """
+
+    @required
+    @fallible
+    def renewed(self, renewal: Ref) -> None:
+        """The harness renewed the credentials. The host stores them only when they are newer."""
+        ...
+
+    @required
+    @fallible
+    def lost(self, loss: Ref) -> None:
+        """The harness lost the login (a refused refresh blanked or deleted its file). The blank copy
+        is never reported as a renewal.
+        """
+        ...
+
+
 class Channel(KindProtocol, Protocol, kind="channel", floor_hash=3787630980, is_object=True):
     """What the host writes on, handed back by the provider that started it.
 
@@ -171,7 +246,41 @@ class Channel(KindProtocol, Protocol, kind="channel", floor_hash=3787630980, is_
         ...
 
 
-class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=1326996142):
+class LoginPrompter(KindProtocol, Protocol, kind="login_prompter", floor_hash=2606822037, is_object=True):
+    """How a login relays its steps to the person. The host implements it, hands one to
+    [`login`](crate::AcpHarness::login) and renders each call; the provider owns it from then on and
+    destroys it when the login ends. `ask` goes sealed from the person's frontend to where the
+    provider runs, never through a model, a channel the agent reads or a log.
+
+    When the person cancels, every call answers `GUATIAO_ERR_GONE` and `cancelled` is true.
+    """
+
+    @required
+    @fallible
+    def say(self, text: str) -> None:
+        """Shows `text`, a line the CLI printed that the person should read."""
+        ...
+
+    @required
+    @fallible
+    def open_url(self, open: Ref) -> None:
+        """Asks the person to open a page, and to confirm a code there."""
+        ...
+
+    @required
+    @fallible
+    def ask(self, form: Ref) -> ValueAnswer:
+        """Asks the person to fill `form` and waits for the answer."""
+        ...
+
+    @required
+    @fallible
+    def cancelled(self) -> bool:
+        """Whether the person cancelled the login."""
+        ...
+
+
+class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=4111118208):
     """Drives an Agent Client Protocol agent, and serves it as one ACP connection over a channel.
 
     The host is the ACP client and the provider the agent: each message on the channel, either way,
@@ -183,6 +292,9 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
     provider's settings and asks it. Every method is synchronous; a host calls them from a thread
     of its own. The methods without a default are the ones a host acts on for every harness; a
     default is kept only where it is a true answer for a harness that has nothing to say.
+
+    Every object a method is handed (`spawner`, `sink`, `keeper`, `prompter`) is the provider's
+    from then on: it destroys each, even when it refuses.
     """
 
     @required
@@ -195,7 +307,16 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
 
     @required
     @fallible
-    def start(self, request: Ref, spawner: Taken[ProcessSpawner], sink: Taken[ChannelSink]) -> Channel:
+    def accounts(self) -> ValueAnswer:
+        """The kinds of account the harness takes, the ways to sign in to make one, and every variable
+        it reads for a credential. Cheap, the same on every call, and answered as configured. The
+        kind [`HARNESS_LOGIN`](crate::HARNESS_LOGIN) is always listed.
+        """
+        ...
+
+    @required
+    @fallible
+    def start(self, request: Ref, spawner: Taken[ProcessSpawner], sink: Taken[ChannelSink], keeper: Taken[AccountKeeper]) -> Channel:
         """Starts one ACP connection: messages the host sends are the client's, and the agent's come back
         through `sink`. The programs it drives start through `spawner`, or the provider ignores it.
 
@@ -204,25 +325,40 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
         program may start later, at `initialize` or `session/new`, and a failure then is answered in
         ACP before the provider closes.
 
+        `keeper` is handed over the same way: the provider reports through it every renewal and loss
+        of the request's account that it sees while the connection runs, and destroys it by the time
+        it calls `closed`. It hears every event of the account, as every other live keeper of the
+        account does, each with a sequence; a host deduplicates by (account, sequence), and so may
+        hand one that keeps nothing.
+
+        With `request.account` the provider applies the account (see
+        [`AccountGrant`](crate::AccountGrant)): it removes every name in its catalog's
+        `credential_variables` from what it starts, then sets the chosen kind's, writes the kind's
+        files through the spawner and starts the harness on them. With none, the environment passes
+        as it is and nothing is cleared.
+
         It refuses exactly when [`refusal`](Self::refusal) would for the request's requirements and
         environment, with the same status: `GUATIAO_ERR_UNSUPPORTED` for a requirement it cannot
         hold, `GUATIAO_ERR_BAD_VALUE` for a request it cannot read (a key it does not know, a
-        session id that is not a UUID, a requirement's value). It never starts with a requirement
-        left out.
+        session id that is not a UUID, a requirement's value, an account kind it does not list,
+        settings its schema refuses, a credential that is missing, an account id that is not 1 to
+        128 bytes without a control character). It refuses `GUATIAO_ERR_UNSUPPORTED`, with the
+        reason, an account kind it cannot apply through this spawner (one that needs a directory,
+        given a spawner without files). It never starts with a requirement left out.
         """
         ...
 
     @required
     @fallible
-    def refusal(self, requirements: Ref, environment: Ref) -> ValueAnswer:
+    def refusal(self, requirements: Ref, environment: Ref, account: Ref) -> ValueAnswer:
         """Why the harness could not hold a connection to all of `requirements` together, started with
-        `environment`, in a sentence; `None` when it can. An empty `environment` asks about the
-        harness's configuration alone, and is answered. A host asks before it starts a connection,
-        and passes over a harness that would refuse.
+        `environment` and running on `account`, in a sentence; `None` when it can. An empty
+        `environment` asks about the harness's configuration alone, and is answered. A host asks
+        before it starts a connection, and passes over a harness that would refuse.
 
         `GUATIAO_ERR_BAD_VALUE` for requirements `start` would refuse as unreadable: a name given
-        twice, or a value its name does not take. A name the harness does not know is answered with
-        a refusal, never `None`.
+        twice, or a value its name does not take; and for an `account` of a kind the harness does
+        not list. A name the harness does not know is answered with a refusal, never `None`.
         """
         ...
 
@@ -237,11 +373,12 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
 
     @required
     @fallible
-    def import_session(self, session: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+    def import_session(self, session: Ref, spawner: Taken[ProcessSpawner], keeper: Taken[AccountKeeper]) -> ValueAnswer:
         """Seeds a session at the host's UUID from a history, so that a later connection's
         `session/resume` or `session/load` of that UUID opens it; an empty history seeds a fresh one.
         The provider maps the UUID to the harness's own id and keeps the mapping. `spawner` is handed
-        over as `start`'s is, for a harness whose files live where its programs run.
+        over as `start`'s is, for a harness whose files live where its programs run, and `keeper`
+        as `start`'s is, for a login the call sees renewed or lost.
 
         Answers what the seed was made from and what it lost. Refuses `GUATIAO_ERR_UNSUPPORTED`,
         with the reason, when the harness cannot import at all or does not read the history's
@@ -254,23 +391,25 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
 
     @required
     @fallible
-    def export_session(self, export: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+    def export_session(self, export: Ref, spawner: Taken[ProcessSpawner], keeper: Taken[AccountKeeper]) -> ValueAnswer:
         """One page of the history of the session `export` names (by its UUID), in the standard
         session-history format, as it is: whole lines, never more than `max_bytes`, the header on
         the first page only. The pages, joined, are the export of one page as
-        large as the whole. `spawner` is handed over as `import_session`'s is. Refuses
-        `GUATIAO_ERR_NOT_FOUND` for a session the harness does not have, `GUATIAO_ERR_BAD_VALUE` for
-        an `after` it did not give or that the session has changed since, and for a next line longer
-        than `max_bytes`, as [`LINE_TOO_LARGE`](crate::LINE_TOO_LARGE) says, `GUATIAO_ERR_UNSUPPORTED`,
-        with the reason, when it cannot export.
+        large as the whole. `spawner` and `keeper` are handed over as `import_session`'s are.
+        Refuses `GUATIAO_ERR_NOT_FOUND` for a session the harness does not have,
+        `GUATIAO_ERR_BAD_VALUE` for an `after` it did not give or that the session has changed
+        since, and for a next line longer than `max_bytes`, as
+        [`LINE_TOO_LARGE`](crate::LINE_TOO_LARGE) says, `GUATIAO_ERR_UNSUPPORTED`, with the reason,
+        when it cannot export.
         """
         ...
 
     @fallible
-    def models(self, environment: Ref) -> ValueAnswer:
-        """The models the account behind `environment` may use, when the harness can say without a
-        model turn. Never carries a value from `environment`. The default, for a harness with no
-        way to list them: unknown, and says so.
+    def models(self, request: Ref, spawner: Taken[ProcessSpawner], keeper: Taken[AccountKeeper]) -> ValueAnswer:
+        """The models the account behind `request` may use, when the harness can say without a model
+        turn. Never carries a value from the request. `spawner` and `keeper` are handed over as
+        `import_session`'s are. The default, for a harness with no way to list them: unknown, and
+        says so.
         """
         ...
 
@@ -283,15 +422,53 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
         ...
 
     @fallible
-    def usage(self, query: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
-        """What the account behind `query`'s environment has used and has left, with no session and no
-        model turn; cheap, so a host may poll it as often as it likes. A harness that learns usage
+    def usage(self, query: Ref, spawner: Taken[ProcessSpawner], keeper: Taken[AccountKeeper]) -> ValueAnswer:
+        """What the account behind `query` has used and has left, with no session and no model turn;
+        cheap, so a host may poll it as often as it likes. A harness that learns usage
         only while a turn runs answers the newest report its connections saw for the account, with
-        its `observed_at`. Never carries a value from the environment. The default, for a harness
-        that reports no usage, is a true answer: [`UsageReport::unsupported`].
+        its `observed_at`. Never carries a value from the environment or the credentials. The
+        default, for a harness that reports no usage, is a true answer:
+        [`UsageReport::unsupported`].
 
         A provider that runs a program to ask (Codex's `account/rateLimits/read`) runs it through
-        `spawner`, and destroys it as `import_session` does.
+        `spawner`, on the account's directory, and destroys it as `import_session` does; `keeper`
+        is handed over as `import_session`'s is.
+        """
+        ...
+
+    @required
+    @fallible
+    def login(self, request: Ref, spawner: Taken[ProcessSpawner], prompter: Taken[LoginPrompter]) -> ValueAnswer:
+        """Signs in to make an account of the kind the method `request.method` produces. The provider
+        runs the harness's own sign-in in `request.state_dir` (on a terminal where the CLI needs one)
+        through `spawner`, reads what it prints and relays each step through `prompter`, and at the
+        end reads the files it wrote into the outcome's credentials. `spawner` and `prompter` are
+        handed over: the provider destroys both before it answers, a timeout excepted (see below).
+
+        When the person cancels (`prompter.cancelled()` true, or a prompter call answering
+        `GUATIAO_ERR_GONE`), or `request.timeout_ms` passes, the provider kills the CLI's whole tree
+        and answers `GUATIAO_ERR_GONE` with `login cancelled` or `login timed out` within two
+        seconds. It runs a watchdog of its own: at the deadline it kills the tree and answers even if
+        a prompter call has not returned (the call is then left to end by itself, and the prompter
+        destroyed when it does), so a host's `ask` should return by `timeout_ms`. It also checks the
+        deadline after every prompter call and before it answers an outcome.
+        A key the CLI refused is `GUATIAO_ERR_BAD_VALUE` with `login refused: ` and the CLI's
+        reason; any other failure `GUATIAO_ERR_INTERNAL` with a reason that holds no input value and
+        no URL query. A method the catalog does not list is `GUATIAO_ERR_BAD_VALUE`; a provider with
+        no login method answers `GUATIAO_ERR_UNSUPPORTED` with the reason.
+        """
+        ...
+
+    @required
+    @fallible
+    def renew(self, request: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """Renews the credentials of `request.account` with no model turn (Claude's `auth status`
+        inside its window, Codex's `app-server` `account/read` with a refresh, Grok's `models`).
+        Answers the new credentials, or why nothing changed. `GUATIAO_ERR_UNSUPPORTED`, with the
+        reason, for a kind whose catalog entry says `renews` false; `GUATIAO_ERR_BAD_VALUE` for a
+        kind it does not list. `spawner` is handed over as `import_session`'s is. A refused renewal
+        that lost the login is `GUATIAO_ERR_GONE` with the reason, and the blank copy is never
+        answered.
         """
         ...
 
@@ -305,4 +482,4 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=13269961
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "ChannelSink", "Channel", "AcpHarness"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "ChannelSink", "AccountKeeper", "Channel", "LoginPrompter", "AcpHarness"]

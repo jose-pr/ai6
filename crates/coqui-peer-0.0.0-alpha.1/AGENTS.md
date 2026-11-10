@@ -12,15 +12,21 @@ package and is self-contained. Development documentation lives with the source a
 | `pin` | `spake2`, `hkdf`, `hmac`, `rand_core` (`getrandom`) | PIN pairing (`Pairing::pin`), `Random::os` | off |
 | `coqui-transport` | `coqui-transport`: module `transport` | `PeerFrame`, and a `coqui_transport::Channel` as a `MessageTransport` | off |
 
-MSRV Rust 1.89. A default build depends on `data-encoding`, `guatiao` (`derive`), `guatiao-serde` (`json`),
-`sha1`, `sha2`, `subtle` and `zeroize`. The settings types below are guatiao values in every build: every
-key is optional (an absent one is its default), an unknown key is refused, and `guatiao_serde::text`
-(toml, json, yaml) reads and writes them; a duration reads as seconds, `[secs, nanos]` or `{secs, nanos}`. Version `0.0.0-alpha.1` is a pre-release; the API may change in any release before
-1.0.
+MSRV Rust 1.89. A default build depends on `coqui-builder` (`derive`), `data-encoding`, `sha1`, `sha2`,
+`subtle` and `zeroize`. The settings types below derive `coqui_builder::Describe` in every build: every
+key is optional (an absent one is its default), an unknown key is refused, and a `coqui_builder::Partial` of one
+is filled from text (toml, json, yaml through coqui-builder's `serde` feature, or its `Env`) and built; a duration
+reads as `60`, `30s` or `250ms`, never `[secs, nanos]`, and nothing writes a settings value out. The builders'
+setters for the top-level keys are methods of the builder; `coqui_peer::prelude` holds the setters traits
+(`TrustStoreSettingsSetters`, ...) for a builder in another crate. Version `0.0.0-alpha.1` is a pre-release; the
+API may change in any release before 1.0.
 
 Imports: the crate root holds the ids, the store and its queue, `KeyMaterial`, `Clock`,
-`Random`, `NonDefault`, the `Handshake`/`Method` traits, the blocking drivers and frame functions,
-and `Error`. Public modules: `pair` (pairing), `asynch` (feature `tokio`), `file` and `pem`.
+`Random`, the `Handshake`/`Method` traits, the blocking drivers and frame functions,
+and `Error`. Public modules: `pair` (pairing), `asynch` (feature `tokio`), `file`, `pem` and `prelude`.
+A non-default setting is `coqui_builder::NonDefault { setting, value, default }`, from
+`coqui_builder::non_defaults(&settings)`; `value` and `default` print as `usize(4)`, `Duration(5s)`,
+`Duration(never)`, `unset`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Process-wide state: one counter that keeps
 temporary file names unique. Invitation secrets, PINs and the PIN exchange's keys are zeroed
@@ -72,18 +78,21 @@ pub const MAX_KEY_BYTES: usize = 65536;
 
 ```rust
 pub struct TrustStore;                     // Clone
-// Builds the store: limits(WaitingLimits), ipv6_prefix(u8), when_full(WhenFull), record_interval(Duration),
-// rotation(RotationOptions), clock(Clock), settings(TrustStoreSettings) (replaces all but the clock), build()
-// -> Result<TrustStore, Error>. The last setter wins.
+// Builds the store: state_dir(impl Into<PathBuf>) (required), clock(Clock), waiting(WaitingSettings),
+// rotation(RotationOptions), limits(WaitingLimits), ipv6_prefix(u8), when_full(WhenFull), record_interval(Duration)
+// (the last four set `waiting.*`), fill(Partial<TrustStoreSettings>), fill_from(&mut impl Source), build()
+// -> Result<TrustStore, BuildError<Error>> (Missing names `state_dir`; Failed(Error::Io)). The last write of a key wins.
+// non_defaults() lists the settings, not the directory.
 pub struct TrustStoreBuilder;
+pub struct TrustStoreParts;                 // Debug; what the builder collects
 #[non_exhaustive] pub struct TrustStoreSettings { pub waiting: WaitingSettings, pub rotation: RotationOptions }
 #[non_exhaustive] pub struct WaitingLimits { pub per_source: usize, pub total: usize, pub rerecord: Duration }   // Default: 16, 1000, 60 s
 #[non_exhaustive] pub struct WaitingEntry { pub id: PeerId, pub source: Option<SocketAddr> }
 pub const FORMAT_VERSION: u32 = 1;
 impl TrustStore {
     pub fn open(state_dir: &Path) -> Result<TrustStore, Error>;        // creates <state_dir>/peers/{accepted,waiting}
-    pub fn builder(state_dir: &Path) -> TrustStoreBuilder;           // the same, with settings
-    pub fn settings(&self) -> TrustStoreSettings;  pub fn non_defaults(&self) -> Vec<NonDefault>;
+    pub fn builder() -> TrustStoreBuilder;                           // the same, with settings and the clock
+    pub fn settings(&self) -> TrustStoreSettings;  pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault>;
     pub fn rotation(&self) -> RotationOptions;   pub fn clock(&self) -> &Clock;
     pub fn waiting_queue(self, WaitingSettings) -> TrustStore;        // a new, empty waiting queue; rotation and the clock stay
     pub fn waiting(&self) -> Result<Vec<WaitingEntry>, Error>;
@@ -146,13 +155,15 @@ storage, for a host that keeps waiting entries elsewhere (a table, a database):
 ```rust
 pub struct WaitingQueue;   // Clone, Debug
 // Builds the queue: limits(WaitingLimits), ipv6_prefix(u8; above 128 is 128), when_full(WhenFull),
-// record_interval(Duration; zero is no limit), settings(WaitingSettings) (replaces all), build() -> WaitingQueue.
+// record_interval(Duration; zero is no limit), fill(Partial<WaitingSettings>), fill_from(&mut impl Source),
+// build() -> Result<WaitingQueue, Missing> (nothing is required, so it is always Ok).
 pub struct WaitingQueueBuilder;
+pub struct WaitingQueueParts;               // Debug; what the builder collects
 #[non_exhaustive] pub struct WaitingSettings { pub limits: WaitingLimits, pub ipv6_prefix: u8, pub when_full: WhenFull,
                                                pub record_interval: Duration }   // Default: limits default, 64, Refuse, 1 s
 impl WaitingQueue {
-    pub fn builder(limits: WaitingLimits) -> WaitingQueueBuilder;   // IPv6 grouped by /64, Refuse, 1 s
-    pub fn new(limits: WaitingLimits) -> WaitingQueue;          // builder(limits).build()
+    pub fn builder() -> WaitingQueueBuilder;                    // WaitingSettings::default(): 16 per source, /64, Refuse, 1 s
+    pub fn new(limits: WaitingLimits) -> WaitingQueue;          // builder().limits(limits).build()
     pub fn settings(&self) -> WaitingSettings;
     pub fn when_full(&self) -> WhenFull;  pub fn record_interval(&self) -> Duration;
     pub fn limits(&self) -> WaitingLimits;  pub fn ipv6_prefix(&self) -> u8;
@@ -371,10 +382,11 @@ pub struct PairingCode { pub slot: Option<u8>, pub pin: Pin }  // plain data
 
 pub struct PairingDesk;        // Clone, shared by every connection and the app
 impl PairingDesk {
-    pub fn builder(random: Random) -> PairingDeskBuilder;   // options(PairingOptions), limits(DeskLimits), clock(Clock),
-                                                            // settings(PairingDeskSettings), build() -> Result<_, Error> (InvalidOptions)
-    pub fn new(random: Random) -> PairingDesk;               // builder(random).build() with the defaults
-    pub fn settings(&self) -> PairingDeskSettings;  pub fn non_defaults(&self) -> Vec<NonDefault>;
+    pub fn builder() -> PairingDeskBuilder;                 // random(Random) (required), clock(Clock), options(PairingOptions),
+                                                            // limits(DeskLimits), fill(Partial<PairingDeskSettings>), fill_from(..),
+                                                            // build() -> Result<_, BuildError<Error>> (Failed(InvalidOptions))
+    pub fn new(random: Random) -> PairingDesk;               // builder().random(random).build() with the defaults
+    pub fn settings(&self) -> PairingDeskSettings;  pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault>;
     pub fn options(&self) -> PairingOptions;  pub fn limits(&self) -> DeskLimits;
     pub fn show_pin(&self) -> Result<ShownPin, Error>;    // replaces the shown one
     pub fn shown_pin(&self) -> Option<ShownPin>;  pub fn clear_pin(&self);
@@ -388,19 +400,16 @@ impl PairingDesk {
     pub fn decided(&self, Ticket) -> Decided;    // Future<Output = Decision>
 }
 #[non_exhaustive] pub struct PairingOptions { pub invitation: bool, pub pin: bool, pub pin_shown: bool, pub device: bool,
-    pub pin_alphabet: CodeAlphabet, pub pin_ttl: Duration, pub pin_attempts: u32,
-    pub user_code_alphabet: CodeAlphabet, pub device_ttl: Duration }   // Default: all on, 10 min, 1, 10 min
+    pub pin_alphabet: CodeAlphabet, pub pin_ttl: Option<Duration>, pub pin_attempts: u32,
+    pub user_code_alphabet: CodeAlphabet, pub device_ttl: Option<Duration> }   // Default: all on, Some(10 min), 1, Some(10 min);
+                                                                              // None is the text `never`
 #[non_exhaustive] pub struct DeskLimits { pub pending: usize, pub pending_per_source: usize, pub pin_runs_per_source: usize,
     pub wrong_codes_per_approver: usize, pub approver_window: Duration, pub wrong_codes_total: usize,
     pub ipv6_prefix: u8 }                       // Default: 32, 4, 8, 5, 60 s, 60, 64
 #[non_exhaustive] pub struct PairingDeskSettings { pub options: PairingOptions, pub limits: DeskLimits }
-impl PairingOptions { pub fn check(&self) -> Result<(), Error>; pub fn non_defaults(&self) -> Vec<NonDefault>; }
-impl DeskLimits { pub fn non_defaults(&self) -> Vec<NonDefault>; }
-// NonDefault is the crate root's: coqui_peer::NonDefault { setting, value, default }, NonDefault::new(setting, value, default);
-// NonDefault::of_settings(&T) lists every key of a guatiao settings type that differs from its schema's default, named
-// by key path (`waiting.limits.per_source`), and of_settings_against(&T, &T) against another value;
-// NonDefault::from_difference(&guatiao::schema::Difference) renders one difference (text as text, else compact JSON, a
-// missing side `unset`).
+pub struct PairingDeskParts;                // Debug; what the builder collects
+impl PairingOptions { pub fn check(&self) -> Result<(), Error>; pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault>; }
+impl DeskLimits { pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault>; }
 #[non_exhaustive] pub struct ShownPin { pub pin: Pin, pub expires: SystemTime }
 #[non_exhaustive] pub struct PendingSlot { pub slot: u8, pub peer: PeerId, pub source: Option<SocketAddr>, pub expires: SystemTime }
 #[non_exhaustive] pub struct PendingDevice { pub peer: PeerId, pub source: Option<SocketAddr>, pub label: String, pub expires: SystemTime }
@@ -489,7 +498,7 @@ option that differs from its default, and these are the costs of the looser ones
   holder count as many sources.
 
 Only meaningless values are errors (`InvalidOptions`): an empty alphabet, a repeated or
-control character, length 0, zero TTL or attempts. A TTL of `Duration::MAX` means never; times
+control character, length 0, zero TTL or attempts. A TTL of `None` (the text `never`) means never; times
 saturate instead of overflowing.
 
 **Throttles** (`DeskLimits`). At most `pending` exchanges at once, and `pending_per_source`

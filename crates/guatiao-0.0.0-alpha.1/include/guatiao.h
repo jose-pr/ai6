@@ -3473,6 +3473,41 @@ bool guatiao_alloc_is_wiping(const struct guatiao_alloc *alloc);
 bool guatiao_value_is_sensitive(const struct guatiao_value *value);
 
 /*
+ Writes `value`'s display text, a string value built in `alloc` and moved
+ into `out`, which is written ABSENT first.
+
+ For a report or a log; the text is written and never read back. Its form
+ is JSON-like today and is not a contract: it may change, so nothing may
+ parse it. Today it is one line, with no
+ whitespace, a map in its order, a number as its own text, bytes as a
+ `"data:;base64,..."` string, text with JSON's escapes (only `"`, `\\`
+ and the characters below U+0020 are escaped: U+007F, U+0085 and the
+ other C1 controls, U+2028 and U+2029 are written as they are).
+
+ What JSON cannot say prints as a bare placeholder, never quoted, so the
+ line is valid JSON exactly when none appears: `[sensitive]` for a node
+ or a map key in the wiping allocator (a sensitive key leaves its value
+ visible, since the key is the secret), `absent`, `<unknown tag N>`,
+ `<not utf-8>` for text, a number or a map key that is not UTF-8 (a bad
+ key hides only itself), `<not a number>` for a number whose text is
+ outside JSON's grammar, and `...` for a node nested
+ `GUATIAO_MAX_DEPTH` levels down. None of these is an error. The exact
+ text is stated in `docs/encodings.md`.
+
+ `GUATIAO_ERR_NULL` for a null `value` or `out`. `GUATIAO_ERR_ALLOC` for
+ a null or unusable allocator, and when `alloc` refuses to build the
+ string.
+
+ # Safety
+
+ Every non-null pointer addresses what its type says; `out` addresses
+ writable storage holding nothing the caller still owns.
+ */
+guatiao_status guatiao_value_display(const struct guatiao_value *value,
+                                     const struct guatiao_alloc *alloc,
+                                     struct guatiao_value *out);
+
+/*
  Overwrites with zeros every byte `v`'s tree owns (its texts, numbers,
  bytes and map keys, at any depth, in whatever allocator each lives),
  then frees the tree and leaves `v` null-tagged: how a caller wipes a

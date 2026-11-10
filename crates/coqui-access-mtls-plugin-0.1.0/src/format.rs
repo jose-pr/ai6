@@ -1,13 +1,13 @@
 //! The formats this plugin keeps a file table in.
 
-use coqui_access::guatiao::{FromValue, Schema, ToValue};
 use coqui_access_kit::file::{Codec, CodecError};
+use coqui_builder::Leaf;
 use serde::Serialize;
 use serde::de::DeserializeSeed;
 
 /// How a file source is written: `toml` or `json`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Leaf)]
+#[map(rename_all = "lowercase")]
 pub enum Format {
     /// A TOML document: the records are an array of tables.
     Toml,

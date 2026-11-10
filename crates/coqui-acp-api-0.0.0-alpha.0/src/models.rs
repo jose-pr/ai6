@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 
 use guatiao::{FromValue, Schema, Secret, ToValue};
 
+use crate::account::AccountGrant;
 use crate::environment::Environment;
 use crate::requirement::Requirement;
 use crate::usage::UsageSupport;
@@ -86,6 +87,9 @@ pub struct HarnessInfo {
     /// What usage it reports, and so whether its `initialize` advertises the usage extension.
     #[map(default)]
     pub usage: UsageSupport,
+    /// What the harness does with [`StartRequest::cache_lifetime`], in a sentence for people (the
+    /// variables it sets, say); absent when it has no such control and ignores the hint.
+    pub cache_lifetime: Option<String>,
 }
 
 impl HarnessInfo {
@@ -99,6 +103,7 @@ impl HarnessInfo {
             takes: Takes::new(),
             resumes_wider: false,
             usage: UsageSupport::none(),
+            cache_lifetime: None,
         }
     }
 }
@@ -120,10 +125,29 @@ pub struct StartRequest {
     /// What the connection is held to. A name may come once.
     #[map(default)]
     pub requirements: Vec<Requirement>,
-    /// The host's id for the account the connection runs on, echoed into every usage report of
-    /// the connection and never interpreted. It picks no credentials: those stay in
-    /// `environment`.
-    pub account: Option<String>,
+    /// The account the connection runs on. Its `id` is echoed into every usage report of the
+    /// connection and never interpreted; the provider applies the rest (see [`AccountGrant`]).
+    /// Absent: the environment passes as it is and nothing is cleared.
+    pub account: Option<AccountGrant>,
+    /// How long the model's prompt cache should live, when the harness has such a control.
+    #[map(default)]
+    pub cache_lifetime: CacheLifetime,
+}
+
+/// How long a connection's prompt cache should live: a hint a harness applies when it has a
+/// control for it, and says so in [`HarnessInfo::cache_lifetime`] when it does.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[map(crate = ::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CacheLifetime {
+    /// The harness's own default.
+    #[default]
+    Default,
+    /// The short cache (about five minutes): for one-shot and background runs and loops that wake
+    /// more often than that.
+    Short,
+    /// The long cache (about an hour): for an interactive session while someone is active.
+    Long,
 }
 
 impl StartRequest {
@@ -163,9 +187,15 @@ impl StartRequestBuilder {
         self
     }
 
-    /// The host's id for the account.
-    pub fn account(mut self, account: impl Into<String>) -> Self {
-        self.0.account = Some(account.into());
+    /// The account the connection runs on.
+    pub fn account(mut self, account: AccountGrant) -> Self {
+        self.0.account = Some(account);
+        self
+    }
+
+    /// How long the prompt cache should live.
+    pub const fn cache_lifetime(mut self, lifetime: CacheLifetime) -> Self {
+        self.0.cache_lifetime = lifetime;
         self
     }
 
@@ -273,7 +303,7 @@ impl SessionQuery {
 
 /// A session to seed, for [`AcpHarness::import_session`](crate::AcpHarness::import_session): at the
 /// host's UUID, from a history, so a later connection resumes it by that id.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::guatiao, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SessionImport {
@@ -288,6 +318,9 @@ pub struct SessionImport {
     /// The variables the session's connections will be started with.
     #[map(default)]
     pub environment: Secret<Environment>,
+    /// The account the session's connections will run on, for a harness whose sessions live in
+    /// the account's own directory.
+    pub account: Option<AccountGrant>,
 }
 
 impl SessionImport {
@@ -303,6 +336,7 @@ impl SessionImport {
             working_directory: working_directory.into(),
             history: history.into(),
             environment: Secret::default(),
+            account: None,
         }
     }
 
@@ -312,11 +346,18 @@ impl SessionImport {
         self.environment = Secret::new(environment);
         self
     }
+
+    /// The same import, for the account the session's connections will run on.
+    #[must_use]
+    pub fn account(mut self, account: AccountGrant) -> Self {
+        self.account = Some(account);
+        self
+    }
 }
 
 /// One page of a session's history to export, for
 /// [`AcpHarness::export_session`](crate::AcpHarness::export_session).
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::guatiao, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SessionExport {
@@ -327,6 +368,8 @@ pub struct SessionExport {
     /// The variables its connection was started with.
     #[map(default)]
     pub environment: Secret<Environment>,
+    /// The account its connection ran on.
+    pub account: Option<AccountGrant>,
     /// Where to go on from: the `next` of the page before, as the provider gave it; absent for the
     /// first page.
     pub after: Option<String>,
@@ -363,6 +406,7 @@ impl SessionExport {
             session_id: session_id.into(),
             working_directory: working_directory.into(),
             environment: Secret::default(),
+            account: None,
             after: None,
             max_bytes: DEFAULT_PAGE_BYTES,
         }
@@ -372,6 +416,13 @@ impl SessionExport {
     #[must_use]
     pub fn environment(mut self, environment: Environment) -> Self {
         self.environment = Secret::new(environment);
+        self
+    }
+
+    /// The same export, for the account its connection ran on.
+    #[must_use]
+    pub fn account(mut self, account: AccountGrant) -> Self {
+        self.account = Some(account);
         self
     }
 

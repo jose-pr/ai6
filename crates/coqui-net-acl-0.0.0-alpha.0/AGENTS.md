@@ -7,8 +7,8 @@ source at <https://github.com/Boriken-Dev/coqui-net-acl>.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
-| `serde` | `serde` (`derive`, `std`): `Serialize`/`Deserialize` for `Acl`, `Rule`, `Action`, `IpNet`, `PortRange`, `NonDefault` | the text form | off |
-| `guatiao` | `guatiao` (`derive`): `ToValue`, `FromValue` and `Schema` for `Acl`, `Rule`, `Action` | the value form | off |
+| `serde` | `serde` (`derive`, `std`): `Serialize`/`Deserialize` for `Acl`, `Rule`, `Action`, `IpNet`, `PortRange` | the text form | off |
+| `describe` | `coqui-builder` (`derive`, no default features): `Describe` for `Acl` and `Rule`, `Leaf` for `Action` | reading a list into a `coqui_builder::Partial`, and `coqui_builder::non_defaults` | off |
 
 MSRV Rust 1.89. A default build has no dependencies. Version `0.0.0-alpha.0` is a pre-release;
 the API may change in any release before 1.0.
@@ -48,9 +48,6 @@ impl Rule { pub fn new(action: Action, source: IpNet) -> Rule; }   // no destina
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Acl { pub rules: Vec<Rule>, pub default: Action }    // Default: no rules, Deny
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NonDefault { pub setting: String, pub value: String, pub default: String }
 ```
 
 - `IpNet::contains` is true for `Any`, and for an address of the same family whose first
@@ -76,7 +73,6 @@ impl Acl {
     pub fn canonicalize_fingerprints<E>(&mut self, canonical: impl FnMut(usize, &str) -> Result<String, E>)
         -> Result<(), E>;
     pub fn permits_bind(&self, local: SocketAddr) -> BindDecision;
-    pub fn non_defaults(&self) -> Vec<NonDefault>;
 }
 impl Display for Acl {}
 
@@ -115,8 +111,6 @@ pub struct BindDecision { pub permitted: bool, pub rule_index: Option<usize> }
   on other networks reach), a `Deny` with source `any` and no fingerprint refuses it, and any
   other rule is passed over. With none, `permitted` is `default == Permit` and `rule_index`
   `None`.
-- `non_defaults` lists only a `permit` default: `NonDefault { setting: "acl.default", value:
-  "permit", default: "deny" }`; empty otherwise.
 - `Display` prints a router-style listing, one rule per line numbered in steps of ten, then the
   default: `10 permit 10.6.0.0/16 destination 10.6.20.5 port 7000-7100 fingerprint sha256:ab
   log`, `default deny`, each line ending in `\n`.
@@ -137,16 +131,26 @@ log = true                  # optional; default false
 
 `Acl`, `Rule`, `IpNet` and `PortRange` serialize as above, any serde format; absent optional
 keys are skipped when written. Unknown keys are errors, and so are networks or ports that do
-not parse. `NonDefault` serializes as a plain struct of its three fields. Inside a
+not parse. Inside a
 `coqui-peer-tls` `Policy` the same table is `[acl]` with `[[acl.rule]]` entries.
 
-## Value form (`guatiao` feature)
+## Description (`describe` feature)
 
-`Acl`, `Rule` and `Action` derive guatiao's `ToValue`, `FromValue` and `Schema`, so a host reads them with
-`guatiao-serde` (TOML, JSON, YAML) and describes them with a schema. The document is the one above:
-`default`, then the rules under the key `rule`; `Rule`'s `source`, `destination` and `port` are their text
-forms, and every key of a rule but `action` is optional. Unknown keys are refused. `IpNet` and `PortRange`
-carry no impl of their own: they cross as text wherever a field holds them (`#[map(as_text)]`).
+`Acl` and `Rule` derive `coqui_builder::Describe` and `Action` derives `coqui_builder::Leaf` (`permit` / `deny`), so a host
+reads a list with `toml::from_str::<Partial<Acl>>(text)?.build()` (coqui-builder's `serde` feature) or fills it key by key
+(`rule[0].action`, `default`), and describes it with `Acl::description()`. The document is the one above: `default`,
+then the rules under the key `rule`; `Rule`'s `source`, `destination` and `port` are their text forms, and every key of a rule
+but `action` is optional. Unknown keys are refused. `IpNet` and `PortRange` carry no impl of their own: they cross as text
+wherever a field holds them (`#[map(as_text)]`).
+
+The derive also writes two public setter traits, `AclSetters` (`rules`, `default`) and `RuleSetters` (`action`, `source`,
+`destination`, `port`, `fingerprint`, `log`), one `fn field(self, impl Into<FieldType>) -> Self` per setting (`log` takes a `bool` itself), for a
+builder that holds an `Acl` or a `Rule` (`coqui_builder::builder::Holds`). A setter takes the Rust field name; the key of
+`rules` is `rule`.
+
+What differs from the defaults is `coqui_builder::non_defaults(&acl)`: a `permit` default is the line `default`
+(`Action(permit)` against `Action(deny)`), and a list with rules lists each as one place, `rule[0]`, `rule[1]`.
+
 
 ## Errors
 

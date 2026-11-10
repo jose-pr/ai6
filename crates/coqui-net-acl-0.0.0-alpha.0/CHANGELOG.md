@@ -9,15 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Feature `guatiao`: `Acl`, `Rule` and `Action` derive guatiao's `ToValue`, `FromValue` and `Schema`, in the same
-  document shape as the serde text form (`default`, `[[rule]]`), so a configuration type that holds an `Acl`
-  derives its own without a conversion module.
+- Feature `describe`: `Acl` and `Rule` derive `coqui_builder::Describe` and `Action` derives `coqui_builder::Leaf`, in the same
+  document shape as the serde text form (`default`, `[[rule]]`). A list is read with
+  `toml::from_str::<Partial<Acl>>(text)?.build()`, and `coqui_builder::non_defaults(&acl)` lists what differs from the
+  defaults. The dependency is `coqui-builder` without its default features.
+- `AclSetters` and `RuleSetters` (feature `describe`): the setter traits the derive writes for `Acl` and `Rule`. `RuleSetters::log` takes a `bool` itself; the other setters take `impl Into<FieldType>`.
 
-### Changed
+### Removed
 
-- **Breaking: a weakening is a non-default setting.** `Weakening { setting, value, strict }` is now
-  `NonDefault { setting, value, default }` and `Acl::weakened` is `Acl::non_defaults`. The old names are
-  gone; nothing keeps an alias before a release without a pre-release tag.
+- `Weakening` and `Acl::weakened` (of the first pre-release), and `NonDefault` and `Acl::non_defaults`: use `coqui_builder::non_defaults(&acl)` (feature `describe`). Its lines name
+  each value with its type (`Action(permit)`), and a list with rules lists each rule as `rule[0]`.
+- Feature `guatiao`, and the `guatiao` and `guatiao-serde` dependencies: the feature is `describe`.
 
 ## [0.0.0-alpha.0] - 2026-10-27
 

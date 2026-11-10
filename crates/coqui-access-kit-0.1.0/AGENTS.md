@@ -10,7 +10,7 @@ source at <https://github.com/Boriken-Dev/coqui-access>.
 | `file` | module `file`: `FileTable`, `Codec`, `Source`, private writes; `serde` and `guatiao-serde` with no format feature | no |
 | `cache` | module `cache`: `Cached`, `CacheOptions`, `CacheSetting`; `moka` (`sync` only) | no |
 
-MSRV Rust 1.89. A default build depends on `coqui-access` (for guatiao), `argon2`, `data-encoding`,
+MSRV Rust 1.89. A default build depends on `coqui-access` (for guatiao), `coqui-builder`, `argon2`, `data-encoding`,
 `getrandom`, `sha2` and `subtle`. No feature adds a format crate: a caller supplies its own codec. No
 `unsafe` code. Public modules: `table`, `hash`, `secret`, `file` (feature `file`); the main
 items of the first three are re-exported at the root. Table errors are `SourceError`; codecs
@@ -42,7 +42,7 @@ pub fn is_hash(value: &str) -> bool;
 ```rust
 pub const IP_FIELD: &str = "san.ip"; pub const DNS_IP_FIELD: &str = "san.dns.ip";
 pub struct Pick { pub field: String, pub by: String, pub domain: Option<String>, pub ip_in_dns: bool }
-    // non_exhaustive; guatiao derives, ip_in_dns defaulting to true
+    // non_exhaustive; coqui_builder::Describe, ip_in_dns defaulting to true
 impl Pick { pub fn new(field, by) -> Self; pub fn domain(self, impl Into<String>) -> Self; pub fn ip_in_dns(self, bool) -> Self; }
 pub enum Picked { Absent, Ambiguous, Found { by: String, value: String } }   // non_exhaustive
 pub fn pick(fields: &BTreeMap<String, Vec<String>>, order: &[Pick]) -> Picked;
@@ -62,7 +62,7 @@ pub fn pick(fields: &BTreeMap<String, Vec<String>>, order: &[Pick]) -> Picked;
 ```rust
 pub struct RecordLimits { pub groups: Limit, pub field_bytes: Limit, pub email_bytes: Limit,
                           pub display_name_bytes: Limit }
-    // non_exhaustive, Copy; guatiao derives (each key defaulting); Default = DEFAULT
+    // non_exhaustive, Copy; coqui_builder::Describe (each key defaulting; a bound is a count or `none`); Default = DEFAULT
 impl RecordLimits {
     pub const DEFAULT: Self;     // 256 groups, 256-byte id/name/group, 320-byte email, 1 024-byte display name
     pub const UNBOUNDED: Self;
@@ -82,7 +82,7 @@ impl RecordLimits {
 pub const DEFAULT_TTL: Duration = 5 s; pub const DEFAULT_NEGATIVE_TTL: Duration = 1 s;
 pub const DEFAULT_MAX_ENTRIES: u64 = 10_000;
 pub struct CacheOptions { pub ttl: Duration, pub negative_ttl: Duration, pub max_entries: u64 }
-    // non_exhaustive, Copy; guatiao derives (durations as seconds, each key defaulting)
+    // non_exhaustive, Copy; coqui_builder::Describe (a duration reads `5`, `1.5`, `5s`, `250ms`; each key defaulting)
 impl CacheOptions {
     pub const fn off() -> Self;                         // keeps nothing
     pub const fn ttl(self, Duration) -> Self; pub const fn negative_ttl(self, Duration) -> Self;
@@ -90,7 +90,7 @@ impl CacheOptions {
     pub fn exceeds_default(&self) -> bool;              // a ttl above the defaults: report it
 }
 impl Default for CacheOptions;                          // 5 s, 1 s, 10 000
-pub enum CacheSetting { Enabled(bool), Tuned(CacheOptions) }   // untagged: true | false | {..}; Default Enabled(true)
+pub enum CacheSetting { Enabled(bool), Tuned(CacheOptions) }   // coqui_builder::Describe, untagged: `cache = true`, `false` or a table; in the environment `APP_CACHE=false` or `APP_CACHE__TTL=30s` (not both); Default Enabled(true)
 impl CacheSetting { pub fn options(&self) -> CacheOptions; }
 pub struct Cached<T: ?Sized>;                           // Debug: options and counts only
 impl<T: ?Sized> Cached<T> {
@@ -129,8 +129,8 @@ impl<T, C> FileTable<T, C> {
     pub fn path(&self) -> &Path;
 }
 impl<T: Keyed + Clone + Send + Walk + FromWalk, C: Codec> Table<T> for FileTable<T, C>;
-pub struct Source<F> { pub file: Option<FileSource<F>> }             // guatiao derives
-pub struct FileSource<F> { pub path: String, pub format: F }         // guatiao derives; format required
+pub struct Source<F> { pub file: Option<FileSource<F>> }             // coqui_builder::Describe, F: Describe
+pub struct FileSource<F> { pub path: String, pub format: F }         // coqui_builder::Describe; format required
 impl<F> Source<F> {
     pub fn file(path: impl Into<String>, format: F) -> Self;
     pub fn sibling(&self, suffix: &str) -> Self where F: Clone;      // "<path>.<suffix>", same format
@@ -212,11 +212,11 @@ pub fn unix_now() -> i64;                                    // whole seconds si
 
 ```rust
 pub const DEFAULT_MAX_PASSWORD_BYTES: Limit = Limit::at(4096);   // coqui_access::Limit
-pub struct Argon2Params;                // Copy, FromValue, ToValue, Schema; Default = 19456 KiB, 2 passes, 1 lane
+pub struct Argon2Params;                // Copy, coqui_builder::Describe; Default = 19456 KiB, 2 passes, 1 lane
 impl Argon2Params { pub fn new(memory_kib: u32, iterations: u32, parallelism: u32) -> Result<Self, String>;
                     pub fn memory_kib(&self) -> u32; pub fn iterations(&self) -> u32; pub fn parallelism(&self) -> u32; }
 pub enum KeyHash { Sha256 /* default */, Argon2id(Argon2Params) }          // non_exhaustive
-// FromValue/ToValue/Schema, tagged: { "algorithm": "sha256" } | { "algorithm": "argon2id", <Argon2Params keys> }
+// coqui_builder::Describe, tagged: { "algorithm": "sha256" } | { "algorithm": "argon2id", <Argon2Params keys> }
 impl KeyHash { pub fn argon2id() -> Self; pub fn hash(&self, secret: &str) -> Result<String, String>; }
 pub fn verify_key(stored: &str, presented: &[u8]) -> bool;
 pub fn is_key_hash(stored: &str) -> bool;
@@ -241,10 +241,9 @@ pub fn is_password_hash(stored: &str) -> bool;
 - `Argon2Params::new` rejects what Argon2 refuses (memory under 8 KiB per lane, zero counts).
   Stored hashes verify with the costs they carry.
 - As configuration `Argon2Params` is `{ memory_kib, iterations, parallelism }`, every key
-  optional with the default above (the schema says so). Like every configuration a host
-  validates against its schema first, reading ignores a key it does not know.
-  `FromValue` checks the combination: one Argon2 refuses is `MapError::BadValue` with
-  `argon2 parameters are out of range`, the words `new` returns.
+  optional with the default above. Reading does not check the combination: one Argon2 refuses
+  is found by `new`, `PasswordHasher::new` and `KeyHash::hash`, with `argon2 parameters are out of
+  range`.
 - `PasswordHasher::new` makes a dummy hash with the same costs; `verify(None, ..)` does the
   same work and answers `false`, so an unknown name costs what a wrong password does.
   `hash` rejects empty and over-long passwords; `verify_password` ignores them.

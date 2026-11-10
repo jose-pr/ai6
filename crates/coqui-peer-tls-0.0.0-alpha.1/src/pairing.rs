@@ -18,12 +18,14 @@ use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, ServerConfig, ServerConnection, StreamOwned};
 
 use crate::certificate::certificate_key;
-use crate::config::{ClientAuth, ClientBuilder, ServerBuilder, crypto_provider};
+use crate::config::{ClientAuth, ClientBuilder, ServerBuilder, crypto_provider, failed};
 use crate::error::PeerError;
 use crate::identity::{Identity, PeerIdentity};
 use crate::policy::Policy;
+use crate::settings::Alpn;
 use crate::stream::{PeerAddr, SERVER_NAME, accept_from_as, dial_named};
 use crate::trust::{Pins, Trust};
+use coqui_builder::Describe;
 
 /// The default ALPN of a pairing connection.
 pub const PAIR_ALPN: &[u8] = b"coqui-pair/1";
@@ -35,10 +37,10 @@ pub const EXPORTER_LABEL: &[u8] = b"EXPORTER-coqui-pair";
 /// The TLS side of pairing: the device's own [`Policy`] and the ALPN that marks a pairing
 /// connection. Nothing here sets a TLS version or suite; the policy does.
 ///
-/// Plain data: start from [`Default`] and assign the fields. It is a guatiao value, the type a
-/// file or a form fills (`alpn` as text, `timeout` as a number of seconds, `[secs, nanos]` or
-/// `{secs, nanos}`), and `#[non_exhaustive]`.
-#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+/// Plain data: start from [`Default`] and assign the fields. The type is [`Describe`], the one a
+/// file or a form fills through a `coqui_builder::Partial` (`alpn` as text, `timeout` as a
+/// duration such as `30` or `15m`, or `never`), and `#[non_exhaustive]`.
+#[derive(Debug, Clone, PartialEq, Eq, Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PairConfig {
@@ -48,23 +50,28 @@ pub struct PairConfig {
     /// The pairing ALPN; only a connection that negotiated it carries a pairing exchange, and
     /// only the configurations built here admit a key-proven certificate nobody trusts yet.
     /// Default [`PAIR_ALPN`].
-    #[map(default = PAIR_ALPN.to_vec(), with = crate::settings::alpn_text)]
-    pub alpn: Vec<u8>,
+    #[map(default = pair_alpn())]
+    pub alpn: Alpn,
     /// How long one side's whole exchange may take, the TLS handshake included: the joiner's
-    /// dial and finish together, the responder's accept. `Duration::MAX` waits forever. Default
-    /// 15 minutes, longer than the default `device_ttl` an operator has to approve.
-    #[map(default = DEFAULT_TIMEOUT)]
-    pub timeout: Duration,
+    /// dial and finish together, the responder's accept. `None` (the text `never`) waits
+    /// forever. Default 15 minutes, longer than the default `device_ttl` an operator has to
+    /// approve.
+    #[map(default = Some(DEFAULT_TIMEOUT), none = "never")]
+    pub timeout: Option<Duration>,
 }
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+fn pair_alpn() -> Alpn {
+    Alpn::try_from(PAIR_ALPN).expect("the pairing ALPN is text of 1 to 255 bytes")
+}
 
 impl Default for PairConfig {
     fn default() -> Self {
         Self {
             policy: Policy::default(),
-            alpn: PAIR_ALPN.to_vec(),
-            timeout: DEFAULT_TIMEOUT,
+            alpn: pair_alpn(),
+            timeout: Some(DEFAULT_TIMEOUT),
         }
     }
 }
@@ -126,13 +133,14 @@ pub fn pair_server_config(
     identity: &Identity,
     config: &PairConfig,
 ) -> Result<ServerConfig, PeerError> {
-    Ok(
-        ServerBuilder::new(identity, ClientAuth::Required(Trust::AnyWithKeyProof))
-            .alpn([&config.alpn])
-            .policy(config.policy.clone())
-            .build()?
-            .config,
-    )
+    Ok(ServerBuilder::new()
+        .identity(identity)
+        .client_auth(ClientAuth::Required(Trust::AnyWithKeyProof))
+        .alpn([config.alpn.clone()])
+        .policy(config.policy.clone())
+        .build()
+        .map_err(failed)?
+        .config)
 }
 
 /// The client configuration of a pairing connection for `pairing`: an invitation pins the
@@ -163,11 +171,13 @@ pub fn pair_client_config(
         Some(name) => name,
         None => ServerName::try_from(SERVER_NAME).map_err(|_| PeerError::Tls)?,
     };
-    let built = ClientBuilder::new(trust)
+    let built = ClientBuilder::new()
+        .server(trust)
         .identity(identity)
-        .alpn([&config.alpn])
+        .alpn([config.alpn.clone()])
         .policy(config.policy.clone())
-        .build()?;
+        .build()
+        .map_err(failed)?;
     Ok((built.config, name))
 }
 
@@ -198,9 +208,10 @@ pub(crate) fn channel(
     })
 }
 
-/// The instant `timeout` from now; `None` when it is too far to represent, which waits forever.
-pub(crate) fn ends(timeout: Duration) -> Option<Instant> {
-    Instant::now().checked_add(timeout)
+/// The instant `timeout` from now; `None` when there is no timeout or it is too far to represent,
+/// which waits forever.
+pub(crate) fn ends(timeout: Option<Duration>) -> Option<Instant> {
+    timeout.and_then(|timeout| Instant::now().checked_add(timeout))
 }
 
 /// The time left until `until`, at least a millisecond (a zero read timeout is an error).
@@ -331,7 +342,14 @@ pub fn pair_dial<S: Read + Write + ReadTimeout + WriteTimeout>(
         .conn
         .export_keying_material([0u8; 32], EXPORTER_LABEL, Some(&[]))
         .map_err(|_| PeerError::Tls)?;
-    let channel = channel(&tls.conn, exporter, identity, &peer, verified, &config.alpn)?;
+    let channel = channel(
+        &tls.conn,
+        exporter,
+        identity,
+        &peer,
+        verified,
+        config.alpn.as_bytes(),
+    )?;
     let mut dial = PairDial {
         tls,
         joiner: pairing.join(channel)?,
@@ -387,7 +405,14 @@ fn pair_accept_as<S: Read + Write + ReadTimeout + WriteTimeout>(
         .conn
         .export_keying_material([0u8; 32], EXPORTER_LABEL, Some(&[]))
         .map_err(|_| PeerError::Tls)?;
-    let channel = channel(&tls.conn, exporter, identity, &peer, false, &config.alpn)?;
+    let channel = channel(
+        &tls.conn,
+        exporter,
+        identity,
+        &peer,
+        false,
+        config.alpn.as_bytes(),
+    )?;
     let mut responder = PairingResponder::new(channel, store, desk, source);
     let result = respond(&mut tls, &mut responder, desk, until);
     tls.conn.send_close_notify();

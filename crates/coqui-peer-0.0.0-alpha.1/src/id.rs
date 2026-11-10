@@ -13,19 +13,7 @@ use crate::error::Error;
 /// elsewhere can be read; whether a method accepts them is its own allow-list (a list of
 /// `Digest` values). MD5 is not supported at all. Methods whose keys are named by another
 /// algorithm add variants here, which is why the enum is non-exhaustive.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    guatiao::ToValue,
-    guatiao::FromValue,
-    guatiao::Schema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, coqui_builder::Leaf)]
 #[map(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Digest {

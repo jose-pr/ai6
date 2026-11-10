@@ -3,7 +3,8 @@ use alloc::sync::Arc;
 use core::fmt;
 use core::net::SocketAddr;
 
-use coqui_peer::{Established, Framing, Handshake, KeyMaterial, Method, NonDefault, Random};
+use coqui_builder::{Datum, NonDefault, Shown};
+use coqui_peer::{Established, Framing, Handshake, KeyMaterial, Method, Random};
 use p256::SecretKey;
 use zeroize::Zeroizing;
 
@@ -38,23 +39,16 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    pub(crate) fn new(identity: Identity) -> Self {
-        Self {
-            identity,
-            responders: None,
-            initiators: None,
-            settings: WebCryptoSettings::default(),
-            random: crate::random(),
-            random_replaced: false,
-        }
-    }
-
-    pub(crate) fn non_defaults(&self) -> Vec<NonDefault> {
-        let mut non_defaults = NonDefault::of_settings(&self.settings);
-        if self.random_replaced {
-            non_defaults.push(NonDefault::new("random", "caller's", "operating system's"));
-        }
-        non_defaults
+    /// The entry for a random source the caller replaced; the settings' own come from
+    /// [`coqui_builder::non_defaults`].
+    pub(crate) fn random_entry(&self) -> Option<NonDefault> {
+        self.random_replaced.then(|| {
+            NonDefault::new(
+                "random",
+                Shown::One(Datum::new("Random", "caller's")),
+                Shown::One(Datum::new("Random", "operating system's")),
+            )
+        })
     }
 }
 
@@ -64,14 +58,16 @@ impl Config {
 /// use coqui_peer::{Handshake, Method};
 /// use coqui_peer_webcrypto::{Identity, Trust, WebCrypto};
 ///
-/// # fn main() -> Result<(), coqui_peer_webcrypto::Error> {
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let (dialer, listener) = (Identity::generate()?, Identity::generate()?);
-/// let client = WebCrypto::builder(dialer.clone())
+/// let client = WebCrypto::builder()
+///     .identity(dialer.clone())
 ///     .responders(Trust::pinned([listener.peer_id()]))
-///     .build();
-/// let server = WebCrypto::builder(listener)
+///     .build()?;
+/// let server = WebCrypto::builder()
+///     .identity(listener)
 ///     .initiators(Trust::pinned([dialer.peer_id()]))
-///     .build();
+///     .build()?;
 ///
 /// let (mut dialing, mut listening) = (client.initiate()?, server.respond(None)?);
 /// while !(dialing.is_complete() && listening.is_complete()) {
@@ -95,67 +91,45 @@ impl Config {
 #[derive(Clone)]
 pub struct WebCrypto(Arc<Config>);
 
-/// Builds a [`WebCrypto`]: [`WebCrypto::builder`], the settings, then [`build`](Self::build).
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct WebCryptoBuilder(Config);
-
-impl WebCryptoBuilder {
+/// What a [`WebCryptoBuilder`] collects: the settings, the identity and whom each role admits.
+///
+/// Build the method with [`WebCrypto::builder`]; the settings' setters (`max_message`,
+/// `session_limit`) are methods of the builder, and `fill` layers a `Partial<WebCryptoSettings>`
+/// or a source over them.
+#[derive(coqui_builder::Builder, Debug)]
+#[builder(build = WebCrypto)]
+pub struct WebCryptoParts {
+    settings: WebCryptoSettings,
+    /// Whose key the method proves; required.
+    #[builder(input)]
+    identity: Identity,
     /// Whom [`initiate`](Method::initiate) admits as the responder.
-    pub fn responders(mut self, trust: Trust) -> Self {
-        self.0.responders = Some(Admit::Trust(trust));
-        self
-    }
-
+    #[builder(input)]
+    responders: Option<Trust>,
     /// Whom [`respond`](Method::respond) admits as the initiator.
-    pub fn initiators(mut self, trust: Trust) -> Self {
-        self.0.initiators = Some(Admit::Trust(trust));
-        self
-    }
-
-    /// The longest handshake message accepted; see [`WebCryptoSettings::max_message`].
-    pub fn max_message(mut self, bytes: usize) -> Self {
-        self.0.settings.max_message = bytes;
-        self
-    }
-
-    /// What each direction of a session may carry; see [`WebCryptoSettings::session_limit`].
-    pub fn session_limit(mut self, bytes: u64) -> Self {
-        self.0.settings.session_limit = bytes;
-        self
-    }
-
+    #[builder(input)]
+    initiators: Option<Trust>,
     /// Where nonces and ephemeral keys come from; the operating system by default. It must be
     /// cryptographically secure: a repeated ephemeral key or nonce breaks the session it is used
     /// for. A fixed source is for test vectors. It is reported by [`WebCrypto::non_defaults`].
-    pub fn random(mut self, random: Random) -> Self {
-        self.0.random = random;
-        self.0.random_replaced = true;
-        self
-    }
+    #[builder(input)]
+    random: Option<Random>,
+}
 
-    /// The message and session limits from `settings`. Replaces what
-    /// [`max_message`](Self::max_message) and [`session_limit`](Self::session_limit) set before,
-    /// and is replaced by what they set after it.
-    pub fn settings(mut self, settings: WebCryptoSettings) -> Self {
-        self.0.settings = settings;
-        self
-    }
-
-    /// The method.
-    pub fn build(self) -> WebCrypto {
-        WebCrypto(Arc::new(self.0))
+impl From<WebCryptoParts> for WebCrypto {
+    fn from(parts: WebCryptoParts) -> Self {
+        Self(Arc::new(Config {
+            identity: parts.identity,
+            responders: parts.responders.map(Admit::Trust),
+            initiators: parts.initiators.map(Admit::Trust),
+            settings: parts.settings,
+            random_replaced: parts.random.is_some(),
+            random: parts.random.unwrap_or_else(crate::random),
+        }))
     }
 }
 
 impl WebCrypto {
-    /// A builder for a method for `identity`, configured for neither role until
-    /// [`responders`](WebCryptoBuilder::responders) or
-    /// [`initiators`](WebCryptoBuilder::initiators).
-    pub fn builder(identity: Identity) -> WebCryptoBuilder {
-        WebCryptoBuilder(Config::new(identity))
-    }
-
     /// This method's identity.
     #[must_use]
     pub fn identity(&self) -> &Identity {
@@ -172,7 +146,9 @@ impl WebCrypto {
     /// nonces and ephemeral keys do not come from the operating system.
     #[must_use]
     pub fn non_defaults(&self) -> Vec<NonDefault> {
-        self.0.non_defaults()
+        let mut found = coqui_builder::non_defaults(&self.0.settings);
+        found.extend(self.0.random_entry());
+        found
     }
 }
 

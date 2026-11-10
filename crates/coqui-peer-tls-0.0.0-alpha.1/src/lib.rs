@@ -27,6 +27,7 @@ mod handshake;
 mod identity;
 mod pairing;
 mod policy;
+pub mod prelude;
 mod profiles;
 mod roots;
 mod settings;
@@ -36,11 +37,14 @@ mod trust;
 mod x509;
 
 pub use certificate::{METHOD, TrustStoreExt, certificate_key};
-pub use config::{Built, ClientAuth, ClientBuilder, ServerAuth, ServerBuilder, crypto_provider};
+pub use config::{
+    Built, ClientAuth, ClientBuilder, ClientParts, ServerAuth, ServerBuilder, ServerParts,
+    crypto_provider,
+};
 pub use connection::{ConnectionConfig, ServerConfigs};
+pub use coqui_builder::NonDefault;
 #[cfg(feature = "acl")]
 pub use coqui_net_acl as acl;
-pub use coqui_peer::NonDefault;
 pub use coqui_peer::pair;
 pub use coqui_peer::{
     Clock, Digest, Invitation, InvitationOptions, KeyMaterial, PeerId, Random, ReadTimeout,
@@ -60,7 +64,7 @@ pub use pairing::{
 pub use policy::{Policy, TlsVersion};
 pub use profiles::{CipherProfile, Crypto};
 pub use roots::Roots;
-pub use settings::TlsSettings;
+pub use settings::{Alpn, TlsSettings};
 pub use source::with_addresses;
 pub use stream::{Addressed, PeerAddr, SERVER_NAME, accept, default_server_name, dial, dial_named};
 #[cfg(feature = "ca")]

@@ -7,7 +7,7 @@ source at <https://github.com/Boriken-Dev/coqui-access>.
 
 Client certificates as accounts: pinned by fingerprint in a table (the peers a service
 pairs with), signed by a CA, or either. MSRV Rust 1.89. No Cargo features. Depends on
-`coqui-access`, `coqui-access-kit`, `coqui-peer` (the waiting queue) and `coqui-peer-tls`
+`coqui-access`, `coqui-access-kit`, `coqui-builder` (`TrustMode`), `coqui-peer` (the waiting queue) and `coqui-peer-tls`
 (feature `ca`: fingerprints, chain checks, certificate fields). The record types derive
 guatiao's `ToValue`, `FromValue` and `Schema`, so any table keeps them. No `unsafe` code. It
 reads no environment variable, and no file but a configured `ca_file`. The loadable library
@@ -16,7 +16,7 @@ is the separate crate `coqui-access-mtls-plugin` (id `coqui_access_mtls`).
 ```rust
 pub const DEFAULT_MAX_RECORDS: usize = 10_000;
 pub const DEFAULT_MAX_CHAIN: Limit = Limit::at(8);
-pub enum TrustMode { Pinned /* default */, Ca, PinnedOrCa }    // guatiao: "pinned" | "ca" | "pinned-or-ca"
+pub enum TrustMode { Pinned /* default */, Ca, PinnedOrCa }    // coqui_builder::Leaf: "pinned" | "ca" | "pinned-or-ca"
 pub fn default_account() -> Vec<Pick>;                        // [fingerprint by certificate]
 pub fn default_waiting_limits() -> coqui_peer::WaitingLimits;   // per_source 1, total 16, rerecord 60 s
 pub const DEFAULT_WAITING_PER_SOURCE: usize = 1;  pub const DEFAULT_WAITING_TOTAL: usize = 16;  pub const DEFAULT_WAITING_RERECORD: Duration = 60 s;

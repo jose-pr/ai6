@@ -302,6 +302,27 @@ impl CodexSession {
         read
     }
 
+    /// Lists the models with no thread and no turn: starts `codex app-server` as `launch` says, initializes it, asks
+    /// `model/list` page by page, and ends it. `None` when Codex listed none at all.
+    ///
+    /// # Errors
+    ///
+    /// As [`CodexSession::start`] up to the handshake. A failed `model/list` is no error: nothing is listed.
+    pub fn read_models(
+        launch: &CodexLaunch,
+        spawn: &dyn Spawn,
+        settings: CodexSettings,
+    ) -> Result<Option<Vec<Model>>, Error> {
+        let mut session = Self::connect(launch, spawn, settings, |_| true)?;
+        let handshake = session.handshake(launch);
+        if handshake.is_ok() {
+            session.list_models();
+        }
+        let models = session.models.clone();
+        session.close();
+        handshake.map(|()| models)
+    }
+
     /// Starts the process and its readers, with no request made yet.
     fn connect(
         launch: &CodexLaunch,

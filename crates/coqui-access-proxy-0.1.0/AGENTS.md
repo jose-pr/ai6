@@ -5,26 +5,26 @@ signature, contract and gotchas, so the crate can be used without reading its so
 ships inside the package and is self-contained. Development documentation lives with the
 source at <https://github.com/Boriken-Dev/coqui-access>.
 
-MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`, `coqui-access-kit` (picks), `coqui-net-acl` (address lists),
+MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`, `coqui-builder`, `guatiao-builder`, `coqui-access-kit` (picks), `coqui-net-acl` (address lists),
 `coqui-peer-tls` (feature `fields`: certificate fields), `data-encoding`, `percent-encoding` and
 `rustls-pki-types` (PEM). No `unsafe` code. The
 loadable library is the separate crate `coqui-access-proxy-plugin`.
 
 ```rust
-pub struct ProxyWordConfig {
+pub struct ProxyWordConfig {               // coqui_builder::Describe; the provider config is guatiao_builder::Described<ProxyWordConfig>
     pub trusted: Vec<String>,            // addresses and CIDR networks (coqui-net-acl IpNet); empty trusts nobody; `any` refused
     pub user_header: Option<String>,     // account name header
     pub certificate_header: Option<String>,          // the client certificate the proxy verified
     pub certificate_encoding: CertificateEncoding,   // default PemUrl
     pub subject_header: Option<String>,  // client-certificate subject header
     pub account: Vec<Pick>,              // default default_account(): subject.cn by name
-    pub max_certificate_bytes: Limit,    // default 16 384
+    pub max_certificate_bytes: Limit,    // default 16 384; a count or `none`
 }                                        // non_exhaustive; Default = an empty configuration
-pub enum CertificateEncoding { PemUrl /* default */, DerBase64, Xfcc }   // "pem-url" | "der-base64" | "xfcc"
+pub enum CertificateEncoding { PemUrl /* default */, DerBase64, Xfcc }   // coqui_builder::Leaf: "pem-url" | "der-base64" | "xfcc"
 pub const DEFAULT_MAX_CERTIFICATE_BYTES: Limit;
 pub fn default_account() -> Vec<Pick>;
 pub struct ProxyWord;                    // provider id "coqui_access_proxy", kind Authenticator
-impl ProxyWord { pub fn new(config: ProxyWordConfig) -> Result<Self, String>; }
+impl ProxyWord { pub fn new(config: ProxyWordConfig) -> Result<Self, String>; }   // also TryFrom<ProxyWordConfig> and TryFrom<Described<ProxyWordConfig>>
 pub fn field_of(subject: &str, field: &str) -> Option<String>;
 ```
 

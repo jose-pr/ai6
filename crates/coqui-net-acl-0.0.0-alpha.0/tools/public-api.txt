@@ -31,7 +31,6 @@ pub fn coqui_net_acl::Acl::canonicalize_fingerprints<E>(&mut self, impl core::op
 pub fn coqui_net_acl::Acl::decide(&self, core::net::socket_addr::SocketAddr, core::net::socket_addr::SocketAddr) -> coqui_net_acl::AclDecision
 pub fn coqui_net_acl::Acl::decide_anonymous(&self, core::net::socket_addr::SocketAddr, core::net::socket_addr::SocketAddr) -> coqui_net_acl::AclDecision
 pub fn coqui_net_acl::Acl::decide_peer(&self, core::net::socket_addr::SocketAddr, core::net::socket_addr::SocketAddr, &str) -> coqui_net_acl::AclDecision
-pub fn coqui_net_acl::Acl::non_defaults(&self) -> alloc::vec::Vec<coqui_net_acl::NonDefault>
 pub fn coqui_net_acl::Acl::permits_bind(&self, core::net::socket_addr::SocketAddr) -> coqui_net_acl::BindDecision
 pub fn coqui_net_acl::Acl::prepend(&mut self, coqui_net_acl::Rule)
 pub fn coqui_net_acl::Acl::push(&mut self, coqui_net_acl::Rule)
@@ -50,10 +49,6 @@ pub fn coqui_net_acl::AclDecision::proceeds(&self) -> bool
 pub struct coqui_net_acl::BindDecision
 pub coqui_net_acl::BindDecision::permitted: bool
 pub coqui_net_acl::BindDecision::rule_index: core::option::Option<usize>
-pub struct coqui_net_acl::NonDefault
-pub coqui_net_acl::NonDefault::default: alloc::string::String
-pub coqui_net_acl::NonDefault::setting: alloc::string::String
-pub coqui_net_acl::NonDefault::value: alloc::string::String
 pub struct coqui_net_acl::ParseError(_)
 impl core::error::Error for coqui_net_acl::ParseError
 impl core::fmt::Display for coqui_net_acl::ParseError
@@ -83,3 +78,13 @@ impl serde_core::ser::Serialize for coqui_net_acl::Rule
 pub fn coqui_net_acl::Rule::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for coqui_net_acl::Rule
 pub fn coqui_net_acl::Rule::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub trait coqui_net_acl::AclSetters: coqui_builder::builder::Holds<coqui_net_acl::Acl> + core::marker::Sized
+pub fn coqui_net_acl::AclSetters::default(self, impl core::convert::Into<coqui_net_acl::Action>) -> Self
+pub fn coqui_net_acl::AclSetters::rules(self, impl core::convert::Into<alloc::vec::Vec<coqui_net_acl::Rule>>) -> Self
+pub trait coqui_net_acl::RuleSetters: coqui_builder::builder::Holds<coqui_net_acl::Rule> + core::marker::Sized
+pub fn coqui_net_acl::RuleSetters::action(self, impl core::convert::Into<coqui_net_acl::Action>) -> Self
+pub fn coqui_net_acl::RuleSetters::destination(self, impl core::convert::Into<core::option::Option<coqui_net_acl::IpNet>>) -> Self
+pub fn coqui_net_acl::RuleSetters::fingerprint(self, impl core::convert::Into<core::option::Option<alloc::string::String>>) -> Self
+pub fn coqui_net_acl::RuleSetters::log(self, bool) -> Self
+pub fn coqui_net_acl::RuleSetters::port(self, impl core::convert::Into<core::option::Option<coqui_net_acl::PortRange>>) -> Self
+pub fn coqui_net_acl::RuleSetters::source(self, impl core::convert::Into<coqui_net_acl::IpNet>) -> Self

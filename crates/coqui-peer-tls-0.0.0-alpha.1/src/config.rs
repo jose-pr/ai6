@@ -17,7 +17,8 @@ use crate::identity::Identity;
 use crate::policy::Policy;
 use crate::settings::TlsSettings;
 use crate::trust::{PeerServerVerifier, Trust};
-use coqui_peer::NonDefault;
+use coqui_builder::builder::BuildError;
+use coqui_builder::{Builder, Configured};
 
 /// rustls's ring provider with its defaults. The configurations built here take the provider a
 /// [`Policy`] selects ([`Policy::crypto_provider`]); nothing in this crate installs a
@@ -26,15 +27,19 @@ pub fn crypto_provider() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
-/// A built configuration and the settings of its [`Policy`] that differ from the default
-/// policy's, so a host can surface them. Nothing is printed by this crate.
-#[derive(Debug)]
+/// A built configuration and the [`Policy`] it was built under, so a host can surface the
+/// settings that differ from the default policy's with [`non_defaults`](Self::non_defaults).
+/// Nothing is printed by this crate.
+#[derive(Debug, Configured)]
 #[non_exhaustive]
 pub struct Built<T> {
     /// The configuration.
     pub config: T,
-    /// Every setting that differs from the default policy's; empty under the default policy.
-    pub non_defaults: Vec<NonDefault>,
+    /// The policy the configuration was built under. Its settings that differ from the default
+    /// policy's are `non_defaults()`, named as [`Policy::non_defaults`] names them
+    /// (`tls_versions`); empty under the default policy.
+    #[configured]
+    pub policy: Policy,
 }
 
 /// How a server treats the client's certificate.
@@ -102,69 +107,30 @@ impl fmt::Debug for ServerAuth {
     }
 }
 
-/// Builds a server configuration, or the configurations of a listener, that presents an
-/// identity: [`ServerBuilder::new`], the settings, then [`build`](Self::build).
+/// What a [`ServerBuilder`] collects: the [`TlsSettings`] and the two inputs, the identity to
+/// present and how client certificates are treated. Start with [`ServerBuilder::new`].
 ///
 /// Session resumption is off unless [`Policy::allow_resumption`] is set, which then keeps
 /// rustls's default session cache and TLS 1.3 tickets. A policy's access control list reads each
 /// connection's addresses from the scope this crate's accept helpers set
 /// ([`accept`](crate::accept), [`with_addresses`](crate::with_addresses)); a host whose
-/// connections reach rustls another way (quinn) takes [`configs`](Self::configs).
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct ServerBuilder<'a> {
+/// connections reach rustls another way (quinn) takes [`configs`](ServerBuilder::configs).
+///
+/// The builder's `non_defaults()` is over the [`TlsSettings`], so its keys carry the `policy.`
+/// prefix (`policy.tls_versions`) and `alpn` is listed when set; [`Built::non_defaults`] reports
+/// the [`Policy`]'s own (`tls_versions`).
+#[derive(Builder, Debug)]
+#[builder(build = Built<ServerConfig>, name = "ServerBuilder", entry = "new", fallible)]
+pub struct ServerParts<'a> {
+    settings: TlsSettings,
+    #[builder(input)]
     identity: &'a Identity,
+    #[builder(input)]
     client_auth: ClientAuth,
-    alpn: Vec<Vec<u8>>,
-    policy: Policy,
 }
 
-impl<'a> ServerBuilder<'a> {
-    /// A builder for a server that presents `identity` and treats client certificates as
-    /// `client_auth` says, with no ALPN and the default policy.
-    pub fn new(identity: &'a Identity, client_auth: ClientAuth) -> Self {
-        Self {
-            identity,
-            client_auth,
-            alpn: Vec::new(),
-            policy: Policy::default(),
-        }
-    }
-
-    /// The application protocols offered, most preferred first. Replaces any set before.
-    pub fn alpn<I>(mut self, protocols: I) -> Self
-    where
-        I: IntoIterator,
-        I::Item: AsRef<[u8]>,
-    {
-        self.alpn = protocols
-            .into_iter()
-            .map(|protocol| protocol.as_ref().to_vec())
-            .collect();
-        self
-    }
-
-    /// The policy: versions, suites, groups, the extended master secret, resumption and the
-    /// access control list. Default [`Policy::default`].
-    pub fn policy(mut self, policy: Policy) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    /// The ALPN list and the policy from `settings`, as a file or a form gave them. Replaces any
-    /// set before by [`alpn`](Self::alpn) and [`policy`](Self::policy), and is replaced by those
-    /// called after it.
-    pub fn settings(mut self, settings: TlsSettings) -> Self {
-        self.alpn = settings.alpn_bytes();
-        self.policy = settings.policy;
-        self
-    }
-
-    /// Every setting of the policy that differs from the default, as the built configuration
-    /// reports it.
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        self.policy.non_defaults()
-    }
+impl TryFrom<ServerParts<'_>> for Built<ServerConfig> {
+    type Error = PeerError;
 
     /// The configuration, shared by every connection it accepts.
     ///
@@ -173,113 +139,86 @@ impl<'a> ServerBuilder<'a> {
     /// [`PeerError::Certificate`], [`PeerError::TrustPattern`], [`PeerError::CaFile`],
     /// [`PeerError::Unsupported`] for trust only clients apply, [`PeerError::Policy`] or
     /// [`PeerError::Tls`] when the configuration cannot be built.
-    pub fn build(self) -> Result<Built<ServerConfig>, PeerError> {
-        let non_defaults = self.policy.non_defaults();
-        let verifier = match &self.client_auth {
+    fn try_from(parts: ServerParts<'_>) -> Result<Self, PeerError> {
+        let ServerParts {
+            settings,
+            identity,
+            client_auth,
+        } = parts;
+        let alpn = settings.alpn_bytes();
+        let policy = settings.policy;
+        let verifier = match &client_auth {
             ClientAuth::None => None,
             ClientAuth::Required(trust) => {
-                Some(Arc::new(trust.client_verifier(&self.policy, None)?)
-                    as Arc<dyn ClientCertVerifier>)
+                Some(Arc::new(trust.client_verifier(&policy, None)?) as Arc<dyn ClientCertVerifier>)
             }
             ClientAuth::Verifier(verifier) => Some(Arc::clone(verifier)),
         };
-        let base = Base::new(self.identity, &self.alpn, &self.policy)?;
+        let base = Base::new(identity, &alpn, &policy)?;
         Ok(Built {
             config: base.config(verifier, None, None)?,
-            non_defaults,
+            policy,
         })
     }
+}
 
+impl ServerBuilder<'_> {
     /// The configurations of a listener, one per connection: for a host such as quinn, whose
     /// connections reach rustls without this crate's accept helpers. See [`ServerConfigs`].
     ///
     /// # Errors
     ///
     /// As [`build`](Self::build).
-    pub fn configs(self) -> Result<ServerConfigs, PeerError> {
-        let non_defaults = self.policy.non_defaults();
-        let client = match self.client_auth {
-            ClientAuth::None => Client::None,
-            ClientAuth::Required(trust) => {
-                Client::Trust(Arc::new(trust.client_verifier(&self.policy, None)?))
-            }
-            ClientAuth::Verifier(verifier) => Client::Verifier(verifier),
+    pub fn configs(self) -> Result<ServerConfigs, BuildError<PeerError>> {
+        let ServerParts {
+            settings,
+            identity,
+            client_auth,
+        } = self.parts().map_err(BuildError::Missing)?;
+        let alpn = settings.alpn_bytes();
+        let policy = settings.policy;
+        let non_defaults = policy.non_defaults();
+        let configs = || {
+            let client = match client_auth {
+                ClientAuth::None => Client::None,
+                ClientAuth::Required(trust) => {
+                    Client::Trust(Arc::new(trust.client_verifier(&policy, None)?))
+                }
+                ClientAuth::Verifier(verifier) => Client::Verifier(verifier),
+            };
+            Ok(ServerConfigs::from_parts(
+                Base::new(identity, &alpn, &policy)?,
+                client,
+                non_defaults,
+            ))
         };
-        Ok(ServerConfigs::from_parts(
-            Base::new(self.identity, &self.alpn, &self.policy)?,
-            client,
-            non_defaults,
-        ))
+        configs().map_err(BuildError::Failed)
     }
 }
 
-/// Builds a client configuration: [`ClientBuilder::new`], the settings, then
-/// [`build`](Self::build).
+/// What a [`ClientBuilder`] collects: the [`TlsSettings`], how the server is verified and the
+/// identity to present, if any. Start with [`ClientBuilder::new`].
 ///
-/// The server is verified as the [`ServerAuth`] given to `new` says. Session resumption is off
-/// unless [`Policy::allow_resumption`] is set, which then keeps rustls's default session cache.
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct ClientBuilder<'a> {
+/// The server is verified as the [`ServerAuth`] given says (a [`Trust`] converts). Without an
+/// identity this side presents no certificate: it proves itself, if at all, inside the
+/// encrypted channel, and a server that requires a client certificate refuses it. Session
+/// resumption is off unless [`Policy::allow_resumption`] is set, which then keeps rustls's
+/// default session cache.
+///
+/// As for the server, the builder's `non_defaults()` carries the `policy.` prefix and lists
+/// `alpn` when set; [`Built::non_defaults`] reports the [`Policy`]'s own.
+#[derive(Builder, Debug)]
+#[builder(build = Built<ClientConfig>, name = "ClientBuilder", entry = "new", fallible)]
+pub struct ClientParts<'a> {
+    settings: TlsSettings,
+    #[builder(input)]
     server: ServerAuth,
+    #[builder(input)]
     identity: Option<&'a Identity>,
-    alpn: Vec<Vec<u8>>,
-    policy: Policy,
 }
 
-impl<'a> ClientBuilder<'a> {
-    /// A builder for a client that verifies the server as `server` says (a [`Trust`] converts),
-    /// presents no certificate, offers no ALPN and runs under the default policy.
-    pub fn new(server: impl Into<ServerAuth>) -> Self {
-        Self {
-            server: server.into(),
-            identity: None,
-            alpn: Vec::new(),
-            policy: Policy::default(),
-        }
-    }
-
-    /// Presents `identity` and its intermediates as the client certificate. Without it this side
-    /// proves itself, if at all, inside the encrypted channel, and a server that requires a
-    /// client certificate refuses it.
-    pub fn identity(mut self, identity: &'a Identity) -> Self {
-        self.identity = Some(identity);
-        self
-    }
-
-    /// The application protocols offered, most preferred first. Replaces any set before.
-    pub fn alpn<I>(mut self, protocols: I) -> Self
-    where
-        I: IntoIterator,
-        I::Item: AsRef<[u8]>,
-    {
-        self.alpn = protocols
-            .into_iter()
-            .map(|protocol| protocol.as_ref().to_vec())
-            .collect();
-        self
-    }
-
-    /// The policy. Default [`Policy::default`].
-    pub fn policy(mut self, policy: Policy) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    /// The ALPN list and the policy from `settings`, as a file or a form gave them. Replaces
-    /// any set before by [`alpn`](Self::alpn) and [`policy`](Self::policy), and is replaced by
-    /// those called after it.
-    pub fn settings(mut self, settings: TlsSettings) -> Self {
-        self.alpn = settings.alpn_bytes();
-        self.policy = settings.policy;
-        self
-    }
-
-    /// Every setting of the policy that differs from the default, as the built configuration
-    /// reports it.
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        self.policy.non_defaults()
-    }
+impl TryFrom<ClientParts<'_>> for Built<ClientConfig> {
+    type Error = PeerError;
 
     /// The configuration.
     ///
@@ -289,33 +228,46 @@ impl<'a> ClientBuilder<'a> {
     /// something the ring provider or this build cannot do; [`PeerError::Io`] or
     /// [`PeerError::Certificate`] when the roots cannot be loaded; [`PeerError::Certificate`] or
     /// [`PeerError::Tls`] when the configuration cannot be built.
-    pub fn build(self) -> Result<Built<ClientConfig>, PeerError> {
-        let verifier: Arc<dyn ServerCertVerifier> = match self.server {
-            ServerAuth::Trust(trust) => PeerServerVerifier::new(&trust, &self.policy)?,
+    fn try_from(parts: ClientParts<'_>) -> Result<Self, PeerError> {
+        let ClientParts {
+            settings,
+            server,
+            identity,
+        } = parts;
+        let alpn = settings.alpn_bytes();
+        let policy = settings.policy;
+        let verifier: Arc<dyn ServerCertVerifier> = match server {
+            ServerAuth::Trust(trust) => PeerServerVerifier::new(&trust, &policy)?,
             ServerAuth::Verifier(verifier) => verifier,
         };
-        let selection = self.policy.selection()?;
+        let selection = policy.selection()?;
         let builder = ClientConfig::builder_with_provider(Arc::clone(&selection.provider))
             .with_protocol_versions(&selection.versions)
             .map_err(|_| PeerError::Tls)?
             .dangerous()
             .with_custom_certificate_verifier(verifier);
-        let mut config = match self.identity {
+        let mut config = match identity {
             Some(identity) => builder
                 .with_client_auth_cert(identity.certificate_chain(), identity.private_key_der())
                 .map_err(|_| PeerError::Certificate)?,
             None => builder.with_no_client_auth(),
         };
-        config.alpn_protocols = self.alpn;
-        config.require_ems = self.policy.require_ems;
-        if !self.policy.allow_resumption {
+        config.alpn_protocols = alpn;
+        config.require_ems = policy.require_ems;
+        if !policy.allow_resumption {
             config.resumption = Resumption::disabled();
         }
         crate::profiles::require_fips(&selection, config.fips())?;
-        Ok(Built {
-            config,
-            non_defaults: self.policy.non_defaults(),
-        })
+        Ok(Built { config, policy })
+    }
+}
+
+/// A build failure as the crate's own error, for the places that supply every input: a missing
+/// one is a programming error, reported as a policy refusal naming it.
+pub(crate) fn failed(error: BuildError<PeerError>) -> PeerError {
+    match error {
+        BuildError::Failed(error) => error,
+        other => PeerError::Policy(other.to_string()),
     }
 }
 

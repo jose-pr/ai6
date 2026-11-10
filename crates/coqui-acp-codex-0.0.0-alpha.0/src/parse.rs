@@ -864,6 +864,7 @@ impl Parser {
                     .into_iter()
                     .find(|choice| choice.option.id == chosen)
                     .map_or(rejected, |choice| choice.result),
+                Outcome::Refused => rejected,
                 _ => cancelled,
             };
             writer(&json!({"id": id, "result": result}))

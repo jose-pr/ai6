@@ -28,6 +28,8 @@ pub(crate) const INVALID_REQUEST: i64 = -32600;
 pub(crate) const METHOD_NOT_FOUND: i64 = -32601;
 pub(crate) const INVALID_PARAMS: i64 = -32602;
 pub(crate) const INTERNAL_ERROR: i64 = -32603;
+/// What the reason starts with when the client answered one of our requests with an error.
+pub(crate) const CLIENT_ERROR: &str = "client error: ";
 
 /// Serves `harness` to one client over `input` and `output`, one JSON-RPC message per line, on the calling thread
 /// until the input ends. Then every session it opened is closed.
@@ -61,9 +63,11 @@ pub fn serve(
     let read = lines::read_lines(input, shared.settings.max_line, |line| {
         match line {
             Line::Json(message) => shared.receive(message),
-            Line::Text(_) => {
-                shared.respond_error(&Value::Null, PARSE_ERROR, "not a JSON-RPC message")
-            }
+            // `5` and `"x"` are JSON, though no message: only text that is no JSON at all is a parse error.
+            Line::Text(text) => match serde_json::from_str::<Value>(&text) {
+                Ok(value) => shared.receive(value),
+                Err(_) => shared.respond_error(&Value::Null, PARSE_ERROR, "not a JSON-RPC message"),
+            },
             Line::TooLong(_) => {
                 too_long = true;
                 return false;
@@ -215,18 +219,33 @@ impl Shared {
     }
 
     fn receive(self: &Arc<Self>, message: Value) {
+        if !message.is_object() {
+            // A batch, a number, text: not one JSON-RPC message.
+            return self.respond_error(&Value::Null, INVALID_REQUEST, "not a JSON-RPC message");
+        }
+        if message
+            .get("method")
+            .is_some_and(|method| !method.is_string())
+        {
+            let id = message.get("id").cloned().unwrap_or(Value::Null);
+            return self.respond_error(&id, INVALID_REQUEST, "the method is not text");
+        }
         let Some(method) = message
             .get("method")
             .and_then(Value::as_str)
             .map(str::to_string)
         else {
             // An answer to one of our requests.
+            if message.get("result").is_none() && message.get("error").is_none() {
+                let id = message.get("id").cloned().unwrap_or(Value::Null);
+                return self.respond_error(&id, INVALID_REQUEST, "not a JSON-RPC message");
+            }
             let Some(id) = message.get("id").and_then(Value::as_u64) else {
                 return;
             };
             if let Some(waiting) = self.pending().remove(&id) {
                 let answer = match message.get("error") {
-                    Some(error) => Err(error.to_string()),
+                    Some(error) => Err(format!("{CLIENT_ERROR}{error}")),
                     None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
                 };
                 let _ = waiting.send(answer);
@@ -331,13 +350,22 @@ impl Shared {
         change: impl FnOnce(&mut UsageTracker, i64) -> bool,
     ) {
         let at = now();
-        let told = {
+        let (told, held) = {
             let mut usage = locked(&self.usage);
             if !usage.reports() || !change(&mut usage, at) {
                 return;
             }
-            usage.notifies().then(|| usage.snapshot(session, at))
+            (
+                usage.notifies().then(|| usage.snapshot(session, at)),
+                self.settings
+                    .on_usage
+                    .as_ref()
+                    .map(|_| usage.snapshot(None, at)),
+            )
         };
+        if let (Some(hook), Some(report)) = (&self.settings.on_usage, &held) {
+            hook(report);
+        }
         if let Some(report) = told
             && let Ok(report) = serde_json::to_value(&report)
         {

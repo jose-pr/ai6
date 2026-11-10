@@ -19,21 +19,23 @@ mod format;
 
 use std::sync::Arc;
 
+use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Provider, Schema, ToValue};
 use coqui_access::{
     AccountInfo, AccountPut, Accounts, Attempt, Authenticator, Description, Directory, Lookup,
     Person, PutOutcome, Verdict,
 };
 use coqui_access_key::{DEFAULT_MAX_KEYS, DEFAULT_PREFIX, KeyRecord, Keys};
 use coqui_access_kit::file::Source;
-use coqui_access_kit::{KeyHash, MemoryTable, RecordLimits, Table};
+use coqui_access_kit::{Argon2Params, KeyHash, MemoryTable, RecordLimits, Table};
+
+use coqui_builder::{Describe, Partial};
+use guatiao_builder::Described;
 
 pub use format::Format;
 
 /// Guatiao configuration for the key provider.
-#[derive(Debug, Clone, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Debug, Clone, Describe)]
 pub struct KeysConfig {
     /// Where the keys are kept; memory when absent.
     pub source: Option<Source<Format>>,
@@ -47,7 +49,7 @@ pub struct KeysConfig {
     #[map(default = DEFAULT_MAX_KEYS as u32)]
     pub max_keys: u32,
     /// How large a record's fields may be: `groups`, `field_bytes`, `email_bytes`,
-    /// `display_name_bytes`, each a number or `null` for no bound.
+    /// `display_name_bytes`, each a number or `none` for no bound.
     #[map(default)]
     pub record_limits: RecordLimits,
 }
@@ -55,7 +57,8 @@ pub struct KeysConfig {
 impl Default for KeysConfig {
     /// What an empty configuration reads as: every default the schema declares.
     fn default() -> Self {
-        Self::from_value(&coqui_access::guatiao::Map::new().into())
+        Partial::new()
+            .build()
             .expect("an empty configuration reads, every key having a default")
     }
 }
@@ -68,7 +71,7 @@ impl Default for KeysConfig {
     Accounts,
     id = "coqui_access_key",
     name = "Bearer keys",
-    config = KeysConfig,
+    config = Described<KeysConfig>,
     crate = ::coqui_access::guatiao
 )]
 pub struct KeysProvider(Keys);
@@ -77,6 +80,12 @@ impl TryFrom<KeysConfig> for KeysProvider {
     type Error = ProviderError;
 
     fn try_from(config: KeysConfig) -> Result<Self, Self::Error> {
+        if let KeyHash::Argon2id(costs) = config.key_hash {
+            Argon2Params::new(costs.memory_kib(), costs.iterations(), costs.parallelism())
+                .map_err(|_| {
+                    coqui_access::error::bad_value("key_hash: the argon2id costs are out of range")
+                })?;
+        }
         let table: Arc<dyn Table<KeyRecord>> = match &config.source {
             Some(source) => source
                 .open("keys")
@@ -93,6 +102,14 @@ impl TryFrom<KeysConfig> for KeysProvider {
             .build()
             .map(Self)
             .map_err(|reason| reason.writing("key table"))
+    }
+}
+
+impl TryFrom<Described<KeysConfig>> for KeysProvider {
+    type Error = ProviderError;
+
+    fn try_from(config: Described<KeysConfig>) -> Result<Self, Self::Error> {
+        Self::try_from(config.0)
     }
 }
 
@@ -134,6 +151,8 @@ coqui_access::guatiao::providers!(KeysProvider);
 
 #[cfg(test)]
 mod tests {
+    use coqui_access::guatiao::{FromValue, Schema};
+
     use super::*;
 
     fn config(path: &std::path::Path) -> KeysConfig {
@@ -221,14 +240,17 @@ mod tests {
         };
         assert!(KeysProvider::try_from(blank).is_err(), "an empty prefix");
         assert!(
-            config_from(r#"{"key_hash": {"algorithm": "argon2id", "iterations": 0}}"#).is_err(),
+            KeysProvider::try_from(
+                config_from(r#"{"key_hash": {"algorithm": "argon2id", "iterations": 0}}"#).unwrap()
+            )
+            .is_err(),
             "Argon2 refuses the costs"
         );
     }
 
     fn config_from(json: &str) -> Result<KeysConfig, coqui_access::guatiao::MapError> {
         let value = guatiao_serde::from_serde(&mut serde_json::Deserializer::from_str(json));
-        KeysConfig::from_value(&value.unwrap())
+        Described::<KeysConfig>::from_value(&value.unwrap()).map(|config| config.0)
     }
 
     #[test]
@@ -258,8 +280,7 @@ mod tests {
         .unwrap();
         let key = provider.put(named("cabin")).unwrap().secret.unwrap();
         assert!(key.starts_with("ck_"));
-        let bare = coqui_access::guatiao::Map::new();
-        assert!(KeysConfig::from_value(&bare.into()).is_ok_and(|c| c.prefix == "ck_"));
+        assert!(config_from("{}").is_ok_and(|c| c.prefix == "ck_"));
     }
     /// The `default` a schema declares for one of its properties.
     fn default_in(schema: &coqui_access::guatiao::Value, field: &str) -> Option<u64> {
@@ -272,7 +293,7 @@ mod tests {
 
     #[test]
     fn the_schema_declares_the_defaults_an_empty_config_reads_as() {
-        let schema = KeysConfig::schema().unwrap();
+        let schema = Described::<KeysConfig>::schema().unwrap();
         assert_eq!(default_in(&schema, "max_keys"), Some(10_000));
         let empty = KeysConfig::default();
         assert_eq!(
@@ -287,7 +308,9 @@ mod tests {
         limits.set("field_bytes", 40u32);
         let mut config = coqui_access::guatiao::Map::new();
         config.set("record_limits", limits);
-        let read = KeysConfig::from_value(&config.into()).unwrap();
+        let read = Described::<KeysConfig>::from_value(&config.into())
+            .unwrap()
+            .0;
         assert_eq!(read.record_limits.field_bytes, coqui_access::Limit::at(40));
         assert_eq!(read.record_limits.groups, coqui_access::Limit::at(256));
         let provider = KeysProvider::try_from(read).unwrap();

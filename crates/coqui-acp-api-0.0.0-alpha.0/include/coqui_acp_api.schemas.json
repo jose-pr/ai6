@@ -44,10 +44,68 @@
       },
       "account": {
         "type": [
-          "string",
+          "object",
           "null"
         ],
-        "description": "The host's id for the account the connection runs on, echoed into every usage report of the connection and never interpreted. It picks no credentials: those stay in `environment`."
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account the connection runs on. Its `id` is echoed into every usage report of the connection and never interpreted; the provider applies the rest (see [`AccountGrant`]). Absent: the environment passes as it is and nothing is cleared."
+      },
+      "cache_lifetime": {
+        "type": "string",
+        "enum": [
+          "default",
+          "short",
+          "long"
+        ],
+        "x-enum-labels": {
+          "default": "The harness's own default.",
+          "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
+          "long": "The long cache (about an hour): for an interactive session while someone is active."
+        },
+        "description": "How long the model's prompt cache should live, when the harness has such a control.",
+        "default": "default"
       }
     },
     "additionalProperties": false
@@ -124,6 +182,56 @@
         "x-sensitive": true,
         "description": "The variables the session's connections will be started with.",
         "default": {}
+      },
+      "account": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account the session's connections will run on, for a harness whose sessions live in the account's own directory."
       }
     },
     "additionalProperties": false,
@@ -153,6 +261,56 @@
         "x-sensitive": true,
         "description": "The variables its connection was started with.",
         "default": {}
+      },
+      "account": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account its connection ran on."
       },
       "after": {
         "type": [
@@ -440,6 +598,13 @@
           "needs_turn": false,
           "needs_session": false
         }
+      },
+      "cache_lifetime": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What the harness does with [`StartRequest::cache_lifetime`], in a sentence for people (the variables it sets, say); absent when it has no such control and ignores the hint."
       }
     },
     "additionalProperties": false,
@@ -785,6 +950,11 @@
         "type": "boolean",
         "description": "Whether a process's tree ends when the host dies without killing it (its group or job, at least); when not, it outlives the host.",
         "default": false
+      },
+      "files": {
+        "type": "boolean",
+        "description": "Whether it serves the file methods in a private directory. A transport without files says `false`, and a provider whose account kind needs a directory refuses that kind.",
+        "default": false
       }
     },
     "additionalProperties": false,
@@ -878,10 +1048,53 @@
       },
       "account": {
         "type": [
-          "string",
+          "object",
           "null"
         ],
-        "description": "The host's id for the account, echoed into the report. It never picks credentials: those stay in `environment`."
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account to report for; its `id` is echoed into the report and never interpreted. The provider applies the rest, as `start` does."
       }
     },
     "additionalProperties": false
@@ -2029,6 +2242,829 @@
         "type": "boolean",
         "description": "Whether it learns its usage only once a session is open, though no turn is needed (an agent that serves its figures from the process a session starts). With none open, a read answers what the connection last saw, and nothing is started for it.",
         "default": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "CacheLifetime": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "default",
+      "short",
+      "long"
+    ],
+    "x-enum-labels": {
+      "default": "The harness's own default.",
+      "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
+      "long": "The long cache (about an hour): for an interactive session while someone is active."
+    },
+    "properties": {}
+  },
+  "FileInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "len": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Its length in bytes."
+      },
+      "modified_ms": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it last changed, in milliseconds since the Unix epoch."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "len",
+      "modified_ms"
+    ]
+  },
+  "Credentials": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": {
+      "type": "string"
+    },
+    "properties": {}
+  },
+  "AccountGrant": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+      },
+      "kind": {
+        "type": "string",
+        "description": "One of the catalog's kinds."
+      },
+      "settings": {
+        "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+        "default": {}
+      },
+      "credentials": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+        "default": {}
+      },
+      "state_dir": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+        "default": 0
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "kind"
+    ]
+  },
+  "AccountRef": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "As [`AccountGrant::id`]."
+      },
+      "kind": {
+        "type": "string",
+        "description": "As [`AccountGrant::kind`]."
+      },
+      "settings": {
+        "description": "As [`AccountGrant::settings`].",
+        "default": {}
+      },
+      "state_dir": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "As [`AccountGrant::state_dir`]."
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "As [`AccountGrant::revision`].",
+        "default": 0
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "kind"
+    ]
+  },
+  "AccountCatalog": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kinds": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Its id, such as `claude-login`."
+            },
+            "title": {
+              "type": "string",
+              "description": "Its name for people."
+            },
+            "description": {
+              "type": "string",
+              "description": "What it is, for people.",
+              "default": ""
+            },
+            "settings": {
+              "description": "A guatiao schema (JSON Schema, `type: object`) for the kind's settings. A credential is a property marked `writeOnly` and `x-sensitive`, and its key is the key in [`Credentials`]. A host renders its form from this.",
+              "default": {}
+            },
+            "endpoints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The kind's text setting holding an absolute URL; absent when the harness fixes it."
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "description": "What it is for: [`MODEL_API`], [`AUTH`] or [`PROXY`]."
+                  },
+                  "default": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The URL used when the setting is absent."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "purpose"
+                ]
+              },
+              "description": "The URLs the kind talks to, for the host's egress policy.",
+              "default": []
+            },
+            "rotates": {
+              "type": "boolean",
+              "description": "A renewal replaces a credential so that an older copy stops working. The host holds such an account exclusively. A kind whose rotation is unmeasured says `true`.",
+              "default": false
+            },
+            "history_portable": {
+              "type": "boolean",
+              "description": "A session started on one account of this kind resumes on another account of the same provider directly.",
+              "default": false
+            },
+            "state_dir": {
+              "type": "boolean",
+              "description": "The kind needs a private directory where the harness runs ([`AccountGrant::state_dir`]).",
+              "default": false
+            },
+            "renews": {
+              "type": "boolean",
+              "description": "[`renew`](crate::AcpHarness::renew) can renew it with no model turn.",
+              "default": false
+            },
+            "notices": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "What using it weakens, shown when the account is added and logged at start.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title"
+          ]
+        },
+        "description": "The kinds, [`HARNESS_LOGIN`] among them.",
+        "default": []
+      },
+      "logins": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Its id, such as `subscription`."
+            },
+            "title": {
+              "type": "string",
+              "description": "Its name for people."
+            },
+            "description": {
+              "type": "string",
+              "description": "What it does, for people.",
+              "default": ""
+            },
+            "produces": {
+              "type": "string",
+              "description": "The kind of account it makes: one of the catalog's kinds."
+            },
+            "inputs": {
+              "description": "A schema of what is asked before it runs (an email, an issuer); an empty object asks nothing.",
+              "default": {}
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The steps it relays, in the order they can come: [`OPEN_URL`], [`USER_CODE`], [`ASK`], [`PASTE_CODE`].",
+              "default": []
+            },
+            "remote": {
+              "type": "boolean",
+              "description": "Whether it works through a spawner that is not local. A loopback callback needs the person's browser on the machine where the CLI runs, so it is `false` unless the CLI offers a code to paste or a device code.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "produces"
+          ]
+        },
+        "description": "The ways a person signs in to make an account.",
+        "default": []
+      },
+      "credential_variables": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Every variable any of its kinds reads: applying an account clears all of them, then sets the chosen kind's.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "AccountKindInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Its id, such as `claude-login`."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "description": {
+        "type": "string",
+        "description": "What it is, for people.",
+        "default": ""
+      },
+      "settings": {
+        "description": "A guatiao schema (JSON Schema, `type: object`) for the kind's settings. A credential is a property marked `writeOnly` and `x-sensitive`, and its key is the key in [`Credentials`]. A host renders its form from this.",
+        "default": {}
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The kind's text setting holding an absolute URL; absent when the harness fixes it."
+            },
+            "purpose": {
+              "type": "string",
+              "description": "What it is for: [`MODEL_API`], [`AUTH`] or [`PROXY`]."
+            },
+            "default": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The URL used when the setting is absent."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "purpose"
+          ]
+        },
+        "description": "The URLs the kind talks to, for the host's egress policy.",
+        "default": []
+      },
+      "rotates": {
+        "type": "boolean",
+        "description": "A renewal replaces a credential so that an older copy stops working. The host holds such an account exclusively. A kind whose rotation is unmeasured says `true`.",
+        "default": false
+      },
+      "history_portable": {
+        "type": "boolean",
+        "description": "A session started on one account of this kind resumes on another account of the same provider directly.",
+        "default": false
+      },
+      "state_dir": {
+        "type": "boolean",
+        "description": "The kind needs a private directory where the harness runs ([`AccountGrant::state_dir`]).",
+        "default": false
+      },
+      "renews": {
+        "type": "boolean",
+        "description": "[`renew`](crate::AcpHarness::renew) can renew it with no model turn.",
+        "default": false
+      },
+      "notices": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What using it weakens, shown when the account is added and logged at start.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  },
+  "EndpointSlot": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "key": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The kind's text setting holding an absolute URL; absent when the harness fixes it."
+      },
+      "purpose": {
+        "type": "string",
+        "description": "What it is for: [`MODEL_API`], [`AUTH`] or [`PROXY`]."
+      },
+      "default": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The URL used when the setting is absent."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "purpose"
+    ]
+  },
+  "LoginMethodInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Its id, such as `subscription`."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "description": {
+        "type": "string",
+        "description": "What it does, for people.",
+        "default": ""
+      },
+      "produces": {
+        "type": "string",
+        "description": "The kind of account it makes: one of the catalog's kinds."
+      },
+      "inputs": {
+        "description": "A schema of what is asked before it runs (an email, an issuer); an empty object asks nothing.",
+        "default": {}
+      },
+      "steps": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The steps it relays, in the order they can come: [`OPEN_URL`], [`USER_CODE`], [`ASK`], [`PASTE_CODE`].",
+        "default": []
+      },
+      "remote": {
+        "type": "boolean",
+        "description": "Whether it works through a spawner that is not local. A loopback callback needs the person's browser on the machine where the CLI runs, so it is `false` unless the CLI offers a code to paste or a device code.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "produces"
+    ]
+  },
+  "LoginRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "method": {
+        "type": "string",
+        "description": "One of the catalog's [`LoginMethodInfo::id`]."
+      },
+      "inputs": {
+        "description": "The answers to the method's `inputs` schema.",
+        "default": {}
+      },
+      "state_dir": {
+        "type": "string",
+        "description": "A private directory where the harness runs, made by the host, where the CLI runs and writes what it signs in with. The host removes it however the login ended."
+      },
+      "timeout_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most the whole login may take.",
+        "default": 600000
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "method",
+      "state_dir"
+    ]
+  },
+  "LoginOutcome": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "The kind made: the method's `produces`."
+      },
+      "settings": {
+        "description": "Its non-secret settings.",
+        "default": {}
+      },
+      "credentials": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "What the login wrote or was given, read from the files it wrote.",
+        "default": {}
+      },
+      "label": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A name for people the provider learned (an email address), when it did."
+      },
+      "expires_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "When the credentials stop working, as an RFC 3339 time, when known."
+      },
+      "checked": {
+        "type": "boolean",
+        "description": "Whether the provider verified the login with a call that spends nothing.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind"
+    ]
+  },
+  "RenewRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account, with the credentials the host holds."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "account"
+    ]
+  },
+  "RenewReport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "credentials": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The credentials after the renewal, when it made new ones; absent when nothing changed."
+      },
+      "expires_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "When the credentials now stop working, as an RFC 3339 time, when known."
+      },
+      "not_renewed_because": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Why nothing was renewed (not within the harness's renewal window, say), when so. It shows no credential."
+      }
+    },
+    "additionalProperties": false
+  },
+  "ModelsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Variables for what the harness runs to ask, over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
+        "default": {}
+      },
+      "account": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account to ask for; absent asks as the configuration stands."
+      }
+    },
+    "additionalProperties": false
+  },
+  "AccountRenewal": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The account's id."
+      },
+      "from_revision": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The revision of the grant the renewal replaces."
+      },
+      "credentials": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The credentials now, whole: every key of the grant."
+      },
+      "expires_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "When they stop working, as an RFC 3339 time, when known."
+      },
+      "sequence": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Counts what happened to this account, renewals and losses together, from 1, without a gap or a repeat for as long as the provider lives, so the host orders chained rotations by it. The same event reaches every keeper that is live for the account and carries the same sequence: the host deduplicates by (account, sequence)."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "from_revision",
+      "credentials",
+      "sequence"
+    ]
+  },
+  "AccountLoss": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The account's id."
+      },
+      "reason": {
+        "type": "string",
+        "description": "Why, for people; it shows no credential."
+      },
+      "sequence": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "As [`AccountRenewal::sequence`]: one count for the account's renewals and losses."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "reason",
+      "sequence"
+    ]
+  },
+  "OpenUrl": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The page, as the CLI printed it."
+      },
+      "user_code": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The one-time code the person confirms there, when the CLI printed one."
+      },
+      "expires_ms": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How long the page and code stay good, in milliseconds, when known."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "url"
+    ]
+  },
+  "LoginForm": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "What it asks, for people."
+      },
+      "schema": {
+        "description": "A schema of the fields. A secret is a property marked `writeOnly` and `x-sensitive`, and the host answers it in [`LoginAnswer::secrets`].",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title"
+    ]
+  },
+  "LoginAnswer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "values": {
+        "description": "The values of the fields that are not secrets, an object.",
+        "default": {}
+      },
+      "secrets": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The values of the sensitive fields, by property name.",
+        "default": {}
       }
     },
     "additionalProperties": false

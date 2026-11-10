@@ -633,23 +633,28 @@ impl Session {
         let outcome = match answer {
             Ok(result) => {
                 let outcome = result.get("outcome");
-                let chosen = (outcome
+                let kind = outcome
                     .and_then(|outcome| outcome.get("outcome"))
-                    .and_then(Value::as_str)
-                    == Some("selected"))
-                .then(|| {
-                    outcome
-                        .and_then(|outcome| outcome.get("optionId"))
-                        .and_then(Value::as_str)
-                })
-                .flatten();
+                    .and_then(Value::as_str);
+                let chosen = (kind == Some("selected"))
+                    .then(|| {
+                        outcome
+                            .and_then(|outcome| outcome.get("optionId"))
+                            .and_then(Value::as_str)
+                    })
+                    .flatten();
                 match chosen {
                     Some(chosen) if request.options.iter().any(|option| option.id == chosen) => {
                         Outcome::Selected(chosen.to_string())
                     }
-                    _ => Outcome::Cancelled,
+                    _ if kind == Some("cancelled") => Outcome::Cancelled,
+                    // Chosen and not offered, or an outcome nobody knows: a refusal of this request alone.
+                    _ => Outcome::Refused,
                 }
             }
+            // The client answered with an error: a refusal. A client that is gone, no answer in time and a question
+            // withdrawn are the turn's end.
+            Err(why) if why.starts_with(super::connection::CLIENT_ERROR) => Outcome::Refused,
             Err(_) => Outcome::Cancelled,
         };
         if let Err(error) = request.responder.answer(outcome) {

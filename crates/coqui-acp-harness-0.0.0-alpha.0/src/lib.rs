@@ -14,6 +14,9 @@ pub mod mode;
 pub mod process;
 #[cfg(feature = "kind")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
+pub mod provider;
+#[cfg(feature = "kind")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
 pub mod spawner;
 pub mod stream;
 pub mod version;

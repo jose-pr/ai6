@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-harness at 981a64ad05a4039f674d9ca204bf4aaeb6db7398, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-harness at c15c0ff96d4bf8b8f56aae671a6ab73f8319825a, with what it inherits written out.
 example = [{ name = "spawner_host", required-features = ["kind"] }]
 test = [{ name = "spawner", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }]
 [package]
@@ -22,7 +22,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
 antigravity = ["dep:serde", "dep:time", "dep:ureq"]
-kind = []
+kind = ["dep:guatiao-serde"]
 [dependencies]
 [dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
@@ -45,6 +45,11 @@ version = "3.5"
 default-features = false
 features = ["rustls"]
 optional = true
+[dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+default-features = false
+optional = true
 [dependencies.serde_json]
 version = "1"
 [dependencies.uuid]
@@ -65,6 +70,9 @@ version = "2.0.3"
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"
+[dev-dependencies.coqui-acp-api]
+path = "../coqui-acp-api"
+features = ["contract"]
 [dev-dependencies.rcgen]
 version = "0.14"
 default-features = false

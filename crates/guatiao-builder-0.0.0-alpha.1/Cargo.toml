@@ -1,0 +1,46 @@
+# guatiao/crates/guatiao-builder at e0136dcc9760ddd6dd8dc89fc4d41320eec6306e, with what it inherits written out.
+[package]
+name = "guatiao-builder"
+description = "guatiao's side of coqui-builder: a schema, a filled Partial and a checked value made from a description, so any struct built field by field can be shown in a form, held as a guatiao value or read from one"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+publish = false
+license = "MPL-2.0"
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[lib]
+name = "guatiao_builder"
+path = "src/lib.rs"
+[dependencies]
+[dependencies.guatiao]
+path = "../guatiao"
+version = "=0.0.0-alpha.1"
+[dependencies.guatiao-intake]
+path = "../guatiao-intake"
+version = "=0.0.0-alpha.1"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+[dev-dependencies]
+serde_json = "1"
+[dev-dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive", "zeroize"]
+[dev-dependencies.guatiao]
+path = "../guatiao"
+features = ["derive"]
+[dev-dependencies.guatiao-serde]
+path = "../guatiao-serde"
+features = ["json"]
+[lints]
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

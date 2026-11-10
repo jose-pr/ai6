@@ -54,8 +54,9 @@ pub(crate) fn from_unix_seconds(seconds: u64) -> SystemTime {
 }
 
 /// `time` plus `by`, or the latest of `time` plus a century, a year, or nothing that the platform
-/// can hold: an option of `Duration::MAX` means "never" and must not overflow.
-pub(crate) fn later(time: SystemTime, by: Duration) -> SystemTime {
+/// can hold: `None` means "never", and neither it nor a `Duration::MAX` overflows.
+pub(crate) fn later(time: SystemTime, by: Option<Duration>) -> SystemTime {
+    let by = by.unwrap_or(Duration::MAX);
     [
         by,
         Duration::from_secs(100 * 365 * 86_400),

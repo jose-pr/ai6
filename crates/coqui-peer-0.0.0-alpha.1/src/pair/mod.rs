@@ -33,10 +33,11 @@ use std::time::SystemTime;
 
 use zeroize::Zeroizing;
 
-pub use code::{CodeAlphabet, PairingCode, Pin, UserCode};
+pub use code::{CodeAlphabet, CodeAlphabetSetters, PairingCode, Pin, UserCode};
 pub use desk::{
-    Decided, Decision, DeskLimits, PairingDesk, PairingDeskBuilder, PairingDeskSettings,
-    PairingOptions, PendingDevice, PendingSlot, ShownPin, Ticket,
+    Decided, Decision, DeskLimits, DeskLimitsSetters, PairingDesk, PairingDeskBuilder,
+    PairingDeskParts, PairingDeskSettings, PairingDeskSettingsSetters, PairingOptions,
+    PairingOptionsSetters, PendingDevice, PendingSlot, ShownPin, Ticket,
 };
 
 use crate::clock::{from_unix_seconds, later, unix_seconds};

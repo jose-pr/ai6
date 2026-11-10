@@ -1,14 +1,15 @@
 //! Which client certificates are trusted, and which account a CA-trusted one names.
 
+use coqui_access::guatiao::Bytes;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{Bytes, FromValue, Schema, ToValue};
 use coqui_access::{Lookup, Verdict, error};
 use coqui_access_kit::pick::{Pick, Picked, pick};
+use coqui_builder::Leaf;
 use coqui_peer_tls::{CertificateFields, PeerError, Policy, Trust};
 
 /// How a client certificate is trusted.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Leaf)]
+#[map(rename_all = "kebab-case")]
 pub enum TrustMode {
     /// Its fingerprint is a record of the table: a pinned peer.
     #[default]

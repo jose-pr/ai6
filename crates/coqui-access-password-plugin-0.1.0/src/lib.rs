@@ -16,8 +16,8 @@ mod format;
 use std::sync::Arc;
 
 use coqui_access::Limit;
+use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Provider, Schema, ToValue};
 use coqui_access::{
     AccountInfo, AccountPut, Accounts, Attempt, Authenticator, Description, Directory, Lookup,
     Person, PutOutcome, Verdict,
@@ -28,11 +28,13 @@ use coqui_access_kit::{
 };
 use coqui_access_password::{AccountRecord, DEFAULT_MAX_ACCOUNTS, PasswordAccounts};
 
+use coqui_builder::{Describe, Partial};
+use guatiao_builder::Described;
+
 pub use format::Format;
 
 /// Guatiao configuration for the password accounts provider.
-#[derive(Debug, Clone, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Debug, Clone, Describe)]
 pub struct PasswordAccountsConfig {
     /// Where the accounts are kept; memory when absent.
     pub source: Option<Source<Format>>,
@@ -40,10 +42,10 @@ pub struct PasswordAccountsConfig {
     #[map(default = DEFAULT_MAX_ACCOUNTS as u32)]
     pub max_accounts: u32,
     /// How large a record's fields may be: `groups`, `field_bytes`, `email_bytes`,
-    /// `display_name_bytes`, each a number or `null` for no bound.
+    /// `display_name_bytes`, each a number or `none` for no bound.
     #[map(default)]
     pub record_limits: RecordLimits,
-    /// The longest password hashed or checked, in bytes; `null` for no bound.
+    /// The longest password hashed or checked, in bytes; `none` for no bound.
     #[map(default = DEFAULT_MAX_PASSWORD_BYTES)]
     pub max_password_bytes: Limit,
     /// Argon2id costs for new passwords; the library default for each one absent.
@@ -54,7 +56,8 @@ pub struct PasswordAccountsConfig {
 impl Default for PasswordAccountsConfig {
     /// What an empty configuration reads as: every default the schema declares.
     fn default() -> Self {
-        Self::from_value(&coqui_access::guatiao::Map::new().into())
+        Partial::new()
+            .build()
             .expect("an empty configuration reads, every key having a default")
     }
 }
@@ -67,7 +70,7 @@ impl Default for PasswordAccountsConfig {
     Accounts,
     id = "coqui_access_password",
     name = "Password accounts",
-    config = PasswordAccountsConfig,
+    config = Described<PasswordAccountsConfig>,
     crate = ::coqui_access::guatiao
 )]
 pub struct PasswordAccountsProvider(PasswordAccounts);
@@ -91,6 +94,14 @@ impl TryFrom<PasswordAccountsConfig> for PasswordAccountsProvider {
             .build()
             .map(Self)
             .map_err(|reason| reason.writing("account table"))
+    }
+}
+
+impl TryFrom<Described<PasswordAccountsConfig>> for PasswordAccountsProvider {
+    type Error = ProviderError;
+
+    fn try_from(config: Described<PasswordAccountsConfig>) -> Result<Self, Self::Error> {
+        Self::try_from(config.0)
     }
 }
 
@@ -132,6 +143,7 @@ coqui_access::guatiao::providers!(PasswordAccountsProvider);
 
 #[cfg(test)]
 mod tests {
+    use coqui_access::guatiao::{FromValue, Schema, ToValue};
     use coqui_access_kit::PasswordHasher;
 
     use super::*;
@@ -226,16 +238,17 @@ mod tests {
 
     #[test]
     fn the_config_reads_from_a_guatiao_value() {
-        let config = PasswordAccountsConfig::from_value(
-            &PasswordAccountsConfig {
+        let config = Described::<PasswordAccountsConfig>::from_value(
+            &Described(PasswordAccountsConfig {
                 source: Some(Source::file("accounts.toml", Format::Toml)),
                 max_accounts: 5,
                 ..PasswordAccountsConfig::default()
-            }
+            })
             .to_value()
             .unwrap(),
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(config.max_accounts, 5);
         assert_eq!(config.source.unwrap().file.unwrap().path, "accounts.toml");
     }
@@ -279,12 +292,16 @@ mod tests {
         let schema = <&Map>::try_from(schema).ok()?;
         let properties = <&Map>::try_from(schema.get("properties")?).ok()?;
         let property = <&Map>::try_from(properties.get(field)?).ok()?;
-        u64::from_value(property.get("default")?).ok()
+        let default = property.get("default")?;
+        // A limit is a text, a count a number.
+        u64::from_value(default)
+            .ok()
+            .or_else(|| String::from_value(default).ok()?.parse().ok())
     }
 
     #[test]
     fn the_schema_declares_the_defaults_an_empty_config_reads_as() {
-        let schema = PasswordAccountsConfig::schema().unwrap();
+        let schema = Described::<PasswordAccountsConfig>::schema().unwrap();
         assert_eq!(default_in(&schema, "max_accounts"), Some(10_000));
         assert_eq!(default_in(&schema, "max_password_bytes"), Some(4096));
         let empty = PasswordAccountsConfig::default();
@@ -298,7 +315,9 @@ mod tests {
         limits.set("field_bytes", 40u32);
         let mut config = coqui_access::guatiao::Map::new();
         config.set("record_limits", limits);
-        let read = PasswordAccountsConfig::from_value(&config.into()).unwrap();
+        let read = Described::<PasswordAccountsConfig>::from_value(&config.into())
+            .unwrap()
+            .0;
         assert_eq!(read.record_limits.field_bytes, coqui_access::Limit::at(40));
         assert_eq!(read.record_limits.groups, coqui_access::Limit::at(256));
         let provider = PasswordAccountsProvider::try_from(PasswordAccountsConfig {

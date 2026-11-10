@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::id::PeerId;
-use crate::non_default::NonDefault;
 use crate::store::{DEFAULT_IPV6_PREFIX, WaitingLimits, source_key};
 
 /// The least time between two new records from one source, unless
@@ -17,18 +16,7 @@ pub const DEFAULT_RECORD_INTERVAL: Duration = Duration::from_secs(1);
 /// What a source at [`per_source`](WaitingLimits::per_source) entries does with a newcomer.
 ///
 /// In text `refuse` or `replace-oldest`.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Default,
-    guatiao::ToValue,
-    guatiao::FromValue,
-    guatiao::Schema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, coqui_builder::Leaf)]
 #[map(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum WhenFull {
@@ -61,8 +49,9 @@ pub struct Admission {
 /// since one holder controls every address of a /64), or no address at all, which is one
 /// source. The queue remembers what it admitted, per source, oldest first; it forgets nothing
 /// on its own, beyond the `per_source` entries it keeps for each source.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, coqui_builder::Configured)]
 pub struct WaitingQueue {
+    #[configured]
     settings: WaitingSettings,
     sources: HashMap<Option<IpAddr>, VecDeque<(PeerId, Instant)>>,
 }
@@ -70,11 +59,10 @@ pub struct WaitingQueue {
 /// What a [`WaitingQueue`] is built from, in the form a file, a form or a peer fills.
 ///
 /// Every key is optional (an absent one is its default) and an unknown key is refused. The type
-/// is a guatiao value (`from_value`, `to_value`, `schema`), and `guatiao_serde::text` reads and
-/// writes its text. It is `#[non_exhaustive]`: start from [`Default`] and assign the fields.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+/// is `Describe`, so a `Partial<WaitingSettings>` is filled from text and built, and it is
+/// `#[non_exhaustive]`: start from [`Default`] and assign the fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, coqui_builder::Describe)]
+#[builder(setters_on = WaitingQueueBuilder)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WaitingSettings {
@@ -109,80 +97,45 @@ impl Default for WaitingSettings {
 
 impl WaitingSettings {
     /// Every setting that differs from its default, named by key path (`limits.per_source`).
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        NonDefault::of_settings(self)
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
+        coqui_builder::non_defaults(self)
     }
 }
 
-/// Builds a [`WaitingQueue`]: [`WaitingQueue::builder`], the settings, then
-/// [`build`](Self::build).
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct WaitingQueueBuilder {
+/// What a [`WaitingQueueBuilder`] collects: the settings.
+///
+/// Build the queue with [`WaitingQueue::builder`].
+#[derive(coqui_builder::Builder, Debug)]
+#[builder(build = WaitingQueue)]
+pub struct WaitingQueueParts {
     settings: WaitingSettings,
 }
 
-impl WaitingQueueBuilder {
-    /// The bounds on entries. Replaces the limits given before.
-    pub fn limits(mut self, limits: WaitingLimits) -> Self {
-        self.settings.limits = limits;
-        self
-    }
-
-    /// Group IPv6 sources by their first `bits` bits (values above 128 are 128). Default 64.
-    pub fn ipv6_prefix(mut self, bits: u8) -> Self {
-        self.settings.ipv6_prefix = bits;
-        self
-    }
-
-    /// What a source at its limit does with a newcomer. Default [`WhenFull::Refuse`].
-    pub fn when_full(mut self, when_full: WhenFull) -> Self {
-        self.settings.when_full = when_full;
-        self
-    }
-
-    /// Record a new peer from one source at most once per `interval`; zero is no limit. Default
-    /// [`DEFAULT_RECORD_INTERVAL`].
-    pub fn record_interval(mut self, interval: Duration) -> Self {
-        self.settings.record_interval = interval;
-        self
-    }
-
-    /// Every setting from `settings`, the limits included. Replaces what was set before, and is
-    /// replaced by what is set after it.
-    pub fn settings(mut self, settings: WaitingSettings) -> Self {
-        self.settings = settings;
-        self
-    }
-
-    /// The queue, empty.
-    pub fn build(self) -> WaitingQueue {
-        WaitingQueue {
-            settings: WaitingSettings {
-                ipv6_prefix: self.settings.ipv6_prefix.min(128),
-                ..self.settings
-            },
-            sources: HashMap::new(),
-        }
+impl From<WaitingQueueParts> for WaitingQueue {
+    fn from(parts: WaitingQueueParts) -> Self {
+        Self::from_settings(parts.settings)
     }
 }
 
 impl WaitingQueue {
-    /// A builder for a queue under `limits`, grouping IPv6 sources by /64, refusing a newcomer
-    /// to a full source and recording one new peer per source each [`DEFAULT_RECORD_INTERVAL`].
-    pub fn builder(limits: WaitingLimits) -> WaitingQueueBuilder {
-        WaitingQueueBuilder {
+    /// An empty queue under `settings`; an IPv6 prefix above 128 is 128.
+    pub(crate) fn from_settings(settings: WaitingSettings) -> Self {
+        Self {
             settings: WaitingSettings {
-                limits,
-                ..WaitingSettings::default()
+                ipv6_prefix: settings.ipv6_prefix.min(128),
+                ..settings
             },
+            sources: HashMap::new(),
         }
     }
 
     /// An empty queue under `limits` with every other setting at its default:
-    /// `WaitingQueue::builder(limits).build()`.
+    /// `WaitingQueue::builder().limits(limits).build()`.
     pub fn new(limits: WaitingLimits) -> Self {
-        Self::builder(limits).build()
+        Self::from_settings(WaitingSettings {
+            limits,
+            ..WaitingSettings::default()
+        })
     }
 
     /// The settings it was built from.

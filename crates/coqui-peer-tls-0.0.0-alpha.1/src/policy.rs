@@ -6,7 +6,9 @@ use rustls::crypto::CryptoProvider;
 
 use crate::error::PeerError;
 use crate::profiles::{CipherProfile, Crypto};
-use coqui_peer::{Digest, NonDefault, PeerId, WaitingLimits};
+use coqui_builder::Describe;
+use coqui_builder::NonDefault;
+use coqui_peer::{Digest, PeerId, WaitingLimits};
 
 /// A TLS protocol version. rustls offers 1.2 and 1.3 only: SSL 3, TLS 1.0 and 1.1 cannot be
 /// offered by this crate, and asking for them is an error, never ignored.
@@ -59,17 +61,18 @@ impl FromStr for TlsVersion {
 /// silently non-default: [`non_defaults`](Policy::non_defaults) lists every setting that differs from
 /// the default, and the configuration builders return that list.
 ///
-/// A policy is a guatiao value with a schema whose `default`s are the intermediate preset's: a
-/// document names only what differs, and an unknown key is refused. With the `serde` feature it
-/// also reads and writes through any serde format.
+/// A policy is [`Describe`]: its keys' defaults are the intermediate preset's, so a document
+/// names only what differs, and an unknown key is refused. A `coqui_builder::Partial<Policy>` is
+/// filled from text and built; with the `serde` feature the policy itself is also read through any
+/// serde format (it is not written).
 ///
 /// The struct is `#[non_exhaustive]`: start from a preset and assign the fields to change.
-#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[derive(Debug, Clone, PartialEq, Eq, Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Policy {
     /// TLS versions offered and accepted. Non-empty.
-    #[map(default = base().tls_versions, with = crate::settings::texts)]
+    #[map(default = base().tls_versions, as_text)]
     pub tls_versions: Vec<TlsVersion>,
     /// An allow-list of cipher suites by IANA name, for example `TLS13_AES_256_GCM_SHA384`.
     /// `None` allows every suite the cipher profiles give for [`tls_versions`](Self::tls_versions).
@@ -82,7 +85,7 @@ pub struct Policy {
     /// first listed, narrowed by the versions, the provider, [`cipher_suites`](Self::cipher_suites)
     /// and [`kx_groups`](Self::kx_groups). Every preset allows `[CipherProfile::Mozilla]`. Text
     /// key `cipher_profiles`.
-    #[map(default = base().cipher_profiles, with = crate::settings::texts)]
+    #[map(default = base().cipher_profiles, as_text)]
     pub cipher_profiles: Vec<CipherProfile>,
     /// The crypto provider; `Crypto::Ring` in every preset. Text key `crypto`.
     #[map(default = base().crypto, as_text)]
@@ -121,7 +124,7 @@ pub struct Policy {
     /// certificate's fingerprint before the trust store is consulted
     /// ([`Refusal::PeerDenied`](crate::Refusal::PeerDenied)). Its fingerprints may be written
     /// in any spelling a [`PeerId`] parses, and are made canonical where a configuration is
-    /// built or a policy is read through [`from_value_over`](Policy::from_value_over) or serde; a
+    /// built or a policy is read through serde; a
     /// rule naming something else, or a digest other than SHA-256, is an error there and in
     /// [`check`](Policy::check). `None` for none.
     #[cfg(feature = "acl")]
@@ -208,52 +211,23 @@ fn list<T: fmt::Display>(items: &[T]) -> String {
 
 impl Policy {
     /// Every setting that differs from the default (intermediate) preset, as plain data named by
-    /// its key (`waiting.per_source`, `tls_versions`): the places where this policy's guatiao
-    /// value departs from the schema's defaults. Empty for `intermediate`; `modern` reports
-    /// `tls_versions` and `legacy` reports `pin_digests` and `require_ems`. Values are rendered
-    /// as [`NonDefault::from_difference`] renders them. With the `acl` feature, the list's own
-    /// non-default settings are added (`acl.default`).
+    /// its key (`waiting.per_source`, `tls_versions`). Empty for `intermediate`; `modern` reports
+    /// `tls_versions` and `legacy` reports `pin_digests` and `require_ems`. A value prints as its
+    /// type and text (`bool(true)`, `[TlsVersion(1.3)]`). With the `acl` feature, a list present is
+    /// one entry, `acl`; `coqui_builder::non_defaults` over the list reports its own settings.
     pub fn non_defaults(&self) -> Vec<NonDefault> {
-        self.differences(None)
+        coqui_builder::non_defaults(self)
     }
 
     /// As [`non_defaults`](Self::non_defaults), against `baseline` instead of the defaults, for a
     /// consumer whose own baseline differs from them (`non_defaults_against(&Policy::modern())`
     /// reports TLS 1.2).
     pub fn non_defaults_against(&self, baseline: &Self) -> Vec<NonDefault> {
-        self.differences(Some(baseline))
-    }
-
-    /// The generic walk: the schema, this policy's value and the baseline's (the schema's
-    /// defaults when `None`). Both are values of a derived type, so the walk cannot fail unless
-    /// the allocator does.
-    fn differences(&self, baseline: Option<&Self>) -> Vec<NonDefault> {
-        use guatiao::{Schema, ToValue};
-        const PLACEHOLDER: &str = "***";
-        let unbuildable = "a policy is a value that builds";
-        let schema = Policy::schema().expect(unbuildable);
-        let schema = guatiao::schema::SchemaRef::new(&schema).expect(unbuildable);
-        let value = self.to_value().expect(unbuildable);
-        let baseline = baseline.map(|baseline| baseline.to_value().expect(unbuildable));
-        #[cfg_attr(not(feature = "acl"), expect(unused_mut))]
-        let mut found: Vec<NonDefault> =
-            guatiao::schema::differences(schema, &value, baseline.as_ref(), PLACEHOLDER)
-                .expect(unbuildable)
-                .iter()
-                // The list is coqui-net-acl's to report, below.
-                .filter(|difference| difference.path.first().is_none_or(|key| key != "acl"))
-                .map(NonDefault::from_difference)
-                .collect();
-        #[cfg(feature = "acl")]
-        if let Some(acl) = &self.acl {
-            // coqui-net-acl has no dependencies and keeps a NonDefault of its own, field for field.
-            found.extend(
-                acl.non_defaults()
-                    .into_iter()
-                    .map(|w| NonDefault::new(w.setting, w.value, w.default)),
-            );
-        }
-        found
+        coqui_builder::differences(&Policy::description(), self, Some(baseline))
+            .findings()
+            .iter()
+            .map(NonDefault::from)
+            .collect()
     }
 
     /// Whether the access control list admits, by address, a client from `source` to `local`
@@ -372,79 +346,45 @@ fn base() -> Policy {
     Policy::intermediate()
 }
 
-impl Policy {
-    /// Reads a policy document over `base` instead of the intermediate preset: the keys it
-    /// names replace the base's (a table such as `waiting` key by key, a list whole), and the
-    /// rest are kept. A consumer with its own default profile reads its configuration with
-    /// this.
-    ///
-    /// # Errors
-    ///
-    /// The reader's refusal of an unknown key or a value of the wrong type or form, and, with the
-    /// `acl` feature, of a rule whose fingerprint is not a SHA-256 peer id; the list's
-    /// fingerprints are made canonical.
-    pub fn from_value_over(
-        base: &Policy,
-        document: &guatiao::Value,
-    ) -> Result<Policy, guatiao::MapError> {
-        use guatiao::{FromValue, MergeMode, ToValue};
-        let unreadable = |error: &dyn fmt::Display| guatiao::MapError::BadValue {
-            key: String::new(),
-            expected: error.to_string(),
-        };
-        let base = base.to_value().map_err(|error| unreadable(&error))?;
-        let merged = MergeMode::Substitute
-            .merge(&base, document, guatiao::Alloc::rust())
-            .map_err(|error| unreadable(&error))?;
-        #[cfg_attr(not(feature = "acl"), expect(unused_mut))]
-        let mut policy = Policy::from_value(&merged)?;
-        #[cfg(feature = "acl")]
-        if let Some(acl) = &policy.acl {
-            policy.acl = Some(crate::gate::canonical(acl).map_err(|error| unreadable(&error))?);
-        }
-        Ok(policy)
-    }
-}
-
 #[cfg(feature = "serde")]
 mod text {
-    use guatiao_serde::{Presentation, Walked};
+    use coqui_builder::Partial;
     use serde::de::Error as _;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer};
 
-    use super::Policy;
+    use super::{Policy, base};
 
     impl Policy {
         /// Reads a policy document over `base` instead of the intermediate preset: the keys it
-        /// names replace the base's, and the rest are kept.
+        /// names replace the base's (a table such as `waiting` key by key, a list whole), and the
+        /// rest are kept. A consumer with its own default profile reads its configuration with
+        /// this.
         ///
         /// # Errors
         ///
-        /// The deserializer's error for an unknown key or a value of the wrong type or form.
+        /// The deserializer's error for an unknown key or a value of the wrong type or form, and,
+        /// with the `acl` feature, for a rule whose fingerprint is not a SHA-256 peer id; the
+        /// list's fingerprints are made canonical.
         pub fn deserialize_over<'de, D: Deserializer<'de>>(
             base: Policy,
             deserializer: D,
         ) -> Result<Policy, D::Error> {
-            use serde::de::DeserializeSeed;
-            let document =
-                guatiao_serde::ValueSeed::new(guatiao::Alloc::rust()).deserialize(deserializer)?;
-            Policy::from_value_over(&base, &document).map_err(D::Error::custom)
-        }
-    }
-
-    impl Serialize for Policy {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            Walked::new(self, Presentation::new()).serialize(serializer)
+            let mut partial = Partial::from(base);
+            partial.overlay(Partial::<Policy>::deserialize(deserializer)?);
+            #[cfg_attr(not(feature = "acl"), expect(unused_mut))]
+            let mut policy = partial.build().map_err(D::Error::custom)?;
+            #[cfg(feature = "acl")]
+            if let Some(acl) = &policy.acl {
+                policy.acl = Some(crate::gate::canonical(acl).map_err(D::Error::custom)?);
+            }
+            Ok(policy)
         }
     }
 
     impl<'de> Deserialize<'de> for Policy {
-        /// Reads the guatiao form over the intermediate preset.
+        /// Reads the document over the intermediate preset.
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            use serde::de::DeserializeSeed;
-            let document =
-                guatiao_serde::ValueSeed::new(guatiao::Alloc::rust()).deserialize(deserializer)?;
-            Policy::from_value_over(&super::base(), &document).map_err(D::Error::custom)
+            Policy::deserialize_over(base(), deserializer)
         }
     }
 }

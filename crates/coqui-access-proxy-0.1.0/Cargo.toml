@@ -1,4 +1,4 @@
-# coqui-access/providers/access/proxy at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+# coqui-access/providers/access/proxy at ce68969a397073dcef0a37fb00a83888b767e273, with what it inherits written out.
 [package]
 name = "coqui-access-proxy"
 description = "Trusted reverse-proxy identity headers as an authenticator"
@@ -15,12 +15,19 @@ exclude = [".*", "*.local.*"]
 path = "crates/coqui-access"
 [dependencies.coqui-access-kit]
 path = "crates/coqui-access-kit"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
+[dependencies.guatiao-builder]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 [dependencies.coqui-net-acl]
 git = "https://github.com/Boriken-Dev/coqui-net-acl"
-rev = "6cbcb4b937ea1902291aaf1636d4d6bd391adc3a"
+rev = "839435acc29b76ec0190b7099f870863313d3fcd"
 [dependencies.coqui-peer-tls]
 git = "https://github.com/Boriken-Dev/coqui-peer-tls"
-rev = "e5c1e6df27260ba3b4cec0a1ad5e37a04652e5f4"
+rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d"
 features = ["fields"]
 [dependencies.data-encoding]
 version = "2.11"

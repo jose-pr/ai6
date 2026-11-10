@@ -10,19 +10,20 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Provider, Schema, ToValue};
 use coqui_access::{Attempt, Authenticator, Directory, Lookup, Person, Verdict};
 use coqui_access_kit::{CacheOptions, CacheSetting, Cached};
+use coqui_builder::{Describe, Secret};
 use coqui_peer_tls::{ClientBuilder, NonDefault, Policy, Roots, Trust};
+use guatiao_builder::Described;
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
 
 /// LDAP result code for credentials rejected by a directory.
 const INVALID_CREDENTIALS: u32 = 49;
 
 /// LDAP authentication and query settings.
-#[derive(Clone, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Clone, Describe)]
 #[non_exhaustive]
 pub struct LdapAccountsConfig {
     /// LDAP or LDAPS server URL.
@@ -36,9 +37,8 @@ pub struct LdapAccountsConfig {
     pub base: String,
     /// Service-account distinguished name used for searches.
     pub bind: Option<String>,
-    /// Service-account password; do not include it in logs.
-    #[schema(sensitive)]
-    pub bind_password: Option<String>,
+    /// Service-account password; wiped when dropped and never shown.
+    pub bind_password: Option<Secret<String>>,
     /// LDAP filter with `{name}` for the escaped account name.
     #[map(default = String::from("(sAMAccountName={name})"))]
     pub user_filter: String,
@@ -59,8 +59,8 @@ pub struct LdapAccountsConfig {
     #[map(default = 10)]
     pub timeout_seconds: u32,
     /// Lookups kept for a few seconds, to absorb bursts: `true` (5 s, 1 s for "not found",
-    /// 10 000 entries), `false`, or `{ "ttl", "negative_ttl", "max_entries" }`. Passwords are
-    /// always checked at the directory.
+    /// 10 000 entries), `false`, or `{ "ttl", "negative_ttl", "max_entries" }` (durations read
+    /// `5`, `1.5`, `5s` or `250ms`). Passwords are always checked at the directory.
     #[map(default)]
     pub cache: CacheSetting,
 }
@@ -97,7 +97,7 @@ impl fmt::Debug for LdapAccountsConfig {
     Directory,
     id = "coqui_access_ldap",
     name = "LDAP accounts",
-    config = LdapAccountsConfig,
+    config = Described<LdapAccountsConfig>,
     crate = ::coqui_access::guatiao
 )]
 pub struct LdapAccounts {
@@ -196,11 +196,13 @@ impl Ldap {
         }
         let (trusted, non_defaults) = match config.ca_file.as_deref() {
             Some(file) => {
-                let built = ClientBuilder::new(Trust::Roots(Roots::bundle_file(file)))
+                let built = ClientBuilder::new()
+                    .server(Trust::Roots(Roots::bundle_file(file)))
                     .policy(Policy::default())
                     .build()
                     .map_err(|reason| format!("ca_file {file}: {reason}"))?;
-                (Some(Arc::new(built.config)), built.non_defaults)
+                let non_defaults = built.non_defaults();
+                (Some(Arc::new(built.config)), non_defaults)
             }
             None => (None, Vec::new()),
         };
@@ -225,9 +227,11 @@ impl Ldap {
             })?;
         connection.with_timeout(timeout);
         if let (Some(bind), Some(password)) = (&self.config.bind, &self.config.bind_password) {
-            let bound = connection.simple_bind(bind, password).map_err(|error| {
-                coqui_access::error::internal(&format!("directory bind failed: {error}"))
-            })?;
+            let bound = connection
+                .simple_bind(bind, password.expose())
+                .map_err(|error| {
+                    coqui_access::error::internal(&format!("directory bind failed: {error}"))
+                })?;
             bound.success().map_err(|_| {
                 coqui_access::error::internal("directory refused its configured search account")
             })?;
@@ -315,6 +319,13 @@ impl TryFrom<LdapAccountsConfig> for LdapAccounts {
             .map_err(|_| coqui_access::error::bad_value("LDAP configuration is invalid"))
     }
 }
+impl TryFrom<Described<LdapAccountsConfig>> for LdapAccounts {
+    type Error = ProviderError;
+
+    fn try_from(config: Described<LdapAccountsConfig>) -> Result<Self, Self::Error> {
+        Self::try_from(config.0)
+    }
+}
 
 impl Authenticator for Ldap {
     fn authenticate(&self, attempt: Attempt) -> Result<Verdict, ProviderError> {
@@ -371,6 +382,8 @@ impl Directory for Ldap {
 
 #[cfg(test)]
 mod tests {
+    use coqui_builder::Partial;
+
     use super::*;
 
     fn config(url: &str) -> LdapAccountsConfig {
@@ -415,7 +428,7 @@ mod tests {
     fn debug_output_redacts_directory_credentials_and_url() {
         let mut config = config("ldaps://user:secret@directory.example.org");
         config.bind = Some("CN=search".to_owned());
-        config.bind_password = Some("very-secret".to_owned());
+        config.bind_password = Some(Secret::new("very-secret".to_owned()));
         let debug = format!("{:?}", config);
         assert!(!debug.contains("very-secret"));
         assert!(!debug.contains("user:secret"));
@@ -464,18 +477,14 @@ mod tests {
         let mut off = config("ldaps://directory.example.org");
         off.cache = CacheSetting::Enabled(false);
         assert_eq!(LdapAccounts::new(off).unwrap().cache(), CacheOptions::off());
-        let read = |cache: coqui_access::guatiao::Value| {
-            let value = config("ldaps://directory.example.org").to_value().unwrap();
-            let mut map = coqui_access::guatiao::Map::try_from(value).unwrap();
-            map.set("cache", cache);
-            LdapAccountsConfig::from_value(&map.into())
-                .unwrap()
-                .cache
-                .options()
+        let read = |key: &str, text: &str| {
+            let mut partial = Partial::from(config("ldaps://directory.example.org"));
+            partial.set(key, text).unwrap();
+            partial.build().unwrap().cache.options()
         };
-        assert_eq!(read(false.into()), CacheOptions::off());
-        let mut tuned = coqui_access::guatiao::Map::new();
-        tuned.set("ttl", 1u32);
-        assert_eq!(read(tuned.into()).ttl, Duration::from_secs(1));
+        assert_eq!(read("cache", "false"), CacheOptions::off());
+        assert_eq!(read("cache", "true"), CacheOptions::default());
+        assert_eq!(read("cache.ttl", "1").ttl, Duration::from_secs(1));
+        assert_eq!(read("cache.ttl", "250ms").ttl, Duration::from_millis(250));
     }
 }

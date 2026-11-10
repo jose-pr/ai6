@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use coqui_access::guatiao::{FromValue, Schema, ToValue};
+use coqui_builder::Leaf;
 use coqui_peer_tls::CertificateFields;
 use data_encoding::BASE64;
 use percent_encoding::percent_decode_str;
@@ -10,8 +10,8 @@ use rustls_pki_types::CertificateDer;
 use rustls_pki_types::pem::PemObject;
 
 /// How the certificate header is written.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Leaf)]
+#[map(rename_all = "kebab-case")]
 pub enum CertificateEncoding {
     /// URL-encoded PEM, the leaf first and any chain after it: nginx
     /// `$ssl_client_escaped_cert`, AWS ALB `X-Amzn-Mtls-Clientcert`.

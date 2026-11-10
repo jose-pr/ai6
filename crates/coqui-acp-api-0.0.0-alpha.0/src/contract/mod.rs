@@ -26,14 +26,21 @@
 //! The `acp-harness-check` program runs the same suite on a library file or a source file, for a
 //! provider written in any language Guatiao loads.
 
+mod accounts;
 mod checks;
 mod host;
+mod json;
+mod programs;
+mod spawner;
 mod transport;
 
 use alloc::borrow::ToOwned;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
+
+pub use programs::HOME_VARIABLE;
+pub use spawner::spawner_files;
 
 use crate::{AcpHarness, NO_COMMANDS, READ_ONLY, Requirement};
 
@@ -46,6 +53,9 @@ pub struct Contract {
     holds: Vec<Requirement>,
     message_limit: Option<usize>,
     imports: bool,
+    logins: bool,
+    account: Option<String>,
+    program_agent: bool,
 }
 
 /// One rule a provider broke.
@@ -94,6 +104,9 @@ impl Contract {
             holds: alloc::vec![Requirement::new(READ_ONLY), Requirement::new(NO_COMMANDS)],
             message_limit: None,
             imports: true,
+            logins: true,
+            account: None,
+            program_agent: false,
         }
     }
 
@@ -124,12 +137,41 @@ impl Contract {
         self
     }
 
+    /// Whether the provider offers login methods (the default). One that does not must list none
+    /// in its catalog and refuse `login` with `GUATIAO_ERR_UNSUPPORTED` and a reason.
+    pub const fn logins(mut self, logins: bool) -> Self {
+        self.logins = logins;
+        self
+    }
+
+    /// Checks the account checks against this kind alone, in place of every kind the catalog
+    /// lists. The catalog checks still read all of them.
+    pub fn account(mut self, kind: impl Into<String>) -> Self {
+        self.account = Some(kind.into());
+        self
+    }
+
+    /// Whether the agent is the harness's own program, which the provider starts through the spawner and the suite's
+    /// spawner then starts for real (the default is the in-process contract agent, and a spawner that starts nothing).
+    /// The provider's settings name a stand-in for the program that behaves as the module's documentation says for
+    /// `wait`, `ask` and a plain prompt (`echo: TEXT`) and, when `describe` lists usage sources, `quota P` and `limit`.
+    ///
+    /// What a program agent cannot do is not asked of it: asking the client for a file (`read PATH`), ending the
+    /// connection on its own (`close`), and the exact figures `quota` and `limit` script (their ids and token bucket),
+    /// of which the checks keep the shape: a report that changes, tells a client that asked, agrees with the kind's
+    /// answer, and a limit that refuses the turn and is kept.
+    pub const fn program_agent(mut self, program_agent: bool) -> Self {
+        self.program_agent = program_agent;
+        self
+    }
+
     /// Runs every check against `harness`.
     ///
     /// # Errors
     ///
     /// Every rule it broke.
     pub fn run(&self, harness: &dyn AcpHarness) -> Result<(), Failures> {
+        let _running = host::Running::on(self.program_agent);
         let failures: Vec<Failure> = checks::all(self, harness)
             .into_iter()
             .filter_map(|(check, outcome)| outcome.err().map(|message| Failure { check, message }))

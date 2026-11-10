@@ -13,11 +13,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Schema, ToValue};
 use coqui_access::{
     AccountInfo, AccountPut, Accounts, AuthorizationDecision, AuthorizationRequest, Authorizer,
     Description, Directory, Lookup, Person, PutOutcome, Waiting,
 };
+use coqui_builder::Describe;
 use moka::Expiry;
 use moka::sync::Cache;
 
@@ -27,9 +27,9 @@ use moka::sync::Cache;
 /// entries of each kind: a burst is answered once, and a change at the source is seen within
 /// seconds. A removed account or a withdrawn permission can still pass for up to `ttl` after
 /// the source changes unless [`Cached::invalidate`] is called; a new one can be refused for
-/// up to `negative_ttl`. As configuration, the durations are seconds (`1.5` allowed).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+/// up to `negative_ttl`. As configuration, a duration reads `5` or `1.5` (seconds), `5s` or
+/// `250ms`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Describe)]
 #[non_exhaustive]
 pub struct CacheOptions {
     /// How long a person found or a grant is kept.
@@ -104,8 +104,8 @@ impl CacheOptions {
 }
 
 /// A cache as configuration: `true` (the defaults), `false` (off), or [`CacheOptions`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, untagged)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Describe)]
+#[map(untagged)]
 pub enum CacheSetting {
     /// On with the defaults, or off.
     Enabled(bool),

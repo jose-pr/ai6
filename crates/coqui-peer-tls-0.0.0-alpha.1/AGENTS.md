@@ -12,22 +12,22 @@ package and is self-contained. Development documentation lives with the source a
 | `ca` | `fields`, `globset` | `Trust::Ca`, `Trust::PinnedOrCa`, `CaPolicy` | off |
 | `tokio` | `tokio` (`net`, `io-util`, `time`), `tokio-rustls`, `coqui-peer/tokio` | module `asynch` | off |
 | `pin` | `coqui-peer/pin` | PIN pairing (`Pairing::pin`) | off |
-| `serde` | `serde`, `guatiao-serde`, `coqui-peer/serde` | `TlsSettings`, `Policy`, `PairConfig` as serde types over their guatiao form, `Policy::deserialize_over`, `PeerId` as text | off |
+| `serde` | `serde`, `coqui-builder/serde`, `coqui-peer/serde` | `Policy` read through any serde format (`Policy::deserialize_over`), the settings types filled from one into a `coqui_builder::Partial`, `PeerId` as text | off |
 | `acl` | `coqui-net-acl` | `Policy::acl` and its enforcement, `coqui_peer_tls::acl` | off |
 | `platform-roots` | `rustls-platform-verifier` | `Roots::platform` | off |
 | `aws-lc` | rustls `aws_lc_rs` (AWS-LC, built from C) | `Crypto::AwsLc`: ML-KEM groups, ML-DSA, `cnsa-2.0` | off |
 | `fips` | `aws-lc`, rustls `fips` (AWS-LC's FIPS module; global, see Gotchas) | `CipherProfile::Fips1403Validated` | off |
 
-MSRV Rust 1.89. A default build depends on `coqui-peer`, `guatiao` (`derive`: the settings
-types are guatiao values in every build), `rustls` (0.23.27 or later, ring provider, `tls12`) and
+MSRV Rust 1.89. A default build depends on `coqui-peer`, `coqui-builder` (`derive`: the settings
+types are described by it in every build), `rustls` (0.23.27 or later, ring provider, `tls12`) and
 `rustls-webpki` (which rustls already uses). Version `0.0.0-alpha.1` is
 a pre-release; the API may change in any release before 1.0. This is the TLS method of `coqui-peer` (the core: `PeerId`, `TrustStore`, the sans-IO
-`Handshake`, `NonDefault`); its API header ships in that crate.
+`Handshake`); its API header ships in that crate.
 
 Imports: everything is at the crate root, including re-exports of `coqui-peer`'s `Clock`,
 `Digest`, `Invitation`, `InvitationOptions`, `KeyMaterial`, `PeerId`, `Random`,
 `ReadTimeout`, `WriteTimeout`, `RotationEvent`, `RotationOptions`, `TrustStore`,
-`WaitingEntry`, `WaitingLimits` and `NonDefault`. Public modules: `asynch` (feature `tokio`), `pair` (`coqui_peer::pair`
+`WaitingEntry` and `WaitingLimits`, and `coqui_builder::NonDefault`. Public modules: `prelude` (the settings types' setter traits), `asynch` (feature `tokio`), `pair` (`coqui_peer::pair`
 re-exported) and `acl` (`coqui_net_acl` re-exported, feature `acl`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). Process-wide state: one thread-local holding the
@@ -279,10 +279,9 @@ impl Policy {
     pub fn crypto_provider(&self) -> Result<Arc<CryptoProvider>, PeerError>;
     pub fn supported_cipher_suites(&self) -> Result<Vec<String>, PeerError>;   // of the provider `crypto` selects
     pub fn supported_kx_groups(&self) -> Result<Vec<String>, PeerError>;
-    pub fn from_value_over(base: &Policy, document: &guatiao::Value) -> Result<Policy, guatiao::MapError>;  // merges key by key (MergeMode::Substitute); reads the earlier text form's keys
-    pub fn deserialize_over<'de, D: Deserializer<'de>>(base: Policy, d: D) -> Result<Policy, D::Error>;  // feature serde
+    pub fn deserialize_over<'de, D: Deserializer<'de>>(base: Policy, d: D) -> Result<Policy, D::Error>;  // feature serde; merges key by key, ACL fingerprints made canonical
 }
-pub use coqui_peer::NonDefault;    // { setting, value, default }, NonDefault::new; setting: a field; default = the baseline's value
+pub use coqui_builder::NonDefault;    // { setting: String, value: Shown, default: Shown }; prints as Type(text): bool(true), [TlsVersion(1.3)], unset
 impl TlsVersion { pub const fn as_str(self) -> &'static str; }   // "1.2", "1.3"; also Display; FromStr refuses others
 ```
 
@@ -305,12 +304,12 @@ builds nothing: for a host that builds its configurations later, one per connect
 `crypto_provider` is the provider `crypto` names narrowed to what the policy offers (next
 section); an unknown suite or group name is `PeerError::Policy` whose message lists the
 provider's names, and so is a policy that leaves no version or no group. `preset` takes `modern`, `intermediate` or `legacy`. `non_defaults` is the places where
-the policy's value departs from the schema's defaults (`guatiao::schema::differences`), one
+the policy's value departs from the defaults (`coqui_builder::non_defaults`), one
 `NonDefault` each, `setting` its key path (`tls_versions`, `waiting.per_source`) and `value` /
-`default` rendered by `NonDefault::from_difference` (text as text, anything else compact JSON:
-`["1.3"]`, `[60,0]`, `true`; `unset` for a missing side), in key order. A looser and a stricter
+`default` shown as their type and text (`bool(true)`, `Duration(60s)`, `[TlsVersion(1.3)]`; `unset` for a
+missing side), in key order. A looser and a stricter
 value are alike differences: empty for `intermediate`, `tls_versions` for `modern`, `pin_digests`
-and `require_ems` for `legacy`. With `acl`, the list's own `acl.default` is added.
+and `require_ems` for `legacy`. With `acl`, a list present is one entry, `acl` (`coqui_builder::non_defaults` over the list reports its own).
 `non_defaults_against(&base)` compares with `base`'s value instead of the defaults.
 
 `allow_resumption` false (every preset) builds configurations with resumption off at both ends:
@@ -371,13 +370,19 @@ handshake signatures). Profiles and the provider are choices, not non-default se
 ### Settings as data
 
 Build a `Policy` in code (constructors and public fields), or read it. `TlsSettings`, `Policy`
-and `PairConfig` derive guatiao's `ToValue`, `FromValue` and `Schema`: `T::schema()` is the
-description, with each field's `default`, and `guatiao_serde::text::{toml, json, yaml}`
-`from_str_as::<T>` / `to_string_of` read and write the text. Every key is optional and takes the
+and `PairConfig` derive `coqui_builder::Describe`: `T::description()` describes each key with its
+default, and with coqui-builder's `serde` feature `toml::from_str::<Partial<T>>(text)?.build()` (or
+JSON, or any serde format) reads the text. They are never written. Every key is optional and takes the
 intermediate preset's value; an unknown key is an error.
 
 ```rust
-#[non_exhaustive] pub struct TlsSettings { pub alpn: Vec<String>, pub policy: Policy }   // Default; each alpn entry 1..=255 bytes
+#[non_exhaustive] pub struct TlsSettings { pub alpn: Vec<Alpn>, pub policy: Policy }   // Default; Describe
+
+/// An application protocol name of 1 to 255 bytes, held as text; a name that is not UTF-8 cannot be held.
+pub struct Alpn;   // Debug, Clone, PartialEq, Eq, Hash, Display, FromStr (Err PeerError::Policy), coqui_builder::Leaf
+impl Alpn { pub fn as_bytes(&self) -> &[u8]; pub fn as_str(&self) -> &str; }
+impl TryFrom<&str> for Alpn { type Error = PeerError; }     // refuses empty and over 255 bytes
+impl TryFrom<&[u8]> for Alpn { type Error = PeerError; }   // the same, and non-UTF-8 bytes
 ```
 
 `Policy` keys: `tls_versions` (`"1.2"`, `"1.3"`), `cipher_suites`,
@@ -385,12 +390,13 @@ intermediate preset's value; an unknown key is an error.
 known), `crypto` (`"ring"`, `"aws-lc"`), `pin_digests` (`"sha256"`, `"sha384"`, `"sha512"`,
 `"sha1"`), `check_validity`, `allow_chain_when_pinned`, `allow_resumption`, `require_ems`,
 `waiting` (a table: `per_source`, `total`, `rerecord`) and `acl` (see `coqui-net-acl`). A duration
-(`rerecord`, `timeout`) is written `[secs, nanos]` and read as a number of seconds, `[secs, nanos]`
-or `{secs, nanos}`. `PairConfig` keys: `policy`, `alpn` (text of 1 to 255 bytes), `timeout`.
-`tests/vectors/policy/{modern,intermediate,legacy,acl,profiles}.{toml,json}` are byte-exact.
+(`rerecord`, `timeout`) is read as `60`, `30s`, `250ms` or `1.5h` (a number is seconds); `[secs, nanos]` is not read.
+`PairConfig` keys: `policy`, `alpn` (text of 1 to 255 bytes), `timeout` (a duration, or `never`).
+`tests/vectors/policy/{modern,intermediate,legacy,acl,profiles}.{toml,json}` are read by the tests.
 
-A consumer with its own default profile reads over it with `from_value_over`.
-With `serde`, `Serialize` / `Deserialize` for these types forward to the same form.
+A consumer with its own default profile reads over it with `Policy::deserialize_over` (`serde`), or by
+overlaying a `Partial<Policy>` on `Partial::from(base)`. With `serde`, `Policy` implements `Deserialize`
+(over the intermediate preset, the ACL fingerprints made canonical); nothing is written.
 
 ## Access control (`Policy::acl`, feature `acl`)
 
@@ -411,7 +417,7 @@ Every server configuration built under a policy with `acl: Some(..)` applies it:
   client is never recorded as waiting. A denial is `Refusal::PeerDenied`.
 - **Fingerprints are canonical.** Rules may be written in any spelling `PeerId` parses (hex,
   colon pairs, grouped base32); they are rewritten to `sha256:<hex>` when a configuration is
-  built, and `Policy::check` reports one that cannot be; reading a policy through `from_value_over` or serde canonicalizes them too. A rule naming something that is not a SHA-256 peer id
+  built, and `Policy::check` reports one that cannot be; reading a policy through serde canonicalizes them too. A rule naming something that is not a SHA-256 peer id
   is `PeerError::Policy` there ("acl rule N: ...").
 - **Addresses.** A configuration shared by connections reads them from the scope the accept
   helpers set: `accept` takes both from a `PeerAddr` (`TcpStream`, tokio's too, or an
@@ -462,7 +468,7 @@ impl ConnectionConfig {
 
 For a host that builds a configuration per connection (quinn's `Incoming::accept_with`).
 `ServerBuilder::configs` builds what `build` builds, and checks the identity and policy once
-(their errors are `build`'s); `non_defaults` is what `Built::non_defaults` would hold.
+(its errors are `build`'s); `non_defaults` is what `Built::non_defaults` would hold.
 `for_connection` then gives one connection's configuration: waiting entries recorded under
 `source`, the ACL decided from `source` and `local` (by address at the `ClientHello`, by
 fingerprint before the store), and every configuration from one `ServerConfigs` sharing one
@@ -476,35 +482,46 @@ handshake.
 ## Configurations and streams (`coqui_peer_tls`, `coqui_peer_tls::asynch`)
 
 ```rust
-#[non_exhaustive] pub struct Built<T> { pub config: T, pub non_defaults: Vec<NonDefault> }
+#[derive(Configured)] #[non_exhaustive] pub struct Built<T> { pub config: T, #[configured] pub policy: Policy }
+impl<T> Built<T> { pub fn non_defaults(&self) -> Vec<NonDefault>; }   // the policy's own keys: "tls_versions"
 #[non_exhaustive] pub enum ClientAuth {          // Clone, Debug
     None,                                        // server TLS: the client presents no certificate
     Required(Trust),                             // a client certificate this trust accepts
     Verifier(Arc<dyn ClientCertVerifier>),       // a verifier of the host's own
 }
-#[must_use] pub struct ServerBuilder<'a>;        // Clone, Debug
+// Derived by coqui-builder from ServerParts<'a> { settings: TlsSettings, input identity: &'a Identity, input client_auth: ClientAuth }.
+// Debug, not Clone; ServerBuilder::new() is the entry.
+pub struct ServerBuilder<'a>;
 impl<'a> ServerBuilder<'a> {
-    pub fn new(identity: &'a Identity, client_auth: ClientAuth) -> Self;   // no ALPN, Policy::default()
-    pub fn alpn<I>(self, protocols: I) -> Self where I: IntoIterator, I::Item: AsRef<[u8]>;   // replaces
-    pub fn policy(self, Policy) -> Self;
-    pub fn settings(self, TlsSettings) -> Self;  // alpn and policy at once; a setter called after it replaces its part
-    pub fn non_defaults(&self) -> Vec<NonDefault>;
-    pub fn build(self) -> Result<Built<ServerConfig>, PeerError>;
-    pub fn configs(self) -> Result<ServerConfigs, PeerError>;   // one configuration per connection
+    pub fn new() -> Self;                                  // nothing set; also Default
+    pub fn identity(self, &'a Identity) -> Self;           // required input
+    pub fn client_auth(self, ClientAuth) -> Self;          // required input
+    pub fn alpn(self, impl Into<Vec<Alpn>>) -> Self;       // the TlsSettings setters: alpn, policy (last write wins)
+    pub fn policy(self, impl Into<Policy>) -> Self;
+    pub fn fill(self, Partial<TlsSettings>) -> Self;       // overlay: only the keys set
+    pub fn fill_from(self, &mut impl Source) -> Result<Self, FillError>;
+    pub fn non_defaults(&self) -> Vec<NonDefault>;         // over TlsSettings: "policy.tls_versions", and "alpn" when set
+    pub fn parts(self) -> Result<ServerParts<'a>, Missing>;
+    pub fn build(self) -> Result<Built<ServerConfig>, BuildError<PeerError>>;   // Missing names the inputs not given
+    pub fn configs(self) -> Result<ServerConfigs, BuildError<PeerError>>;       // one configuration per connection
 }
 #[non_exhaustive] pub enum ServerAuth {          // Clone, Debug; From<Trust>
     Trust(Trust),                                // pins, roots, pinned-or-roots, any with key proof
     Verifier(Arc<dyn ServerCertVerifier>),       // a verifier of the host's own
 }
-#[must_use] pub struct ClientBuilder<'a>;        // Clone, Debug
+// Derived from ClientParts<'a> { settings: TlsSettings, input server: ServerAuth, input identity: Option<&'a Identity> }.
+pub struct ClientBuilder<'a>;   // Debug, not Clone
 impl<'a> ClientBuilder<'a> {
-    pub fn new(server: impl Into<ServerAuth>) -> Self;   // no certificate presented, no ALPN, Policy::default()
-    pub fn identity(self, &'a Identity) -> Self; // presented with its whole chain
-    pub fn alpn<I>(self, protocols: I) -> Self where I: IntoIterator, I::Item: AsRef<[u8]>;
-    pub fn policy(self, Policy) -> Self;
-    pub fn settings(self, TlsSettings) -> Self;
-    pub fn non_defaults(&self) -> Vec<NonDefault>;
-    pub fn build(self) -> Result<Built<ClientConfig>, PeerError>;
+    pub fn new() -> Self;
+    pub fn server(self, impl Into<ServerAuth>) -> Self;   // required input; a Trust converts
+    pub fn identity(self, &'a Identity) -> Self;           // optional; presented with its whole chain
+    pub fn alpn(self, impl Into<Vec<Alpn>>) -> Self;
+    pub fn policy(self, impl Into<Policy>) -> Self;
+    pub fn fill(self, Partial<TlsSettings>) -> Self;
+    pub fn fill_from(self, &mut impl Source) -> Result<Self, FillError>;
+    pub fn non_defaults(&self) -> Vec<NonDefault>;         // over TlsSettings, as the server builder's
+    pub fn parts(self) -> Result<ClientParts<'a>, Missing>;
+    pub fn build(self) -> Result<Built<ClientConfig>, BuildError<PeerError>>;
 }
 pub fn crypto_provider() -> Arc<CryptoProvider>;       // default ring provider
 pub const SERVER_NAME: &str = "coqui-peer.invalid";
@@ -600,7 +617,7 @@ pub use coqui_peer::pair;                    // Pairing, PairingDesk, PairingOpt
 pub use coqui_peer::{Clock, Random, Invitation, InvitationOptions, RotationOptions, RotationEvent};
 pub const PAIR_ALPN: &[u8] = b"coqui-pair/1";
 pub const EXPORTER_LABEL: &[u8] = b"EXPORTER-coqui-pair";
-#[non_exhaustive] pub struct PairConfig { pub policy: Policy, pub alpn: Vec<u8>, pub timeout: Duration }  // Default: Policy::default(), PAIR_ALPN, 15 min; plain data, a guatiao value
+#[non_exhaustive] pub struct PairConfig { pub policy: Policy, pub alpn: Alpn, pub timeout: Option<Duration> }  // Default: Policy::default(), PAIR_ALPN, Some(15 min); plain data, Describe; None is the text "never"
 pub use coqui_peer::{ReadTimeout, WriteTimeout};   // set_read_timeout / set_write_timeout(&self, Option<Duration>); TcpStream, &TcpStream
 #[non_exhaustive] pub enum ResponderTrust { Unverified, Verified { trust: Box<Trust>, name: Option<ServerName<'static>> } }
 impl ResponderTrust { pub fn pinned(id: PeerId) -> ResponderTrust; }
@@ -650,7 +667,7 @@ source the desk throttles by (an `Addressed` stream for one that names none).
 
 **Timeouts.** One side's whole exchange, its TLS handshake included, takes at most
 `PairConfig::timeout` (15 minutes by default, longer than the default `device_ttl`;
-`Duration::MAX` waits forever): the joiner's `pair_dial` and `finish` together, the responder's
+`None`, the text `never`, waits forever): the joiner's `pair_dial` and `finish` together, the responder's
 `pair_accept` (or `asynch::pair_respond` from its call). Each responder read also waits at most
 until the responder's own deadline (`PairingResponder::time_left`: `pin_ttl` or `device_ttl` from
 the joiner's first message); past it the joiner is told `Expired` and its slot, code and pending

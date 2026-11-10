@@ -218,18 +218,39 @@ fn off_asks_every_time_and_debug_shows_counts_only() {
 
 #[test]
 fn a_setting_reads_as_a_flag_or_as_options() {
-    use coqui_access::guatiao::{FromValue, Map, Value};
+    use coqui_builder::{Describe, Partial};
+
+    #[derive(Debug, Describe)]
+    struct Holder {
+        #[map(default)]
+        cache: CacheSetting,
+    }
+    let read = |keys: &[(&str, &str)]| {
+        let mut partial = Partial::<Holder>::new();
+        for (key, text) in keys {
+            partial.set(key, text).ok()?;
+        }
+        partial.build().ok().map(|holder| holder.cache)
+    };
+    assert_eq!(read(&[]), Some(CacheSetting::Enabled(true)));
     assert_eq!(
-        CacheSetting::from_value(&Value::from(false)).unwrap(),
-        CacheSetting::Enabled(false)
+        read(&[("cache", "true")]),
+        Some(CacheSetting::Enabled(true))
     );
-    let mut tuned = Map::new();
-    tuned.set("ttl", 2u32);
-    let CacheSetting::Tuned(options) = CacheSetting::from_value(&tuned.into()).unwrap() else {
-        panic!("a map is options");
+    assert_eq!(
+        read(&[("cache", "false")]),
+        Some(CacheSetting::Enabled(false))
+    );
+    let Some(CacheSetting::Tuned(options)) = read(&[("cache.ttl", "2")]) else {
+        panic!("a key below the setting is options");
     };
     assert_eq!(
         (options.ttl, options.negative_ttl),
         (Duration::from_secs(2), DEFAULT_NEGATIVE_TTL)
     );
+    let Some(CacheSetting::Tuned(options)) = read(&[("cache.ttl", "250ms")]) else {
+        panic!("a unit is read");
+    };
+    assert_eq!(options.ttl, Duration::from_millis(250));
+    assert_eq!(read(&[("cache", "maybe")]), None);
 }

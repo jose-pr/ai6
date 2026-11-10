@@ -54,14 +54,14 @@ cargo add coqui-peer-tls@0.0.0-alpha.1
 | `ca` | `fields`, `globset` | `Trust::Ca`, `Trust::PinnedOrCa`, `CaPolicy` | off |
 | `tokio` | `tokio`, `tokio-rustls`, `coqui-peer/tokio` | module `asynch`: async dial, accept, pairing and rotation | off |
 | `pin` | `coqui-peer/pin` | PIN pairing | off |
-| `serde` | `serde`, `guatiao-serde`, `coqui-peer/serde` | `TlsSettings`, `Policy` and `PairConfig` as serde types over their guatiao form, and `PeerId` as text | off |
+| `serde` | `serde`, `coqui-builder/serde`, `coqui-peer/serde` | `Policy` read through any serde format, the settings types filled from one into a `coqui_builder::Partial`, and `PeerId` as text | off |
 | `acl` | `coqui-net-acl` | an access control list inside a `Policy` | off |
 | `platform-roots` | `rustls-platform-verifier` | `Roots::platform`: servers verified by the operating system | off |
 | `aws-lc` | rustls's aws-lc-rs provider (AWS-LC, built from C) | `crypto = "aws-lc"`: ML-KEM key exchange, ML-DSA, the `cnsa-2.0` profile | off |
 | `fips` | `aws-lc` and rustls's `fips` (AWS-LC's FIPS module) | the `fips-140-3-validated` profile; global, see Development | off |
 
-Rust 1.89 or later. A default build depends on `coqui-peer`, `guatiao` (the settings types'
-value form), `rustls` (0.23.27 or later, ring provider) and `rustls-webpki`, which rustls
+Rust 1.89 or later. A default build depends on `coqui-peer`, `coqui-builder` (the settings types'
+description and the builders), `rustls` (0.23.27 or later, ring provider) and `rustls-webpki`, which rustls
 already uses.
 
 ## Quick start
@@ -70,15 +70,16 @@ Dial a peer you pinned, with an identity read from a file:
 
 ```rust,no_run
 use std::sync::Arc;
-use coqui_peer_tls::{ClientBuilder, Identity, Pins, Trust, dial};
+use coqui_peer_tls::{Alpn, ClientBuilder, Identity, Pins, Trust, dial};
 
 let me = Identity::read("identity.pem".as_ref())?.expect("an identity file");
 let trust = Trust::Pinned(Pins::fixed([
     "sha256:630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd".parse()?,
 ]));
-let config = ClientBuilder::new(trust)
+let config = ClientBuilder::new()
+    .server(trust)
     .identity(&me)
-    .alpn([b"my-protocol/1"])
+    .alpn([Alpn::try_from("my-protocol/1")?])
     .build()? // default policy: TLS 1.2 and 1.3
     .config;
 let socket = std::net::TcpStream::connect("192.0.2.7:7000")?;
@@ -92,11 +93,15 @@ Dial a server with a CA-issued certificate, verified by the web PKI for its name
 
 ```rust,no_run
 use std::sync::Arc;
-use coqui_peer_tls::{ClientBuilder, Roots, Trust, dial_named};
+use coqui_peer_tls::{Alpn, ClientBuilder, Roots, Trust, dial_named};
 use rustls::pki_types::ServerName;
 
 let trust = Trust::Roots(Roots::bundle_file("/etc/ssl/certs/ca-certificates.crt"));
-let config = ClientBuilder::new(trust).alpn([b"my-protocol/1"]).build()?.config;
+let config = ClientBuilder::new()
+    .server(trust)
+    .alpn([Alpn::try_from("my-protocol/1")?])
+    .build()?
+    .config;
 let name = ServerName::try_from("example.com")?.to_owned();
 let socket = std::net::TcpStream::connect("example.com:443")?;
 let (stream, server) = dial_named(Arc::new(config), name, socket)?;
@@ -111,7 +116,8 @@ for the dialled name is trusted. The chain, the dates and the name are always ch
 
 | Module | Purpose |
 | --- | --- |
-| `coqui_peer_tls` | `Identity`, `PeerIdentity`; `Trust`, `Pins`, `CaPolicy`, `Roots` and their verifiers; `Policy`; the configuration builders (`ServerBuilder`, `ClientBuilder`, `ClientAuth`, `ServerAuth`), `Built`, and `ServerConfigs` / `ConnectionConfig` for a configuration per connection; `dial`, `accept`, `Addressed` and their variants; `Tls` and `TlsHandshake`; pairing over TLS; rotation; `PeerError`, `Refusal`; re-exports of `coqui-peer`'s ids, store and `NonDefault`. |
+| `coqui_peer_tls` | `Identity`, `PeerIdentity`; `Trust`, `Pins`, `CaPolicy`, `Roots` and their verifiers; `Policy`; the configuration builders (`ServerBuilder`, `ClientBuilder`, `ClientAuth`, `ServerAuth`), `Built`, and `ServerConfigs` / `ConnectionConfig` for a configuration per connection; `dial`, `accept`, `Addressed` and their variants; `Tls` and `TlsHandshake`; pairing over TLS; rotation; `PeerError`, `Refusal`; re-exports of `coqui-peer`'s ids and store and of `coqui_builder::NonDefault`; `Alpn`, `TlsSettings` and the builders' parts (`ServerParts`, `ClientParts`). |
+| `coqui_peer_tls::prelude` | The setter traits of the settings types (`TlsSettingsSetters`, `PolicySetters`, `PairConfigSetters`), for a builder in another crate that holds them. |
 | `coqui_peer_tls::asynch` | Async dial, accept, pairing and rotation over tokio (`tokio`). |
 | `coqui_peer_tls::pair` | `coqui-peer`'s pairing exchange, re-exported. |
 | `coqui_peer_tls::acl` | `coqui-net-acl`, re-exported (`acl`). |
@@ -120,10 +126,12 @@ for the dialled name is trusted. The chain, the dates and the name are always ch
 `Policy::default()` is `intermediate` and works as it is. `Policy::modern()`, `intermediate()`
 and `legacy()` are plain values; start from one and assign the public fields to change (`Policy`
 is `#[non_exhaustive]`). `non_defaults()` lists every setting that differs from the default, as data
-named by key (`waiting.per_source`): the places where the policy departs from the schema's defaults
+named by key (`waiting.per_source`): the places where the policy departs from the defaults
 (`modern` reports `tls_versions`, `legacy` `pin_digests` and `require_ems`), and
 `non_defaults_against(&base)` does the same against a base of your own. `ServerBuilder::build` and
-`ClientBuilder::build` return that list beside the configuration. Nothing is printed.
+`ClientBuilder::build` return the policy beside the configuration, and `Built::non_defaults()` lists
+it. A builder's own `non_defaults()` is over `TlsSettings`, so its keys carry the `policy.` prefix
+(`policy.tls_versions`) and `alpn` is listed when set. Nothing is printed.
 
 | Field | `modern` | `intermediate` (default) | `legacy` |
 | --- | --- | --- | --- |
@@ -172,17 +180,19 @@ on a resumed session, so a peer removed from the trust store could reconnect on 
 held. TLS 1.0, 1.1 and non-AEAD suites cannot be offered; MD5 pins are never accepted.
 
 ```rust,no_run
-use coqui_peer_tls::{ClientAuth, Digest, Identity, Policy, ServerBuilder, Trust};
+use coqui_peer_tls::{Alpn, ClientAuth, Digest, Identity, Policy, ServerBuilder, Trust};
 
 let identity = Identity::read("identity.pem".as_ref())?.expect("an identity file");
 let mut policy = Policy::default();
 policy.pin_digests.push(Digest::Sha1);
 policy.waiting.per_source = 4;
-let built = ServerBuilder::new(&identity, ClientAuth::Required(Trust::AnyWithKeyProof))
-    .alpn([b"my-protocol/1"])
+let built = ServerBuilder::new()
+    .identity(&identity)
+    .client_auth(ClientAuth::Required(Trust::AnyWithKeyProof))
+    .alpn([Alpn::try_from("my-protocol/1")?])
     .policy(policy)
     .build()?;
-for setting in &built.non_defaults {
+for setting in built.non_defaults() {
     eprintln!("{} = {} (default: {})", setting.setting, setting.value, setting.default);
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -194,28 +204,33 @@ One builder per configuration, the settings named for what they are, then `build
 
 | To get | Write |
 | --- | --- |
-| a server that requires a pinned or CA-trusted client | `ServerBuilder::new(&identity, ClientAuth::Required(trust))` |
-| a server that asks for no client certificate | `ServerBuilder::new(&identity, ClientAuth::None)` |
-| a server whose clients a verifier of your own decides | `ServerBuilder::new(&identity, ClientAuth::Verifier(verifier))` |
-| a client | `ClientBuilder::new(trust)`, with `.identity(&me)` to present a certificate |
-| a client verified by a verifier of your own | `ClientBuilder::new(ServerAuth::Verifier(verifier))` |
-| a server configuration per connection (quinn) | `ServerBuilder::new(..).configs()` |
+| a server that requires a pinned or CA-trusted client | `ServerBuilder::new().identity(&identity).client_auth(ClientAuth::Required(trust))` |
+| a server that asks for no client certificate | `ServerBuilder::new().identity(&identity).client_auth(ClientAuth::None)` |
+| a server whose clients a verifier of your own decides | `ServerBuilder::new().identity(&identity).client_auth(ClientAuth::Verifier(verifier))` |
+| a client | `ClientBuilder::new().server(trust)`, with `.identity(&me)` to present a certificate |
+| a client verified by a verifier of your own | `ClientBuilder::new().server(ServerAuth::Verifier(verifier))` |
+| a server configuration per connection (quinn) | `ServerBuilder::new()...configs()` |
 | a server's client verifier for one connection | `PeerClientVerifier::builder(&trust).policy(p).addresses(source, local).build()` |
 | a client's server verifier | `PeerServerVerifier::new(&trust, &policy)` |
 | a stream that cannot name its addresses | `accept(config, Addressed::new(io, source).local(local))` |
 | a pairing configuration | `PairConfig::default()`, then assign `alpn`, `timeout` or `policy` |
 | a generated identity with a validity window | `Identity::builder().valid_for(..).generate()`, or `.not_before(..).not_after(..)` |
 
-Each configuration builder has `.alpn(..)`, `.policy(..)` and `.settings(TlsSettings)`; the last
-one called wins, and `settings` replaces both.
+Each configuration builder has `.alpn(..)` and `.policy(..)` (the keys of `TlsSettings`, set by name),
+and `.fill(Partial<TlsSettings>)` and `.fill_from(&mut source)` for a file or the environment; the last
+write of a key wins, whichever way it was written. `build()` returns `Result<_, BuildError<PeerError>>`:
+`Missing` names an input not given (the identity, the client authentication, the server
+verification), `Failed` holds the `PeerError`. Builders are not `Clone`. A builder from another crate
+that holds `TlsSettings` takes its setters from `coqui_peer_tls::prelude`.
 
 ## Settings as data
 
 The builders' settings are one type, `TlsSettings { alpn, policy }`, and `PairConfig` is its own
-plain-data type. `TlsSettings`, `Policy` and `PairConfig` are guatiao values with a
-schema (`TlsSettings::schema()`) whose defaults are the real ones, so a file names only what
-differs from the intermediate preset, and an unknown key is refused. `alpn` entries are text of 1
-to 255 bytes. `guatiao-serde` reads TOML, JSON and YAML into them:
+plain-data type. `TlsSettings`, `Policy` and `PairConfig` derive `coqui_builder::Describe`, with
+defaults that are the real ones, so a file names only what differs from the intermediate preset,
+and an unknown key is refused. `alpn` entries are `Alpn`s: text of 1 to 255 bytes (a protocol name
+that is not UTF-8 cannot be held; `Alpn` converts from `&str` and from UTF-8 `&[u8]`). With `serde` on
+`coqui-builder`, a `Partial` reads TOML, JSON and the other serde formats into them:
 
 ```toml
 alpn = ["my-protocol/1"]
@@ -231,7 +246,7 @@ require_ems = true
 [policy.waiting]
 per_source = 16
 total = 1000
-rerecord = 60                   # a duration: seconds, [secs, nanos] or {secs, nanos}
+rerecord = "60s"               # a duration: 60, "30s", "250ms", "1.5h"
 
 [policy.acl]                    # optional, with the `acl` feature; see coqui-net-acl
 default = "deny"
@@ -243,14 +258,18 @@ destination = "10.6.20.5"
 ```
 
 ```rust,ignore
-let settings: TlsSettings = guatiao_serde::text::toml::from_str_as(text, Presentation::new())?;
-let built = ServerBuilder::new(&identity, ClientAuth::None).settings(settings).build()?;
+let settings = toml::from_str::<Partial<TlsSettings>>(text)?.build()?;
+let built = ServerBuilder::new()
+    .identity(&identity)
+    .client_auth(ClientAuth::None)
+    .fill(Partial::from(settings))
+    .build()?;
 ```
 
-With `serde`, `Policy`, `TlsSettings` and `PairConfig` also implement `Serialize` and
-`Deserialize` over the same form. A consumer with its own default profile reads a document over
-it with `Policy::from_value_over` (`Policy::deserialize_over` with `serde`), which merges the
-document into the base key by key, a table such as `waiting` included. Committed examples for
+With `serde`, `Policy` also implements `Deserialize` over the same form (it is never written). A
+consumer with its own default profile reads a document over it with `Policy::deserialize_over`,
+which merges the document into the base key by key, a table such as `waiting` included, and makes
+an access list's fingerprints canonical. Committed examples for
 every preset are in the repository's `tests/vectors/policy/`.
 
 ## Access control

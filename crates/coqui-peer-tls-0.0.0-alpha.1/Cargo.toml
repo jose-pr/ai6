@@ -1,4 +1,4 @@
-# coqui-peer-tls/. at e5c1e6df27260ba3b4cec0a1ad5e37a04652e5f4, with what it inherits written out.
+# coqui-peer-tls/. at 7cbd7ee208595c055d74eed79a4dafcd0175883d, with what it inherits written out.
 [package]
 name = "coqui-peer-tls"
 version = "0.0.0-alpha.1"
@@ -24,8 +24,8 @@ ca = ["fields", "dep:globset"]
 fields = ["dep:x509-parser"]
 tokio = ["dep:tokio", "dep:tokio-rustls", "coqui-peer/tokio"]
 pin = ["coqui-peer/pin"]
-serde = ["dep:serde", "dep:guatiao-serde", "coqui-peer/serde"]
-acl = ["dep:coqui-net-acl"]
+serde = ["dep:serde", "coqui-builder/serde", "coqui-peer/serde"]
+acl = ["dep:coqui-net-acl", "coqui-net-acl/describe"]
 platform-roots = ["dep:rustls-platform-verifier"]
 aws-lc = ["rustls/aws_lc_rs", "webpki/aws-lc-rs"]
 fips = ["aws-lc", "rustls/fips"]
@@ -33,7 +33,7 @@ fips = ["aws-lc", "rustls/fips"]
 [dependencies.coqui-peer]
 version = "=0.0.0-alpha.1"
 git = "https://github.com/Boriken-Dev/coqui-peer"
-rev = "381e2a8144a228e592dc7d82eeb7db85885422ec"
+rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
 [dependencies.rustls]
 version = "0.23.27"
 default-features = false
@@ -46,19 +46,12 @@ features = ["ring"]
 [dependencies.coqui-net-acl]
 version = "0.0.0-alpha.0"
 git = "https://github.com/Boriken-Dev/coqui-net-acl"
-rev = "6cbcb4b937ea1902291aaf1636d4d6bd391adc3a"
-features = ["guatiao"]
+rev = "839435acc29b76ec0190b7099f870863313d3fcd"
 optional = true
-[dependencies.guatiao]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-default-features = false
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive"]
-[dependencies.guatiao-serde]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-default-features = false
-optional = true
 [dependencies.serde]
 version = "1"
 default-features = false
@@ -101,11 +94,10 @@ rcgen = "0.14"
 serde_json = "1"
 toml = "0.9"
 x509-parser = "0.18"
-[dev-dependencies.guatiao-serde]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-default-features = false
-features = ["json", "toml", "yaml"]
+[dev-dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive", "serde"]
 [dev-dependencies.tokio]
 version = "1"
 default-features = false

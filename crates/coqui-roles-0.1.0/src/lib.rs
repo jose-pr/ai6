@@ -33,8 +33,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use coqui_builder::Describe;
+use guatiao_builder::Described;
+
+use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Provider, Schema, ToValue};
 use coqui_access::{
     AuthorizationDecision, AuthorizationRequest, Authorizer, Limit, Subject, error,
 };
@@ -44,8 +47,8 @@ use coqui_access::{
 /// They bound the work and memory a policy costs, not who may do what: the rule scan per
 /// request, and the tables built once. By default at most 256 roles, 256 actions per role,
 /// 10 000 rules, 64 scope kinds, names of 256 bytes, and 64 ancestors in one request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Describe)]
+#[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RoleLimits {
     /// Roles a policy defines.
@@ -136,8 +139,8 @@ impl RoleLimits {
 }
 
 /// A named set of actions.
-#[derive(Debug, Clone, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Describe)]
+#[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Role {
     /// The name rules refer to.
@@ -160,8 +163,8 @@ impl Role {
 }
 
 /// Binds a subject to a role at a scope.
-#[derive(Debug, Clone, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Describe)]
+#[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Rule {
     /// `account:<name>`, `person:<id>` or `group:<name>`.
@@ -200,8 +203,8 @@ impl Rule {
 }
 
 /// A role policy as plain data: what [`RoleAuthorizer::new`] checks and compiles.
-#[derive(Debug, Clone, Default, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, deny_unknown_fields)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Describe)]
+#[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RolePolicy {
     /// The kinds a rule scope may use (`site` allows `site:north`); empty allows any kind.
@@ -282,7 +285,7 @@ impl RoleAuthorizerBuilder {
     Authorizer,
     id = "coqui_roles",
     name = "Role authorizer",
-    config = RolePolicy,
+    config = Described<RolePolicy>,
     crate = ::coqui_access::guatiao
 )]
 pub struct RoleAuthorizer {
@@ -327,6 +330,14 @@ impl core::error::Error for RolePolicyError {}
 impl From<RolePolicyError> for ProviderError {
     fn from(error: RolePolicyError) -> Self {
         error::bad_value(&error.0)
+    }
+}
+
+impl TryFrom<Described<RolePolicy>> for RoleAuthorizer {
+    type Error = RolePolicyError;
+
+    fn try_from(policy: Described<RolePolicy>) -> Result<Self, RolePolicyError> {
+        Self::new(policy.0)
     }
 }
 
@@ -781,22 +792,23 @@ mod tests {
         assert!(tight.is_err());
     }
 
+    fn policy_from(keys: &[(&str, &str)]) -> Result<RolePolicy, String> {
+        let mut partial = coqui_builder::Partial::<RolePolicy>::new();
+        for (key, text) in keys {
+            partial.set(key, text).map_err(|error| error.to_string())?;
+        }
+        partial.build().map_err(|error| error.to_string())
+    }
+
     #[test]
     fn the_limits_read_from_configuration() {
-        use coqui_access::guatiao::Map;
-        let mut limits = Map::new();
-        limits.set("rules", Limit::UNBOUNDED.to_value().unwrap());
-        limits.set("roles", 2u32);
-        let mut policy = Map::new();
-        policy.set("limits", limits);
-        let read = RolePolicy::from_value(&policy.into()).unwrap().limits;
+        let read = policy_from(&[("limits.rules", "none"), ("limits.roles", "2")])
+            .unwrap()
+            .limits;
         assert_eq!(read.rules, Limit::UNBOUNDED);
         assert_eq!(read.roles, Limit::at(2));
         assert_eq!(read.scope_kinds, Limit::at(64));
-        assert_eq!(
-            RolePolicy::from_value(&Map::new().into()).unwrap().limits,
-            RoleLimits::default()
-        );
+        assert_eq!(policy_from(&[]).unwrap().limits, RoleLimits::default());
     }
 
     #[test]
@@ -805,8 +817,16 @@ mod tests {
         policy.scope_kinds = vec!["site".to_owned()];
         policy.roles = vec![Role::new("viewer", ["document.read"])];
         policy.rules = vec![Rule::new("group:staff", "site:north", "viewer")];
-        let value = policy.to_value().unwrap();
-        assert_eq!(RolePolicy::from_value(&value).unwrap(), policy);
+        let read = policy_from(&[
+            ("scope_kinds[0]", "site"),
+            ("roles[0].name", "viewer"),
+            ("roles[0].actions[0]", "document.read"),
+            ("rules[0].subject", "group:staff"),
+            ("rules[0].scope", "site:north"),
+            ("rules[0].role", "viewer"),
+        ])
+        .unwrap();
+        assert_eq!(read, policy);
         let authorizer = RoleAuthorizer::try_from(policy).unwrap();
         assert!(allowed(
             &authorizer,
@@ -814,14 +834,8 @@ mod tests {
             "document.read",
             "site:north"
         ));
-        let mut surprise = coqui_access::guatiao::Map::new();
-        surprise.set("surprise", true);
-        assert!(RolePolicy::from_value(&surprise.into()).is_err());
-        let empty = coqui_access::guatiao::Map::new();
-        assert_eq!(
-            RolePolicy::from_value(&empty.into()).unwrap(),
-            RolePolicy::new()
-        );
+        assert!(policy_from(&[("surprise", "true")]).is_err());
+        assert_eq!(policy_from(&[]).unwrap(), RolePolicy::new());
     }
 
     #[test]

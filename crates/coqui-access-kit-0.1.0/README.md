@@ -24,7 +24,8 @@ the caller hands it.
   credentials and errors are never kept.
 - **File tables** (feature `file`) - `FileTable` keeps a table in one private file, written
   whole beside the target and renamed into place (`0600` on Unix), in any serde format the
-  caller supplies as a `Codec`. Records cross through their guatiao derives.
+  caller supplies as a `Codec`. Records cross through their guatiao derives; settings types
+  (`RecordLimits`, `Pick`, `KeyHash`, `CacheSetting`, `Source`) derive `coqui_builder::Describe`.
 
 ## Installation
 
@@ -76,8 +77,8 @@ assert!(!hasher.verify(None, "correct horse"));          // no such account
 is for keys a person might have chosen. `verify_key` branches only on the algorithm prefix of
 the stored string; a string naming no known algorithm never matches. `Argon2Params::default()`
 is 19 MiB, 2 passes, 1 lane. As configuration, `Argon2Params` is a map of `memory_kib`,
-`iterations` and `parallelism`, each defaulting to that value; reading it refuses a
-combination Argon2 would.
+`iterations` and `parallelism`, each defaulting to that value; reading does not check the
+combination, `Argon2Params::new` and making a hash do.
 
 ## API overview
 

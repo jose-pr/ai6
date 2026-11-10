@@ -16,6 +16,7 @@ mod tests {
     use coqui_access::guatiao::{FromValue, ToValue};
     use coqui_access::{AuthorizationRequest, Authorizer, Person};
     use coqui_roles::{Role, RoleAuthorizer, RolePolicy, Rule};
+    use guatiao_builder::Described;
 
     fn config(kinds: &[&str]) -> RolePolicy {
         let mut policy = RolePolicy::new();
@@ -52,8 +53,8 @@ mod tests {
 
     #[test]
     fn the_config_round_trips_through_a_guatiao_value() {
-        let value = config(&["site"]).to_value().unwrap();
-        let read = RolePolicy::from_value(&value).unwrap();
+        let value = Described(config(&["site"])).to_value().unwrap();
+        let read = Described::<RolePolicy>::from_value(&value).unwrap().0;
         assert_eq!(read.roles.len(), 1);
         assert_eq!(read.rules[0].subject, "account:admin");
         assert!(RoleAuthorizer::try_from(read).is_ok());

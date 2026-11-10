@@ -9,9 +9,14 @@
 //! --provider KEY        the provider, when the file offers more than one acp_harness
 //! --settings JSON       build an instance from these settings instead of the default instance
 //! --version N           the ACP version initialize asks for (1)
-//! --holds NAME[=JSON]   a requirement it holds, repeated; the default holds read_only and no_commands
+//! --holds NAME[=JSON]   a requirement it holds, repeated; the default holds read_only and no_commands;
+//!                       `--holds none` says it holds none
 //! --message-limit N     the largest message it takes, when it has a limit
 //! --no-imports          it imports no session, and must refuse import_session with a reason
+//! --no-logins           it offers no login method, lists none, and must refuse login with a reason
+//! --account KIND        run the account checks on this kind of account alone
+//! --program-agent       the provider starts its harness's own program, which the checker's spawner then
+//!                       starts for real: name a stand-in for it in --settings
 //! ```
 //!
 //! Exits 0 when the provider keeps every rule, 1 with each rule it broke, 2 when it could not be
@@ -27,7 +32,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use coqui_acp_api::contract::Contract;
+use coqui_acp_api::contract::{Contract, HOME_VARIABLE};
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::{List, Map, Number, Value};
 use coqui_acp_api::{AcpHarness, Requirement};
@@ -43,6 +48,10 @@ struct Args {
     holds: Vec<Requirement>,
     message_limit: Option<usize>,
     no_imports: bool,
+    no_logins: bool,
+    account: Option<String>,
+    program_agent: bool,
+    holds_none: bool,
 }
 
 fn parse() -> Result<Args, String> {
@@ -67,8 +76,15 @@ fn parse() -> Result<Args, String> {
                 );
             }
             "--no-imports" => args.no_imports = true,
+            "--no-logins" => args.no_logins = true,
+            "--program-agent" => args.program_agent = true,
+            "--account" => args.account = Some(value()?),
             "--holds" => {
                 let held = value()?;
+                if held == "none" {
+                    args.holds_none = true;
+                    continue;
+                }
                 args.holds.push(match held.split_once('=') {
                     Some((name, json)) => Requirement::with_value(name, json_value(json)?),
                     None => Requirement::new(held),
@@ -79,6 +95,14 @@ fn parse() -> Result<Args, String> {
     }
     if args.library.is_some() == args.source.is_some() {
         return Err("name one of --library and --source".into());
+    }
+    if args.holds_none && !args.holds.is_empty() {
+        return Err("--holds none holds nothing: name no other requirement".into());
+    }
+    if args.program_agent && args.settings.is_none() {
+        return Err(
+            "--program-agent needs --settings, naming the program the provider starts".into(),
+        );
     }
     Ok(args)
 }
@@ -167,6 +191,51 @@ fn load(args: &Args) -> Result<(Registry, Arc<dyn AcpHarness>), String> {
     Ok((registry, harness))
 }
 
+/// Runs this program again with a home of its own and no configuration directory of a command line in its
+/// environment, so that neither the provider nor the program it starts can reach the person's home. The suite hands
+/// the same home to the programs it starts.
+fn homed() -> ExitCode {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let home = std::env::temp_dir().join(format!(
+        "acp-harness-check-home-{}-{nanos}",
+        std::process::id()
+    ));
+    if let Err(why) = std::fs::create_dir_all(&home) {
+        eprintln!("acp-harness-check: no home to run in: {why}");
+        return ExitCode::from(2);
+    }
+    let mut again = std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| "acp-harness-check".into()),
+    );
+    again.args(std::env::args_os().skip(1));
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+    ] {
+        again.env(name, &home);
+    }
+    for name in ["CLAUDE_CONFIG_DIR", "CODEX_HOME"] {
+        again.env_remove(name);
+    }
+    again.env(HOME_VARIABLE, &home);
+    let status = again.status();
+    let _ = std::fs::remove_dir_all(&home);
+    match status {
+        Ok(status) => ExitCode::from(u8::try_from(status.code().unwrap_or(2)).unwrap_or(2)),
+        Err(why) => {
+            eprintln!("acp-harness-check: could not run again: {why}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args = match parse() {
         Ok(args) => args,
@@ -175,6 +244,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if args.program_agent && std::env::var_os(HOME_VARIABLE).is_none() {
+        return homed();
+    }
     let (registry, harness) = match load(&args) {
         Ok(loaded) => loaded,
         Err(why) => {
@@ -190,7 +262,9 @@ fn main() -> ExitCode {
     if let Some(version) = args.version {
         contract = contract.version(version);
     }
-    if !args.holds.is_empty() {
+    if args.holds_none {
+        contract = contract.holds(Vec::new());
+    } else if !args.holds.is_empty() {
         contract = contract.holds(args.holds.clone());
     }
     if let Some(limit) = args.message_limit {
@@ -198,6 +272,15 @@ fn main() -> ExitCode {
     }
     if args.no_imports {
         contract = contract.imports(false);
+    }
+    if args.no_logins {
+        contract = contract.logins(false);
+    }
+    if let Some(kind) = &args.account {
+        contract = contract.account(kind.clone());
+    }
+    if args.program_agent {
+        contract = contract.program_agent(true);
     }
     let outcome = contract.run(&*harness);
     drop(harness);

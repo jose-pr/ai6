@@ -17,6 +17,7 @@ use core::time::Duration;
 use guatiao::{FromValue, Schema, Secret, ToValue};
 use serde::{Deserialize, Serialize};
 
+use crate::account::AccountGrant;
 use crate::environment::Environment;
 
 /// The key of `agentCapabilities._meta` (`capabilities._meta` in ACP version 2) in which an agent
@@ -655,9 +656,9 @@ pub struct UsageQuery {
     /// of them in an answer, a refusal, an error or a log.
     #[map(default)]
     pub environment: Secret<Environment>,
-    /// The host's id for the account, echoed into the report. It never picks credentials: those
-    /// stay in `environment`.
-    pub account: Option<String>,
+    /// The account to report for; its `id` is echoed into the report and never interpreted. The
+    /// provider applies the rest, as `start` does.
+    pub account: Option<AccountGrant>,
 }
 
 impl UsageQuery {
@@ -676,8 +677,8 @@ impl UsageQuery {
 
     /// The account the report is for.
     #[must_use]
-    pub fn account(mut self, account: impl Into<String>) -> Self {
-        self.account = Some(account.into());
+    pub fn account(mut self, account: AccountGrant) -> Self {
+        self.account = Some(account);
         self
     }
 }

@@ -86,7 +86,7 @@ pub coqui_peer::pair::DeskLimits::pin_runs_per_source: usize
 pub coqui_peer::pair::DeskLimits::wrong_codes_per_approver: usize
 pub coqui_peer::pair::DeskLimits::wrong_codes_total: usize
 impl coqui_peer::pair::DeskLimits
-pub fn coqui_peer::pair::DeskLimits::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::pair::DeskLimits::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 impl core::default::Default for coqui_peer::pair::DeskLimits
 pub fn coqui_peer::pair::DeskLimits::default() -> Self
 #[non_exhaustive] pub struct coqui_peer::pair::Paired
@@ -111,14 +111,13 @@ pub coqui_peer::pair::PairingCode::slot: core::option::Option<u8>
 pub struct coqui_peer::pair::PairingDesk
 impl coqui_peer::pair::PairingDesk
 pub fn coqui_peer::pair::PairingDesk::approve(&self, &coqui_peer::pair::PendingDevice) -> core::result::Result<(), coqui_peer::pair::PairingError>
-pub fn coqui_peer::pair::PairingDesk::builder(coqui_peer::Random) -> coqui_peer::pair::PairingDeskBuilder
 pub fn coqui_peer::pair::PairingDesk::clear_pin(&self)
 pub fn coqui_peer::pair::PairingDesk::decided(&self, coqui_peer::pair::Ticket) -> coqui_peer::pair::Decided
 pub fn coqui_peer::pair::PairingDesk::deny(&self, &coqui_peer::pair::PendingDevice) -> core::result::Result<(), coqui_peer::pair::PairingError>
 pub fn coqui_peer::pair::PairingDesk::find_device(&self, &str, &str) -> core::result::Result<coqui_peer::pair::PendingDevice, coqui_peer::pair::PairingError>
 pub fn coqui_peer::pair::PairingDesk::limits(&self) -> coqui_peer::pair::DeskLimits
 pub fn coqui_peer::pair::PairingDesk::new(coqui_peer::Random) -> Self
-pub fn coqui_peer::pair::PairingDesk::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::pair::PairingDesk::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 pub fn coqui_peer::pair::PairingDesk::options(&self) -> coqui_peer::pair::PairingOptions
 pub fn coqui_peer::pair::PairingDesk::settings(&self) -> coqui_peer::pair::PairingDeskSettings
 pub fn coqui_peer::pair::PairingDesk::show_pin(&self) -> core::result::Result<coqui_peer::pair::ShownPin, coqui_peer::Error>
@@ -127,18 +126,28 @@ pub fn coqui_peer::pair::PairingDesk::slots(&self) -> alloc::vec::Vec<coqui_peer
 pub fn coqui_peer::pair::PairingDesk::submit_code(&self, &coqui_peer::pair::PairingCode) -> core::result::Result<(), coqui_peer::pair::PairingError>
 pub fn coqui_peer::pair::PairingDesk::sweep(&self)
 pub fn coqui_peer::pair::PairingDesk::wait(&self, coqui_peer::pair::Ticket) -> coqui_peer::pair::Decision
-pub struct coqui_peer::pair::PairingDeskBuilder
-impl coqui_peer::pair::PairingDeskBuilder
-pub fn coqui_peer::pair::PairingDeskBuilder::build(self) -> core::result::Result<coqui_peer::pair::PairingDesk, coqui_peer::Error>
-pub fn coqui_peer::pair::PairingDeskBuilder::clock(self, coqui_peer::Clock) -> Self
-pub fn coqui_peer::pair::PairingDeskBuilder::limits(self, coqui_peer::pair::DeskLimits) -> Self
-pub fn coqui_peer::pair::PairingDeskBuilder::options(self, coqui_peer::pair::PairingOptions) -> Self
-pub fn coqui_peer::pair::PairingDeskBuilder::settings(self, coqui_peer::pair::PairingDeskSettings) -> Self
+impl coqui_peer::pair::PairingDesk
+pub fn coqui_peer::pair::PairingDesk::builder() -> coqui_peer::pair::PairingDeskBuilder
+impl core::convert::TryFrom<coqui_peer::pair::PairingDeskParts> for coqui_peer::pair::PairingDesk
+pub type coqui_peer::pair::PairingDesk::Error = coqui_peer::Error
+pub fn coqui_peer::pair::PairingDesk::try_from(coqui_peer::pair::PairingDeskParts) -> core::result::Result<Self, coqui_peer::Error>
+pub struct coqui_peer::pair::PairingDeskBuilder where coqui_peer::pair::PairingDeskSettings: coqui_builder::describe::Describe
+impl coqui_peer::pair::PairingDeskBuilder where coqui_peer::pair::PairingDeskSettings: coqui_builder::describe::Describe
+pub fn coqui_peer::pair::PairingDeskBuilder::build(self) -> core::result::Result<coqui_peer::pair::PairingDesk, coqui_builder::builder::BuildError<<coqui_peer::pair::PairingDesk as core::convert::TryFrom<coqui_peer::pair::PairingDeskParts>>::Error>>
+pub fn coqui_peer::pair::PairingDeskBuilder::clock(self, impl core::convert::Into<coqui_peer::Clock>) -> Self
+pub fn coqui_peer::pair::PairingDeskBuilder::fill(self, coqui_builder::partial::Partial<coqui_peer::pair::PairingDeskSettings>) -> Self
+pub fn coqui_peer::pair::PairingDeskBuilder::fill_from(self, &mut impl coqui_builder::source::Source) -> core::result::Result<Self, coqui_builder::fill::FillError>
+pub fn coqui_peer::pair::PairingDeskBuilder::parts(self) -> core::result::Result<coqui_peer::pair::PairingDeskParts, coqui_builder::partial::Missing>
+pub fn coqui_peer::pair::PairingDeskBuilder::random(self, impl core::convert::Into<coqui_peer::Random>) -> Self
+pub struct coqui_peer::pair::PairingDeskParts
+impl core::convert::TryFrom<coqui_peer::pair::PairingDeskParts> for coqui_peer::pair::PairingDesk
+pub type coqui_peer::pair::PairingDesk::Error = coqui_peer::Error
+pub fn coqui_peer::pair::PairingDesk::try_from(coqui_peer::pair::PairingDeskParts) -> core::result::Result<Self, coqui_peer::Error>
 #[non_exhaustive] pub struct coqui_peer::pair::PairingDeskSettings
 pub coqui_peer::pair::PairingDeskSettings::limits: coqui_peer::pair::DeskLimits
 pub coqui_peer::pair::PairingDeskSettings::options: coqui_peer::pair::PairingOptions
 impl coqui_peer::pair::PairingDeskSettings
-pub fn coqui_peer::pair::PairingDeskSettings::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::pair::PairingDeskSettings::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 pub struct coqui_peer::pair::PairingJoiner
 impl coqui_peer::pair::PairingJoiner
 pub fn coqui_peer::pair::PairingJoiner::finish(self) -> core::result::Result<coqui_peer::pair::Paired, coqui_peer::pair::PairingError>
@@ -150,17 +159,17 @@ impl core::fmt::Debug for coqui_peer::pair::PairingJoiner
 pub fn coqui_peer::pair::PairingJoiner::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct coqui_peer::pair::PairingOptions
 pub coqui_peer::pair::PairingOptions::device: bool
-pub coqui_peer::pair::PairingOptions::device_ttl: core::time::Duration
+pub coqui_peer::pair::PairingOptions::device_ttl: core::option::Option<core::time::Duration>
 pub coqui_peer::pair::PairingOptions::invitation: bool
 pub coqui_peer::pair::PairingOptions::pin: bool
 pub coqui_peer::pair::PairingOptions::pin_alphabet: coqui_peer::pair::CodeAlphabet
 pub coqui_peer::pair::PairingOptions::pin_attempts: u32
 pub coqui_peer::pair::PairingOptions::pin_shown: bool
-pub coqui_peer::pair::PairingOptions::pin_ttl: core::time::Duration
+pub coqui_peer::pair::PairingOptions::pin_ttl: core::option::Option<core::time::Duration>
 pub coqui_peer::pair::PairingOptions::user_code_alphabet: coqui_peer::pair::CodeAlphabet
 impl coqui_peer::pair::PairingOptions
 pub fn coqui_peer::pair::PairingOptions::check(&self) -> core::result::Result<(), coqui_peer::Error>
-pub fn coqui_peer::pair::PairingOptions::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::pair::PairingOptions::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 impl core::default::Default for coqui_peer::pair::PairingOptions
 pub fn coqui_peer::pair::PairingOptions::default() -> Self
 pub struct coqui_peer::pair::PairingResponder
@@ -212,6 +221,30 @@ pub fn coqui_peer::pair::UserCode::generate(&coqui_peer::pair::CodeAlphabet, &co
 pub fn coqui_peer::pair::UserCode::parse(&coqui_peer::pair::CodeAlphabet, &str) -> core::result::Result<Self, coqui_peer::Error>
 impl core::fmt::Debug for coqui_peer::pair::UserCode
 pub fn coqui_peer::pair::UserCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait coqui_peer::pair::CodeAlphabetSetters: coqui_builder::builder::Holds<coqui_peer::pair::CodeAlphabet> + core::marker::Sized
+pub fn coqui_peer::pair::CodeAlphabetSetters::chars(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn coqui_peer::pair::CodeAlphabetSetters::len(self, usize) -> Self
+pub trait coqui_peer::pair::DeskLimitsSetters: coqui_builder::builder::Holds<coqui_peer::pair::DeskLimits> + core::marker::Sized
+pub fn coqui_peer::pair::DeskLimitsSetters::approver_window(self, impl core::convert::Into<core::time::Duration>) -> Self
+pub fn coqui_peer::pair::DeskLimitsSetters::ipv6_prefix(self, u8) -> Self
+pub fn coqui_peer::pair::DeskLimitsSetters::pending(self, usize) -> Self
+pub fn coqui_peer::pair::DeskLimitsSetters::pending_per_source(self, usize) -> Self
+pub fn coqui_peer::pair::DeskLimitsSetters::pin_runs_per_source(self, usize) -> Self
+pub fn coqui_peer::pair::DeskLimitsSetters::wrong_codes_per_approver(self, usize) -> Self
+pub fn coqui_peer::pair::DeskLimitsSetters::wrong_codes_total(self, usize) -> Self
+pub trait coqui_peer::pair::PairingDeskSettingsSetters: coqui_builder::builder::Holds<coqui_peer::pair::PairingDeskSettings> + core::marker::Sized
+pub fn coqui_peer::pair::PairingDeskSettingsSetters::limits(self, impl core::convert::Into<coqui_peer::pair::DeskLimits>) -> Self
+pub fn coqui_peer::pair::PairingDeskSettingsSetters::options(self, impl core::convert::Into<coqui_peer::pair::PairingOptions>) -> Self
+pub trait coqui_peer::pair::PairingOptionsSetters: coqui_builder::builder::Holds<coqui_peer::pair::PairingOptions> + core::marker::Sized
+pub fn coqui_peer::pair::PairingOptionsSetters::device(self, bool) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::device_ttl(self, impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::invitation(self, bool) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::pin(self, bool) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::pin_alphabet(self, impl core::convert::Into<coqui_peer::pair::CodeAlphabet>) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::pin_attempts(self, u32) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::pin_shown(self, bool) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::pin_ttl(self, impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
+pub fn coqui_peer::pair::PairingOptionsSetters::user_code_alphabet(self, impl core::convert::Into<coqui_peer::pair::CodeAlphabet>) -> Self
 pub mod coqui_peer::pem
 #[non_exhaustive] pub struct coqui_peer::pem::Block<'a>
 pub coqui_peer::pem::Block::bytes: alloc::vec::Vec<u8>
@@ -219,6 +252,47 @@ pub coqui_peer::pem::Block::headers: alloc::vec::Vec<&'a str>
 pub coqui_peer::pem::Block::label: alloc::string::String
 pub fn coqui_peer::pem::decode(&str) -> core::option::Option<coqui_peer::pem::Block<'_>>
 pub fn coqui_peer::pem::encode(&str, &[u8]) -> alloc::string::String
+pub mod coqui_peer::prelude
+pub trait coqui_peer::prelude::CodeAlphabetSetters: coqui_builder::builder::Holds<coqui_peer::pair::CodeAlphabet> + core::marker::Sized
+pub fn coqui_peer::prelude::CodeAlphabetSetters::chars(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn coqui_peer::prelude::CodeAlphabetSetters::len(self, usize) -> Self
+pub trait coqui_peer::prelude::DeskLimitsSetters: coqui_builder::builder::Holds<coqui_peer::pair::DeskLimits> + core::marker::Sized
+pub fn coqui_peer::prelude::DeskLimitsSetters::approver_window(self, impl core::convert::Into<core::time::Duration>) -> Self
+pub fn coqui_peer::prelude::DeskLimitsSetters::ipv6_prefix(self, u8) -> Self
+pub fn coqui_peer::prelude::DeskLimitsSetters::pending(self, usize) -> Self
+pub fn coqui_peer::prelude::DeskLimitsSetters::pending_per_source(self, usize) -> Self
+pub fn coqui_peer::prelude::DeskLimitsSetters::pin_runs_per_source(self, usize) -> Self
+pub fn coqui_peer::prelude::DeskLimitsSetters::wrong_codes_per_approver(self, usize) -> Self
+pub fn coqui_peer::prelude::DeskLimitsSetters::wrong_codes_total(self, usize) -> Self
+pub trait coqui_peer::prelude::PairingDeskSettingsSetters: coqui_builder::builder::Holds<coqui_peer::pair::PairingDeskSettings> + core::marker::Sized
+pub fn coqui_peer::prelude::PairingDeskSettingsSetters::limits(self, impl core::convert::Into<coqui_peer::pair::DeskLimits>) -> Self
+pub fn coqui_peer::prelude::PairingDeskSettingsSetters::options(self, impl core::convert::Into<coqui_peer::pair::PairingOptions>) -> Self
+pub trait coqui_peer::prelude::PairingOptionsSetters: coqui_builder::builder::Holds<coqui_peer::pair::PairingOptions> + core::marker::Sized
+pub fn coqui_peer::prelude::PairingOptionsSetters::device(self, bool) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::device_ttl(self, impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::invitation(self, bool) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::pin(self, bool) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::pin_alphabet(self, impl core::convert::Into<coqui_peer::pair::CodeAlphabet>) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::pin_attempts(self, u32) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::pin_shown(self, bool) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::pin_ttl(self, impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
+pub fn coqui_peer::prelude::PairingOptionsSetters::user_code_alphabet(self, impl core::convert::Into<coqui_peer::pair::CodeAlphabet>) -> Self
+pub trait coqui_peer::prelude::RotationOptionsSetters: coqui_builder::builder::Holds<coqui_peer::RotationOptions> + core::marker::Sized
+pub fn coqui_peer::prelude::RotationOptionsSetters::allow_unproven(self, bool) -> Self
+pub fn coqui_peer::prelude::RotationOptionsSetters::require_approval(self, bool) -> Self
+pub fn coqui_peer::prelude::RotationOptionsSetters::retire_after(self, impl core::convert::Into<core::time::Duration>) -> Self
+pub trait coqui_peer::prelude::TrustStoreSettingsSetters: coqui_builder::builder::Holds<coqui_peer::TrustStoreSettings> + core::marker::Sized
+pub fn coqui_peer::prelude::TrustStoreSettingsSetters::rotation(self, impl core::convert::Into<coqui_peer::RotationOptions>) -> Self
+pub fn coqui_peer::prelude::TrustStoreSettingsSetters::waiting(self, impl core::convert::Into<coqui_peer::WaitingSettings>) -> Self
+pub trait coqui_peer::prelude::WaitingLimitsSetters: coqui_builder::builder::Holds<coqui_peer::WaitingLimits> + core::marker::Sized
+pub fn coqui_peer::prelude::WaitingLimitsSetters::per_source(self, usize) -> Self
+pub fn coqui_peer::prelude::WaitingLimitsSetters::rerecord(self, impl core::convert::Into<core::time::Duration>) -> Self
+pub fn coqui_peer::prelude::WaitingLimitsSetters::total(self, usize) -> Self
+pub trait coqui_peer::prelude::WaitingSettingsSetters: coqui_builder::builder::Holds<coqui_peer::WaitingSettings> + core::marker::Sized
+pub fn coqui_peer::prelude::WaitingSettingsSetters::ipv6_prefix(self, u8) -> Self
+pub fn coqui_peer::prelude::WaitingSettingsSetters::limits(self, impl core::convert::Into<coqui_peer::WaitingLimits>) -> Self
+pub fn coqui_peer::prelude::WaitingSettingsSetters::record_interval(self, impl core::convert::Into<core::time::Duration>) -> Self
+pub fn coqui_peer::prelude::WaitingSettingsSetters::when_full(self, impl core::convert::Into<coqui_peer::WhenFull>) -> Self
 pub mod coqui_peer::transport
 pub struct coqui_peer::transport::ChannelTransport<C>
 impl<C: coqui_transport::channel::Channel> coqui_peer::transport::ChannelTransport<C>
@@ -360,15 +434,6 @@ pub coqui_peer::KeyMaterial::method: alloc::string::String
 impl coqui_peer::KeyMaterial
 pub fn coqui_peer::KeyMaterial::id(&self) -> coqui_peer::PeerId
 pub fn coqui_peer::KeyMaterial::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::vec::Vec<u8>>) -> core::result::Result<Self, coqui_peer::Error>
-pub struct coqui_peer::NonDefault
-pub coqui_peer::NonDefault::default: alloc::string::String
-pub coqui_peer::NonDefault::setting: alloc::string::String
-pub coqui_peer::NonDefault::value: alloc::string::String
-impl coqui_peer::NonDefault
-pub fn coqui_peer::NonDefault::from_difference(&guatiao::schema::differences::Difference) -> Self
-pub fn coqui_peer::NonDefault::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn coqui_peer::NonDefault::of_settings<T: guatiao::value::convert::ToValue + guatiao::schema::describe::Schema>(&T) -> alloc::vec::Vec<Self>
-pub fn coqui_peer::NonDefault::of_settings_against<T: guatiao::value::convert::ToValue + guatiao::schema::describe::Schema>(&T, &T) -> alloc::vec::Vec<Self>
 pub struct coqui_peer::PeerId
 impl coqui_peer::PeerId
 pub fn coqui_peer::PeerId::as_bytes(&self) -> &[u8]
@@ -421,12 +486,11 @@ pub fn coqui_peer::TrustStore::accept_key(&self, &coqui_peer::KeyMaterial) -> co
 pub fn coqui_peer::TrustStore::accepted(&self) -> core::result::Result<alloc::vec::Vec<coqui_peer::PeerId>, coqui_peer::Error>
 pub fn coqui_peer::TrustStore::accepted_key(&self, &coqui_peer::PeerId) -> core::option::Option<coqui_peer::KeyMaterial>
 pub fn coqui_peer::TrustStore::announce_successor(&self, &coqui_peer::PeerId, &coqui_peer::KeyMaterial) -> core::result::Result<(), coqui_peer::Error>
-pub fn coqui_peer::TrustStore::builder(&std::path::Path) -> coqui_peer::TrustStoreBuilder
 pub fn coqui_peer::TrustStore::clock(&self) -> &coqui_peer::Clock
 pub fn coqui_peer::TrustStore::invitations(&self) -> core::result::Result<alloc::vec::Vec<coqui_peer::InvitationEntry>, coqui_peer::Error>
 pub fn coqui_peer::TrustStore::invite(&self, &coqui_peer::Random, coqui_peer::InvitationOptions, &str) -> core::result::Result<coqui_peer::Invitation, coqui_peer::Error>
 pub fn coqui_peer::TrustStore::is_accepted(&self, &coqui_peer::PeerId) -> bool
-pub fn coqui_peer::TrustStore::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::TrustStore::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 pub fn coqui_peer::TrustStore::open(&std::path::Path) -> core::result::Result<Self, coqui_peer::Error>
 pub fn coqui_peer::TrustStore::promote_successor(&self, &coqui_peer::PeerId) -> core::result::Result<coqui_peer::PeerId, coqui_peer::Error>
 pub fn coqui_peer::TrustStore::prove_successor(&self, &coqui_peer::PeerId) -> core::result::Result<(), coqui_peer::Error>
@@ -443,21 +507,33 @@ pub fn coqui_peer::TrustStore::take_rotation_events(&self) -> alloc::vec::Vec<co
 pub fn coqui_peer::TrustStore::waiting(&self) -> core::result::Result<alloc::vec::Vec<coqui_peer::WaitingEntry>, coqui_peer::Error>
 pub fn coqui_peer::TrustStore::waiting_key(&self, &coqui_peer::PeerId) -> core::option::Option<coqui_peer::KeyMaterial>
 pub fn coqui_peer::TrustStore::waiting_queue(self, coqui_peer::WaitingSettings) -> Self
-pub struct coqui_peer::TrustStoreBuilder
+impl coqui_peer::TrustStore
+pub fn coqui_peer::TrustStore::builder() -> coqui_peer::TrustStoreBuilder
+impl core::convert::TryFrom<coqui_peer::TrustStoreParts> for coqui_peer::TrustStore
+pub type coqui_peer::TrustStore::Error = coqui_peer::Error
+pub fn coqui_peer::TrustStore::try_from(coqui_peer::TrustStoreParts) -> core::result::Result<Self, coqui_peer::Error>
+pub struct coqui_peer::TrustStoreBuilder where coqui_peer::TrustStoreSettings: coqui_builder::describe::Describe
+impl coqui_peer::TrustStoreBuilder where coqui_peer::TrustStoreSettings: coqui_builder::describe::Describe
+pub fn coqui_peer::TrustStoreBuilder::build(self) -> core::result::Result<coqui_peer::TrustStore, coqui_builder::builder::BuildError<<coqui_peer::TrustStore as core::convert::TryFrom<coqui_peer::TrustStoreParts>>::Error>>
+pub fn coqui_peer::TrustStoreBuilder::clock(self, impl core::convert::Into<coqui_peer::Clock>) -> Self
+pub fn coqui_peer::TrustStoreBuilder::fill(self, coqui_builder::partial::Partial<coqui_peer::TrustStoreSettings>) -> Self
+pub fn coqui_peer::TrustStoreBuilder::fill_from(self, &mut impl coqui_builder::source::Source) -> core::result::Result<Self, coqui_builder::fill::FillError>
+pub fn coqui_peer::TrustStoreBuilder::parts(self) -> core::result::Result<coqui_peer::TrustStoreParts, coqui_builder::partial::Missing>
+pub fn coqui_peer::TrustStoreBuilder::state_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 impl coqui_peer::TrustStoreBuilder
-pub fn coqui_peer::TrustStoreBuilder::build(self) -> core::result::Result<coqui_peer::TrustStore, coqui_peer::Error>
-pub fn coqui_peer::TrustStoreBuilder::clock(self, coqui_peer::Clock) -> Self
 pub fn coqui_peer::TrustStoreBuilder::ipv6_prefix(self, u8) -> Self
 pub fn coqui_peer::TrustStoreBuilder::limits(self, coqui_peer::WaitingLimits) -> Self
 pub fn coqui_peer::TrustStoreBuilder::record_interval(self, core::time::Duration) -> Self
-pub fn coqui_peer::TrustStoreBuilder::rotation(self, coqui_peer::RotationOptions) -> Self
-pub fn coqui_peer::TrustStoreBuilder::settings(self, coqui_peer::TrustStoreSettings) -> Self
 pub fn coqui_peer::TrustStoreBuilder::when_full(self, coqui_peer::WhenFull) -> Self
+pub struct coqui_peer::TrustStoreParts
+impl core::convert::TryFrom<coqui_peer::TrustStoreParts> for coqui_peer::TrustStore
+pub type coqui_peer::TrustStore::Error = coqui_peer::Error
+pub fn coqui_peer::TrustStore::try_from(coqui_peer::TrustStoreParts) -> core::result::Result<Self, coqui_peer::Error>
 #[non_exhaustive] pub struct coqui_peer::TrustStoreSettings
 pub coqui_peer::TrustStoreSettings::rotation: coqui_peer::RotationOptions
 pub coqui_peer::TrustStoreSettings::waiting: coqui_peer::WaitingSettings
 impl coqui_peer::TrustStoreSettings
-pub fn coqui_peer::TrustStoreSettings::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::TrustStoreSettings::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 #[non_exhaustive] pub struct coqui_peer::WaitingEntry
 pub coqui_peer::WaitingEntry::id: coqui_peer::PeerId
 pub coqui_peer::WaitingEntry::source: core::option::Option<core::net::socket_addr::SocketAddr>
@@ -470,7 +546,6 @@ pub fn coqui_peer::WaitingLimits::default() -> Self
 pub struct coqui_peer::WaitingQueue
 impl coqui_peer::WaitingQueue
 pub fn coqui_peer::WaitingQueue::admit(&mut self, coqui_peer::PeerId, core::option::Option<core::net::socket_addr::SocketAddr>, usize, std::time::Instant) -> coqui_peer::Admission
-pub fn coqui_peer::WaitingQueue::builder(coqui_peer::WaitingLimits) -> coqui_peer::WaitingQueueBuilder
 pub fn coqui_peer::WaitingQueue::forget(&mut self, &coqui_peer::PeerId)
 pub fn coqui_peer::WaitingQueue::ipv6_prefix(&self) -> u8
 pub fn coqui_peer::WaitingQueue::is_empty(&self) -> bool
@@ -482,21 +557,26 @@ pub fn coqui_peer::WaitingQueue::record_interval(&self) -> core::time::Duration
 pub fn coqui_peer::WaitingQueue::remember(&mut self, coqui_peer::PeerId, core::option::Option<core::net::socket_addr::SocketAddr>, std::time::Instant) -> alloc::vec::Vec<coqui_peer::PeerId>
 pub fn coqui_peer::WaitingQueue::settings(&self) -> coqui_peer::WaitingSettings
 pub fn coqui_peer::WaitingQueue::when_full(&self) -> coqui_peer::WhenFull
-pub struct coqui_peer::WaitingQueueBuilder
-impl coqui_peer::WaitingQueueBuilder
-pub fn coqui_peer::WaitingQueueBuilder::build(self) -> coqui_peer::WaitingQueue
-pub fn coqui_peer::WaitingQueueBuilder::ipv6_prefix(self, u8) -> Self
-pub fn coqui_peer::WaitingQueueBuilder::limits(self, coqui_peer::WaitingLimits) -> Self
-pub fn coqui_peer::WaitingQueueBuilder::record_interval(self, core::time::Duration) -> Self
-pub fn coqui_peer::WaitingQueueBuilder::settings(self, coqui_peer::WaitingSettings) -> Self
-pub fn coqui_peer::WaitingQueueBuilder::when_full(self, coqui_peer::WhenFull) -> Self
+impl coqui_peer::WaitingQueue
+pub fn coqui_peer::WaitingQueue::builder() -> coqui_peer::WaitingQueueBuilder
+impl core::convert::From<coqui_peer::WaitingQueueParts> for coqui_peer::WaitingQueue
+pub fn coqui_peer::WaitingQueue::from(coqui_peer::WaitingQueueParts) -> Self
+pub struct coqui_peer::WaitingQueueBuilder where coqui_peer::WaitingSettings: coqui_builder::describe::Describe
+impl coqui_peer::WaitingQueueBuilder where coqui_peer::WaitingSettings: coqui_builder::describe::Describe
+pub fn coqui_peer::WaitingQueueBuilder::build(self) -> core::result::Result<coqui_peer::WaitingQueue, coqui_builder::partial::Missing>
+pub fn coqui_peer::WaitingQueueBuilder::fill(self, coqui_builder::partial::Partial<coqui_peer::WaitingSettings>) -> Self
+pub fn coqui_peer::WaitingQueueBuilder::fill_from(self, &mut impl coqui_builder::source::Source) -> core::result::Result<Self, coqui_builder::fill::FillError>
+pub fn coqui_peer::WaitingQueueBuilder::parts(self) -> core::result::Result<coqui_peer::WaitingQueueParts, coqui_builder::partial::Missing>
+pub struct coqui_peer::WaitingQueueParts
+impl core::convert::From<coqui_peer::WaitingQueueParts> for coqui_peer::WaitingQueue
+pub fn coqui_peer::WaitingQueue::from(coqui_peer::WaitingQueueParts) -> Self
 #[non_exhaustive] pub struct coqui_peer::WaitingSettings
 pub coqui_peer::WaitingSettings::ipv6_prefix: u8
 pub coqui_peer::WaitingSettings::limits: coqui_peer::WaitingLimits
 pub coqui_peer::WaitingSettings::record_interval: core::time::Duration
 pub coqui_peer::WaitingSettings::when_full: coqui_peer::WhenFull
 impl coqui_peer::WaitingSettings
-pub fn coqui_peer::WaitingSettings::non_defaults(&self) -> alloc::vec::Vec<coqui_peer::NonDefault>
+pub fn coqui_peer::WaitingSettings::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
 impl core::default::Default for coqui_peer::WaitingSettings
 pub fn coqui_peer::WaitingSettings::default() -> Self
 pub const coqui_peer::DEFAULT_RECORD_INTERVAL: core::time::Duration

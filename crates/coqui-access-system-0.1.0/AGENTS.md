@@ -5,7 +5,7 @@ signature, contract and gotchas, so the crate can be used without reading its so
 ships inside the package and is self-contained. Development documentation lives with the
 source at <https://github.com/Boriken-Dev/coqui-access>.
 
-MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`; on Unix on `uzers` (NSS) and
+MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`, `coqui-builder` and `guatiao-builder`; on Unix on `uzers` (NSS) and
 `nonstick` (PAM, linking the system `libpam`), on Windows on `windows-sys`. Everything is at
 the root. `unsafe` lives in `src/os/windows.rs` alone (the Win32 calls), checked by
 `tests/unsafe_stays_in_windows.rs`; the root is `#![deny(unsafe_code)]`. The loadable library
@@ -17,7 +17,7 @@ pub const DEFAULT_MIN_UID: u32;          // Linux 1000, FreeBSD 1001, macOS 501,
 pub const DEFAULT_DOMAIN: &str = ".";
 pub const SUPPORTED: bool;               // Unix and Windows
 
-#[non_exhaustive]                        // FromValue, ToValue, Schema; deny_unknown_fields
+#[non_exhaustive]                        // coqui_builder::Describe; deny_unknown_fields
 pub struct SystemAccountsConfig {
     pub pam_service: String,             // default DEFAULT_PAM_SERVICE (Unix)
     pub min_uid: u32,                    // default DEFAULT_MIN_UID (Unix); 0 admits root
@@ -39,13 +39,14 @@ impl SystemAccountsBuilder {
     pub fn build(self) -> Result<SystemAccounts, ProviderError>;
 }
 
-pub struct SystemAccounts;               // provider id "coqui_access_system", config SystemAccountsConfig
+pub struct SystemAccounts;               // provider id "coqui_access_system", config Described<SystemAccountsConfig>
 impl SystemAccounts {
     pub fn builder() -> SystemAccountsBuilder;
     pub fn new(config: SystemAccountsConfig) -> Result<Self, ProviderError>;
     pub fn config(&self) -> &SystemAccountsConfig;
 }
 impl TryFrom<SystemAccountsConfig> for SystemAccounts;      // Error = ProviderError
+impl TryFrom<guatiao_builder::Described<SystemAccountsConfig>> for SystemAccounts;   // the provider config
 impl Authenticator for SystemAccounts;   // takes "password"
 impl Directory for SystemAccounts;       // by "id" or "name"
 ```

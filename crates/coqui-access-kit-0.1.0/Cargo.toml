@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access-kit at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+# coqui-access/crates/coqui-access-kit at ce68969a397073dcef0a37fb00a83888b767e273, with what it inherits written out.
 [package]
 name = "coqui-access-kit"
 description = "Building blocks for access providers: typed tables, key and password hashing, generated secrets and private atomic files"
@@ -20,13 +20,17 @@ rustdoc-args = ["--cfg", "docsrs"]
 version = "0.6"
 [dependencies.coqui-access]
 path = "crates/coqui-access"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
 [dependencies.data-encoding]
 version = "2.11"
 [dependencies.getrandom]
 version = "0.4"
 [dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 default-features = false
 optional = true
 [dependencies.moka]
@@ -51,7 +55,7 @@ cache = ["dep:moka"]
 [dev-dependencies]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 default-features = false
 features = ["json"]
 [dev-dependencies.serde_json]

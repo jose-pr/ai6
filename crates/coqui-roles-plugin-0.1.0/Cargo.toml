@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-roles/plugin at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+# coqui-access/crates/coqui-roles/plugin at ce68969a397073dcef0a37fb00a83888b767e273, with what it inherits written out.
 [package]
 name = "coqui-roles-plugin"
 description = "coqui-roles as a library a host loads"
@@ -16,3 +16,7 @@ crate-type = ["cdylib"]
 path = "crates/coqui-access"
 [dependencies.coqui-roles]
 path = ".."
+[dev-dependencies]
+[dev-dependencies.guatiao-builder]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"

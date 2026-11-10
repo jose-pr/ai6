@@ -8,11 +8,13 @@ mod certificate;
 
 use std::net::{IpAddr, SocketAddr};
 
+use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Provider, Schema, ToValue};
 use coqui_access::{Attempt, Authenticator, Limit, Lookup, Verdict};
 use coqui_access_kit::pick::{Pick, Picked, pick};
+use coqui_builder::{Describe, Partial};
 use coqui_net_acl::IpNet;
+use guatiao_builder::Described;
 
 pub use certificate::CertificateEncoding;
 
@@ -26,8 +28,7 @@ pub fn default_account() -> Vec<Pick> {
 }
 
 /// Reverse-proxy trust and identity-header configuration.
-#[derive(Debug, Clone, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Debug, Clone, Describe)]
 #[non_exhaustive]
 pub struct ProxyWordConfig {
     /// Trusted addresses and CIDR networks; an empty list trusts nobody.
@@ -47,7 +48,7 @@ pub struct ProxyWordConfig {
     /// (`subject.cn`, `san.email`, `san.upn`, ...). Default its subject's CN, by `name`.
     #[map(default = default_account())]
     pub account: Vec<Pick>,
-    /// The most bytes `certificate_header` may hold; `null` for no bound.
+    /// The most bytes `certificate_header` may hold; `none` for no bound.
     #[map(default = DEFAULT_MAX_CERTIFICATE_BYTES)]
     pub max_certificate_bytes: Limit,
 }
@@ -55,7 +56,8 @@ pub struct ProxyWordConfig {
 impl Default for ProxyWordConfig {
     /// What an empty configuration reads as: nobody trusted, every other default.
     fn default() -> Self {
-        Self::from_value(&coqui_access::guatiao::Map::new().into())
+        Partial::new()
+            .build()
             .expect("an empty configuration reads, every key having a default")
     }
 }
@@ -66,7 +68,7 @@ impl Default for ProxyWordConfig {
     Authenticator,
     id = "coqui_access_proxy",
     name = "Trusted reverse proxy",
-    config = ProxyWordConfig,
+    config = Described<ProxyWordConfig>,
     crate = ::coqui_access::guatiao
 )]
 pub struct ProxyWord {
@@ -121,6 +123,14 @@ impl TryFrom<ProxyWordConfig> for ProxyWord {
         Self::new(config).map_err(|_| {
             coqui_access::error::bad_value("trusted entries must be IP addresses or CIDR networks")
         })
+    }
+}
+
+impl TryFrom<Described<ProxyWordConfig>> for ProxyWord {
+    type Error = ProviderError;
+
+    fn try_from(config: Described<ProxyWordConfig>) -> Result<Self, Self::Error> {
+        Self::try_from(config.0)
     }
 }
 

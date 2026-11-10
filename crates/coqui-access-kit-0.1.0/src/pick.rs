@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use coqui_access::guatiao::{FromValue, Schema, ToValue};
+use coqui_builder::Describe;
 
 /// The field DNS names that are IP literals are listed under, beside `san.dns`.
 pub const DNS_IP_FIELD: &str = "san.dns.ip";
@@ -21,8 +21,7 @@ pub const IP_FIELD: &str = "san.ip";
 /// ```json
 /// { "field": "san.upn", "by": "name", "domain": "example.org" }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Debug, Clone, PartialEq, Eq, Describe)]
 #[non_exhaustive]
 pub struct Pick {
     /// The credential's field, such as `san.email` or `subject.cn`.
@@ -256,11 +255,10 @@ mod tests {
 
     #[test]
     fn a_pick_reads_from_configuration_with_ip_in_dns_on() {
-        use coqui_access::guatiao::Map;
-        let mut map = Map::new();
-        map.set("field", "san.ip");
-        map.set("by", "address");
-        let read = Pick::from_value(&map.into()).unwrap();
+        let mut partial = coqui_builder::Partial::<Pick>::new();
+        partial.set("field", "san.ip").unwrap();
+        partial.set("by", "address").unwrap();
+        let read = partial.build().unwrap();
         assert_eq!(read, Pick::new("san.ip", "address"));
         assert!(read.ip_in_dns);
     }

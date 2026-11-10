@@ -2,9 +2,9 @@
 
 Header-file-style reference for the `coqui-acp-harness` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/coqui-acp>.
 
-MSRV Rust 1.89. A default build depends on `coqui-acp-api` (for the usage model), `base64`, `serde_json` and `uuid`, and `win32job` on Windows or `rustix` on Unix. Feature `kind` (off by default) adds `spawner`, the `acp_harness` kind's spawner on this machine and `Spawn` through any host's. Feature `antigravity` (off by default) adds `antigravity`, which reads Antigravity's quota from its loopback port, and with it `serde`, `time` (parsing) and `ureq` (rustls with ring, no default features); its tests also use `rcgen` and `rustls`. Version `0.0.0-alpha.0`, not published; the API may change in any release before 1.0.
+MSRV Rust 1.89. A default build depends on `coqui-acp-api` (for the usage model), `base64`, `serde_json` and `uuid`, and `win32job` on Windows or `rustix` on Unix. Feature `kind` (off by default) adds `spawner`, the `acp_harness` kind's spawner on this machine and `Spawn` through any host's, and `provider`, which serves a harness over the kind's channel (with `guatiao-serde`, for catalogs). Feature `antigravity` (off by default) adds `antigravity`, which reads Antigravity's quota from its loopback port, and with it `serde`, `time` (parsing) and `ureq` (rustls with ring, no default features); its tests also use `rcgen` and `rustls`. Version `0.0.0-alpha.0`, not published; the API may change in any release before 1.0.
 
-Imports: the root re-exports `acp`'s `AgentInfo`, `ConfigOption`, `Conversation`, `EventSink`, `Harness`, `HarnessError`, `McpServer`, `McpTransport`, `Open`, `OpenRequest`, `OptionValue`, `Settings`, `Takes`, `UsageTracker` and `serve`; `event`'s `Event`, `Outcome`, `PermissionRequest` and `Responder`; `process`'s `Exit`, `Launch`, `LineWriter`, `PlainSpawn`, `Process`, `Spawn`, `Spawned`, `ending_once`, `exit_text`, `line_writer` and `watch_exit`; and `stream`'s `Answer`, `LineHook`, `Step`, `Stream` and `Waiting`. The root also re-exports `mode`'s `Mode`, and with `kind` `spawner`'s `LocalSpawner` and `ThroughSpawner`. The modules `acp`, `event`, `lines`, `mode`, `process`, `stream` and `version` are public, `spawner` with `kind` and `antigravity` with `antigravity`.
+Imports: the root re-exports `acp`'s `AgentInfo`, `ConfigOption`, `Conversation`, `EventSink`, `Harness`, `HarnessError`, `McpServer`, `McpTransport`, `Open`, `OpenRequest`, `OptionValue`, `Settings`, `Takes`, `UsageTracker` and `serve`; `event`'s `Event`, `Outcome`, `PermissionRequest` and `Responder`; `process`'s `Exit`, `Launch`, `LineWriter`, `PlainSpawn`, `Process`, `Spawn`, `Spawned`, `ending_once`, `exit_text`, `line_writer` and `watch_exit`; and `stream`'s `Answer`, `LineHook`, `Step`, `Stream` and `Waiting`. The root also re-exports `mode`'s `Mode`, and with `kind` `spawner`'s `LocalSpawner` and `ThroughSpawner`. The modules `acp`, `event`, `lines`, `mode`, `process`, `stream` and `version` are public, `spawner` and `provider` with `kind` and `antigravity` with `antigravity`.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`). No process-wide state.
 
@@ -41,18 +41,45 @@ Implement `Spawn` to run a harness elsewhere: in a container, over SSH, under a 
 ## Spawner (`coqui_acp_harness::spawner`, feature `kind`)
 
 ```rust
-pub struct LocalSpawner;                         // Clone, Copy, Debug, Default; #[must_use]
+pub struct LocalSpawner;                         // Clone, Debug, Default; #[must_use]
 pub const fn LocalSpawner::new() -> LocalSpawner // 1 MiB of each output stream held unread
 pub const fn buffer(self, bytes: usize) -> Self  // past it the program waits to write
+pub fn files(self, dir: impl Into<PathBuf>) -> Self  // serves the file methods in dir, which must exist
 impl coqui_acp_api::ProcessSpawner for LocalSpawner
 pub struct ThroughSpawner;                       // Debug
 pub fn ThroughSpawner::new(spawner: Object<dyn ProcessSpawner>) -> ThroughSpawner
 impl Spawn for ThroughSpawner
 ```
 
-`LocalSpawner` is the spawner a host hands an `acp_harness` start by default: it starts a `SpawnSpec` as `PlainSpawn` starts a `Launch`, standard error apart, into its standard output or nowhere, as the spec says, and gives no terminal (`GUATIAO_ERR_UNSUPPORTED`). A missing program is `GUATIAO_ERR_NOT_FOUND`. A thread per output stream reads it into the buffer; `read` and `read_error` wait up to their timeout. `describe` says `local`, `separate_error`, `ends_with_host`, and `kills_escaped` on Windows, Linux and Android. Its link is always up. Destroying a process kills its tree.
+`LocalSpawner` is the spawner a host hands an `acp_harness` start by default: it starts a `SpawnSpec` as `PlainSpawn` starts a `Launch`, standard error apart, into its standard output or nowhere, as the spec says, and gives no terminal (`GUATIAO_ERR_UNSUPPORTED`). A missing program is `GUATIAO_ERR_NOT_FOUND`. A thread per output stream reads it into the buffer; `read` and `read_error` wait up to their timeout. `describe` says `local`, `separate_error`, `ends_with_host`, and `kills_escaped` on Windows, Linux and Android. Its link is always up. Destroying a process kills its tree. With `files(dir)` it serves the kind's file methods (`write_file`, `read_file`, `file_info`, `remove_file`) in `dir` and `describe` says `files`; a path is relative, and an absolute one, a `..` part, an empty one and a link leading out of `dir` are `GUATIAO_ERR_NOT_FOUND`. Without it `files` is false and the four methods are `GUATIAO_ERR_UNSUPPORTED`.
 
 `ThroughSpawner` is `Spawn` over any host's spawner, so a translator served with `serve` starts its program wherever the host's spawner runs it. Every text of the `Launch` must be UTF-8. Its reads wait through a link that is down; dropping its standard input closes the program's.
+
+## Provider (`coqui_acp_harness::provider`, feature `kind`)
+
+```rust
+pub fn Serving::new(settings: Settings, max_message_bytes: usize) -> Serving       // Debug, Clone; #[must_use]
+pub fn Serving::open(self, spawner: Object<dyn ProcessSpawner>, sink: Object<dyn ChannelSink>,
+    harness: impl FnOnce(Arc<dyn Spawn>) -> Result<Arc<dyn Harness>, ProviderError>) -> Result<Object<dyn Channel>, ProviderError>
+pub fn shared(harness: impl Harness) -> Arc<dyn Harness>
+pub fn threads_done() -> Status                                                    // a library's `unload` hook
+pub struct Reports;                                                               // Debug, Default
+pub fn Reports::new() -> Reports
+pub fn observe(&self, support: &UsageSupport, account: Option<&str>, report: &UsageReport)   // a connection's report
+pub fn read(&self, support: &UsageSupport, account: Option<&str>, buckets: Vec<Bucket>) -> UsageReport
+pub fn report(&self, support: &UsageSupport, account: Option<&str>) -> UsageReport
+pub fn takes_of(takes: &Takes) -> coqui_acp_api::Takes                              // resume true
+pub fn schema(json: &Value) -> guatiao::Value;  pub fn credential() -> Value        // for a catalog
+pub fn account_refusal(catalog: &AccountCatalog, account: &AccountRef) -> Result<Option<String>, ProviderError>
+```
+
+What a provider of `acp_harness` needs to front a harness that `serve` serves. `Serving::open` builds the harness from a `Spawn` that starts its programs through the host's `spawner`, runs `serve` on a thread of its own and hands the host a `Channel`: each message sent is a line `serve` reads (a line feed inside a message that is not JSON is replaced by a NUL, so it stays one invalid line), each line it writes a message for the sink, which only one thread of the library calls. `send` waits while four messages wait on either side, so a sink that takes nothing holds the sender back (and `Settings::max_requests` bounds what `serve` has in hand); a message over `max_message_bytes` ends the connection `GUATIAO_ERR_BAD_VALUE`; `close` wakes a waiting `send` (`GUATIAO_ERR_GONE`), ends `serve`'s input, and `closed` follows once `serve` has returned and its lines are all handed over, with the host's status and reason, `GUATIAO_OK` when `serve` ended by itself and `GUATIAO_ERR_INTERNAL` when it failed. The spawner is destroyed before `closed`, whatever else holds the harness. A sink that refuses a message ends the connection with its status and message. A program that ends ends its session, not the connection: the host closes that.
+
+`Reports` is what a provider keeps for the kind's `usage` method, by account: `observe` takes a connection's report (give it `Settings::on_usage`), `read` a reading the provider made itself, and `report` answers the merged figures or, for an account nothing was learned of, an empty report naming the sources. A repeat changes nothing and the revision only grows.
+
+`account_refusal` is for a provider that applies nothing to the harness's environment yet: `GUATIAO_ERR_BAD_VALUE` for an id that is not an account id or a kind the catalog does not list, a reason for any listed kind but `harness-login`, `None` for that one.
+
+The one process-wide state of the crate is the list of threads `provider` started; `threads_done` is `GUATIAO_ERR_BUSY` while one runs.
 
 ## Stream (`coqui_acp_harness::stream`)
 
@@ -122,7 +149,7 @@ pub struct PermissionRequest { pub tool: ToolCall, pub title: String, pub descri
 pub fn PermissionRequest::new(tool, title, description, options, responder) -> PermissionRequest
 pub fn details(self, details: Map<String, Value>) -> Self
 pub struct PermissionOption { pub id: String, pub name: String, pub kind: OptionKind }
-pub enum Outcome { Selected(String), Cancelled }
+pub enum Outcome { Selected(String), Cancelled, Refused }
 pub fn Responder::new(answer: impl FnOnce(Outcome) -> io::Result<()> + Send + 'static) -> Responder
 pub fn answer(self, outcome: Outcome) -> io::Result<()>
 ```
@@ -163,6 +190,7 @@ pub const PLAN_ID: &str = "plan";
 
 `serve` runs on the calling thread until the input ends, then closes every session it opened. Requests that take time run on threads of their own.
 
+- A line that is not an object (a batch, a number) is answered `-32600` with id null, and one whose `method` is not text `-32600` with its id; an object with no method, result or error likewise.
 - `initialize` is answered on a thread of its own, as asking a harness for `info` may take long. It answers version 2 to a client that asks for 2 or more, else version 1, up to `Settings::max_version`. Version 1: `agentCapabilities` with `loadSession`, `promptCapabilities`, `mcpCapabilities`, `sessionCapabilities` (`resume`, `close`, and `additionalDirectories` and `systemPrompt` when taken), `agentInfo`, `authMethods: []`. Version 2: `info` and `capabilities.session` (`prompt.image`, `prompt.embeddedContext`, `mcp.stdio`, `mcp.http`, `close`, `additionalDirectories`, `systemPrompt`). Any other request first is refused.
 - `authenticate` answers `{}`. `session/new`, `session/load`, `session/resume` (version 2's `replayFrom: {"type": "start"}` replays, as `load`) check every part against `Takes` and `Settings` before the harness is asked: a `cwd`, MCP command or directory that is not absolute by this platform's rules (a drive or UNC path on Windows, `/…` elsewhere), a network or device path (`\\host\share`, `//host/share`, `\\?\…`, `\\.\…`) unless `network_paths`, a directory outside `working_roots` or holding `.` or `..` when roots are set, MCP servers when `client_mcp_servers` is off, two servers of one name, a transport not taken (version 2 has no SSE), a system prompt in a mode other than `append`, or a part not taken is invalid params. `new` answers `{sessionId, configOptions}` before the session's first events; `load` answers `{configOptions}` after its history; `resume` answers at once.
 - A session being opened counts against `max_sessions` as an open one. `session/prompt` takes its turn on the thread that reads the client, so a `session/cancel` on the next line finds it; it takes text, images, resource links and resources as taken; any other block is invalid params, as is one larger than `max_prompt_bytes`. One turn at a time: a prompt while one runs is invalid request. Version 1 answers `{stopReason, usage}` at the turn's end; version 2 answers `{messageId}` at once, after a `user_message` and a `running` state update, and ends the turn with an `idle` state update carrying `stopReason` and `usage`. A failed turn is error `-32603` `Internal error` with the harness's words in `data.message` (version 1), or `idle` with `stopReason: "error"` and `error` (version 2). A limit is stop reason `refusal` with `_meta[LIMIT_META_KEY]` holding the `LimitHit`, and in version 2 a notice first.
@@ -170,7 +198,7 @@ pub const PLAN_ID: &str = "plan";
 - `session/cancel` calls `interrupt` once per turn, after the turn's prompt has reached the harness; the turn's end is answered `cancelled`. If it has not ended within `cancel_grace` it is answered `cancelled` anyway, its later end is dropped, and a prompt is refused until it comes.
 - `session/set_config_option` (`configId`, `value` an id) calls `set_option` and answers `{configOptions}`: `id` in version 1, `configId` in version 2.
 - `session/close` answers a running turn `cancelled`, closes the harness's session and lets go of it, and answers `{}`. Anything else with an id is method not found.
-- A permission request is `session/request_permission`: version 1 `{sessionId, toolCall, options}`; version 2 `{sessionId, title, description, subject: {type: "tool_call", toolCall}, options}`, with `requires_action` before it and `running` after. An answer naming an option not offered, an error, no answer within `permission_timeout`, or a client that has gone is `Outcome::Cancelled`; so is a question still open when its turn ends, is answered cancelled after `cancel_grace`, or its session closes, and the client's later answer is dropped.
+- A permission request is `session/request_permission`: version 1 `{sessionId, toolCall, options}`; version 2 `{sessionId, title, description, subject: {type: "tool_call", toolCall}, options}`, with `requires_action` before it and `running` after. An answer naming an option not offered, an outcome nobody knows, or an error is `Outcome::Refused` (this request alone is refused); the cancelled outcome, no answer within `permission_timeout`, or a client that has gone is `Outcome::Cancelled`; so is a question still open when its turn ends, is answered cancelled after `cancel_grace`, or its session closes, and the client's later answer is dropped.
 
 What each event becomes:
 
@@ -190,7 +218,7 @@ What each event becomes:
 | `Compaction` | nothing | `compaction_summary_chunk`, `compaction_update` |
 | `Exited` | the running turn fails | the same |
 
-`Settings` (`#[non_exhaustive]`, `new()` and `Default`; set its fields): `max_line` (64 MiB; a longer client line ends the connection), `max_sessions` (8), `max_requests` (64 at once), `max_prompt_bytes` (16 MiB), `max_version` (2), `cancel_grace` (10 s), `permission_timeout` (`None`: as long as the person takes), `max_tools` (4096 tool calls tracked per session for version 1; past it the oldest is forgotten, and a later report of it is a new `tool_call`), `max_queued_events` (4096 events queued for a client that has not read them; past it the harness's `EventSink::send` waits, so a client that does not read holds the harness back; the same many are kept of what a session says before its answer, and past it they are dropped and the client told how many), `max_open_questions` (64 open at once per session, each holding a thread; past it one is answered cancelled without being asked), `client_mcp_servers` (true), `working_roots` (empty: any; links followed; also on `OpenRequest`, whose `path_admitted` holds what a harness reads from the request's other parts to the same rule, and for a harness that finds a session by its id alone), `network_paths` (false, as written or where links lead), `max_tool_content_bytes` (1 MiB) and `max_tool_content_items` (256) (version 1 sends a tool call's content whole each time; past them the rest is left out and the client told), `on_notice: Option<NoticeHook>` (called with each notice and each harness exit, for a host that logs them), `account: Option<String>` (the host's id for the account, echoed into usage reports; none).
+`Settings` (`#[non_exhaustive]`, `new()` and `Default`; set its fields): `max_line` (64 MiB; a longer client line ends the connection), `max_sessions` (8), `max_requests` (64 at once), `max_prompt_bytes` (16 MiB), `max_version` (2), `cancel_grace` (10 s), `permission_timeout` (`None`: as long as the person takes), `max_tools` (4096 tool calls tracked per session for version 1; past it the oldest is forgotten, and a later report of it is a new `tool_call`), `max_queued_events` (4096 events queued for a client that has not read them; past it the harness's `EventSink::send` waits, so a client that does not read holds the harness back; the same many are kept of what a session says before its answer, and past it they are dropped and the client told how many), `max_open_questions` (64 open at once per session, each holding a thread; past it one is answered cancelled without being asked), `client_mcp_servers` (true), `working_roots` (empty: any; links followed; also on `OpenRequest`, whose `path_admitted` holds what a harness reads from the request's other parts to the same rule, and for a harness that finds a session by its id alone), `network_paths` (false, as written or where links lead), `max_tool_content_bytes` (1 MiB) and `max_tool_content_items` (256) (version 1 sends a tool call's content whole each time; past them the rest is left out and the client told), `on_notice: Option<NoticeHook>` (called with each notice and each harness exit, for a host that logs them), `on_usage: Option<UsageHook>` (called with the connection's report, as `_coqui_acp/usage` answers it with no session, each time it changes, with no lock held; none), `account: Option<String>` (the host's id for the account, echoed into usage reports; none).
 
 ## Modes (`coqui_acp_harness::mode`)
 

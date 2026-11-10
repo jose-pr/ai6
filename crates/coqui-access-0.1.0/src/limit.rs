@@ -2,14 +2,15 @@
 
 use core::fmt;
 
-use guatiao::{FromValue, Schema, ToValue};
+use coqui_builder::Leaf;
+use coqui_builder::describe::LeafError;
 
 /// At most a count, or no bound at all.
 ///
 /// Libraries here state their resource bounds (entries, rules, bytes) as `Limit`s with a
-/// default the caller can change or lift. As configuration it is a number, or `null` for no
-/// bound; a struct field of this type with a default keeps `null` when written, so a lifted
-/// bound reads back lifted.
+/// default the caller can change or lift. As configuration it is a number, or `none` for no
+/// bound. A document's `null` is a key that is not given, so it reads the default, not "no
+/// bound".
 ///
 /// ```
 /// use coqui_access::Limit;
@@ -17,9 +18,29 @@ use guatiao::{FromValue, Schema, ToValue};
 /// assert!(Limit::at(2).allows(2) && !Limit::at(2).allows(3));
 /// assert!(Limit::UNBOUNDED.allows(usize::MAX));
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq, Hash, FromValue, Schema, ToValue)]
-#[map(crate = ::guatiao, transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Limit(Option<u32>);
+
+/// The text of a limit is its count, or `none`; `Display` stays the human wording.
+impl Leaf for Limit {
+    const TYPE: &'static str = "Limit";
+
+    fn to_text(&self) -> String {
+        match self.0 {
+            Some(most) => most.to_string(),
+            None => "none".to_owned(),
+        }
+    }
+
+    fn from_text(text: &str) -> Result<Self, LeafError> {
+        if text == "none" {
+            return Ok(Self::UNBOUNDED);
+        }
+        text.parse().map(Self::at).map_err(|_| LeafError::Invalid {
+            type_name: Self::TYPE,
+        })
+    }
+}
 
 impl Limit {
     /// No bound.
@@ -82,27 +103,39 @@ impl fmt::Display for Limit {
 
 #[cfg(test)]
 mod tests {
-    use guatiao::Map;
+    use coqui_builder::{Describe, Partial};
 
     use super::*;
 
-    #[derive(Debug, PartialEq, FromValue, Schema, ToValue)]
-    #[map(crate = ::guatiao)]
+    #[derive(Debug, PartialEq, Describe)]
     struct Bounded {
         #[map(default = Limit::at(256))]
         entries: Limit,
     }
 
+    fn read(key: &str, text: &str) -> Limit {
+        let mut partial = Partial::<Bounded>::new();
+        partial.set(key, text).unwrap();
+        partial.build().unwrap().entries
+    }
+
     #[test]
-    fn a_limit_defaults_reads_null_as_unbounded_and_writes_it_back() {
+    fn a_limit_defaults_reads_none_as_unbounded_and_a_count_as_itself() {
         assert_eq!(
-            Bounded::from_value(&Map::new().into()).unwrap().entries,
+            Partial::<Bounded>::new().build().unwrap().entries,
             Limit::at(256)
         );
-        for entries in [Limit::UNBOUNDED, Limit::at(3)] {
-            let written = Bounded { entries }.to_value().unwrap();
-            assert_eq!(Bounded::from_value(&written).unwrap().entries, entries);
+        assert_eq!(read("entries", "none"), Limit::UNBOUNDED);
+        assert_eq!(read("entries", "3"), Limit::at(3));
+        let mut partial = Partial::<Bounded>::new();
+        for text in ["null", "unbounded", "-1", "1.5", ""] {
+            assert!(partial.set("entries", text).is_err(), "{text}");
         }
+        coqui_builder::describe::assert_round_trip(&[
+            Limit::UNBOUNDED,
+            Limit::at(0),
+            Limit::at(u32::MAX),
+        ]);
         assert!(Limit::UNBOUNDED.allows(usize::MAX));
         assert!(Limit::at(0).allows(0) && !Limit::at(0).allows(1));
         assert_eq!(Limit::UNBOUNDED.or_max(), usize::MAX);

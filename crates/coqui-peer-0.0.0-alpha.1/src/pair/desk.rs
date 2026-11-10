@@ -12,7 +12,6 @@ use std::time::SystemTime;
 use crate::clock::{Clock, later};
 use crate::error::Error;
 use crate::id::PeerId;
-use crate::non_default::NonDefault;
 use crate::pair::code::{CodeAlphabet, PairingCode, Pin, UserCode, below, same};
 use crate::pair::{PairRefusal, PairingError};
 use crate::random::Random;
@@ -23,10 +22,10 @@ const ISSUE_DRAWS: usize = 64;
 
 /// What a responder offers and how its codes are made. Every field has a default; any value
 /// with a meaning is accepted, and [`non_defaults`](PairingOptions::non_defaults) lists the ones that
-/// differ from their default. A guatiao value: every key is optional and an unknown key is refused;
-/// the durations read as seconds, `[secs, nanos]` or `{secs, nanos}`. `#[non_exhaustive]`: start from
-/// [`Default`] and assign the fields.
-#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+/// differ from their default. Every key is optional and an unknown key is refused; a duration
+/// reads as `600`, `90s` or `250ms`, and `pin_ttl` and `device_ttl` also read `never`.
+/// `#[non_exhaustive]`: start from [`Default`] and assign the fields.
+#[derive(Debug, Clone, PartialEq, Eq, coqui_builder::Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PairingOptions {
@@ -47,10 +46,11 @@ pub struct PairingOptions {
     /// The alphabet and length of a PIN the desk shows. Default `0123456789` × 6.
     #[map(default = PairingOptions::default().pin_alphabet)]
     pub pin_alphabet: CodeAlphabet,
-    /// How long a shown PIN, or a slot waiting for a joiner's PIN, lasts. Default 10 minutes;
-    /// it is also the window of [`DeskLimits::pin_runs_per_source`].
-    #[map(default = PairingOptions::default().pin_ttl)]
-    pub pin_ttl: Duration,
+    /// How long a shown PIN, or a slot waiting for a joiner's PIN, lasts; `None` (the text
+    /// `never`) lasts for good. Default 10 minutes; it is also the window of
+    /// [`DeskLimits::pin_runs_per_source`].
+    #[map(default = PairingOptions::default().pin_ttl, none = "never")]
+    pub pin_ttl: Option<Duration>,
     /// How many runs may try a shown PIN before it is burned; a run counts once it is past
     /// the first PAKE message, whatever its outcome. Default 1.
     #[map(default = PairingOptions::default().pin_attempts)]
@@ -59,10 +59,10 @@ pub struct PairingOptions {
     /// `BCDFGHJKLMNPQRSTVWXZ` × 8.
     #[map(default = PairingOptions::default().user_code_alphabet)]
     pub user_code_alphabet: CodeAlphabet,
-    /// How long a user code waits for approval. Default 10 minutes; it is also the window of
-    /// [`DeskLimits::wrong_codes_total`].
-    #[map(default = PairingOptions::default().device_ttl)]
-    pub device_ttl: Duration,
+    /// How long a user code waits for approval; `None` (the text `never`) waits for good.
+    /// Default 10 minutes; it is also the window of [`DeskLimits::wrong_codes_total`].
+    #[map(default = PairingOptions::default().device_ttl, none = "never")]
+    pub device_ttl: Option<Duration>,
 }
 
 impl Default for PairingOptions {
@@ -73,20 +73,18 @@ impl Default for PairingOptions {
             pin_shown: true,
             device: true,
             pin_alphabet: CodeAlphabet::pin(),
-            pin_ttl: Duration::from_secs(600),
+            pin_ttl: Some(Duration::from_secs(600)),
             pin_attempts: 1,
             user_code_alphabet: CodeAlphabet::user_code(),
-            device_ttl: Duration::from_secs(600),
+            device_ttl: Some(Duration::from_secs(600)),
         }
     }
 }
 
 /// Bounds on a desk's pending work and on guessing. Every field has a default; any value is
 /// accepted, and [`non_defaults`](DeskLimits::non_defaults) lists the ones that differ from
-/// their default. A guatiao value like [`PairingOptions`]; `#[non_exhaustive]`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+/// their default. Read like [`PairingOptions`]; `#[non_exhaustive]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, coqui_builder::Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DeskLimits {
@@ -141,7 +139,10 @@ impl PairingOptions {
     pub fn check(&self) -> Result<(), Error> {
         self.pin_alphabet.check()?;
         self.user_code_alphabet.check()?;
-        if self.pin_ttl.is_zero() || self.device_ttl.is_zero() || self.pin_attempts == 0 {
+        if self.pin_ttl == Some(Duration::ZERO)
+            || self.device_ttl == Some(Duration::ZERO)
+            || self.pin_attempts == 0
+        {
             return Err(Error::InvalidOptions);
         }
         Ok(())
@@ -149,15 +150,15 @@ impl PairingOptions {
 
     /// Every option that differs from its default, named by key path (`pin_attempts`,
     /// `pin_alphabet.len`).
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        NonDefault::of_settings(self)
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
+        coqui_builder::non_defaults(self)
     }
 }
 
 impl DeskLimits {
     /// Every limit that differs from its default, named by key path.
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        NonDefault::of_settings(self)
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
+        coqui_builder::non_defaults(self)
     }
 }
 
@@ -165,11 +166,10 @@ impl DeskLimits {
 /// file, a form or a peer fills.
 ///
 /// Every key is optional (an absent one is its default) and an unknown key is refused. The type
-/// is a guatiao value (`from_value`, `to_value`, `schema`), and `guatiao_serde::text` reads and
-/// writes its text. It is `#[non_exhaustive]`: start from [`Default`] and assign the fields.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+/// is `Describe`, so a `Partial<PairingDeskSettings>` is filled from text and built, and it is
+/// `#[non_exhaustive]`: start from [`Default`] and assign the fields.
+#[derive(Debug, Clone, PartialEq, Eq, Default, coqui_builder::Describe)]
+#[builder(setters_on = PairingDeskBuilder)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PairingDeskSettings {
@@ -183,58 +183,39 @@ pub struct PairingDeskSettings {
 
 impl PairingDeskSettings {
     /// Every setting that differs from its default, named by key path (`limits.pending`).
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        NonDefault::of_settings(self)
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
+        coqui_builder::non_defaults(self)
     }
 }
 
-/// Builds a [`PairingDesk`]: [`PairingDesk::builder`], the settings, then
-/// [`build`](Self::build).
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct PairingDeskBuilder {
-    random: Random,
+/// What a [`PairingDeskBuilder`] collects: the settings, the random source and the clock.
+///
+/// The random source is required, the clock is the system clock unless given. Build the desk with
+/// [`PairingDesk::builder`].
+#[derive(coqui_builder::Builder, Debug)]
+#[builder(build = PairingDesk, fallible)]
+pub struct PairingDeskParts {
     settings: PairingDeskSettings,
-    clock: Clock,
+    #[builder(input)]
+    random: Random,
+    #[builder(input)]
+    clock: Option<Clock>,
 }
 
-impl PairingDeskBuilder {
-    /// What the desk offers and how its codes are made; checked by [`build`](Self::build).
-    pub fn options(mut self, options: PairingOptions) -> Self {
-        self.settings.options = options;
-        self
-    }
-
-    /// The bounds on pending work and on guessing.
-    pub fn limits(mut self, limits: DeskLimits) -> Self {
-        self.settings.limits = limits;
-        self
-    }
-
-    /// The clock the desk reads. Default the system clock.
-    pub fn clock(mut self, clock: Clock) -> Self {
-        self.clock = clock;
-        self
-    }
-
-    /// The options and the limits from `settings`. Replaces both set before, and is replaced by
-    /// what is set after it. The random source and the clock are code, not settings, and stay.
-    pub fn settings(mut self, settings: PairingDeskSettings) -> Self {
-        self.settings = settings;
-        self
-    }
+impl TryFrom<PairingDeskParts> for PairingDesk {
+    type Error = Error;
 
     /// The desk.
     ///
     /// # Errors
     ///
     /// [`Error::InvalidOptions`] as [`PairingOptions::check`].
-    pub fn build(self) -> Result<PairingDesk, Error> {
-        self.settings.options.check()?;
+    fn try_from(parts: PairingDeskParts) -> Result<Self, Error> {
+        parts.settings.options.check()?;
         Ok(PairingDesk::from_parts(
-            self.random,
-            self.clock,
-            self.settings,
+            parts.random,
+            parts.clock.unwrap_or_default(),
+            parts.settings,
         ))
     }
 }
@@ -431,7 +412,10 @@ impl State {
             }
         }
         // Buckets of past windows go, so the maps stay as large as the recent traffic.
-        let (ttl, window) = (self.options.pin_ttl, self.limits.approver_window);
+        let (ttl, window) = (
+            self.options.pin_ttl.unwrap_or(Duration::MAX),
+            self.limits.approver_window,
+        );
         self.runs.retain(|_, times| {
             prune(times, now, ttl);
             !times.is_empty()
@@ -459,18 +443,8 @@ impl State {
 }
 
 impl PairingDesk {
-    /// A builder for a desk that draws PINs, slots and user codes from `random`, with the default
-    /// options and limits and the system clock.
-    pub fn builder(random: Random) -> PairingDeskBuilder {
-        PairingDeskBuilder {
-            random,
-            settings: PairingDeskSettings::default(),
-            clock: Clock::system(),
-        }
-    }
-
     /// A desk with the default options and limits, the system clock, and `random` for PINs,
-    /// slots and user codes: `PairingDesk::builder(random).build()`.
+    /// slots and user codes: `PairingDesk::builder().random(random).build()`.
     pub fn new(random: Random) -> Self {
         Self::from_parts(random, Clock::system(), PairingDeskSettings::default())
     }
@@ -515,7 +489,7 @@ impl PairingDesk {
     }
 
     /// Every setting that differs from its default, named by key path.
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
         self.settings().non_defaults()
     }
 
@@ -626,7 +600,10 @@ impl PairingDesk {
         let entered = UserCode::parse(&state.options.user_code_alphabet, code)
             .map_err(PairingError::Local)?;
         let now = state.clock.now();
-        let (limits, ttl) = (state.limits, state.options.device_ttl);
+        let (limits, ttl) = (
+            state.limits,
+            state.options.device_ttl.unwrap_or(Duration::MAX),
+        );
         let by = state.wrong_by.entry(approver.to_owned()).or_default();
         prune(by, now, limits.approver_window);
         let by_count = by.len();
@@ -764,7 +741,7 @@ impl PairingDesk {
     pub(crate) fn pin_run(&self, source: Option<SocketAddr>) -> Result<(), PairRefusal> {
         let mut state = self.state();
         let now = state.clock.now();
-        let (ttl, limits) = (state.options.pin_ttl, state.limits);
+        let (ttl, limits) = (state.options.pin_ttl.unwrap_or(Duration::MAX), state.limits);
         let bucket = source.map(|s| source_key(s.ip(), limits.ipv6_prefix));
         let runs = state.runs.entry(bucket).or_default();
         prune(runs, now, ttl);
@@ -931,14 +908,15 @@ mod tests {
             wrong_codes_total: 1000,
             ..DeskLimits::default()
         };
-        let desk = PairingDesk::builder(Random::from_fn(|out| {
-            out.fill(7);
-            Ok(())
-        }))
-        .clock(clock)
-        .limits(limits)
-        .build()
-        .unwrap();
+        let desk = PairingDesk::builder()
+            .random(Random::from_fn(|out| {
+                out.fill(7);
+                Ok(())
+            }))
+            .clock(clock)
+            .limits(limits)
+            .build()
+            .unwrap();
         for host in 0..200u8 {
             let source = SocketAddr::from(([192, 0, 2, host], 1000));
             desk.pin_run(Some(source)).unwrap();

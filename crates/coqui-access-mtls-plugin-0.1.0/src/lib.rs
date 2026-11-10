@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use coqui_access::Limit;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, FromWalk, Provider, Schema, ToValue, Walk};
+use coqui_access::guatiao::{FromWalk, Provider, Walk};
 use coqui_access::{
     AccountInfo, AccountPut, Accounts, Attempt, Authenticator, Description, Directory, Lookup,
     Person, PutOutcome, Verdict, Waiting,
@@ -44,11 +44,13 @@ use coqui_access_mtls::{
 use coqui_peer::WaitingLimits;
 use coqui_peer_tls::CaPolicy;
 
+use coqui_builder::{Describe, Partial};
+use guatiao_builder::Described;
+
 pub use format::Format;
 
 /// Guatiao configuration for the verified peer provider.
-#[derive(Debug, Clone, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Debug, Clone, Describe)]
 pub struct MtlsAccountsConfig {
     /// Where the accepted peers are kept; memory when absent.
     pub source: Option<Source<Format>>,
@@ -58,7 +60,7 @@ pub struct MtlsAccountsConfig {
     #[map(default = DEFAULT_MAX_RECORDS as u32)]
     pub max_records: u32,
     /// How large a record's fields may be: `groups`, `field_bytes`, `email_bytes`,
-    /// `display_name_bytes`, each a number or `null` for no bound.
+    /// `display_name_bytes`, each a number or `none` for no bound.
     #[map(default)]
     pub record_limits: RecordLimits,
     /// Waiting places per source: an IPv4 address, or an IPv6 /64.
@@ -90,7 +92,7 @@ pub struct MtlsAccountsConfig {
     /// `fingerprint`, by `certificate`.
     #[map(default = default_account())]
     pub account: Vec<Pick>,
-    /// The most certificates a client may send, leaf included; `null` for no bound.
+    /// The most certificates a client may send, leaf included; `none` for no bound.
     #[map(default = DEFAULT_MAX_CHAIN)]
     pub max_chain: Limit,
 }
@@ -98,7 +100,8 @@ pub struct MtlsAccountsConfig {
 impl Default for MtlsAccountsConfig {
     /// What an empty configuration reads as: every default the schema declares.
     fn default() -> Self {
-        Self::from_value(&coqui_access::guatiao::Map::new().into())
+        Partial::new()
+            .build()
             .expect("an empty configuration reads, every key having a default")
     }
 }
@@ -127,7 +130,7 @@ where
     Accounts,
     id = "coqui_access_mtls",
     name = "Client certificates",
-    config = MtlsAccountsConfig,
+    config = Described<MtlsAccountsConfig>,
     crate = ::coqui_access::guatiao
 )]
 pub struct MtlsAccountsProvider(MtlsAccounts);
@@ -168,6 +171,14 @@ impl TryFrom<MtlsAccountsConfig> for MtlsAccountsProvider {
             .build()
             .map(Self)
             .map_err(|reason| reason.writing("peer table"))
+    }
+}
+
+impl TryFrom<Described<MtlsAccountsConfig>> for MtlsAccountsProvider {
+    type Error = ProviderError;
+
+    fn try_from(config: Described<MtlsAccountsConfig>) -> Result<Self, Self::Error> {
+        Self::try_from(config.0)
     }
 }
 
@@ -213,6 +224,7 @@ coqui_access::guatiao::providers!(MtlsAccountsProvider);
 
 #[cfg(test)]
 mod tests {
+    use coqui_access::guatiao::{FromValue, Schema};
     use coqui_peer_tls::Identity;
 
     use super::*;
@@ -331,13 +343,19 @@ mod tests {
         let schema = <&Map>::try_from(schema).ok()?;
         let properties = <&Map>::try_from(schema.get("properties")?).ok()?;
         let property = <&Map>::try_from(properties.get(field)?).ok()?;
-        u64::from_value(property.get("default")?).ok()
+        let default = property.get("default")?;
+        // A limit is a text, a count a number.
+        u64::from_value(default)
+            .ok()
+            .or_else(|| String::from_value(default).ok()?.parse().ok())
     }
 
     #[test]
     fn the_waiting_limits_default_in_the_schema_and_when_read() {
         let read =
-            MtlsAccountsConfig::from_value(&coqui_access::guatiao::Map::new().into()).unwrap();
+            Described::<MtlsAccountsConfig>::from_value(&coqui_access::guatiao::Map::new().into())
+                .unwrap()
+                .0;
         assert_eq!(
             (
                 read.waiting_per_source,
@@ -348,7 +366,7 @@ mod tests {
         );
         let defaults = MtlsAccountsConfig::default();
         assert_eq!(read.waiting_total, defaults.waiting_total);
-        let schema = MtlsAccountsConfig::schema().unwrap();
+        let schema = Described::<MtlsAccountsConfig>::schema().unwrap();
         for (field, expected) in [
             ("waiting_per_source", 1),
             ("waiting_total", 16),
@@ -365,7 +383,9 @@ mod tests {
         limits.set("field_bytes", 40u32);
         let mut config = coqui_access::guatiao::Map::new();
         config.set("record_limits", limits);
-        let read = MtlsAccountsConfig::from_value(&config.into()).unwrap();
+        let read = Described::<MtlsAccountsConfig>::from_value(&config.into())
+            .unwrap()
+            .0;
         assert_eq!(read.record_limits.field_bytes, coqui_access::Limit::at(40));
         assert_eq!(read.record_limits.groups, coqui_access::Limit::at(256));
         let provider = MtlsAccountsProvider::try_from(read).unwrap();
@@ -385,7 +405,9 @@ mod tests {
         assert!(empty.ip_in_dns);
         let mut config = coqui_access::guatiao::Map::new();
         config.set("trust", "pinned-or-ca");
-        let read = MtlsAccountsConfig::from_value(&config.into()).unwrap();
+        let read = Described::<MtlsAccountsConfig>::from_value(&config.into())
+            .unwrap()
+            .0;
         assert_eq!(read.trust, TrustMode::PinnedOrCa);
         assert!(MtlsAccountsProvider::try_from(read).is_err(), "no ca_file");
     }

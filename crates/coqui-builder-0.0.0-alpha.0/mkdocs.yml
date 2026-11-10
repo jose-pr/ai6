@@ -1,0 +1,36 @@
+site_name: coqui-builder
+site_description: "Describe, fill, check and build any struct field by field: builders, partials and profiles, with no dependencies"
+site_url: https://boriken-dev.github.io/coqui-builder/
+repo_url: https://github.com/Boriken-Dev/coqui-builder
+repo_name: Boriken-Dev/coqui-builder
+edit_uri: edit/main/docs/
+
+# Constrained to docs/ so a strict build does not scan the repository's own markdown.
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Migrating: migrating.md
+  - Rust API: https://boriken-dev.github.io/coqui-builder/rust/index.html
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences

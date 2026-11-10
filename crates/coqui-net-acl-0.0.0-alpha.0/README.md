@@ -21,7 +21,7 @@ the [documentation](https://boriken-dev.github.io/coqui-net-acl/).
 - **Two evaluation points**: at accept time from the addresses alone, and after a handshake
   with the verified peer fingerprint.
 - **Router-style listing**: `Display` prints `10 permit 10.6.0.0/16`, numbered in steps of ten.
-- **A plain text form** (TOML, JSON) with the `serde` feature, and as a guatiao value with a schema with the `guatiao` feature.
+- **A plain text form** (TOML, JSON) with the `serde` feature, and as a described value (read into a `coqui_builder::Partial`) with the `describe` feature.
 - No dependencies in a default build, no `unsafe` code, no process-wide state.
 
 ## Installation
@@ -33,7 +33,7 @@ cargo add coqui-net-acl@0.0.0-alpha.0
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
 | `serde` | `serde` | reading and writing an ACL in its text form | off |
-| `guatiao` | `guatiao` (`derive`) | `Acl`, `Rule` and `Action` as guatiao values with a schema | off |
+| `describe` | `coqui-builder` (`derive`) | `Acl`, `Rule` and `Action` described field by field, read from text through `coqui_builder::Partial` | off |
 
 Rust 1.89 or later.
 
@@ -78,11 +78,11 @@ Everything is at the crate root.
 
 | Item | Purpose |
 | --- | --- |
-| `Acl` | The rules and the default; `push`, `prepend`, `decide`, `decide_peer`, `decide_anonymous`, `canonicalize_fingerprints`, `permits_bind`, `non_defaults`. |
+| `Acl` | The rules and the default; `push`, `prepend`, `decide`, `decide_peer`, `decide_anonymous`, `canonicalize_fingerprints`, `permits_bind`. |
 | `Rule` | `action`, `source`, and the optional `destination`, `port` and `fingerprint`; a `log` hint. |
 | `IpNet`, `PortRange` | Networks (`any`, a host, CIDR) and ports, parsed from and printed as text. |
 | `Outcome`, `AclDecision`, `BindDecision` | What was decided, and by which rule. |
-| `Action`, `NonDefault`, `ParseError` | `permit` / `deny`; a setting that differs from its default; a malformed network or port. |
+| `Action`, `ParseError` | `permit` / `deny`; a malformed network or port. |
 
 ## Evaluation
 
@@ -100,8 +100,8 @@ list, refusing any that does not parse.
 
 An IPv4-mapped IPv6 address (`::ffff:10.0.0.9`) is the IPv4 address it maps, in rules and in
 connections. `Acl::permits_bind` is advisory: whether any rule could permit traffic to a local
-address. Nothing enforces it; what to listen on is the host's choice. `Acl::non_defaults` lists a
-`permit` default, as data, so a host can report it.
+address. Nothing enforces it; what to listen on is the host's choice. With the `describe` feature,
+`coqui_builder::non_defaults(&acl)` lists what differs from the defaults, so a host can report it.
 
 ## Development
 

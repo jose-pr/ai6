@@ -5,9 +5,9 @@ signature, contract and gotchas, so the crate can be used without reading its so
 ships inside the package and is self-contained. Development documentation lives with the
 source at <https://github.com/Boriken-Dev/coqui-access>.
 
-MSRV Rust 1.89. No Cargo features. Depends on `coqui-access` only: no format crate, no `unsafe`
+MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`, `coqui-builder` and `guatiao-builder`: no format crate, no `unsafe`
 code. Everything is at the crate root. `RoleAuthorizer` is the Guatiao provider `coqui_roles`
-(`#[derive(Provider)]`, configured with `RolePolicy`); `coqui-roles-plugin` (a `cdylib`) is its
+(`#[derive(Provider)]`, configured with `guatiao_builder::Described<RolePolicy>`); `coqui-roles-plugin` (a `cdylib`) is its
 one `providers!` line.
 
 ## RoleAuthorizer
@@ -15,7 +15,7 @@ one `providers!` line.
 ```rust
 pub struct RoleLimits { pub roles: Limit, pub actions_per_role: Limit, pub rules: Limit,
                         pub scope_kinds: Limit, pub name_bytes: Limit, pub ancestors: Limit }
-    // non_exhaustive, Copy; guatiao derives (each key defaulting);
+    // non_exhaustive, Copy; coqui_builder::Describe (each key defaulting, a bound is a count or `none`);
     // Default = 256, 256, 10 000, 64, 256, 64
 impl RoleLimits {
     pub const UNBOUNDED: Self;
@@ -34,7 +34,7 @@ impl Rule {
 pub struct RolePolicy { pub scope_kinds: Vec<String>, pub roles: Vec<Role>, pub rules: Vec<Rule>,
                         pub limits: RoleLimits }
                                                 // non_exhaustive, Default; RolePolicy::new()
-// Role, Rule and RolePolicy derive FromValue, ToValue, Schema (deny_unknown_fields; the
+// Role, Rule and RolePolicy derive coqui_builder::Describe (deny_unknown_fields; the
 // policy's three lists default to empty).
 pub struct RoleAuthorizerBuilder;               // Clone, Default
 impl RoleAuthorizerBuilder {
@@ -80,9 +80,9 @@ impl From<RolePolicyError> for ProviderError;   // GUATIAO_ERR_BAD_VALUE
 ## Provider (`coqui_roles`)
 
 `RoleAuthorizer` derives `Provider`: id `coqui_roles`, name `Role authorizer`, kind
-`Authorizer`, config `RolePolicy`, built with `TryFrom`. `coqui-roles-plugin` exports it.
+`Authorizer`, config `Described<RolePolicy>`, built with `TryFrom` (from the policy too). `coqui-roles-plugin` exports it.
 Config: `limits` (`{ roles, actions_per_role, rules, scope_kinds, name_bytes, ancestors }`,
-each a number or `null`, each defaulting), `scope_kinds: [string]`,
+each a count or `none`, each defaulting), `scope_kinds: [string]`,
 `roles: [{ name, actions: [string] }]`, `rules: [{ subject, scope, role, propagate? }]`
 (`propagate` defaults to `true`), all optional
 (default: deny everything). An invalid policy is `GUATIAO_ERR_BAD_VALUE` at build time.

@@ -1,0 +1,1895 @@
+pub mod coqui_builder
+pub use coqui_builder::Builder
+pub use coqui_builder::Configured
+pub use coqui_builder::Describe
+pub use coqui_builder::Leaf
+pub mod coqui_builder::builder
+#[non_exhaustive] pub enum coqui_builder::builder::BuildError<E>
+pub coqui_builder::builder::BuildError::Failed(E)
+pub coqui_builder::builder::BuildError::Missing(coqui_builder::partial::Missing)
+impl<E: core::error::Error + 'static> core::error::Error for coqui_builder::builder::BuildError<E>
+pub fn coqui_builder::builder::BuildError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Display> core::fmt::Display for coqui_builder::builder::BuildError<E>
+pub fn coqui_builder::builder::BuildError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait coqui_builder::builder::Configured
+pub type coqui_builder::builder::Configured::Settings: coqui_builder::describe::Describe
+pub fn coqui_builder::builder::Configured::configured(&self) -> &dyn coqui_builder::inspect::Inspect
+pub fn coqui_builder::builder::Configured::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
+pub trait coqui_builder::builder::Holds<S: coqui_builder::describe::Describe>
+pub fn coqui_builder::builder::Holds::partial_mut(&mut self) -> &mut coqui_builder::partial::Partial<S>
+pub mod coqui_builder::check
+pub struct coqui_builder::check::Checks<T: ?core::marker::Sized>
+impl<T: ?core::marker::Sized> coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::is_empty(&self) -> bool
+pub fn coqui_builder::check::Checks<T>::len(&self) -> usize
+pub fn coqui_builder::check::Checks<T>::new() -> Self
+pub fn coqui_builder::check::Checks<T>::push(&mut self, impl coqui_builder::check::Check<T> + 'static)
+impl<T: ?core::marker::Sized> coqui_builder::check::Check<T> for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::check::Checks<T>::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized> core::default::Default for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::default() -> Self
+impl<T: ?core::marker::Sized> core::fmt::Debug for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait coqui_builder::check::Check<T: ?core::marker::Sized>
+pub fn coqui_builder::check::Check::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::check::Check::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized, C: coqui_builder::check::Check<T>> coqui_builder::check::Check<T> for [C]
+pub fn [C]::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn [C]::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized, C: coqui_builder::check::Check<T>> coqui_builder::check::Check<T> for alloc::vec::Vec<C>
+pub fn alloc::vec::Vec<C>::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn alloc::vec::Vec<C>::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized, F: core::ops::function::Fn(&T, &mut coqui_builder::report::Report)> coqui_builder::check::Check<T> for F
+pub fn F::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn F::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized> coqui_builder::check::Check<T> for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::check::Checks<T>::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect> coqui_builder::check::Check<T> for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::profile::Profile::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+pub mod coqui_builder::datum
+pub enum coqui_builder::datum::Shown
+pub coqui_builder::datum::Shown::Fields(alloc::vec::Vec<(alloc::string::String, coqui_builder::datum::Datum)>)
+pub coqui_builder::datum::Shown::Items(alloc::vec::Vec<coqui_builder::datum::Datum>)
+pub coqui_builder::datum::Shown::One(coqui_builder::datum::Datum)
+pub coqui_builder::datum::Shown::Unset
+impl coqui_builder::datum::Shown
+pub fn coqui_builder::datum::Shown::sensitive(self) -> coqui_builder::datum::Shown
+impl core::fmt::Display for coqui_builder::datum::Shown
+pub fn coqui_builder::datum::Shown::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::datum::Datum
+impl coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::is_sensitive(&self) -> bool
+pub fn coqui_builder::datum::Datum::new(&'static str, impl core::convert::Into<alloc::string::String>) -> coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::sensitive(self) -> coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::text(&self) -> &str
+pub fn coqui_builder::datum::Datum::ty(&self) -> &'static str
+impl core::fmt::Debug for coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::drop(&mut self)
+pub mod coqui_builder::describe
+#[non_exhaustive] pub enum coqui_builder::describe::Bound
+pub coqui_builder::describe::Bound::NotAMultiple
+pub coqui_builder::describe::Bound::TooFewItems
+pub coqui_builder::describe::Bound::TooLong
+pub coqui_builder::describe::Bound::TooManyItems
+pub coqui_builder::describe::Bound::TooShort
+impl core::fmt::Display for coqui_builder::describe::Bound
+pub fn coqui_builder::describe::Bound::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum coqui_builder::describe::Kind
+pub coqui_builder::describe::Kind::Group(coqui_builder::describe::Group)
+pub coqui_builder::describe::Kind::Leaf(coqui_builder::describe::LeafInfo)
+pub coqui_builder::describe::Kind::List(alloc::boxed::Box<coqui_builder::describe::Description>)
+pub coqui_builder::describe::Kind::Map(alloc::boxed::Box<coqui_builder::describe::Description>)
+pub coqui_builder::describe::Kind::Union(coqui_builder::describe::Union)
+pub coqui_builder::describe::Kind::Variant(coqui_builder::describe::Variant)
+#[non_exhaustive] pub enum coqui_builder::describe::LeafError
+pub coqui_builder::describe::LeafError::Invalid
+pub coqui_builder::describe::LeafError::Invalid::type_name: &'static str
+pub coqui_builder::describe::LeafError::Negative
+pub coqui_builder::describe::LeafError::NotFinite
+pub coqui_builder::describe::LeafError::OutOfRange
+pub coqui_builder::describe::LeafError::OutOfRange::type_name: &'static str
+pub coqui_builder::describe::LeafError::Refused(alloc::string::String)
+pub coqui_builder::describe::LeafError::TooFine
+pub coqui_builder::describe::LeafError::UnknownName
+impl core::error::Error for coqui_builder::describe::LeafError
+impl core::fmt::Display for coqui_builder::describe::LeafError
+pub fn coqui_builder::describe::LeafError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum coqui_builder::describe::Stricter
+pub coqui_builder::describe::Stricter::Higher
+pub coqui_builder::describe::Stricter::Lower
+#[non_exhaustive] pub struct coqui_builder::describe::Arm
+pub coqui_builder::describe::Arm::description: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Arm::fields: alloc::vec::Vec<coqui_builder::describe::Field>
+pub coqui_builder::describe::Arm::name: alloc::string::String
+pub coqui_builder::describe::Arm::title: core::option::Option<alloc::string::String>
+impl coqui_builder::describe::Arm
+pub fn coqui_builder::describe::Arm::new(impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<coqui_builder::describe::Field>) -> coqui_builder::describe::Arm
+pub struct coqui_builder::describe::Description
+impl coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::check_items(&self, usize) -> core::result::Result<(), coqui_builder::describe::Bound>
+pub fn coqui_builder::describe::Description::check_text(&self, &str) -> core::result::Result<(), coqui_builder::describe::Bound>
+pub fn coqui_builder::describe::Description::default_at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<alloc::string::String>
+pub fn coqui_builder::describe::Description::group(alloc::vec::Vec<coqui_builder::describe::Field>) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::group_fields(&self) -> core::option::Option<&[coqui_builder::describe::Field]>
+pub fn coqui_builder::describe::Description::into_group_fields(self) -> alloc::vec::Vec<coqui_builder::describe::Field>
+pub fn coqui_builder::describe::Description::kind(&self) -> &coqui_builder::describe::Kind
+pub fn coqui_builder::describe::Description::kind_mut(&mut self) -> &mut coqui_builder::describe::Kind
+pub fn coqui_builder::describe::Description::knows(&self, &[coqui_builder::path::Segment]) -> bool
+pub fn coqui_builder::describe::Description::leaf<T: coqui_builder::Leaf>() -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::leaf_of<T, C: coqui_builder::describe::Codec<T>>() -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::list(coqui_builder::describe::Description) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::map(coqui_builder::describe::Description) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::new(coqui_builder::describe::Kind) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::notes(&self) -> &coqui_builder::describe::Notes
+pub fn coqui_builder::describe::Description::notes_mut(&mut self) -> &mut coqui_builder::describe::Notes
+pub fn coqui_builder::describe::Description::resolve(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::describe::Resolved<'_>>
+pub fn coqui_builder::describe::Description::resolve_chosen(&self, &[coqui_builder::path::Segment], &dyn core::ops::function::Fn(&[coqui_builder::path::Segment]) -> core::option::Option<alloc::string::String>) -> core::option::Option<coqui_builder::describe::Resolved<'_>>
+pub fn coqui_builder::describe::Description::union(coqui_builder::describe::LeafInfo, coqui_builder::describe::Description) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::variant(coqui_builder::describe::Variant) -> coqui_builder::describe::Description
+#[non_exhaustive] pub struct coqui_builder::describe::Field
+pub coqui_builder::describe::Field::default: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Field::default_items: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub coqui_builder::describe::Field::description: coqui_builder::describe::Description
+pub coqui_builder::describe::Field::key: alloc::string::String
+pub coqui_builder::describe::Field::none: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Field::optional: bool
+pub coqui_builder::describe::Field::required: bool
+impl coqui_builder::describe::Field
+pub fn coqui_builder::describe::Field::default_from(&mut self, &dyn coqui_builder::inspect::Inspect)
+pub fn coqui_builder::describe::Field::default_value<T: coqui_builder::describe::Describe>(&mut self, T)
+pub fn coqui_builder::describe::Field::new(impl core::convert::Into<alloc::string::String>, coqui_builder::describe::Description) -> coqui_builder::describe::Field
+pub struct coqui_builder::describe::Gate
+impl coqui_builder::describe::Gate
+pub fn coqui_builder::describe::Gate::arms(&self) -> core::option::Option<&[alloc::string::String]>
+pub fn coqui_builder::describe::Gate::at(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::describe::Gate::is_union(&self) -> bool
+#[non_exhaustive] pub struct coqui_builder::describe::Group
+pub coqui_builder::describe::Group::deny_unknown_fields: bool
+pub coqui_builder::describe::Group::fields: alloc::vec::Vec<coqui_builder::describe::Field>
+impl coqui_builder::describe::Group
+pub fn coqui_builder::describe::Group::field(&self, &str) -> core::option::Option<&coqui_builder::describe::Field>
+pub fn coqui_builder::describe::Group::new(alloc::vec::Vec<coqui_builder::describe::Field>) -> coqui_builder::describe::Group
+pub struct coqui_builder::describe::LeafInfo
+impl coqui_builder::describe::LeafInfo
+pub fn coqui_builder::describe::LeafInfo::check(&self, &str) -> core::result::Result<(), coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::LeafInfo::choices(&self) -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::describe::LeafInfo::eq(&self, &str, &str) -> core::result::Result<bool, coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::LeafInfo::is_ordered(&self) -> bool
+pub fn coqui_builder::describe::LeafInfo::label(&self, &str) -> core::option::Option<&'static str>
+pub fn coqui_builder::describe::LeafInfo::labels(&self) -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::describe::LeafInfo::of<T: coqui_builder::Leaf>() -> coqui_builder::describe::LeafInfo
+pub fn coqui_builder::describe::LeafInfo::of_codec<T, C: coqui_builder::describe::Codec<T>>() -> coqui_builder::describe::LeafInfo
+pub fn coqui_builder::describe::LeafInfo::order(&self, &str, &str) -> core::result::Result<core::option::Option<core::cmp::Ordering>, coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::LeafInfo::ty(&self) -> &'static str
+impl core::cmp::PartialEq for coqui_builder::describe::LeafInfo
+pub fn coqui_builder::describe::LeafInfo::eq(&self, &Self) -> bool
+impl core::fmt::Debug for coqui_builder::describe::LeafInfo
+pub fn coqui_builder::describe::LeafInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::describe::Native
+impl<T: coqui_builder::Leaf> coqui_builder::describe::Codec<T> for coqui_builder::describe::Native
+pub const coqui_builder::describe::Native::ORDERED: bool
+pub const coqui_builder::describe::Native::SENSITIVE: bool
+pub const coqui_builder::describe::Native::TYPE: &'static str
+pub fn coqui_builder::describe::Native::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::describe::Native::from_text(&str) -> core::result::Result<T, coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::Native::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::describe::Native::order(&T, &T) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::describe::Native::same(&T, &T) -> bool
+pub fn coqui_builder::describe::Native::to_text(&T) -> alloc::string::String
+#[non_exhaustive] pub struct coqui_builder::describe::Notes
+pub coqui_builder::describe::Notes::advanced: bool
+pub coqui_builder::describe::Notes::deprecated: bool
+pub coqui_builder::describe::Notes::description: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Notes::examples: alloc::vec::Vec<alloc::string::String>
+pub coqui_builder::describe::Notes::format: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Notes::max_items: core::option::Option<u64>
+pub coqui_builder::describe::Notes::max_length: core::option::Option<u64>
+pub coqui_builder::describe::Notes::min_items: core::option::Option<u64>
+pub coqui_builder::describe::Notes::min_length: core::option::Option<u64>
+pub coqui_builder::describe::Notes::multiple_of: core::option::Option<f64>
+pub coqui_builder::describe::Notes::order: core::option::Option<i64>
+pub coqui_builder::describe::Notes::pattern: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Notes::read_only: bool
+pub coqui_builder::describe::Notes::section: core::option::Option<alloc::string::String>
+pub coqui_builder::describe::Notes::sensitive: bool
+pub coqui_builder::describe::Notes::stricter: core::option::Option<coqui_builder::describe::Stricter>
+pub coqui_builder::describe::Notes::title: core::option::Option<alloc::string::String>
+pub struct coqui_builder::describe::Resolved<'a>
+impl<'a> coqui_builder::describe::Resolved<'a>
+pub fn coqui_builder::describe::Resolved<'a>::default(&self) -> core::option::Option<&str>
+pub fn coqui_builder::describe::Resolved<'a>::default_items(&self) -> core::option::Option<&[alloc::string::String]>
+pub fn coqui_builder::describe::Resolved<'a>::description(&self) -> &'a coqui_builder::describe::Description
+pub fn coqui_builder::describe::Resolved<'a>::field(&self) -> core::option::Option<&'a coqui_builder::describe::Field>
+pub fn coqui_builder::describe::Resolved<'a>::gates(&self) -> &[coqui_builder::describe::Gate]
+pub struct coqui_builder::describe::Union
+impl coqui_builder::describe::Union
+pub fn coqui_builder::describe::Union::default_is_structured(&self) -> bool
+pub fn coqui_builder::describe::Union::new(coqui_builder::describe::LeafInfo, coqui_builder::describe::Description) -> coqui_builder::describe::Union
+pub fn coqui_builder::describe::Union::structured(&self) -> &coqui_builder::describe::Description
+pub fn coqui_builder::describe::Union::text(&self) -> &coqui_builder::describe::LeafInfo
+pub struct coqui_builder::describe::Variant
+impl coqui_builder::describe::Variant
+pub fn coqui_builder::describe::Variant::arm(&self, &str) -> core::option::Option<&coqui_builder::describe::Arm>
+pub fn coqui_builder::describe::Variant::arms(&self) -> &[coqui_builder::describe::Arm]
+pub fn coqui_builder::describe::Variant::default_arm(&self) -> core::option::Option<&str>
+pub fn coqui_builder::describe::Variant::new(impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<coqui_builder::describe::Arm>) -> coqui_builder::describe::Variant
+pub fn coqui_builder::describe::Variant::tag(&self) -> &str
+pub fn coqui_builder::describe::Variant::tag_description(&self) -> &coqui_builder::describe::Description
+pub trait coqui_builder::describe::Codec<T>
+pub const coqui_builder::describe::Codec::ORDERED: bool
+pub const coqui_builder::describe::Codec::SENSITIVE: bool
+pub const coqui_builder::describe::Codec::TYPE: &'static str
+pub fn coqui_builder::describe::Codec::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::describe::Codec::from_text(&str) -> core::result::Result<T, coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::Codec::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::describe::Codec::order(&T, &T) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::describe::Codec::same(&T, &T) -> bool
+pub fn coqui_builder::describe::Codec::to_text(&T) -> alloc::string::String
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Codec<coqui_builder::secret::Secret<T>> for coqui_builder::secret::SecretCodec<T>
+pub const coqui_builder::secret::SecretCodec<T>::ORDERED: bool
+pub const coqui_builder::secret::SecretCodec<T>::SENSITIVE: bool
+pub const coqui_builder::secret::SecretCodec<T>::TYPE: &'static str
+pub fn coqui_builder::secret::SecretCodec<T>::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::secret::SecretCodec<T>::from_text(&str) -> core::result::Result<coqui_builder::secret::Secret<T>, coqui_builder::describe::LeafError>
+pub fn coqui_builder::secret::SecretCodec<T>::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::secret::SecretCodec<T>::order(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::secret::SecretCodec<T>::same(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> bool
+pub fn coqui_builder::secret::SecretCodec<T>::to_text(&coqui_builder::secret::Secret<T>) -> alloc::string::String
+impl<T: coqui_builder::Leaf> coqui_builder::describe::Codec<T> for coqui_builder::describe::Native
+pub const coqui_builder::describe::Native::ORDERED: bool
+pub const coqui_builder::describe::Native::SENSITIVE: bool
+pub const coqui_builder::describe::Native::TYPE: &'static str
+pub fn coqui_builder::describe::Native::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::describe::Native::from_text(&str) -> core::result::Result<T, coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::Native::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::describe::Native::order(&T, &T) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::describe::Native::same(&T, &T) -> bool
+pub fn coqui_builder::describe::Native::to_text(&T) -> alloc::string::String
+pub trait coqui_builder::describe::Describe: core::marker::Sized
+pub type coqui_builder::describe::Describe::Fill: coqui_builder::fill::Fill<Self>
+pub const coqui_builder::describe::Describe::LEAF: bool
+pub const coqui_builder::describe::Describe::OPTIONAL: bool
+pub fn coqui_builder::describe::Describe::description() -> coqui_builder::describe::Description
+impl coqui_builder::describe::Describe for coqui_builder::Expect
+pub type coqui_builder::Expect::Fill = coqui_builder::profile::ExpectFill
+pub const coqui_builder::Expect::LEAF: bool
+pub const coqui_builder::Expect::OPTIONAL: bool
+pub fn coqui_builder::Expect::description() -> coqui_builder::describe::Description
+impl coqui_builder::describe::Describe for coqui_builder::profile::Profile
+pub type coqui_builder::profile::Profile::Fill = coqui_builder::profile::ProfileFill
+pub const coqui_builder::profile::Profile::LEAF: bool
+pub const coqui_builder::profile::Profile::OPTIONAL: bool
+pub fn coqui_builder::profile::Profile::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Describe for coqui_builder::secret::Secret<T>
+pub type coqui_builder::secret::Secret<T>::Fill = coqui_builder::fill::LeafSlot<coqui_builder::secret::Secret<T>, coqui_builder::secret::SecretCodec<T>>
+pub const coqui_builder::secret::Secret<T>::LEAF: bool
+pub const coqui_builder::secret::Secret<T>::OPTIONAL: bool
+pub fn coqui_builder::secret::Secret<T>::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::Leaf> coqui_builder::describe::Describe for T
+pub type T::Fill = coqui_builder::fill::LeafSlot<T>
+pub const T::LEAF: bool
+pub const T::OPTIONAL: bool
+pub fn T::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::describe::Describe> coqui_builder::describe::Describe for alloc::vec::Vec<T>
+pub type alloc::vec::Vec<T>::Fill = coqui_builder::fill::ListSlot<T, <T as coqui_builder::describe::Describe>::Fill>
+pub const alloc::vec::Vec<T>::LEAF: bool
+pub const alloc::vec::Vec<T>::OPTIONAL: bool
+pub fn alloc::vec::Vec<T>::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::describe::Describe> coqui_builder::describe::Describe for core::option::Option<T>
+pub type core::option::Option<T>::Fill = coqui_builder::fill::OptionSlot<T, <T as coqui_builder::describe::Describe>::Fill>
+pub const core::option::Option<T>::LEAF: bool
+pub const core::option::Option<T>::OPTIONAL: bool
+pub fn core::option::Option<T>::description() -> coqui_builder::describe::Description
+impl<V: coqui_builder::describe::Describe + 'static, S: core::hash::BuildHasher + core::default::Default + 'static> coqui_builder::describe::Describe for std::collections::hash::map::HashMap<alloc::string::String, V, S>
+pub type std::collections::hash::map::HashMap<alloc::string::String, V, S>::Fill = coqui_builder::fill::MapSlot<std::collections::hash::map::HashMap<alloc::string::String, V, S>, V, <V as coqui_builder::describe::Describe>::Fill>
+pub const std::collections::hash::map::HashMap<alloc::string::String, V, S>::LEAF: bool
+pub const std::collections::hash::map::HashMap<alloc::string::String, V, S>::OPTIONAL: bool
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::description() -> coqui_builder::describe::Description
+impl<V: coqui_builder::describe::Describe + 'static> coqui_builder::describe::Describe for alloc::collections::btree::map::BTreeMap<alloc::string::String, V>
+pub type alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::Fill = coqui_builder::fill::MapSlot<alloc::collections::btree::map::BTreeMap<alloc::string::String, V>, V, <V as coqui_builder::describe::Describe>::Fill>
+pub const alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::LEAF: bool
+pub const alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::OPTIONAL: bool
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::description() -> coqui_builder::describe::Description
+pub trait coqui_builder::describe::Leaf: core::marker::Sized
+pub const coqui_builder::describe::Leaf::ORDERED: bool
+pub const coqui_builder::describe::Leaf::TYPE: &'static str
+pub fn coqui_builder::describe::Leaf::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::describe::Leaf::from_text(&str) -> core::result::Result<Self, coqui_builder::describe::LeafError>
+pub fn coqui_builder::describe::Leaf::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::describe::Leaf::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::describe::Leaf::same(&Self, &Self) -> bool
+pub fn coqui_builder::describe::Leaf::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for alloc::string::String
+pub const alloc::string::String::ORDERED: bool
+pub const alloc::string::String::TYPE: &'static str
+pub fn alloc::string::String::choices() -> core::option::Option<&'static [&'static str]>
+pub fn alloc::string::String::from_text(&str) -> core::result::Result<alloc::string::String, coqui_builder::describe::LeafError>
+pub fn alloc::string::String::labels() -> &'static [(&'static str, &'static str)]
+pub fn alloc::string::String::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn alloc::string::String::same(&Self, &Self) -> bool
+pub fn alloc::string::String::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for bool
+pub const bool::ORDERED: bool
+pub const bool::TYPE: &'static str
+pub fn bool::choices() -> core::option::Option<&'static [&'static str]>
+pub fn bool::from_text(&str) -> core::result::Result<bool, coqui_builder::describe::LeafError>
+pub fn bool::labels() -> &'static [(&'static str, &'static str)]
+pub fn bool::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn bool::same(&Self, &Self) -> bool
+pub fn bool::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for char
+pub const char::ORDERED: bool
+pub const char::TYPE: &'static str
+pub fn char::choices() -> core::option::Option<&'static [&'static str]>
+pub fn char::from_text(&str) -> core::result::Result<char, coqui_builder::describe::LeafError>
+pub fn char::labels() -> &'static [(&'static str, &'static str)]
+pub fn char::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn char::same(&Self, &Self) -> bool
+pub fn char::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::ip_addr::IpAddr
+pub const core::net::ip_addr::IpAddr::ORDERED: bool
+pub const core::net::ip_addr::IpAddr::TYPE: &'static str
+pub fn core::net::ip_addr::IpAddr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::ip_addr::IpAddr::from_text(&str) -> core::result::Result<core::net::ip_addr::IpAddr, coqui_builder::describe::LeafError>
+pub fn core::net::ip_addr::IpAddr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::ip_addr::IpAddr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::ip_addr::IpAddr::same(&Self, &Self) -> bool
+pub fn core::net::ip_addr::IpAddr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::ip_addr::Ipv4Addr
+pub const core::net::ip_addr::Ipv4Addr::ORDERED: bool
+pub const core::net::ip_addr::Ipv4Addr::TYPE: &'static str
+pub fn core::net::ip_addr::Ipv4Addr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::ip_addr::Ipv4Addr::from_text(&str) -> core::result::Result<core::net::ip_addr::Ipv4Addr, coqui_builder::describe::LeafError>
+pub fn core::net::ip_addr::Ipv4Addr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::ip_addr::Ipv4Addr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::ip_addr::Ipv4Addr::same(&Self, &Self) -> bool
+pub fn core::net::ip_addr::Ipv4Addr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::ip_addr::Ipv6Addr
+pub const core::net::ip_addr::Ipv6Addr::ORDERED: bool
+pub const core::net::ip_addr::Ipv6Addr::TYPE: &'static str
+pub fn core::net::ip_addr::Ipv6Addr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::ip_addr::Ipv6Addr::from_text(&str) -> core::result::Result<core::net::ip_addr::Ipv6Addr, coqui_builder::describe::LeafError>
+pub fn core::net::ip_addr::Ipv6Addr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::ip_addr::Ipv6Addr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::ip_addr::Ipv6Addr::same(&Self, &Self) -> bool
+pub fn core::net::ip_addr::Ipv6Addr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::socket_addr::SocketAddr
+pub const core::net::socket_addr::SocketAddr::ORDERED: bool
+pub const core::net::socket_addr::SocketAddr::TYPE: &'static str
+pub fn core::net::socket_addr::SocketAddr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::socket_addr::SocketAddr::from_text(&str) -> core::result::Result<core::net::socket_addr::SocketAddr, coqui_builder::describe::LeafError>
+pub fn core::net::socket_addr::SocketAddr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::socket_addr::SocketAddr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::socket_addr::SocketAddr::same(&Self, &Self) -> bool
+pub fn core::net::socket_addr::SocketAddr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::socket_addr::SocketAddrV4
+pub const core::net::socket_addr::SocketAddrV4::ORDERED: bool
+pub const core::net::socket_addr::SocketAddrV4::TYPE: &'static str
+pub fn core::net::socket_addr::SocketAddrV4::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::socket_addr::SocketAddrV4::from_text(&str) -> core::result::Result<core::net::socket_addr::SocketAddrV4, coqui_builder::describe::LeafError>
+pub fn core::net::socket_addr::SocketAddrV4::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::socket_addr::SocketAddrV4::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::socket_addr::SocketAddrV4::same(&Self, &Self) -> bool
+pub fn core::net::socket_addr::SocketAddrV4::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::socket_addr::SocketAddrV6
+pub const core::net::socket_addr::SocketAddrV6::ORDERED: bool
+pub const core::net::socket_addr::SocketAddrV6::TYPE: &'static str
+pub fn core::net::socket_addr::SocketAddrV6::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::socket_addr::SocketAddrV6::from_text(&str) -> core::result::Result<core::net::socket_addr::SocketAddrV6, coqui_builder::describe::LeafError>
+pub fn core::net::socket_addr::SocketAddrV6::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::socket_addr::SocketAddrV6::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::socket_addr::SocketAddrV6::same(&Self, &Self) -> bool
+pub fn core::net::socket_addr::SocketAddrV6::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::time::Duration
+pub const core::time::Duration::ORDERED: bool
+pub const core::time::Duration::TYPE: &'static str
+pub fn core::time::Duration::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::time::Duration::from_text(&str) -> core::result::Result<core::time::Duration, coqui_builder::describe::LeafError>
+pub fn core::time::Duration::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::time::Duration::order(&core::time::Duration, &core::time::Duration) -> core::option::Option<core::cmp::Ordering>
+pub fn core::time::Duration::same(&Self, &Self) -> bool
+pub fn core::time::Duration::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for f32
+pub const f32::ORDERED: bool
+pub const f32::TYPE: &'static str
+pub fn f32::choices() -> core::option::Option<&'static [&'static str]>
+pub fn f32::from_text(&str) -> core::result::Result<f32, coqui_builder::describe::LeafError>
+pub fn f32::labels() -> &'static [(&'static str, &'static str)]
+pub fn f32::order(&f32, &f32) -> core::option::Option<core::cmp::Ordering>
+pub fn f32::same(&f32, &f32) -> bool
+pub fn f32::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for f64
+pub const f64::ORDERED: bool
+pub const f64::TYPE: &'static str
+pub fn f64::choices() -> core::option::Option<&'static [&'static str]>
+pub fn f64::from_text(&str) -> core::result::Result<f64, coqui_builder::describe::LeafError>
+pub fn f64::labels() -> &'static [(&'static str, &'static str)]
+pub fn f64::order(&f64, &f64) -> core::option::Option<core::cmp::Ordering>
+pub fn f64::same(&f64, &f64) -> bool
+pub fn f64::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i128
+pub const i128::ORDERED: bool
+pub const i128::TYPE: &'static str
+pub fn i128::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i128::from_text(&str) -> core::result::Result<i128, coqui_builder::describe::LeafError>
+pub fn i128::labels() -> &'static [(&'static str, &'static str)]
+pub fn i128::order(&i128, &i128) -> core::option::Option<core::cmp::Ordering>
+pub fn i128::same(&Self, &Self) -> bool
+pub fn i128::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i16
+pub const i16::ORDERED: bool
+pub const i16::TYPE: &'static str
+pub fn i16::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i16::from_text(&str) -> core::result::Result<i16, coqui_builder::describe::LeafError>
+pub fn i16::labels() -> &'static [(&'static str, &'static str)]
+pub fn i16::order(&i16, &i16) -> core::option::Option<core::cmp::Ordering>
+pub fn i16::same(&Self, &Self) -> bool
+pub fn i16::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i32
+pub const i32::ORDERED: bool
+pub const i32::TYPE: &'static str
+pub fn i32::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i32::from_text(&str) -> core::result::Result<i32, coqui_builder::describe::LeafError>
+pub fn i32::labels() -> &'static [(&'static str, &'static str)]
+pub fn i32::order(&i32, &i32) -> core::option::Option<core::cmp::Ordering>
+pub fn i32::same(&Self, &Self) -> bool
+pub fn i32::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i64
+pub const i64::ORDERED: bool
+pub const i64::TYPE: &'static str
+pub fn i64::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i64::from_text(&str) -> core::result::Result<i64, coqui_builder::describe::LeafError>
+pub fn i64::labels() -> &'static [(&'static str, &'static str)]
+pub fn i64::order(&i64, &i64) -> core::option::Option<core::cmp::Ordering>
+pub fn i64::same(&Self, &Self) -> bool
+pub fn i64::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i8
+pub const i8::ORDERED: bool
+pub const i8::TYPE: &'static str
+pub fn i8::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i8::from_text(&str) -> core::result::Result<i8, coqui_builder::describe::LeafError>
+pub fn i8::labels() -> &'static [(&'static str, &'static str)]
+pub fn i8::order(&i8, &i8) -> core::option::Option<core::cmp::Ordering>
+pub fn i8::same(&Self, &Self) -> bool
+pub fn i8::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for isize
+pub const isize::ORDERED: bool
+pub const isize::TYPE: &'static str
+pub fn isize::choices() -> core::option::Option<&'static [&'static str]>
+pub fn isize::from_text(&str) -> core::result::Result<isize, coqui_builder::describe::LeafError>
+pub fn isize::labels() -> &'static [(&'static str, &'static str)]
+pub fn isize::order(&isize, &isize) -> core::option::Option<core::cmp::Ordering>
+pub fn isize::same(&Self, &Self) -> bool
+pub fn isize::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for std::path::PathBuf
+pub const std::path::PathBuf::ORDERED: bool
+pub const std::path::PathBuf::TYPE: &'static str
+pub fn std::path::PathBuf::choices() -> core::option::Option<&'static [&'static str]>
+pub fn std::path::PathBuf::from_text(&str) -> core::result::Result<std::path::PathBuf, coqui_builder::describe::LeafError>
+pub fn std::path::PathBuf::labels() -> &'static [(&'static str, &'static str)]
+pub fn std::path::PathBuf::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn std::path::PathBuf::same(&Self, &Self) -> bool
+pub fn std::path::PathBuf::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u128
+pub const u128::ORDERED: bool
+pub const u128::TYPE: &'static str
+pub fn u128::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u128::from_text(&str) -> core::result::Result<u128, coqui_builder::describe::LeafError>
+pub fn u128::labels() -> &'static [(&'static str, &'static str)]
+pub fn u128::order(&u128, &u128) -> core::option::Option<core::cmp::Ordering>
+pub fn u128::same(&Self, &Self) -> bool
+pub fn u128::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u16
+pub const u16::ORDERED: bool
+pub const u16::TYPE: &'static str
+pub fn u16::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u16::from_text(&str) -> core::result::Result<u16, coqui_builder::describe::LeafError>
+pub fn u16::labels() -> &'static [(&'static str, &'static str)]
+pub fn u16::order(&u16, &u16) -> core::option::Option<core::cmp::Ordering>
+pub fn u16::same(&Self, &Self) -> bool
+pub fn u16::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u32
+pub const u32::ORDERED: bool
+pub const u32::TYPE: &'static str
+pub fn u32::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u32::from_text(&str) -> core::result::Result<u32, coqui_builder::describe::LeafError>
+pub fn u32::labels() -> &'static [(&'static str, &'static str)]
+pub fn u32::order(&u32, &u32) -> core::option::Option<core::cmp::Ordering>
+pub fn u32::same(&Self, &Self) -> bool
+pub fn u32::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u64
+pub const u64::ORDERED: bool
+pub const u64::TYPE: &'static str
+pub fn u64::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u64::from_text(&str) -> core::result::Result<u64, coqui_builder::describe::LeafError>
+pub fn u64::labels() -> &'static [(&'static str, &'static str)]
+pub fn u64::order(&u64, &u64) -> core::option::Option<core::cmp::Ordering>
+pub fn u64::same(&Self, &Self) -> bool
+pub fn u64::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u8
+pub const u8::ORDERED: bool
+pub const u8::TYPE: &'static str
+pub fn u8::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u8::from_text(&str) -> core::result::Result<u8, coqui_builder::describe::LeafError>
+pub fn u8::labels() -> &'static [(&'static str, &'static str)]
+pub fn u8::order(&u8, &u8) -> core::option::Option<core::cmp::Ordering>
+pub fn u8::same(&Self, &Self) -> bool
+pub fn u8::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for usize
+pub const usize::ORDERED: bool
+pub const usize::TYPE: &'static str
+pub fn usize::choices() -> core::option::Option<&'static [&'static str]>
+pub fn usize::from_text(&str) -> core::result::Result<usize, coqui_builder::describe::LeafError>
+pub fn usize::labels() -> &'static [(&'static str, &'static str)]
+pub fn usize::order(&usize, &usize) -> core::option::Option<core::cmp::Ordering>
+pub fn usize::same(&Self, &Self) -> bool
+pub fn usize::to_text(&self) -> alloc::string::String
+pub fn coqui_builder::describe::assert_round_trip<T: coqui_builder::Leaf + core::fmt::Debug>(&[T])
+pub mod coqui_builder::env
+pub struct coqui_builder::env::Env
+impl coqui_builder::env::Env
+pub fn coqui_builder::env::Env::from_vars<K, V>(&str, impl core::iter::traits::collect::IntoIterator<Item = (K, V)>) -> coqui_builder::env::Env where K: core::convert::Into<alloc::string::String>, V: core::convert::Into<alloc::string::String>
+pub fn coqui_builder::env::Env::name(&self, &coqui_builder::path::KeyPath) -> alloc::string::String
+pub fn coqui_builder::env::Env::new(&str) -> coqui_builder::env::Env
+impl coqui_builder::source::Source for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::entries(&mut self, &coqui_builder::path::KeyPath) -> core::result::Result<core::option::Option<coqui_builder::inspect::Entries>, coqui_builder::source::SourceError>
+pub fn coqui_builder::env::Env::unknown(&mut self, &dyn core::ops::function::Fn(&coqui_builder::path::KeyPath) -> bool) -> alloc::vec::Vec<coqui_builder::path::KeyPath>
+pub fn coqui_builder::env::Env::value(&mut self, &coqui_builder::path::KeyPath, &coqui_builder::describe::LeafInfo) -> core::result::Result<core::option::Option<alloc::string::String>, coqui_builder::source::SourceError>
+impl core::fmt::Debug for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::drop(&mut self)
+pub mod coqui_builder::fill
+#[non_exhaustive] pub enum coqui_builder::fill::FillErrorKind
+pub coqui_builder::fill::FillErrorKind::Bound(coqui_builder::describe::Bound)
+pub coqui_builder::fill::FillErrorKind::Leaf(coqui_builder::describe::LeafError)
+pub coqui_builder::fill::FillErrorKind::Path(coqui_builder::path::PathError)
+pub coqui_builder::fill::FillErrorKind::Source(coqui_builder::source::SourceError)
+pub coqui_builder::fill::FillErrorKind::UnknownKey
+pub coqui_builder::fill::FillErrorKind::UnknownKeys(coqui_builder::source::Unknown)
+pub coqui_builder::fill::FillErrorKind::Unsupported(&'static str)
+impl core::fmt::Display for coqui_builder::fill::FillErrorKind
+pub fn coqui_builder::fill::FillErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::fill::FillError
+impl coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::at(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::fill::FillError::is_unknown_here(&self) -> bool
+pub fn coqui_builder::fill::FillError::kind(&self) -> &coqui_builder::fill::FillErrorKind
+pub fn coqui_builder::fill::FillError::leaf(coqui_builder::describe::LeafError) -> coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::new(coqui_builder::fill::FillErrorKind) -> coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::under(self, coqui_builder::path::Segment) -> coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::unknown_key(coqui_builder::path::Segment) -> coqui_builder::fill::FillError
+impl core::convert::From<coqui_builder::source::SourceError> for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::from(coqui_builder::source::SourceError) -> coqui_builder::fill::FillError
+impl core::error::Error for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::fill::LeafSlot<T, C>
+impl<T, C: coqui_builder::describe::Codec<T>> coqui_builder::fill::Fill<T> for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::LeafSlot<T, C>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::LeafSlot<T, C>::from_value(T) -> Self
+pub fn coqui_builder::fill::LeafSlot<T, C>::put(&mut self, T)
+pub fn coqui_builder::fill::LeafSlot<T, C>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::LeafSlot<T, C>::set_default(&mut self, T)
+pub fn coqui_builder::fill::LeafSlot<T, C>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, C: coqui_builder::describe::Codec<T>> coqui_builder::inspect::Inspect for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::LeafSlot<T, C>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, C> core::default::Default for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::default() -> Self
+impl<T, C> core::fmt::Debug for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::fill::ListSlot<T, F>
+impl<T, F: coqui_builder::fill::Fill<T>> coqui_builder::fill::Fill<alloc::vec::Vec<T>> for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<alloc::vec::Vec<T>>
+pub fn coqui_builder::fill::ListSlot<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::ListSlot<T, F>::from_value(alloc::vec::Vec<T>) -> Self
+pub fn coqui_builder::fill::ListSlot<T, F>::put(&mut self, alloc::vec::Vec<T>)
+pub fn coqui_builder::fill::ListSlot<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::ListSlot<T, F>::set_default(&mut self, alloc::vec::Vec<T>)
+pub fn coqui_builder::fill::ListSlot<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::ListSlot<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, F: core::fmt::Debug> core::fmt::Debug for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T, F> core::default::Default for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::default() -> Self
+pub struct coqui_builder::fill::MapSlot<M, V, F>
+impl<M, V, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<M, V, F: core::fmt::Debug> core::fmt::Debug for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<M, V, F> core::default::Default for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::default() -> Self
+impl<M: coqui_builder::fill::TextMap<V>, V: 'static, F: coqui_builder::fill::Fill<V>> coqui_builder::fill::Fill<M> for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<M>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::from_value(M) -> Self
+pub fn coqui_builder::fill::MapSlot<M, V, F>::put(&mut self, M)
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set_default(&mut self, M)
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub struct coqui_builder::fill::OptionSlot<T, F>
+impl<T, F> coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::none(self, &'static str, &'static str) -> Self
+impl<T, F: coqui_builder::fill::Fill<T>> coqui_builder::fill::Fill<core::option::Option<T>> for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<core::option::Option<T>>
+pub fn coqui_builder::fill::OptionSlot<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::OptionSlot<T, F>::from_value(core::option::Option<T>) -> Self
+pub fn coqui_builder::fill::OptionSlot<T, F>::put(&mut self, core::option::Option<T>)
+pub fn coqui_builder::fill::OptionSlot<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::OptionSlot<T, F>::set_default(&mut self, core::option::Option<T>)
+pub fn coqui_builder::fill::OptionSlot<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::OptionSlot<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, F: core::default::Default> core::default::Default for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::default() -> Self
+impl<T, F: core::fmt::Debug> core::fmt::Debug for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::fill::Wrapped<T: coqui_builder::fill::Wrap, F>
+impl<T: coqui_builder::fill::Wrap, F: coqui_builder::fill::Fill<<T as coqui_builder::fill::Wrap>::Inner>> coqui_builder::fill::Fill<T> for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::Wrapped<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Wrapped<T, F>::from_value(T) -> Self
+pub fn coqui_builder::fill::Wrapped<T, F>::put(&mut self, T)
+pub fn coqui_builder::fill::Wrapped<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Wrapped<T, F>::set_default(&mut self, T)
+pub fn coqui_builder::fill::Wrapped<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::fill::Wrap, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::Wrapped<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::fill::Wrap, F: core::default::Default> core::default::Default for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::default() -> Self
+impl<T: coqui_builder::fill::Wrap, F: core::fmt::Debug> core::fmt::Debug for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait coqui_builder::fill::Fill<T>: core::default::Default + coqui_builder::inspect::Inspect
+pub fn coqui_builder::fill::Fill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::Fill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Fill::from_value(T) -> Self
+pub fn coqui_builder::fill::Fill::put(&mut self, T)
+pub fn coqui_builder::fill::Fill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Fill::set_default(&mut self, T)
+pub fn coqui_builder::fill::Fill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::fill::Fill<coqui_builder::Expect> for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::ExpectFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::from_value(coqui_builder::Expect) -> Self
+pub fn coqui_builder::profile::ExpectFill::put(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::set_default(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::fill::Fill<coqui_builder::profile::Profile> for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::profile::Profile>
+pub fn coqui_builder::profile::ProfileFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::from_value(coqui_builder::profile::Profile) -> Self
+pub fn coqui_builder::profile::ProfileFill::put(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::set_default(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<M: coqui_builder::fill::TextMap<V>, V: 'static, F: coqui_builder::fill::Fill<V>> coqui_builder::fill::Fill<M> for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<M>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::from_value(M) -> Self
+pub fn coqui_builder::fill::MapSlot<M, V, F>::put(&mut self, M)
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set_default(&mut self, M)
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, C: coqui_builder::describe::Codec<T>> coqui_builder::fill::Fill<T> for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::LeafSlot<T, C>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::LeafSlot<T, C>::from_value(T) -> Self
+pub fn coqui_builder::fill::LeafSlot<T, C>::put(&mut self, T)
+pub fn coqui_builder::fill::LeafSlot<T, C>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::LeafSlot<T, C>::set_default(&mut self, T)
+pub fn coqui_builder::fill::LeafSlot<T, C>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, F: coqui_builder::fill::Fill<T>> coqui_builder::fill::Fill<alloc::vec::Vec<T>> for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<alloc::vec::Vec<T>>
+pub fn coqui_builder::fill::ListSlot<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::ListSlot<T, F>::from_value(alloc::vec::Vec<T>) -> Self
+pub fn coqui_builder::fill::ListSlot<T, F>::put(&mut self, alloc::vec::Vec<T>)
+pub fn coqui_builder::fill::ListSlot<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::ListSlot<T, F>::set_default(&mut self, alloc::vec::Vec<T>)
+pub fn coqui_builder::fill::ListSlot<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, F: coqui_builder::fill::Fill<T>> coqui_builder::fill::Fill<core::option::Option<T>> for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<core::option::Option<T>>
+pub fn coqui_builder::fill::OptionSlot<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::OptionSlot<T, F>::from_value(core::option::Option<T>) -> Self
+pub fn coqui_builder::fill::OptionSlot<T, F>::put(&mut self, core::option::Option<T>)
+pub fn coqui_builder::fill::OptionSlot<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::OptionSlot<T, F>::set_default(&mut self, core::option::Option<T>)
+pub fn coqui_builder::fill::OptionSlot<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::fill::Wrap, F: coqui_builder::fill::Fill<<T as coqui_builder::fill::Wrap>::Inner>> coqui_builder::fill::Fill<T> for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::Wrapped<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Wrapped<T, F>::from_value(T) -> Self
+pub fn coqui_builder::fill::Wrapped<T, F>::put(&mut self, T)
+pub fn coqui_builder::fill::Wrapped<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Wrapped<T, F>::set_default(&mut self, T)
+pub fn coqui_builder::fill::Wrapped<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub trait coqui_builder::fill::TextMap<V>: core::marker::Sized
+pub fn coqui_builder::fill::TextMap::collect_entries(alloc::vec::Vec<(alloc::string::String, V)>) -> Self
+pub fn coqui_builder::fill::TextMap::into_entries(self) -> alloc::vec::Vec<(alloc::string::String, V)>
+impl<V, S: core::hash::BuildHasher + core::default::Default> coqui_builder::fill::TextMap<V> for std::collections::hash::map::HashMap<alloc::string::String, V, S>
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::collect_entries(alloc::vec::Vec<(alloc::string::String, V)>) -> Self
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::into_entries(self) -> alloc::vec::Vec<(alloc::string::String, V)>
+impl<V> coqui_builder::fill::TextMap<V> for alloc::collections::btree::map::BTreeMap<alloc::string::String, V>
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::collect_entries(alloc::vec::Vec<(alloc::string::String, V)>) -> Self
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::into_entries(self) -> alloc::vec::Vec<(alloc::string::String, V)>
+pub trait coqui_builder::fill::Wrap: core::marker::Sized
+pub type coqui_builder::fill::Wrap::Inner: 'static
+pub fn coqui_builder::fill::Wrap::inner(&self) -> &Self::Inner
+pub fn coqui_builder::fill::Wrap::into_inner(self) -> Self::Inner
+pub fn coqui_builder::fill::Wrap::wrap(Self::Inner) -> Self
+pub mod coqui_builder::inspect
+#[non_exhaustive] pub enum coqui_builder::inspect::Entries
+pub coqui_builder::inspect::Entries::Keys(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::inspect::Entries::Len(usize)
+pub trait coqui_builder::inspect::Inspect
+pub fn coqui_builder::inspect::Inspect::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::inspect::Inspect::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::Expect
+pub fn coqui_builder::Expect::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::Expect::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::ExpectFill::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::Profile::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::ProfileFill::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<M, V, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, C: coqui_builder::describe::Codec<T>> coqui_builder::inspect::Inspect for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::LeafSlot<T, C>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::ListSlot<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::OptionSlot<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::inspect::Inspect for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::secret::Secret<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::Leaf> coqui_builder::inspect::Inspect for T
+pub fn T::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn T::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::describe::Describe> coqui_builder::inspect::Inspect for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::partial::Partial<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::fill::Wrap, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::Wrapped<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn alloc::vec::Vec<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for core::option::Option<T>
+pub fn core::option::Option<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn core::option::Option<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<V: coqui_builder::inspect::Inspect, S: core::hash::BuildHasher> coqui_builder::inspect::Inspect for std::collections::hash::map::HashMap<alloc::string::String, V, S>
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<V: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for alloc::collections::btree::map::BTreeMap<alloc::string::String, V>
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+pub mod coqui_builder::non_default
+pub struct coqui_builder::non_default::NonDefault
+pub coqui_builder::non_default::NonDefault::default: coqui_builder::datum::Shown
+pub coqui_builder::non_default::NonDefault::setting: alloc::string::String
+pub coqui_builder::non_default::NonDefault::value: coqui_builder::datum::Shown
+impl coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::new(impl core::convert::Into<alloc::string::String>, coqui_builder::datum::Shown, coqui_builder::datum::Shown) -> Self
+impl core::convert::From<&coqui_builder::report::Finding> for coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::from(&coqui_builder::report::Finding) -> coqui_builder::non_default::NonDefault
+impl core::fmt::Display for coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn coqui_builder::non_default::differences(&coqui_builder::describe::Description, &dyn coqui_builder::inspect::Inspect, core::option::Option<&dyn coqui_builder::inspect::Inspect>) -> coqui_builder::report::Report
+pub fn coqui_builder::non_default::non_defaults<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect>(&T) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
+pub mod coqui_builder::partial
+pub struct coqui_builder::partial::Missing
+impl coqui_builder::partial::Missing
+pub fn coqui_builder::partial::Missing::inputs(&self) -> &[&'static str]
+pub fn coqui_builder::partial::Missing::is_empty(&self) -> bool
+pub fn coqui_builder::partial::Missing::keys(&self) -> &[coqui_builder::path::KeyPath]
+pub fn coqui_builder::partial::Missing::new(alloc::vec::Vec<coqui_builder::path::KeyPath>, alloc::vec::Vec<&'static str>) -> coqui_builder::partial::Missing
+impl core::error::Error for coqui_builder::partial::Missing
+impl core::fmt::Display for coqui_builder::partial::Missing
+pub fn coqui_builder::partial::Missing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::partial::Partial<T: coqui_builder::describe::Describe>
+impl<T: coqui_builder::describe::Describe + 'static> coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::put<V: 'static>(&mut self, &str, V) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::put_at<V: 'static>(&mut self, &[coqui_builder::path::Segment], V) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::describe::Describe> coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::build(self) -> core::result::Result<T, coqui_builder::partial::Missing>
+pub fn coqui_builder::partial::Partial<T>::clear(&mut self, &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::clear_at(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::description(&self) -> &coqui_builder::describe::Description
+pub fn coqui_builder::partial::Partial<T>::new() -> Self
+pub fn coqui_builder::partial::Partial<T>::overlay(&mut self, coqui_builder::partial::Partial<T>)
+pub fn coqui_builder::partial::Partial<T>::set(&mut self, &str, &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::set_at(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::set_items<S: core::convert::AsRef<str>>(&mut self, &str, impl core::iter::traits::collect::IntoIterator<Item = S>) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::set_items_at(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::describe::Describe> coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::fill_from(&mut self, &mut impl coqui_builder::source::Source) -> core::result::Result<coqui_builder::source::Unknown, coqui_builder::fill::FillError>
+impl<'de, T: coqui_builder::describe::Describe> serde_core::de::Deserialize<'de> for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<coqui_builder::partial::Partial<T>, <D as serde_core::de::Deserializer>::Error>
+impl<T: coqui_builder::describe::Describe> coqui_builder::inspect::Inspect for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::partial::Partial<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::describe::Describe> core::convert::From<T> for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::from(T) -> Self
+impl<T: coqui_builder::describe::Describe> core::default::Default for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::default() -> Self
+impl<T: coqui_builder::describe::Describe> core::fmt::Debug for coqui_builder::partial::Partial<T> where <T as coqui_builder::describe::Describe>::Fill: core::fmt::Debug
+pub fn coqui_builder::partial::Partial<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod coqui_builder::path
+#[non_exhaustive] pub enum coqui_builder::path::PathError
+pub coqui_builder::path::PathError::BadEscape
+pub coqui_builder::path::PathError::BadEscape::at: usize
+pub coqui_builder::path::PathError::Empty
+pub coqui_builder::path::PathError::EmptyField
+pub coqui_builder::path::PathError::EmptyField::at: usize
+pub coqui_builder::path::PathError::EmptyIndex
+pub coqui_builder::path::PathError::EmptyIndex::at: usize
+pub coqui_builder::path::PathError::MissingSeparator
+pub coqui_builder::path::PathError::MissingSeparator::at: usize
+pub coqui_builder::path::PathError::TrailingQuote
+pub coqui_builder::path::PathError::TrailingQuote::at: usize
+pub coqui_builder::path::PathError::UnclosedIndex
+pub coqui_builder::path::PathError::UnclosedIndex::at: usize
+pub coqui_builder::path::PathError::UnclosedQuote
+pub coqui_builder::path::PathError::UnclosedQuote::at: usize
+pub coqui_builder::path::PathError::UnexpectedClose
+pub coqui_builder::path::PathError::UnexpectedClose::at: usize
+impl coqui_builder::path::PathError
+pub fn coqui_builder::path::PathError::offset(&self) -> usize
+impl core::error::Error for coqui_builder::path::PathError
+impl core::fmt::Display for coqui_builder::path::PathError
+pub fn coqui_builder::path::PathError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum coqui_builder::path::Segment
+pub coqui_builder::path::Segment::Index(usize)
+pub coqui_builder::path::Segment::Key(alloc::string::String)
+impl coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::as_index(&self) -> core::option::Option<usize>
+pub fn coqui_builder::path::Segment::as_key(&self) -> core::option::Option<&str>
+pub fn coqui_builder::path::Segment::key(impl core::convert::Into<alloc::string::String>) -> coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::name(&self) -> alloc::borrow::Cow<'_, str>
+impl core::convert::From<&str> for coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::from(&str) -> coqui_builder::path::Segment
+impl core::convert::From<usize> for coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::from(usize) -> coqui_builder::path::Segment
+impl core::fmt::Display for coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::iter::traits::collect::FromIterator<coqui_builder::path::Segment> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::from_iter<I: core::iter::traits::collect::IntoIterator<Item = coqui_builder::path::Segment>>(I) -> coqui_builder::path::KeyPath
+pub struct coqui_builder::path::KeyPath
+impl coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::child(&self, impl core::convert::Into<coqui_builder::path::Segment>) -> coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::is_empty(&self) -> bool
+pub fn coqui_builder::path::KeyPath::len(&self) -> usize
+pub fn coqui_builder::path::KeyPath::new(alloc::vec::Vec<coqui_builder::path::Segment>) -> coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::pop(&mut self) -> core::option::Option<coqui_builder::path::Segment>
+pub fn coqui_builder::path::KeyPath::push(&mut self, impl core::convert::Into<coqui_builder::path::Segment>)
+pub fn coqui_builder::path::KeyPath::root() -> coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::segments(&self) -> &[coqui_builder::path::Segment]
+pub fn coqui_builder::path::KeyPath::starts_with(&self, &[coqui_builder::path::Segment]) -> bool
+impl core::convert::AsRef<[coqui_builder::path::Segment]> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::as_ref(&self) -> &[coqui_builder::path::Segment]
+impl core::convert::From<alloc::vec::Vec<coqui_builder::path::Segment>> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::from(alloc::vec::Vec<coqui_builder::path::Segment>) -> coqui_builder::path::KeyPath
+impl core::fmt::Display for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::iter::traits::collect::FromIterator<coqui_builder::path::Segment> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::from_iter<I: core::iter::traits::collect::IntoIterator<Item = coqui_builder::path::Segment>>(I) -> coqui_builder::path::KeyPath
+impl core::str::traits::FromStr for coqui_builder::path::KeyPath
+pub type coqui_builder::path::KeyPath::Err = coqui_builder::path::PathError
+pub fn coqui_builder::path::KeyPath::from_str(&str) -> core::result::Result<coqui_builder::path::KeyPath, coqui_builder::path::PathError>
+impl<'a> core::iter::traits::collect::IntoIterator for &'a coqui_builder::path::KeyPath
+pub type &'a coqui_builder::path::KeyPath::IntoIter = core::slice::iter::Iter<'a, coqui_builder::path::Segment>
+pub type &'a coqui_builder::path::KeyPath::Item = &'a coqui_builder::path::Segment
+pub fn &'a coqui_builder::path::KeyPath::into_iter(self) -> Self::IntoIter
+pub mod coqui_builder::profile
+#[non_exhaustive] pub enum coqui_builder::profile::Expect
+pub coqui_builder::profile::Expect::Absent
+pub coqui_builder::profile::Expect::Any
+pub coqui_builder::profile::Expect::Arms(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::profile::Expect::AsStrictAs(alloc::string::String)
+pub coqui_builder::profile::Expect::Equal(alloc::string::String)
+pub coqui_builder::profile::Expect::ItemsEqual(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::profile::Expect::NoStricterThan(alloc::string::String)
+pub coqui_builder::profile::Expect::OneOf(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::profile::Expect::Required
+pub coqui_builder::profile::Expect::SubsetOf(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::profile::Expect::Within
+pub coqui_builder::profile::Expect::Within::max: core::option::Option<alloc::string::String>
+pub coqui_builder::profile::Expect::Within::min: core::option::Option<alloc::string::String>
+impl coqui_builder::Expect
+pub fn coqui_builder::Expect::masked(&self) -> coqui_builder::Expect
+impl coqui_builder::describe::Describe for coqui_builder::Expect
+pub type coqui_builder::Expect::Fill = coqui_builder::profile::ExpectFill
+pub const coqui_builder::Expect::LEAF: bool
+pub const coqui_builder::Expect::OPTIONAL: bool
+pub fn coqui_builder::Expect::description() -> coqui_builder::describe::Description
+impl coqui_builder::fill::Fill<coqui_builder::Expect> for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::ExpectFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::from_value(coqui_builder::Expect) -> Self
+pub fn coqui_builder::profile::ExpectFill::put(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::set_default(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::inspect::Inspect for coqui_builder::Expect
+pub fn coqui_builder::Expect::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::Expect::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+pub struct coqui_builder::profile::BindError
+impl coqui_builder::BindError
+pub fn coqui_builder::BindError::key(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::BindError::reason(&self) -> &coqui_builder::report::Reason
+impl core::error::Error for coqui_builder::BindError
+impl core::fmt::Display for coqui_builder::BindError
+pub fn coqui_builder::BindError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::profile::ExpectFill
+impl coqui_builder::fill::Fill<coqui_builder::Expect> for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::ExpectFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::from_value(coqui_builder::Expect) -> Self
+pub fn coqui_builder::profile::ExpectFill::put(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::set_default(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::ExpectFill::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl core::fmt::Debug for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::profile::Profile
+impl coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::against<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect>(&T) -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::bind<T: coqui_builder::describe::Describe>(&self) -> core::result::Result<(), coqui_builder::BindError>
+pub fn coqui_builder::profile::Profile::defaults<T: coqui_builder::describe::Describe>() -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::entries(&self) -> &[(coqui_builder::path::KeyPath, coqui_builder::Expect)]
+pub fn coqui_builder::profile::Profile::expecting(self, &str, coqui_builder::Expect) -> core::result::Result<coqui_builder::profile::Profile, coqui_builder::path::PathError>
+pub fn coqui_builder::profile::Profile::get(&self, &coqui_builder::path::KeyPath) -> core::option::Option<&coqui_builder::Expect>
+pub fn coqui_builder::profile::Profile::insert(&mut self, coqui_builder::path::KeyPath, coqui_builder::Expect) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::Profile::is_empty(&self) -> bool
+pub fn coqui_builder::profile::Profile::len(&self) -> usize
+pub fn coqui_builder::profile::Profile::merge(&self, &coqui_builder::profile::Profile) -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::new() -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::remove(&mut self, &coqui_builder::path::KeyPath) -> core::option::Option<coqui_builder::Expect>
+impl coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::judge(&self, &coqui_builder::describe::Description, &dyn coqui_builder::inspect::Inspect, &mut coqui_builder::report::Report)
+impl coqui_builder::describe::Describe for coqui_builder::profile::Profile
+pub type coqui_builder::profile::Profile::Fill = coqui_builder::profile::ProfileFill
+pub const coqui_builder::profile::Profile::LEAF: bool
+pub const coqui_builder::profile::Profile::OPTIONAL: bool
+pub fn coqui_builder::profile::Profile::description() -> coqui_builder::describe::Description
+impl coqui_builder::fill::Fill<coqui_builder::profile::Profile> for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::profile::Profile>
+pub fn coqui_builder::profile::ProfileFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::from_value(coqui_builder::profile::Profile) -> Self
+pub fn coqui_builder::profile::ProfileFill::put(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::set_default(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::Profile::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect> coqui_builder::check::Check<T> for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::profile::Profile::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+pub struct coqui_builder::profile::ProfileFill
+impl coqui_builder::fill::Fill<coqui_builder::profile::Profile> for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::profile::Profile>
+pub fn coqui_builder::profile::ProfileFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::from_value(coqui_builder::profile::Profile) -> Self
+pub fn coqui_builder::profile::ProfileFill::put(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::set_default(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::ProfileFill::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl core::default::Default for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::default() -> Self
+impl core::fmt::Debug for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod coqui_builder::report
+#[non_exhaustive] pub enum coqui_builder::report::Reason
+pub coqui_builder::report::Reason::Above
+pub coqui_builder::report::Reason::ArmNotAllowed
+pub coqui_builder::report::Reason::Below
+pub coqui_builder::report::Reason::Custom(alloc::string::String)
+pub coqui_builder::report::Reason::Differs
+pub coqui_builder::report::Reason::Looser
+pub coqui_builder::report::Reason::Missing
+pub coqui_builder::report::Reason::NoOrdering
+pub coqui_builder::report::Reason::NotApplied
+pub coqui_builder::report::Reason::NotOneOf
+pub coqui_builder::report::Reason::NotSubset
+pub coqui_builder::report::Reason::Present
+pub coqui_builder::report::Reason::UnknownKey
+pub struct coqui_builder::report::Finding
+impl coqui_builder::report::Finding
+pub fn coqui_builder::report::Finding::expected(&self) -> &coqui_builder::Expect
+pub fn coqui_builder::report::Finding::key(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::report::Finding::met(&self) -> bool
+pub fn coqui_builder::report::Finding::new(coqui_builder::path::KeyPath, bool, coqui_builder::datum::Shown, coqui_builder::Expect, core::option::Option<coqui_builder::report::Reason>) -> coqui_builder::report::Finding
+pub fn coqui_builder::report::Finding::reason(&self) -> core::option::Option<&coqui_builder::report::Reason>
+pub fn coqui_builder::report::Finding::value(&self) -> &coqui_builder::datum::Shown
+impl core::convert::From<&coqui_builder::report::Finding> for coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::from(&coqui_builder::report::Finding) -> coqui_builder::non_default::NonDefault
+pub struct coqui_builder::report::Report
+impl coqui_builder::report::Report
+pub fn coqui_builder::report::Report::findings(&self) -> &[coqui_builder::report::Finding]
+pub fn coqui_builder::report::Report::is_empty(&self) -> bool
+pub fn coqui_builder::report::Report::is_met(&self) -> bool
+pub fn coqui_builder::report::Report::len(&self) -> usize
+pub fn coqui_builder::report::Report::new(&coqui_builder::describe::Description) -> coqui_builder::report::Report
+pub fn coqui_builder::report::Report::push(&mut self, coqui_builder::report::Finding)
+pub fn coqui_builder::report::Report::unmet(&self) -> impl core::iter::traits::iterator::Iterator<Item = &coqui_builder::report::Finding>
+pub mod coqui_builder::secret
+pub struct coqui_builder::secret::Secret<T: zeroize::Zeroize>
+impl<T: zeroize::Zeroize> coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::expose(&self) -> &T
+pub fn coqui_builder::secret::Secret<T>::new(T) -> coqui_builder::secret::Secret<T>
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Codec<coqui_builder::secret::Secret<T>> for coqui_builder::secret::SecretCodec<T>
+pub const coqui_builder::secret::SecretCodec<T>::ORDERED: bool
+pub const coqui_builder::secret::SecretCodec<T>::SENSITIVE: bool
+pub const coqui_builder::secret::SecretCodec<T>::TYPE: &'static str
+pub fn coqui_builder::secret::SecretCodec<T>::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::secret::SecretCodec<T>::from_text(&str) -> core::result::Result<coqui_builder::secret::Secret<T>, coqui_builder::describe::LeafError>
+pub fn coqui_builder::secret::SecretCodec<T>::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::secret::SecretCodec<T>::order(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::secret::SecretCodec<T>::same(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> bool
+pub fn coqui_builder::secret::SecretCodec<T>::to_text(&coqui_builder::secret::Secret<T>) -> alloc::string::String
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Describe for coqui_builder::secret::Secret<T>
+pub type coqui_builder::secret::Secret<T>::Fill = coqui_builder::fill::LeafSlot<coqui_builder::secret::Secret<T>, coqui_builder::secret::SecretCodec<T>>
+pub const coqui_builder::secret::Secret<T>::LEAF: bool
+pub const coqui_builder::secret::Secret<T>::OPTIONAL: bool
+pub fn coqui_builder::secret::Secret<T>::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::inspect::Inspect for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::secret::Secret<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: zeroize::Zeroize + core::clone::Clone> core::clone::Clone for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::clone(&self) -> coqui_builder::secret::Secret<T>
+impl<T: zeroize::Zeroize + core::cmp::Eq> core::cmp::Eq for coqui_builder::secret::Secret<T>
+impl<T: zeroize::Zeroize + core::cmp::PartialEq> core::cmp::PartialEq for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::eq(&self, &coqui_builder::secret::Secret<T>) -> bool
+impl<T: zeroize::Zeroize> core::convert::From<T> for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::from(T) -> coqui_builder::secret::Secret<T>
+impl<T: zeroize::Zeroize> core::fmt::Debug for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T: zeroize::Zeroize> core::ops::drop::Drop for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::drop(&mut self)
+pub struct coqui_builder::secret::SecretCodec<T>(_)
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Codec<coqui_builder::secret::Secret<T>> for coqui_builder::secret::SecretCodec<T>
+pub const coqui_builder::secret::SecretCodec<T>::ORDERED: bool
+pub const coqui_builder::secret::SecretCodec<T>::SENSITIVE: bool
+pub const coqui_builder::secret::SecretCodec<T>::TYPE: &'static str
+pub fn coqui_builder::secret::SecretCodec<T>::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::secret::SecretCodec<T>::from_text(&str) -> core::result::Result<coqui_builder::secret::Secret<T>, coqui_builder::describe::LeafError>
+pub fn coqui_builder::secret::SecretCodec<T>::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::secret::SecretCodec<T>::order(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::secret::SecretCodec<T>::same(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> bool
+pub fn coqui_builder::secret::SecretCodec<T>::to_text(&coqui_builder::secret::Secret<T>) -> alloc::string::String
+impl<T> core::fmt::Debug for coqui_builder::secret::SecretCodec<T>
+pub fn coqui_builder::secret::SecretCodec<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod coqui_builder::source
+#[non_exhaustive] pub enum coqui_builder::source::Entries
+pub coqui_builder::source::Entries::Keys(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::source::Entries::Len(usize)
+pub struct coqui_builder::source::SourceError
+impl coqui_builder::source::SourceError
+pub fn coqui_builder::source::SourceError::new(impl core::convert::Into<alloc::string::String>) -> coqui_builder::source::SourceError
+impl core::convert::From<coqui_builder::source::SourceError> for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::from(coqui_builder::source::SourceError) -> coqui_builder::fill::FillError
+impl core::error::Error for coqui_builder::source::SourceError
+impl core::fmt::Display for coqui_builder::source::SourceError
+pub fn coqui_builder::source::SourceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::source::Unknown
+impl coqui_builder::source::Unknown
+pub fn coqui_builder::source::Unknown::is_empty(&self) -> bool
+pub fn coqui_builder::source::Unknown::keys(&self) -> &[coqui_builder::path::KeyPath]
+pub trait coqui_builder::source::Source
+pub fn coqui_builder::source::Source::entries(&mut self, &coqui_builder::path::KeyPath) -> core::result::Result<core::option::Option<coqui_builder::inspect::Entries>, coqui_builder::source::SourceError>
+pub fn coqui_builder::source::Source::unknown(&mut self, &dyn core::ops::function::Fn(&coqui_builder::path::KeyPath) -> bool) -> alloc::vec::Vec<coqui_builder::path::KeyPath>
+pub fn coqui_builder::source::Source::value(&mut self, &coqui_builder::path::KeyPath, &coqui_builder::describe::LeafInfo) -> core::result::Result<core::option::Option<alloc::string::String>, coqui_builder::source::SourceError>
+impl coqui_builder::source::Source for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::entries(&mut self, &coqui_builder::path::KeyPath) -> core::result::Result<core::option::Option<coqui_builder::inspect::Entries>, coqui_builder::source::SourceError>
+pub fn coqui_builder::env::Env::unknown(&mut self, &dyn core::ops::function::Fn(&coqui_builder::path::KeyPath) -> bool) -> alloc::vec::Vec<coqui_builder::path::KeyPath>
+pub fn coqui_builder::env::Env::value(&mut self, &coqui_builder::path::KeyPath, &coqui_builder::describe::LeafInfo) -> core::result::Result<core::option::Option<alloc::string::String>, coqui_builder::source::SourceError>
+#[non_exhaustive] pub enum coqui_builder::Entries
+pub coqui_builder::Entries::Keys(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::Entries::Len(usize)
+#[non_exhaustive] pub enum coqui_builder::Expect
+pub coqui_builder::Expect::Absent
+pub coqui_builder::Expect::Any
+pub coqui_builder::Expect::Arms(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::Expect::AsStrictAs(alloc::string::String)
+pub coqui_builder::Expect::Equal(alloc::string::String)
+pub coqui_builder::Expect::ItemsEqual(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::Expect::NoStricterThan(alloc::string::String)
+pub coqui_builder::Expect::OneOf(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::Expect::Required
+pub coqui_builder::Expect::SubsetOf(alloc::vec::Vec<alloc::string::String>)
+pub coqui_builder::Expect::Within
+pub coqui_builder::Expect::Within::max: core::option::Option<alloc::string::String>
+pub coqui_builder::Expect::Within::min: core::option::Option<alloc::string::String>
+impl coqui_builder::Expect
+pub fn coqui_builder::Expect::masked(&self) -> coqui_builder::Expect
+impl coqui_builder::describe::Describe for coqui_builder::Expect
+pub type coqui_builder::Expect::Fill = coqui_builder::profile::ExpectFill
+pub const coqui_builder::Expect::LEAF: bool
+pub const coqui_builder::Expect::OPTIONAL: bool
+pub fn coqui_builder::Expect::description() -> coqui_builder::describe::Description
+impl coqui_builder::fill::Fill<coqui_builder::Expect> for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::ExpectFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::from_value(coqui_builder::Expect) -> Self
+pub fn coqui_builder::profile::ExpectFill::put(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::set_default(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::inspect::Inspect for coqui_builder::Expect
+pub fn coqui_builder::Expect::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::Expect::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+#[non_exhaustive] pub enum coqui_builder::PathError
+pub coqui_builder::PathError::BadEscape
+pub coqui_builder::PathError::BadEscape::at: usize
+pub coqui_builder::PathError::Empty
+pub coqui_builder::PathError::EmptyField
+pub coqui_builder::PathError::EmptyField::at: usize
+pub coqui_builder::PathError::EmptyIndex
+pub coqui_builder::PathError::EmptyIndex::at: usize
+pub coqui_builder::PathError::MissingSeparator
+pub coqui_builder::PathError::MissingSeparator::at: usize
+pub coqui_builder::PathError::TrailingQuote
+pub coqui_builder::PathError::TrailingQuote::at: usize
+pub coqui_builder::PathError::UnclosedIndex
+pub coqui_builder::PathError::UnclosedIndex::at: usize
+pub coqui_builder::PathError::UnclosedQuote
+pub coqui_builder::PathError::UnclosedQuote::at: usize
+pub coqui_builder::PathError::UnexpectedClose
+pub coqui_builder::PathError::UnexpectedClose::at: usize
+impl coqui_builder::path::PathError
+pub fn coqui_builder::path::PathError::offset(&self) -> usize
+impl core::error::Error for coqui_builder::path::PathError
+impl core::fmt::Display for coqui_builder::path::PathError
+pub fn coqui_builder::path::PathError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum coqui_builder::Reason
+pub coqui_builder::Reason::Above
+pub coqui_builder::Reason::ArmNotAllowed
+pub coqui_builder::Reason::Below
+pub coqui_builder::Reason::Custom(alloc::string::String)
+pub coqui_builder::Reason::Differs
+pub coqui_builder::Reason::Looser
+pub coqui_builder::Reason::Missing
+pub coqui_builder::Reason::NoOrdering
+pub coqui_builder::Reason::NotApplied
+pub coqui_builder::Reason::NotOneOf
+pub coqui_builder::Reason::NotSubset
+pub coqui_builder::Reason::Present
+pub coqui_builder::Reason::UnknownKey
+pub enum coqui_builder::Segment
+pub coqui_builder::Segment::Index(usize)
+pub coqui_builder::Segment::Key(alloc::string::String)
+impl coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::as_index(&self) -> core::option::Option<usize>
+pub fn coqui_builder::path::Segment::as_key(&self) -> core::option::Option<&str>
+pub fn coqui_builder::path::Segment::key(impl core::convert::Into<alloc::string::String>) -> coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::name(&self) -> alloc::borrow::Cow<'_, str>
+impl core::convert::From<&str> for coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::from(&str) -> coqui_builder::path::Segment
+impl core::convert::From<usize> for coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::from(usize) -> coqui_builder::path::Segment
+impl core::fmt::Display for coqui_builder::path::Segment
+pub fn coqui_builder::path::Segment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::iter::traits::collect::FromIterator<coqui_builder::path::Segment> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::from_iter<I: core::iter::traits::collect::IntoIterator<Item = coqui_builder::path::Segment>>(I) -> coqui_builder::path::KeyPath
+pub enum coqui_builder::Shown
+pub coqui_builder::Shown::Fields(alloc::vec::Vec<(alloc::string::String, coqui_builder::datum::Datum)>)
+pub coqui_builder::Shown::Items(alloc::vec::Vec<coqui_builder::datum::Datum>)
+pub coqui_builder::Shown::One(coqui_builder::datum::Datum)
+pub coqui_builder::Shown::Unset
+impl coqui_builder::datum::Shown
+pub fn coqui_builder::datum::Shown::sensitive(self) -> coqui_builder::datum::Shown
+impl core::fmt::Display for coqui_builder::datum::Shown
+pub fn coqui_builder::datum::Shown::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::BindError
+impl coqui_builder::BindError
+pub fn coqui_builder::BindError::key(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::BindError::reason(&self) -> &coqui_builder::report::Reason
+impl core::error::Error for coqui_builder::BindError
+impl core::fmt::Display for coqui_builder::BindError
+pub fn coqui_builder::BindError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::Checks<T: ?core::marker::Sized>
+impl<T: ?core::marker::Sized> coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::is_empty(&self) -> bool
+pub fn coqui_builder::check::Checks<T>::len(&self) -> usize
+pub fn coqui_builder::check::Checks<T>::new() -> Self
+pub fn coqui_builder::check::Checks<T>::push(&mut self, impl coqui_builder::check::Check<T> + 'static)
+impl<T: ?core::marker::Sized> coqui_builder::check::Check<T> for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::check::Checks<T>::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized> core::default::Default for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::default() -> Self
+impl<T: ?core::marker::Sized> core::fmt::Debug for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::Datum
+impl coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::is_sensitive(&self) -> bool
+pub fn coqui_builder::datum::Datum::new(&'static str, impl core::convert::Into<alloc::string::String>) -> coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::sensitive(self) -> coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::text(&self) -> &str
+pub fn coqui_builder::datum::Datum::ty(&self) -> &'static str
+impl core::fmt::Debug for coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for coqui_builder::datum::Datum
+pub fn coqui_builder::datum::Datum::drop(&mut self)
+pub struct coqui_builder::Description
+impl coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::check_items(&self, usize) -> core::result::Result<(), coqui_builder::describe::Bound>
+pub fn coqui_builder::describe::Description::check_text(&self, &str) -> core::result::Result<(), coqui_builder::describe::Bound>
+pub fn coqui_builder::describe::Description::default_at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<alloc::string::String>
+pub fn coqui_builder::describe::Description::group(alloc::vec::Vec<coqui_builder::describe::Field>) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::group_fields(&self) -> core::option::Option<&[coqui_builder::describe::Field]>
+pub fn coqui_builder::describe::Description::into_group_fields(self) -> alloc::vec::Vec<coqui_builder::describe::Field>
+pub fn coqui_builder::describe::Description::kind(&self) -> &coqui_builder::describe::Kind
+pub fn coqui_builder::describe::Description::kind_mut(&mut self) -> &mut coqui_builder::describe::Kind
+pub fn coqui_builder::describe::Description::knows(&self, &[coqui_builder::path::Segment]) -> bool
+pub fn coqui_builder::describe::Description::leaf<T: coqui_builder::Leaf>() -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::leaf_of<T, C: coqui_builder::describe::Codec<T>>() -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::list(coqui_builder::describe::Description) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::map(coqui_builder::describe::Description) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::new(coqui_builder::describe::Kind) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::notes(&self) -> &coqui_builder::describe::Notes
+pub fn coqui_builder::describe::Description::notes_mut(&mut self) -> &mut coqui_builder::describe::Notes
+pub fn coqui_builder::describe::Description::resolve(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::describe::Resolved<'_>>
+pub fn coqui_builder::describe::Description::resolve_chosen(&self, &[coqui_builder::path::Segment], &dyn core::ops::function::Fn(&[coqui_builder::path::Segment]) -> core::option::Option<alloc::string::String>) -> core::option::Option<coqui_builder::describe::Resolved<'_>>
+pub fn coqui_builder::describe::Description::union(coqui_builder::describe::LeafInfo, coqui_builder::describe::Description) -> coqui_builder::describe::Description
+pub fn coqui_builder::describe::Description::variant(coqui_builder::describe::Variant) -> coqui_builder::describe::Description
+pub struct coqui_builder::Env
+impl coqui_builder::env::Env
+pub fn coqui_builder::env::Env::from_vars<K, V>(&str, impl core::iter::traits::collect::IntoIterator<Item = (K, V)>) -> coqui_builder::env::Env where K: core::convert::Into<alloc::string::String>, V: core::convert::Into<alloc::string::String>
+pub fn coqui_builder::env::Env::name(&self, &coqui_builder::path::KeyPath) -> alloc::string::String
+pub fn coqui_builder::env::Env::new(&str) -> coqui_builder::env::Env
+impl coqui_builder::source::Source for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::entries(&mut self, &coqui_builder::path::KeyPath) -> core::result::Result<core::option::Option<coqui_builder::inspect::Entries>, coqui_builder::source::SourceError>
+pub fn coqui_builder::env::Env::unknown(&mut self, &dyn core::ops::function::Fn(&coqui_builder::path::KeyPath) -> bool) -> alloc::vec::Vec<coqui_builder::path::KeyPath>
+pub fn coqui_builder::env::Env::value(&mut self, &coqui_builder::path::KeyPath, &coqui_builder::describe::LeafInfo) -> core::result::Result<core::option::Option<alloc::string::String>, coqui_builder::source::SourceError>
+impl core::fmt::Debug for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::drop(&mut self)
+pub struct coqui_builder::FillError
+impl coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::at(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::fill::FillError::is_unknown_here(&self) -> bool
+pub fn coqui_builder::fill::FillError::kind(&self) -> &coqui_builder::fill::FillErrorKind
+pub fn coqui_builder::fill::FillError::leaf(coqui_builder::describe::LeafError) -> coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::new(coqui_builder::fill::FillErrorKind) -> coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::under(self, coqui_builder::path::Segment) -> coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::unknown_key(coqui_builder::path::Segment) -> coqui_builder::fill::FillError
+impl core::convert::From<coqui_builder::source::SourceError> for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::from(coqui_builder::source::SourceError) -> coqui_builder::fill::FillError
+impl core::error::Error for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::Finding
+impl coqui_builder::report::Finding
+pub fn coqui_builder::report::Finding::expected(&self) -> &coqui_builder::Expect
+pub fn coqui_builder::report::Finding::key(&self) -> &coqui_builder::path::KeyPath
+pub fn coqui_builder::report::Finding::met(&self) -> bool
+pub fn coqui_builder::report::Finding::new(coqui_builder::path::KeyPath, bool, coqui_builder::datum::Shown, coqui_builder::Expect, core::option::Option<coqui_builder::report::Reason>) -> coqui_builder::report::Finding
+pub fn coqui_builder::report::Finding::reason(&self) -> core::option::Option<&coqui_builder::report::Reason>
+pub fn coqui_builder::report::Finding::value(&self) -> &coqui_builder::datum::Shown
+impl core::convert::From<&coqui_builder::report::Finding> for coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::from(&coqui_builder::report::Finding) -> coqui_builder::non_default::NonDefault
+pub struct coqui_builder::KeyPath
+impl coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::child(&self, impl core::convert::Into<coqui_builder::path::Segment>) -> coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::is_empty(&self) -> bool
+pub fn coqui_builder::path::KeyPath::len(&self) -> usize
+pub fn coqui_builder::path::KeyPath::new(alloc::vec::Vec<coqui_builder::path::Segment>) -> coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::pop(&mut self) -> core::option::Option<coqui_builder::path::Segment>
+pub fn coqui_builder::path::KeyPath::push(&mut self, impl core::convert::Into<coqui_builder::path::Segment>)
+pub fn coqui_builder::path::KeyPath::root() -> coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::segments(&self) -> &[coqui_builder::path::Segment]
+pub fn coqui_builder::path::KeyPath::starts_with(&self, &[coqui_builder::path::Segment]) -> bool
+impl core::convert::AsRef<[coqui_builder::path::Segment]> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::as_ref(&self) -> &[coqui_builder::path::Segment]
+impl core::convert::From<alloc::vec::Vec<coqui_builder::path::Segment>> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::from(alloc::vec::Vec<coqui_builder::path::Segment>) -> coqui_builder::path::KeyPath
+impl core::fmt::Display for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::iter::traits::collect::FromIterator<coqui_builder::path::Segment> for coqui_builder::path::KeyPath
+pub fn coqui_builder::path::KeyPath::from_iter<I: core::iter::traits::collect::IntoIterator<Item = coqui_builder::path::Segment>>(I) -> coqui_builder::path::KeyPath
+impl core::str::traits::FromStr for coqui_builder::path::KeyPath
+pub type coqui_builder::path::KeyPath::Err = coqui_builder::path::PathError
+pub fn coqui_builder::path::KeyPath::from_str(&str) -> core::result::Result<coqui_builder::path::KeyPath, coqui_builder::path::PathError>
+impl<'a> core::iter::traits::collect::IntoIterator for &'a coqui_builder::path::KeyPath
+pub type &'a coqui_builder::path::KeyPath::IntoIter = core::slice::iter::Iter<'a, coqui_builder::path::Segment>
+pub type &'a coqui_builder::path::KeyPath::Item = &'a coqui_builder::path::Segment
+pub fn &'a coqui_builder::path::KeyPath::into_iter(self) -> Self::IntoIter
+pub struct coqui_builder::Missing
+impl coqui_builder::partial::Missing
+pub fn coqui_builder::partial::Missing::inputs(&self) -> &[&'static str]
+pub fn coqui_builder::partial::Missing::is_empty(&self) -> bool
+pub fn coqui_builder::partial::Missing::keys(&self) -> &[coqui_builder::path::KeyPath]
+pub fn coqui_builder::partial::Missing::new(alloc::vec::Vec<coqui_builder::path::KeyPath>, alloc::vec::Vec<&'static str>) -> coqui_builder::partial::Missing
+impl core::error::Error for coqui_builder::partial::Missing
+impl core::fmt::Display for coqui_builder::partial::Missing
+pub fn coqui_builder::partial::Missing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::NonDefault
+pub coqui_builder::NonDefault::default: coqui_builder::datum::Shown
+pub coqui_builder::NonDefault::setting: alloc::string::String
+pub coqui_builder::NonDefault::value: coqui_builder::datum::Shown
+impl coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::new(impl core::convert::Into<alloc::string::String>, coqui_builder::datum::Shown, coqui_builder::datum::Shown) -> Self
+impl core::convert::From<&coqui_builder::report::Finding> for coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::from(&coqui_builder::report::Finding) -> coqui_builder::non_default::NonDefault
+impl core::fmt::Display for coqui_builder::non_default::NonDefault
+pub fn coqui_builder::non_default::NonDefault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::Partial<T: coqui_builder::describe::Describe>
+impl<T: coqui_builder::describe::Describe + 'static> coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::put<V: 'static>(&mut self, &str, V) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::put_at<V: 'static>(&mut self, &[coqui_builder::path::Segment], V) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::describe::Describe> coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::build(self) -> core::result::Result<T, coqui_builder::partial::Missing>
+pub fn coqui_builder::partial::Partial<T>::clear(&mut self, &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::clear_at(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::description(&self) -> &coqui_builder::describe::Description
+pub fn coqui_builder::partial::Partial<T>::new() -> Self
+pub fn coqui_builder::partial::Partial<T>::overlay(&mut self, coqui_builder::partial::Partial<T>)
+pub fn coqui_builder::partial::Partial<T>::set(&mut self, &str, &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::set_at(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::set_items<S: core::convert::AsRef<str>>(&mut self, &str, impl core::iter::traits::collect::IntoIterator<Item = S>) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::partial::Partial<T>::set_items_at(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::describe::Describe> coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::fill_from(&mut self, &mut impl coqui_builder::source::Source) -> core::result::Result<coqui_builder::source::Unknown, coqui_builder::fill::FillError>
+impl<'de, T: coqui_builder::describe::Describe> serde_core::de::Deserialize<'de> for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<coqui_builder::partial::Partial<T>, <D as serde_core::de::Deserializer>::Error>
+impl<T: coqui_builder::describe::Describe> coqui_builder::inspect::Inspect for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::partial::Partial<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::describe::Describe> core::convert::From<T> for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::from(T) -> Self
+impl<T: coqui_builder::describe::Describe> core::default::Default for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::default() -> Self
+impl<T: coqui_builder::describe::Describe> core::fmt::Debug for coqui_builder::partial::Partial<T> where <T as coqui_builder::describe::Describe>::Fill: core::fmt::Debug
+pub fn coqui_builder::partial::Partial<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::Profile
+impl coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::against<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect>(&T) -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::bind<T: coqui_builder::describe::Describe>(&self) -> core::result::Result<(), coqui_builder::BindError>
+pub fn coqui_builder::profile::Profile::defaults<T: coqui_builder::describe::Describe>() -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::entries(&self) -> &[(coqui_builder::path::KeyPath, coqui_builder::Expect)]
+pub fn coqui_builder::profile::Profile::expecting(self, &str, coqui_builder::Expect) -> core::result::Result<coqui_builder::profile::Profile, coqui_builder::path::PathError>
+pub fn coqui_builder::profile::Profile::get(&self, &coqui_builder::path::KeyPath) -> core::option::Option<&coqui_builder::Expect>
+pub fn coqui_builder::profile::Profile::insert(&mut self, coqui_builder::path::KeyPath, coqui_builder::Expect) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::Profile::is_empty(&self) -> bool
+pub fn coqui_builder::profile::Profile::len(&self) -> usize
+pub fn coqui_builder::profile::Profile::merge(&self, &coqui_builder::profile::Profile) -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::new() -> coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::remove(&mut self, &coqui_builder::path::KeyPath) -> core::option::Option<coqui_builder::Expect>
+impl coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::judge(&self, &coqui_builder::describe::Description, &dyn coqui_builder::inspect::Inspect, &mut coqui_builder::report::Report)
+impl coqui_builder::describe::Describe for coqui_builder::profile::Profile
+pub type coqui_builder::profile::Profile::Fill = coqui_builder::profile::ProfileFill
+pub const coqui_builder::profile::Profile::LEAF: bool
+pub const coqui_builder::profile::Profile::OPTIONAL: bool
+pub fn coqui_builder::profile::Profile::description() -> coqui_builder::describe::Description
+impl coqui_builder::fill::Fill<coqui_builder::profile::Profile> for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::profile::Profile>
+pub fn coqui_builder::profile::ProfileFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::from_value(coqui_builder::profile::Profile) -> Self
+pub fn coqui_builder::profile::ProfileFill::put(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::set_default(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::Profile::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect> coqui_builder::check::Check<T> for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::profile::Profile::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+pub struct coqui_builder::Report
+impl coqui_builder::report::Report
+pub fn coqui_builder::report::Report::findings(&self) -> &[coqui_builder::report::Finding]
+pub fn coqui_builder::report::Report::is_empty(&self) -> bool
+pub fn coqui_builder::report::Report::is_met(&self) -> bool
+pub fn coqui_builder::report::Report::len(&self) -> usize
+pub fn coqui_builder::report::Report::new(&coqui_builder::describe::Description) -> coqui_builder::report::Report
+pub fn coqui_builder::report::Report::push(&mut self, coqui_builder::report::Finding)
+pub fn coqui_builder::report::Report::unmet(&self) -> impl core::iter::traits::iterator::Iterator<Item = &coqui_builder::report::Finding>
+pub struct coqui_builder::Secret<T: zeroize::Zeroize>
+impl<T: zeroize::Zeroize> coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::expose(&self) -> &T
+pub fn coqui_builder::secret::Secret<T>::new(T) -> coqui_builder::secret::Secret<T>
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Codec<coqui_builder::secret::Secret<T>> for coqui_builder::secret::SecretCodec<T>
+pub const coqui_builder::secret::SecretCodec<T>::ORDERED: bool
+pub const coqui_builder::secret::SecretCodec<T>::SENSITIVE: bool
+pub const coqui_builder::secret::SecretCodec<T>::TYPE: &'static str
+pub fn coqui_builder::secret::SecretCodec<T>::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::secret::SecretCodec<T>::from_text(&str) -> core::result::Result<coqui_builder::secret::Secret<T>, coqui_builder::describe::LeafError>
+pub fn coqui_builder::secret::SecretCodec<T>::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::secret::SecretCodec<T>::order(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::secret::SecretCodec<T>::same(&coqui_builder::secret::Secret<T>, &coqui_builder::secret::Secret<T>) -> bool
+pub fn coqui_builder::secret::SecretCodec<T>::to_text(&coqui_builder::secret::Secret<T>) -> alloc::string::String
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Describe for coqui_builder::secret::Secret<T>
+pub type coqui_builder::secret::Secret<T>::Fill = coqui_builder::fill::LeafSlot<coqui_builder::secret::Secret<T>, coqui_builder::secret::SecretCodec<T>>
+pub const coqui_builder::secret::Secret<T>::LEAF: bool
+pub const coqui_builder::secret::Secret<T>::OPTIONAL: bool
+pub fn coqui_builder::secret::Secret<T>::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::inspect::Inspect for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::secret::Secret<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: zeroize::Zeroize + core::clone::Clone> core::clone::Clone for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::clone(&self) -> coqui_builder::secret::Secret<T>
+impl<T: zeroize::Zeroize + core::cmp::Eq> core::cmp::Eq for coqui_builder::secret::Secret<T>
+impl<T: zeroize::Zeroize + core::cmp::PartialEq> core::cmp::PartialEq for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::eq(&self, &coqui_builder::secret::Secret<T>) -> bool
+impl<T: zeroize::Zeroize> core::convert::From<T> for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::from(T) -> coqui_builder::secret::Secret<T>
+impl<T: zeroize::Zeroize> core::fmt::Debug for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T: zeroize::Zeroize> core::ops::drop::Drop for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::drop(&mut self)
+pub struct coqui_builder::SourceError
+impl coqui_builder::source::SourceError
+pub fn coqui_builder::source::SourceError::new(impl core::convert::Into<alloc::string::String>) -> coqui_builder::source::SourceError
+impl core::convert::From<coqui_builder::source::SourceError> for coqui_builder::fill::FillError
+pub fn coqui_builder::fill::FillError::from(coqui_builder::source::SourceError) -> coqui_builder::fill::FillError
+impl core::error::Error for coqui_builder::source::SourceError
+impl core::fmt::Display for coqui_builder::source::SourceError
+pub fn coqui_builder::source::SourceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_builder::Unknown
+impl coqui_builder::source::Unknown
+pub fn coqui_builder::source::Unknown::is_empty(&self) -> bool
+pub fn coqui_builder::source::Unknown::keys(&self) -> &[coqui_builder::path::KeyPath]
+pub trait coqui_builder::Check<T: ?core::marker::Sized>
+pub fn coqui_builder::Check::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::Check::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized, C: coqui_builder::check::Check<T>> coqui_builder::check::Check<T> for [C]
+pub fn [C]::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn [C]::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized, C: coqui_builder::check::Check<T>> coqui_builder::check::Check<T> for alloc::vec::Vec<C>
+pub fn alloc::vec::Vec<C>::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn alloc::vec::Vec<C>::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized, F: core::ops::function::Fn(&T, &mut coqui_builder::report::Report)> coqui_builder::check::Check<T> for F
+pub fn F::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn F::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: ?core::marker::Sized> coqui_builder::check::Check<T> for coqui_builder::check::Checks<T>
+pub fn coqui_builder::check::Checks<T>::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::check::Checks<T>::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+impl<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect> coqui_builder::check::Check<T> for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::check(&self, &T, &mut coqui_builder::report::Report)
+pub fn coqui_builder::profile::Profile::verify(&self, &T) -> coqui_builder::report::Report where T: coqui_builder::describe::Describe
+pub trait coqui_builder::Configured
+pub type coqui_builder::Configured::Settings: coqui_builder::describe::Describe
+pub fn coqui_builder::Configured::configured(&self) -> &dyn coqui_builder::inspect::Inspect
+pub fn coqui_builder::Configured::non_defaults(&self) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>
+pub trait coqui_builder::Describe: core::marker::Sized
+pub type coqui_builder::Describe::Fill: coqui_builder::fill::Fill<Self>
+pub const coqui_builder::Describe::LEAF: bool
+pub const coqui_builder::Describe::OPTIONAL: bool
+pub fn coqui_builder::Describe::description() -> coqui_builder::describe::Description
+impl coqui_builder::describe::Describe for coqui_builder::Expect
+pub type coqui_builder::Expect::Fill = coqui_builder::profile::ExpectFill
+pub const coqui_builder::Expect::LEAF: bool
+pub const coqui_builder::Expect::OPTIONAL: bool
+pub fn coqui_builder::Expect::description() -> coqui_builder::describe::Description
+impl coqui_builder::describe::Describe for coqui_builder::profile::Profile
+pub type coqui_builder::profile::Profile::Fill = coqui_builder::profile::ProfileFill
+pub const coqui_builder::profile::Profile::LEAF: bool
+pub const coqui_builder::profile::Profile::OPTIONAL: bool
+pub fn coqui_builder::profile::Profile::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::describe::Describe for coqui_builder::secret::Secret<T>
+pub type coqui_builder::secret::Secret<T>::Fill = coqui_builder::fill::LeafSlot<coqui_builder::secret::Secret<T>, coqui_builder::secret::SecretCodec<T>>
+pub const coqui_builder::secret::Secret<T>::LEAF: bool
+pub const coqui_builder::secret::Secret<T>::OPTIONAL: bool
+pub fn coqui_builder::secret::Secret<T>::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::Leaf> coqui_builder::describe::Describe for T
+pub type T::Fill = coqui_builder::fill::LeafSlot<T>
+pub const T::LEAF: bool
+pub const T::OPTIONAL: bool
+pub fn T::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::describe::Describe> coqui_builder::describe::Describe for alloc::vec::Vec<T>
+pub type alloc::vec::Vec<T>::Fill = coqui_builder::fill::ListSlot<T, <T as coqui_builder::describe::Describe>::Fill>
+pub const alloc::vec::Vec<T>::LEAF: bool
+pub const alloc::vec::Vec<T>::OPTIONAL: bool
+pub fn alloc::vec::Vec<T>::description() -> coqui_builder::describe::Description
+impl<T: coqui_builder::describe::Describe> coqui_builder::describe::Describe for core::option::Option<T>
+pub type core::option::Option<T>::Fill = coqui_builder::fill::OptionSlot<T, <T as coqui_builder::describe::Describe>::Fill>
+pub const core::option::Option<T>::LEAF: bool
+pub const core::option::Option<T>::OPTIONAL: bool
+pub fn core::option::Option<T>::description() -> coqui_builder::describe::Description
+impl<V: coqui_builder::describe::Describe + 'static, S: core::hash::BuildHasher + core::default::Default + 'static> coqui_builder::describe::Describe for std::collections::hash::map::HashMap<alloc::string::String, V, S>
+pub type std::collections::hash::map::HashMap<alloc::string::String, V, S>::Fill = coqui_builder::fill::MapSlot<std::collections::hash::map::HashMap<alloc::string::String, V, S>, V, <V as coqui_builder::describe::Describe>::Fill>
+pub const std::collections::hash::map::HashMap<alloc::string::String, V, S>::LEAF: bool
+pub const std::collections::hash::map::HashMap<alloc::string::String, V, S>::OPTIONAL: bool
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::description() -> coqui_builder::describe::Description
+impl<V: coqui_builder::describe::Describe + 'static> coqui_builder::describe::Describe for alloc::collections::btree::map::BTreeMap<alloc::string::String, V>
+pub type alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::Fill = coqui_builder::fill::MapSlot<alloc::collections::btree::map::BTreeMap<alloc::string::String, V>, V, <V as coqui_builder::describe::Describe>::Fill>
+pub const alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::LEAF: bool
+pub const alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::OPTIONAL: bool
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::description() -> coqui_builder::describe::Description
+pub trait coqui_builder::Fields: coqui_builder::describe::Describe
+pub trait coqui_builder::Fill<T>: core::default::Default + coqui_builder::inspect::Inspect
+pub fn coqui_builder::Fill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::Fill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::Fill::from_value(T) -> Self
+pub fn coqui_builder::Fill::put(&mut self, T)
+pub fn coqui_builder::Fill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::Fill::set_default(&mut self, T)
+pub fn coqui_builder::Fill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::fill::Fill<coqui_builder::Expect> for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::Expect>
+pub fn coqui_builder::profile::ExpectFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::from_value(coqui_builder::Expect) -> Self
+pub fn coqui_builder::profile::ExpectFill::put(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ExpectFill::set_default(&mut self, coqui_builder::Expect)
+pub fn coqui_builder::profile::ExpectFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl coqui_builder::fill::Fill<coqui_builder::profile::Profile> for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<coqui_builder::profile::Profile>
+pub fn coqui_builder::profile::ProfileFill::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::from_value(coqui_builder::profile::Profile) -> Self
+pub fn coqui_builder::profile::ProfileFill::put(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::profile::ProfileFill::set_default(&mut self, coqui_builder::profile::Profile)
+pub fn coqui_builder::profile::ProfileFill::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<M: coqui_builder::fill::TextMap<V>, V: 'static, F: coqui_builder::fill::Fill<V>> coqui_builder::fill::Fill<M> for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<M>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::from_value(M) -> Self
+pub fn coqui_builder::fill::MapSlot<M, V, F>::put(&mut self, M)
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set_default(&mut self, M)
+pub fn coqui_builder::fill::MapSlot<M, V, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, C: coqui_builder::describe::Codec<T>> coqui_builder::fill::Fill<T> for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::LeafSlot<T, C>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::LeafSlot<T, C>::from_value(T) -> Self
+pub fn coqui_builder::fill::LeafSlot<T, C>::put(&mut self, T)
+pub fn coqui_builder::fill::LeafSlot<T, C>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::LeafSlot<T, C>::set_default(&mut self, T)
+pub fn coqui_builder::fill::LeafSlot<T, C>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, F: coqui_builder::fill::Fill<T>> coqui_builder::fill::Fill<alloc::vec::Vec<T>> for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<alloc::vec::Vec<T>>
+pub fn coqui_builder::fill::ListSlot<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::ListSlot<T, F>::from_value(alloc::vec::Vec<T>) -> Self
+pub fn coqui_builder::fill::ListSlot<T, F>::put(&mut self, alloc::vec::Vec<T>)
+pub fn coqui_builder::fill::ListSlot<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::ListSlot<T, F>::set_default(&mut self, alloc::vec::Vec<T>)
+pub fn coqui_builder::fill::ListSlot<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T, F: coqui_builder::fill::Fill<T>> coqui_builder::fill::Fill<core::option::Option<T>> for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<core::option::Option<T>>
+pub fn coqui_builder::fill::OptionSlot<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::OptionSlot<T, F>::from_value(core::option::Option<T>) -> Self
+pub fn coqui_builder::fill::OptionSlot<T, F>::put(&mut self, core::option::Option<T>)
+pub fn coqui_builder::fill::OptionSlot<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::OptionSlot<T, F>::set_default(&mut self, core::option::Option<T>)
+pub fn coqui_builder::fill::OptionSlot<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+impl<T: coqui_builder::fill::Wrap, F: coqui_builder::fill::Fill<<T as coqui_builder::fill::Wrap>::Inner>> coqui_builder::fill::Fill<T> for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::build(self, &coqui_builder::path::KeyPath, &mut alloc::vec::Vec<coqui_builder::path::KeyPath>) -> core::option::Option<T>
+pub fn coqui_builder::fill::Wrapped<T, F>::clear(&mut self, &[coqui_builder::path::Segment]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Wrapped<T, F>::from_value(T) -> Self
+pub fn coqui_builder::fill::Wrapped<T, F>::put(&mut self, T)
+pub fn coqui_builder::fill::Wrapped<T, F>::set(&mut self, &[coqui_builder::path::Segment], &str) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub fn coqui_builder::fill::Wrapped<T, F>::set_default(&mut self, T)
+pub fn coqui_builder::fill::Wrapped<T, F>::set_items(&mut self, &[coqui_builder::path::Segment], &[alloc::string::String]) -> core::result::Result<(), coqui_builder::fill::FillError>
+pub trait coqui_builder::Inspect
+pub fn coqui_builder::Inspect::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::Inspect::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::Expect
+pub fn coqui_builder::Expect::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::Expect::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::ExpectFill
+pub fn coqui_builder::profile::ExpectFill::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::ExpectFill::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::Profile
+pub fn coqui_builder::profile::Profile::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::Profile::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl coqui_builder::inspect::Inspect for coqui_builder::profile::ProfileFill
+pub fn coqui_builder::profile::ProfileFill::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::profile::ProfileFill::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<M, V, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::MapSlot<M, V, F>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::MapSlot<M, V, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, C: coqui_builder::describe::Codec<T>> coqui_builder::inspect::Inspect for coqui_builder::fill::LeafSlot<T, C>
+pub fn coqui_builder::fill::LeafSlot<T, C>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::LeafSlot<T, C>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::ListSlot<T, F>
+pub fn coqui_builder::fill::ListSlot<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::ListSlot<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::OptionSlot<T, F>
+pub fn coqui_builder::fill::OptionSlot<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::OptionSlot<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::Leaf + zeroize::Zeroize> coqui_builder::inspect::Inspect for coqui_builder::secret::Secret<T>
+pub fn coqui_builder::secret::Secret<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::secret::Secret<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::Leaf> coqui_builder::inspect::Inspect for T
+pub fn T::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn T::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::describe::Describe> coqui_builder::inspect::Inspect for coqui_builder::partial::Partial<T>
+pub fn coqui_builder::partial::Partial<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::partial::Partial<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::fill::Wrap, F: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for coqui_builder::fill::Wrapped<T, F>
+pub fn coqui_builder::fill::Wrapped<T, F>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn coqui_builder::fill::Wrapped<T, F>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn alloc::vec::Vec<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<T: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for core::option::Option<T>
+pub fn core::option::Option<T>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn core::option::Option<T>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<V: coqui_builder::inspect::Inspect, S: core::hash::BuildHasher> coqui_builder::inspect::Inspect for std::collections::hash::map::HashMap<alloc::string::String, V, S>
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn std::collections::hash::map::HashMap<alloc::string::String, V, S>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+impl<V: coqui_builder::inspect::Inspect> coqui_builder::inspect::Inspect for alloc::collections::btree::map::BTreeMap<alloc::string::String, V>
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::at(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::datum::Datum>
+pub fn alloc::collections::btree::map::BTreeMap<alloc::string::String, V>::entries(&self, &[coqui_builder::path::Segment]) -> core::option::Option<coqui_builder::inspect::Entries>
+pub trait coqui_builder::Leaf: core::marker::Sized
+pub const coqui_builder::Leaf::ORDERED: bool
+pub const coqui_builder::Leaf::TYPE: &'static str
+pub fn coqui_builder::Leaf::choices() -> core::option::Option<&'static [&'static str]>
+pub fn coqui_builder::Leaf::from_text(&str) -> core::result::Result<Self, coqui_builder::describe::LeafError>
+pub fn coqui_builder::Leaf::labels() -> &'static [(&'static str, &'static str)]
+pub fn coqui_builder::Leaf::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn coqui_builder::Leaf::same(&Self, &Self) -> bool
+pub fn coqui_builder::Leaf::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for alloc::string::String
+pub const alloc::string::String::ORDERED: bool
+pub const alloc::string::String::TYPE: &'static str
+pub fn alloc::string::String::choices() -> core::option::Option<&'static [&'static str]>
+pub fn alloc::string::String::from_text(&str) -> core::result::Result<alloc::string::String, coqui_builder::describe::LeafError>
+pub fn alloc::string::String::labels() -> &'static [(&'static str, &'static str)]
+pub fn alloc::string::String::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn alloc::string::String::same(&Self, &Self) -> bool
+pub fn alloc::string::String::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for bool
+pub const bool::ORDERED: bool
+pub const bool::TYPE: &'static str
+pub fn bool::choices() -> core::option::Option<&'static [&'static str]>
+pub fn bool::from_text(&str) -> core::result::Result<bool, coqui_builder::describe::LeafError>
+pub fn bool::labels() -> &'static [(&'static str, &'static str)]
+pub fn bool::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn bool::same(&Self, &Self) -> bool
+pub fn bool::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for char
+pub const char::ORDERED: bool
+pub const char::TYPE: &'static str
+pub fn char::choices() -> core::option::Option<&'static [&'static str]>
+pub fn char::from_text(&str) -> core::result::Result<char, coqui_builder::describe::LeafError>
+pub fn char::labels() -> &'static [(&'static str, &'static str)]
+pub fn char::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn char::same(&Self, &Self) -> bool
+pub fn char::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::ip_addr::IpAddr
+pub const core::net::ip_addr::IpAddr::ORDERED: bool
+pub const core::net::ip_addr::IpAddr::TYPE: &'static str
+pub fn core::net::ip_addr::IpAddr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::ip_addr::IpAddr::from_text(&str) -> core::result::Result<core::net::ip_addr::IpAddr, coqui_builder::describe::LeafError>
+pub fn core::net::ip_addr::IpAddr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::ip_addr::IpAddr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::ip_addr::IpAddr::same(&Self, &Self) -> bool
+pub fn core::net::ip_addr::IpAddr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::ip_addr::Ipv4Addr
+pub const core::net::ip_addr::Ipv4Addr::ORDERED: bool
+pub const core::net::ip_addr::Ipv4Addr::TYPE: &'static str
+pub fn core::net::ip_addr::Ipv4Addr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::ip_addr::Ipv4Addr::from_text(&str) -> core::result::Result<core::net::ip_addr::Ipv4Addr, coqui_builder::describe::LeafError>
+pub fn core::net::ip_addr::Ipv4Addr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::ip_addr::Ipv4Addr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::ip_addr::Ipv4Addr::same(&Self, &Self) -> bool
+pub fn core::net::ip_addr::Ipv4Addr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::ip_addr::Ipv6Addr
+pub const core::net::ip_addr::Ipv6Addr::ORDERED: bool
+pub const core::net::ip_addr::Ipv6Addr::TYPE: &'static str
+pub fn core::net::ip_addr::Ipv6Addr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::ip_addr::Ipv6Addr::from_text(&str) -> core::result::Result<core::net::ip_addr::Ipv6Addr, coqui_builder::describe::LeafError>
+pub fn core::net::ip_addr::Ipv6Addr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::ip_addr::Ipv6Addr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::ip_addr::Ipv6Addr::same(&Self, &Self) -> bool
+pub fn core::net::ip_addr::Ipv6Addr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::socket_addr::SocketAddr
+pub const core::net::socket_addr::SocketAddr::ORDERED: bool
+pub const core::net::socket_addr::SocketAddr::TYPE: &'static str
+pub fn core::net::socket_addr::SocketAddr::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::socket_addr::SocketAddr::from_text(&str) -> core::result::Result<core::net::socket_addr::SocketAddr, coqui_builder::describe::LeafError>
+pub fn core::net::socket_addr::SocketAddr::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::socket_addr::SocketAddr::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::socket_addr::SocketAddr::same(&Self, &Self) -> bool
+pub fn core::net::socket_addr::SocketAddr::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::socket_addr::SocketAddrV4
+pub const core::net::socket_addr::SocketAddrV4::ORDERED: bool
+pub const core::net::socket_addr::SocketAddrV4::TYPE: &'static str
+pub fn core::net::socket_addr::SocketAddrV4::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::socket_addr::SocketAddrV4::from_text(&str) -> core::result::Result<core::net::socket_addr::SocketAddrV4, coqui_builder::describe::LeafError>
+pub fn core::net::socket_addr::SocketAddrV4::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::socket_addr::SocketAddrV4::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::socket_addr::SocketAddrV4::same(&Self, &Self) -> bool
+pub fn core::net::socket_addr::SocketAddrV4::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::net::socket_addr::SocketAddrV6
+pub const core::net::socket_addr::SocketAddrV6::ORDERED: bool
+pub const core::net::socket_addr::SocketAddrV6::TYPE: &'static str
+pub fn core::net::socket_addr::SocketAddrV6::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::net::socket_addr::SocketAddrV6::from_text(&str) -> core::result::Result<core::net::socket_addr::SocketAddrV6, coqui_builder::describe::LeafError>
+pub fn core::net::socket_addr::SocketAddrV6::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::net::socket_addr::SocketAddrV6::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn core::net::socket_addr::SocketAddrV6::same(&Self, &Self) -> bool
+pub fn core::net::socket_addr::SocketAddrV6::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for core::time::Duration
+pub const core::time::Duration::ORDERED: bool
+pub const core::time::Duration::TYPE: &'static str
+pub fn core::time::Duration::choices() -> core::option::Option<&'static [&'static str]>
+pub fn core::time::Duration::from_text(&str) -> core::result::Result<core::time::Duration, coqui_builder::describe::LeafError>
+pub fn core::time::Duration::labels() -> &'static [(&'static str, &'static str)]
+pub fn core::time::Duration::order(&core::time::Duration, &core::time::Duration) -> core::option::Option<core::cmp::Ordering>
+pub fn core::time::Duration::same(&Self, &Self) -> bool
+pub fn core::time::Duration::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for f32
+pub const f32::ORDERED: bool
+pub const f32::TYPE: &'static str
+pub fn f32::choices() -> core::option::Option<&'static [&'static str]>
+pub fn f32::from_text(&str) -> core::result::Result<f32, coqui_builder::describe::LeafError>
+pub fn f32::labels() -> &'static [(&'static str, &'static str)]
+pub fn f32::order(&f32, &f32) -> core::option::Option<core::cmp::Ordering>
+pub fn f32::same(&f32, &f32) -> bool
+pub fn f32::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for f64
+pub const f64::ORDERED: bool
+pub const f64::TYPE: &'static str
+pub fn f64::choices() -> core::option::Option<&'static [&'static str]>
+pub fn f64::from_text(&str) -> core::result::Result<f64, coqui_builder::describe::LeafError>
+pub fn f64::labels() -> &'static [(&'static str, &'static str)]
+pub fn f64::order(&f64, &f64) -> core::option::Option<core::cmp::Ordering>
+pub fn f64::same(&f64, &f64) -> bool
+pub fn f64::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i128
+pub const i128::ORDERED: bool
+pub const i128::TYPE: &'static str
+pub fn i128::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i128::from_text(&str) -> core::result::Result<i128, coqui_builder::describe::LeafError>
+pub fn i128::labels() -> &'static [(&'static str, &'static str)]
+pub fn i128::order(&i128, &i128) -> core::option::Option<core::cmp::Ordering>
+pub fn i128::same(&Self, &Self) -> bool
+pub fn i128::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i16
+pub const i16::ORDERED: bool
+pub const i16::TYPE: &'static str
+pub fn i16::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i16::from_text(&str) -> core::result::Result<i16, coqui_builder::describe::LeafError>
+pub fn i16::labels() -> &'static [(&'static str, &'static str)]
+pub fn i16::order(&i16, &i16) -> core::option::Option<core::cmp::Ordering>
+pub fn i16::same(&Self, &Self) -> bool
+pub fn i16::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i32
+pub const i32::ORDERED: bool
+pub const i32::TYPE: &'static str
+pub fn i32::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i32::from_text(&str) -> core::result::Result<i32, coqui_builder::describe::LeafError>
+pub fn i32::labels() -> &'static [(&'static str, &'static str)]
+pub fn i32::order(&i32, &i32) -> core::option::Option<core::cmp::Ordering>
+pub fn i32::same(&Self, &Self) -> bool
+pub fn i32::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i64
+pub const i64::ORDERED: bool
+pub const i64::TYPE: &'static str
+pub fn i64::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i64::from_text(&str) -> core::result::Result<i64, coqui_builder::describe::LeafError>
+pub fn i64::labels() -> &'static [(&'static str, &'static str)]
+pub fn i64::order(&i64, &i64) -> core::option::Option<core::cmp::Ordering>
+pub fn i64::same(&Self, &Self) -> bool
+pub fn i64::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for i8
+pub const i8::ORDERED: bool
+pub const i8::TYPE: &'static str
+pub fn i8::choices() -> core::option::Option<&'static [&'static str]>
+pub fn i8::from_text(&str) -> core::result::Result<i8, coqui_builder::describe::LeafError>
+pub fn i8::labels() -> &'static [(&'static str, &'static str)]
+pub fn i8::order(&i8, &i8) -> core::option::Option<core::cmp::Ordering>
+pub fn i8::same(&Self, &Self) -> bool
+pub fn i8::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for isize
+pub const isize::ORDERED: bool
+pub const isize::TYPE: &'static str
+pub fn isize::choices() -> core::option::Option<&'static [&'static str]>
+pub fn isize::from_text(&str) -> core::result::Result<isize, coqui_builder::describe::LeafError>
+pub fn isize::labels() -> &'static [(&'static str, &'static str)]
+pub fn isize::order(&isize, &isize) -> core::option::Option<core::cmp::Ordering>
+pub fn isize::same(&Self, &Self) -> bool
+pub fn isize::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for std::path::PathBuf
+pub const std::path::PathBuf::ORDERED: bool
+pub const std::path::PathBuf::TYPE: &'static str
+pub fn std::path::PathBuf::choices() -> core::option::Option<&'static [&'static str]>
+pub fn std::path::PathBuf::from_text(&str) -> core::result::Result<std::path::PathBuf, coqui_builder::describe::LeafError>
+pub fn std::path::PathBuf::labels() -> &'static [(&'static str, &'static str)]
+pub fn std::path::PathBuf::order(&Self, &Self) -> core::option::Option<core::cmp::Ordering>
+pub fn std::path::PathBuf::same(&Self, &Self) -> bool
+pub fn std::path::PathBuf::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u128
+pub const u128::ORDERED: bool
+pub const u128::TYPE: &'static str
+pub fn u128::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u128::from_text(&str) -> core::result::Result<u128, coqui_builder::describe::LeafError>
+pub fn u128::labels() -> &'static [(&'static str, &'static str)]
+pub fn u128::order(&u128, &u128) -> core::option::Option<core::cmp::Ordering>
+pub fn u128::same(&Self, &Self) -> bool
+pub fn u128::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u16
+pub const u16::ORDERED: bool
+pub const u16::TYPE: &'static str
+pub fn u16::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u16::from_text(&str) -> core::result::Result<u16, coqui_builder::describe::LeafError>
+pub fn u16::labels() -> &'static [(&'static str, &'static str)]
+pub fn u16::order(&u16, &u16) -> core::option::Option<core::cmp::Ordering>
+pub fn u16::same(&Self, &Self) -> bool
+pub fn u16::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u32
+pub const u32::ORDERED: bool
+pub const u32::TYPE: &'static str
+pub fn u32::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u32::from_text(&str) -> core::result::Result<u32, coqui_builder::describe::LeafError>
+pub fn u32::labels() -> &'static [(&'static str, &'static str)]
+pub fn u32::order(&u32, &u32) -> core::option::Option<core::cmp::Ordering>
+pub fn u32::same(&Self, &Self) -> bool
+pub fn u32::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u64
+pub const u64::ORDERED: bool
+pub const u64::TYPE: &'static str
+pub fn u64::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u64::from_text(&str) -> core::result::Result<u64, coqui_builder::describe::LeafError>
+pub fn u64::labels() -> &'static [(&'static str, &'static str)]
+pub fn u64::order(&u64, &u64) -> core::option::Option<core::cmp::Ordering>
+pub fn u64::same(&Self, &Self) -> bool
+pub fn u64::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for u8
+pub const u8::ORDERED: bool
+pub const u8::TYPE: &'static str
+pub fn u8::choices() -> core::option::Option<&'static [&'static str]>
+pub fn u8::from_text(&str) -> core::result::Result<u8, coqui_builder::describe::LeafError>
+pub fn u8::labels() -> &'static [(&'static str, &'static str)]
+pub fn u8::order(&u8, &u8) -> core::option::Option<core::cmp::Ordering>
+pub fn u8::same(&Self, &Self) -> bool
+pub fn u8::to_text(&self) -> alloc::string::String
+impl coqui_builder::Leaf for usize
+pub const usize::ORDERED: bool
+pub const usize::TYPE: &'static str
+pub fn usize::choices() -> core::option::Option<&'static [&'static str]>
+pub fn usize::from_text(&str) -> core::result::Result<usize, coqui_builder::describe::LeafError>
+pub fn usize::labels() -> &'static [(&'static str, &'static str)]
+pub fn usize::order(&usize, &usize) -> core::option::Option<core::cmp::Ordering>
+pub fn usize::same(&Self, &Self) -> bool
+pub fn usize::to_text(&self) -> alloc::string::String
+pub trait coqui_builder::Source
+pub fn coqui_builder::Source::entries(&mut self, &coqui_builder::path::KeyPath) -> core::result::Result<core::option::Option<coqui_builder::inspect::Entries>, coqui_builder::source::SourceError>
+pub fn coqui_builder::Source::unknown(&mut self, &dyn core::ops::function::Fn(&coqui_builder::path::KeyPath) -> bool) -> alloc::vec::Vec<coqui_builder::path::KeyPath>
+pub fn coqui_builder::Source::value(&mut self, &coqui_builder::path::KeyPath, &coqui_builder::describe::LeafInfo) -> core::result::Result<core::option::Option<alloc::string::String>, coqui_builder::source::SourceError>
+impl coqui_builder::source::Source for coqui_builder::env::Env
+pub fn coqui_builder::env::Env::entries(&mut self, &coqui_builder::path::KeyPath) -> core::result::Result<core::option::Option<coqui_builder::inspect::Entries>, coqui_builder::source::SourceError>
+pub fn coqui_builder::env::Env::unknown(&mut self, &dyn core::ops::function::Fn(&coqui_builder::path::KeyPath) -> bool) -> alloc::vec::Vec<coqui_builder::path::KeyPath>
+pub fn coqui_builder::env::Env::value(&mut self, &coqui_builder::path::KeyPath, &coqui_builder::describe::LeafInfo) -> core::result::Result<core::option::Option<alloc::string::String>, coqui_builder::source::SourceError>
+pub fn coqui_builder::differences(&coqui_builder::describe::Description, &dyn coqui_builder::inspect::Inspect, core::option::Option<&dyn coqui_builder::inspect::Inspect>) -> coqui_builder::report::Report
+pub fn coqui_builder::non_defaults<T: coqui_builder::describe::Describe + coqui_builder::inspect::Inspect>(&T) -> alloc::vec::Vec<coqui_builder::non_default::NonDefault>

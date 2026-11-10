@@ -301,7 +301,7 @@ where
         identity,
         &peer,
         verified,
-        &config.alpn,
+        config.alpn.as_bytes(),
     )?;
     let mut dial = PairDial {
         tls,
@@ -394,8 +394,14 @@ where
     let exporter = connection
         .export_keying_material([0u8; 32], crate::EXPORTER_LABEL, Some(&[]))
         .map_err(|_| PeerError::Tls)?;
-    let channel =
-        crate::pairing::channel(connection, exporter, identity, &peer, false, &config.alpn)?;
+    let channel = crate::pairing::channel(
+        connection,
+        exporter,
+        identity,
+        &peer,
+        false,
+        config.alpn.as_bytes(),
+    )?;
     let mut responder = PairingResponder::new(channel, store, desk, source);
     let result = respond(&mut tls, &mut responder, desk, until).await;
     let _ = tokio::io::AsyncWriteExt::shutdown(&mut tls).await;

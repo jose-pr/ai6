@@ -13,11 +13,13 @@ mod os;
 
 use core::fmt;
 
+use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
-use coqui_access::guatiao::{FromValue, Provider, Schema, ToValue};
 use coqui_access::{
     Attempt, Authenticator, Description, Directory, Lookup, Person, Verdict, error, takes,
 };
+use coqui_builder::Describe;
+use guatiao_builder::Described;
 
 /// The PAM service checked unless the configuration names another.
 pub const DEFAULT_PAM_SERVICE: &str = "coqui-access";
@@ -31,8 +33,8 @@ pub const DEFAULT_DOMAIN: &str = ".";
 pub const SUPPORTED: bool = os::SUPPORTED;
 
 /// Options of [`SystemAccounts`], as a host's configuration holds them. Every key is optional.
-#[derive(Debug, Clone, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Describe)]
+#[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SystemAccountsConfig {
     /// The PAM service a password is checked under (Unix). With no file of that name in
@@ -186,7 +188,7 @@ impl SystemAccountsBuilder {
     Directory,
     id = "coqui_access_system",
     name = "System accounts",
-    config = SystemAccountsConfig,
+    config = Described<SystemAccountsConfig>,
     crate = ::coqui_access::guatiao
 )]
 pub struct SystemAccounts {
@@ -224,6 +226,14 @@ impl SystemAccounts {
             _ => None,
         };
         Ok(found.filter(|account| account.admitted_by(&self.config)))
+    }
+}
+
+impl TryFrom<Described<SystemAccountsConfig>> for SystemAccounts {
+    type Error = ProviderError;
+
+    fn try_from(config: Described<SystemAccountsConfig>) -> Result<Self, Self::Error> {
+        Self::new(config.0)
     }
 }
 

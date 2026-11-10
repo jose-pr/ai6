@@ -579,6 +579,9 @@ pub trait Conversation: Send + Sync {
 /// What [`Settings::on_notice`] calls with each notice.
 pub type NoticeHook = Arc<dyn Fn(&str) + Send + Sync>;
 
+/// What [`Settings::on_usage`] calls with the connection's report each time it changes.
+pub type UsageHook = Arc<dyn Fn(&coqui_acp_api::UsageReport) + Send + Sync>;
+
 /// The limits of one connection. Every one is a setting with a default, and any value is taken.
 #[derive(Clone)]
 #[non_exhaustive]
@@ -623,6 +626,9 @@ pub struct Settings {
     pub network_paths: bool,
     /// Called with each notice the harness gives, such as a warning about its version, for a host that logs them.
     pub on_notice: Option<NoticeHook>,
+    /// Called with the connection's report, as `_coqui_acp/usage` answers it with no session, each time something other than
+    /// when it was read changes, for a host that keeps what its connections learned. Called with no lock held. Default none.
+    pub on_usage: Option<UsageHook>,
     /// The host's id for the account the connection runs on, echoed into every usage report and never
     /// interpreted; over the one the client names in its capabilities. Default none.
     pub account: Option<String>,
@@ -649,6 +655,7 @@ impl Settings {
             working_roots: Vec::new(),
             network_paths: false,
             on_notice: None,
+            on_usage: None,
             account: None,
         }
     }
@@ -679,6 +686,7 @@ impl fmt::Debug for Settings {
             .field("working_roots", &self.working_roots)
             .field("network_paths", &self.network_paths)
             .field("on_notice", &self.on_notice.is_some())
+            .field("on_usage", &self.on_usage.is_some())
             .field("account", &self.account)
             .finish()
     }

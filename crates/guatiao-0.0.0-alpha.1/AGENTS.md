@@ -390,6 +390,23 @@ Structural comparison is `PartialEq` on both the node and the container.
 `Dump(&v)` is a bounded `Debug` tree for diagnostics; a node or key in
 `Alloc::wiping()` prints `[sensitive]`.
 
+`impl Display for Value` (`v.to_string()`, `{v}`) is a value as one line of
+text for a report or a log, with no format crate. **Its form is not a
+contract and may change**: nothing may parse it, and it is not an encoding.
+Today it is JSON form: what a compact JSON writer prints with bytes as a
+`data:;base64,` string and numbers as their text (`[1,"a"]`, `{"k":null}`, no
+spaces), pinned by `tests/vectors/display.json` and compared with
+`guatiao-serde`'s JSON writer (a change of form is an edit of that test). A node
+or key in `Alloc::wiping()` prints `[sensitive]` (a sensitive key leaves its value
+visible), an absent node `absent`, an unknown tag `<unknown tag N>`, text, a
+number or a map key that is not UTF-8 `<not utf-8>` (a bad key hides only
+itself), a number outside JSON's grammar `<not a number>`, and a node
+`MAX_DEPTH` (128) levels below the root `...`; none fails. Placeholders are
+bare, never quoted. `Debug` stays tag-only. C: `guatiao_value_display(value,
+alloc, out)` writes a string value; `GUATIAO_ERR_NULL` for a null `value` or
+`out`, `GUATIAO_ERR_ALLOC` for a null or unusable allocator or when it refuses
+the string. The text is in `docs/encodings.md`, "A value's display text".
+
 **Numbers are the exact text that declared them.** `1.10` reads back as
 `1.10`, a 200-digit integer survives, and `u64::MAX` crosses as itself.
 Nothing coerces between kinds.
@@ -673,7 +690,13 @@ hand-written impl reports a missing key, and where in the tree an error
 happened, the same way.
 
 An `Option<T>` field is omitted when `None` rather than written as null,
-and both spellings read back as `None`. Its schema is `T`'s accepting
+and both spellings read back as `None`. `#[map(default = <expr>, none =
+"text")]` writes the `None` as that text instead (the inner type must read
+no string), reads the text as `None` and any other value as the inner
+one, and describes the field as `anyOf` the text and the inner kind with
+the inner value as `default`. `#[map(as_text)]` on a `Vec<T>` or
+`Option<Vec<T>>` is per item: a list of `Display` texts, each read with
+`FromStr`, a refusal naming the index. Its schema is `T`'s accepting
 null as well (`type: [T, "null"]`, or `anyOf: [T, {"type": "null"}]` for
 an enum or a variant), so validation accepts a null wherever `FromValue`
 reads one: the field, a `Vec<Option<T>>` element, a map's value. An

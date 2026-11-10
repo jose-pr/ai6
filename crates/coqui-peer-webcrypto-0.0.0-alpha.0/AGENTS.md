@@ -9,15 +9,16 @@ the package and is self-contained. Development documentation lives with the sour
 | --- | --- | --- | --- |
 | `pin` | `coqui-peer/pin` (SPAKE2, HKDF, HMAC) | PIN pairing (`pair::Pairing::pin`) | off |
 
-MSRV Rust 1.89. A default build depends on `coqui-peer` (by git revision, `e0f96b8`), `guatiao` (by revision), `p256`,
+MSRV Rust 1.89. A default build depends on `coqui-peer` (by git revision, `984db3d`), `coqui-builder` (by revision), `p256`,
 `aes-gcm`, `hkdf`, `sha2`, `data-encoding`, `serde`, `serde_json`, `getrandom` and `zeroize`. This crate
 is unreleased, with no independent security review: depend on a git revision, and name the same
 `coqui-peer` revision if you use it directly; the wire and API may change at any commit. This is the method named `webcrypto` of `coqui-peer` (`PeerId`, `TrustStore`, the sans-IO
 `Handshake`, `pair`); its API header ships in that crate. `PROTOCOL.md` ships here and is the wire.
 
 Imports: everything is at the crate root, including re-exports of `coqui-peer`'s `Established`,
-`KeyMaterial`, `MessageTransport`, `Method`, `PeerId`, `Random`, `TrustStore`, `NonDefault` and its module
-`pair`.
+`KeyMaterial`, `MessageTransport`, `Method`, `PeerId`, `Random`, `TrustStore` and its module `pair`, and
+of `coqui-builder`'s `NonDefault`: its `value` and `default` print as `Type(text)` (`usize(4096)`,
+`Random(caller's)`). `prelude` holds the settings' setter traits.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`), no process-wide state. Nothing reads a file or an
 environment variable unless the caller names a path. Ephemeral scalars, traffic keys, the export secret,
@@ -80,23 +81,28 @@ pub const DEFAULT_MAX_MESSAGE: usize = 3072;
 pub fn random() -> Random;                    // the OS generator
 pub struct WebCrypto;                         // Clone (shared); Debug shows no secret
 impl WebCrypto {
-    pub fn builder(identity: Identity) -> WebCryptoBuilder;   // neither role until responders or initiators
+    pub fn builder() -> WebCryptoBuilder;     // takes no arguments; the identity is an input; neither role until responders or initiators
     pub fn identity(&self) -> &Identity;
     pub fn settings(&self) -> WebCryptoSettings;
-    pub fn non_defaults(&self) -> Vec<NonDefault>;  // every WebCryptoSettings key that differs, by key path (`max_message`, `session_limit`); `random` when replaced
+    pub fn non_defaults(&self) -> Vec<NonDefault>;  // every WebCryptoSettings key that differs, by key path (`max_message`, `session_limit`), and `random` when replaced
 }
-// Setters, the last wins; build() -> WebCrypto:
-pub struct WebCryptoBuilder;                  // Clone; Debug
+// Derived by coqui-builder; not Clone. Each write replaces the last, whichever way it was made:
+pub struct WebCryptoBuilder;                  // Debug
 impl WebCryptoBuilder {
-    pub fn responders(self, trust: Trust) -> WebCryptoBuilder;     // whom initiate() admits
-    pub fn initiators(self, trust: Trust) -> WebCryptoBuilder;     // whom respond() admits
-    pub fn max_message(self, bytes: usize) -> WebCryptoBuilder;    // before parsing; no floor
-    pub fn session_limit(self, bytes: u64) -> WebCryptoBuilder;    // per direction; DEFAULT_SESSION_LIMIT; no floor
-    pub fn random(self, random: Random) -> WebCryptoBuilder;       // secure, or for test vectors only
-    pub fn settings(self, settings: WebCryptoSettings) -> WebCryptoBuilder;   // both limits, whole
-    pub fn build(self) -> WebCrypto;
+    pub fn identity(self, identity: impl Into<Identity>) -> Self;  // required
+    pub fn responders(self, trust: impl Into<Trust>) -> Self;     // whom initiate() admits
+    pub fn initiators(self, trust: impl Into<Trust>) -> Self;     // whom respond() admits
+    pub fn random(self, random: impl Into<Random>) -> Self;       // secure, or for test vectors only
+    pub fn max_message(self, bytes: usize) -> Self;                // before parsing; no floor
+    pub fn session_limit(self, bytes: u64) -> Self;                // per direction; DEFAULT_SESSION_LIMIT; no floor
+    pub fn fill(self, settings: Partial<WebCryptoSettings>) -> Self;   // only the keys the partial sets
+    pub fn fill_from(self, source: &mut impl Source) -> Result<Self, FillError>;
+    pub fn build(self) -> Result<WebCrypto, Missing>;              // Missing names `identity`
+    pub fn parts(self) -> Result<WebCryptoParts, Missing>;         // the collected parts, for a second terminal
 }
-// A guatiao value (ToValue, FromValue, Schema): every key optional, unknown keys refused.
+pub struct WebCryptoParts;                    // Debug; what the builder collects (settings and inputs)
+// Describe (coqui-builder): every key optional, unknown keys refused; read as `Partial<WebCryptoSettings>`.
+// The setters are methods of WebCryptoBuilder; `prelude::WebCryptoSettingsSetters` is the trait for a builder in another crate.
 #[non_exhaustive] pub struct WebCryptoSettings { pub max_message: usize, pub session_limit: u64 }   // Default: DEFAULT_MAX_MESSAGE, DEFAULT_SESSION_LIMIT
 impl coqui_peer::Method for WebCrypto { /* name() = "webcrypto"; initiate(); respond(source) */ }
 pub struct WebCryptoHandshake;
@@ -167,18 +173,21 @@ a successful handshake.
 pub const PAIR_EXPORT_LABEL: &str = "EXPORTER-coqui-pair";
 pub struct PairingMethod;                     // Clone; Debug
 impl PairingMethod {
-    pub fn builder(identity: Identity) -> PairingMethodBuilder;   // admits any proved key, in both roles
+    pub fn builder() -> PairingMethodBuilder;   // no arguments; admits any proved key, in both roles
     pub fn settings(&self) -> PairingSettings;
     pub fn non_defaults(&self) -> Vec<NonDefault>;    // `max_message` when it differs; `random` when replaced (admitting any proved key is what pairing is, not listed)
 }
-pub struct PairingMethodBuilder;              // Clone; Debug; build() -> PairingMethod
+pub struct PairingMethodBuilder;              // Debug; not Clone; build() -> Result<PairingMethod, Missing>
 impl PairingMethodBuilder {
-    pub fn responders(self, trust: Trust) -> PairingMethodBuilder;   // a joiner verifies the responder
-    pub fn max_message(self, bytes: usize) -> PairingMethodBuilder;
-    pub fn random(self, random: Random) -> PairingMethodBuilder;
-    pub fn settings(self, settings: PairingSettings) -> PairingMethodBuilder;
+    pub fn identity(self, identity: impl Into<Identity>) -> Self;   // required
+    pub fn responders(self, trust: impl Into<Trust>) -> Self;       // a joiner verifies the responder
+    pub fn random(self, random: impl Into<Random>) -> Self;
+    pub fn max_message(self, bytes: usize) -> Self;
+    pub fn fill(self, settings: Partial<PairingSettings>) -> Self;
+    pub fn fill_from(self, source: &mut impl Source) -> Result<Self, FillError>;
 }
-#[non_exhaustive] pub struct PairingSettings { pub max_message: usize }   // Default: DEFAULT_MAX_MESSAGE
+pub struct PairingMethodParts;                // Debug
+#[non_exhaustive] pub struct PairingSettings { pub max_message: usize }   // Describe; Default: DEFAULT_MAX_MESSAGE
 impl coqui_peer::Method for PairingMethod { /* name() = "webcrypto"; initiate(); respond(source) */ }
 pub struct PairingHandshake;  // impl Handshake { Output = PairingSession, Framing::Message }
 pub struct PairingSession;    // no seal, no open: it runs one exchange

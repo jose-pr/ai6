@@ -14,7 +14,7 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher as _, PasswordVerifier as _};
 use argon2::{Algorithm, Argon2, Params, Version};
 use coqui_access::Limit;
-use coqui_access::guatiao::{FromValue, Kinds, Map, MapError, Schema, ToValue, Value};
+use coqui_builder::Describe;
 
 use crate::secret;
 
@@ -29,9 +29,8 @@ const ARGON2ID_PREFIX: &str = "$argon2id$";
 ///
 /// As configuration it is a map of `memory_kib`, `iterations` and `parallelism`, each
 /// defaulting to the library's value, so a config may give any of them or none. Reading it
-/// checks the combination, as [`Argon2Params::new`] does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+/// does not check the combination: [`Argon2Params::new`] does, and so does making a hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Describe)]
 pub struct Argon2Params {
     /// Memory in KiB.
     #[map(default = Params::DEFAULT_M_COST)]
@@ -55,27 +54,6 @@ impl Default for Argon2Params {
 }
 
 const OUT_OF_RANGE: &str = "argon2 parameters are out of range";
-
-/// Reads each field the derive's way and then checks the combination, so a config Argon2
-/// would refuse fails as it is read.
-impl FromValue for Argon2Params {
-    const KINDS: Kinds = Kinds::MAP;
-
-    fn from_value(value: &Value) -> Result<Self, MapError> {
-        let map = <&Map>::try_from(value)?;
-        let default = Self::default();
-        let field = |key: &str, default: u32| match map.get(key) {
-            Some(field) => u32::from_value(field).map_err(|error| error.under(key)),
-            None => Ok(default),
-        };
-        Self::new(
-            field("memory_kib", default.memory_kib)?,
-            field("iterations", default.iterations)?,
-            field("parallelism", default.parallelism)?,
-        )
-        .map_err(|_| MapError::bad_value(OUT_OF_RANGE))
-    }
-}
 
 impl Argon2Params {
     /// Memory in KiB, passes over it and lanes.
@@ -123,8 +101,8 @@ impl Argon2Params {
 ///
 /// As configuration it is a map tagged by `algorithm`, the costs beside it under Argon2id:
 /// `{ "algorithm": "sha256" }` or `{ "algorithm": "argon2id", "memory_kib": 65536 }`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, tag = "algorithm", rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Describe)]
+#[map(tag = "algorithm", rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum KeyHash {
     /// `sha256:<hex>`: fast, and enough for a key of 256 random bits. The default.
@@ -294,6 +272,8 @@ impl PasswordHasher {
 
 #[cfg(test)]
 mod tests {
+    use coqui_builder::{Partial, Segment};
+
     use super::*;
 
     fn cheap() -> Argon2Params {
@@ -382,67 +362,59 @@ mod tests {
         assert!(stored.contains("m=64,t=2,p=1"));
     }
 
-    fn costs_from(json: &str) -> Result<Argon2Params, MapError> {
-        let value =
-            guatiao_serde::from_serde(&mut serde_json::Deserializer::from_str(json)).unwrap();
-        Argon2Params::from_value(&value)
+    fn costs_from(keys: &[(&str, &str)]) -> Result<Argon2Params, String> {
+        let mut partial = Partial::<Argon2Params>::new();
+        for (key, text) in keys {
+            partial.set(key, text).map_err(|error| error.to_string())?;
+        }
+        partial.build().map_err(|error| error.to_string())
     }
 
     #[test]
-    fn argon2_costs_read_from_configuration_default_each_field_and_are_checked() {
-        assert_eq!(costs_from("{}").unwrap(), Argon2Params::default());
-        let set = costs_from(r#"{"memory_kib": 64, "iterations": 1}"#).unwrap();
+    fn argon2_costs_read_from_configuration_default_each_field() {
+        assert_eq!(costs_from(&[]).unwrap(), Argon2Params::default());
+        let set = costs_from(&[("memory_kib", "64"), ("iterations", "1")]).unwrap();
         assert_eq!(set, Argon2Params::new(64, 1, 1).unwrap());
-        assert_eq!(
-            Argon2Params::from_value(&set.to_value().unwrap()).unwrap(),
-            set
-        );
-        let refused = costs_from(r#"{"iterations": 0}"#).unwrap_err();
-        assert_eq!(refused, MapError::bad_value(OUT_OF_RANGE));
-        assert!(costs_from(r#"{"memory_kib": 4}"#).is_err());
-        // Reading is lenient about keys it does not know; the schema a host validates with is not.
-        assert_eq!(
-            costs_from(r#"{"lanes": 1}"#).unwrap(),
-            Argon2Params::default()
-        );
-        assert_eq!(
-            costs_from(r#"{"iterations": "2"}"#).unwrap_err().key(),
-            "iterations"
-        );
-        assert!(costs_from("[]").is_err());
+        // Reading does not check the combination; making a hash does.
+        let zero = costs_from(&[("iterations", "0")]).unwrap();
+        assert!(KeyHash::Argon2id(zero).hash("k").is_err());
+        assert!(costs_from(&[("iterations", "two")]).is_err());
+        assert!(costs_from(&[("lanes", "1")]).is_err());
     }
 
     #[test]
     fn argon2_costs_describe_their_defaults() {
-        let schema = Argon2Params::schema().unwrap();
-        let text = guatiao_serde::text::json::to_string(&schema, Default::default()).unwrap();
-        assert!(text.contains("\"default\":19456"), "{text}");
+        let description = Argon2Params::description();
+        let default = description.default_at(&[Segment::key("memory_kib")]);
+        assert_eq!(default.as_deref(), Some("19456"));
     }
 
     #[test]
     fn a_key_hash_reads_from_configuration_tagged_by_algorithm() {
-        let read = |json: &str| {
-            let value =
-                guatiao_serde::from_serde(&mut serde_json::Deserializer::from_str(json)).unwrap();
-            KeyHash::from_value(&value)
+        let read = |keys: &[(&str, &str)]| {
+            let mut partial = Partial::<KeyHash>::new();
+            for (key, text) in keys {
+                partial.set(key, text).map_err(|error| error.to_string())?;
+            }
+            partial.build().map_err(|error| error.to_string())
         };
-        assert_eq!(read(r#"{"algorithm": "sha256"}"#).unwrap(), KeyHash::Sha256);
+        // The default applies to a field that holds a key hash, not to the tag by itself.
+        assert!(read(&[]).is_err());
+        assert_eq!(read(&[("algorithm", "sha256")]).unwrap(), KeyHash::Sha256);
         assert_eq!(
-            read(r#"{"algorithm": "argon2id"}"#).unwrap(),
+            read(&[("algorithm", "argon2id")]).unwrap(),
             KeyHash::argon2id()
         );
         assert_eq!(
-            read(r#"{"algorithm": "argon2id", "memory_kib": 64, "iterations": 1}"#).unwrap(),
+            read(&[
+                ("algorithm", "argon2id"),
+                ("memory_kib", "64"),
+                ("iterations", "1")
+            ])
+            .unwrap(),
             KeyHash::Argon2id(cheap())
         );
-        assert!(read(r#"{"algorithm": "argon2id", "iterations": 0}"#).is_err());
-        assert!(read(r#"{"algorithm": "md5"}"#).is_err());
-        for hash in [KeyHash::Sha256, KeyHash::Argon2id(cheap())] {
-            assert_eq!(
-                KeyHash::from_value(&hash.to_value().unwrap()).unwrap(),
-                hash
-            );
-        }
+        assert!(read(&[("algorithm", "md5")]).is_err());
     }
 
     #[test]

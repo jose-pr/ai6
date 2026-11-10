@@ -521,6 +521,9 @@ pub enum Outcome {
     Selected(String),
     /// Nobody chose: the turn is being stopped, or the question could not be put.
     Cancelled,
+    /// The client answered, but chose no option that was offered: an error, an outcome that is none of the protocol's,
+    /// or an option that was never put. A refusal of this one request, not an end of the turn.
+    Refused,
 }
 
 /// Sends the answer to a permission request to the harness, once. One dropped unanswered answers

@@ -18,10 +18,10 @@ use crate::error::Error;
 use crate::file::{self, Access};
 use crate::id::PeerId;
 use crate::key::KeyMaterial;
-use crate::non_default::NonDefault;
 use crate::pem;
 use crate::random::Random;
 use crate::waiting::{WaitingQueue, WaitingSettings, WhenFull};
+use coqui_builder::builder::Holds;
 
 /// The version of the on-disk format [`TrustStore`] writes and reads.
 pub const FORMAT_VERSION: u32 = 1;
@@ -38,12 +38,10 @@ pub(crate) const DEFAULT_IPV6_PREFIX: u8 = 64;
 
 /// Bounds on the waiting queue.
 ///
-/// A guatiao value: every key is optional (an absent one is its default) and an unknown key is
-/// refused. `rerecord` is a duration: a number of seconds, `[secs, nanos]` or `{secs, nanos}`. The
-/// struct is `#[non_exhaustive]`: start from [`Default`] and assign the fields.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+/// Every key is optional (an absent one is its default) and an unknown key is refused.
+/// `rerecord` is a duration: `60`, `30s`, `250ms`. The struct is `#[non_exhaustive]`: start from
+/// [`Default`] and assign the fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, coqui_builder::Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WaitingLimits {
@@ -72,11 +70,9 @@ impl Default for WaitingLimits {
 
 /// How an accepted peer's key is replaced by its successor.
 ///
-/// A guatiao value like [`WaitingLimits`]; `retire_after` is a duration. `#[non_exhaustive]`:
+/// Read like [`WaitingLimits`]; `retire_after` is a duration. `#[non_exhaustive]`:
 /// start from [`Default`] and assign the fields.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, coqui_builder::Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RotationOptions {
@@ -366,20 +362,12 @@ struct Entry {
 /// What a [`TrustStore`] is built from, besides the directory and the clock, in the form a
 /// file, a form or a peer fills.
 ///
-/// Every key is optional (an absent one is its default) and an unknown key is refused. The type
-/// is a guatiao value (`from_value`, `to_value`, `schema`), and `guatiao_serde::text` reads and
-/// writes its text. It is `#[non_exhaustive]`: start from [`Default`] and assign the fields.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    guatiao::ToValue,
-    guatiao::FromValue,
-    guatiao::Schema,
-)]
+/// Every key is optional (an absent one is its default) and an unknown key is refused. The
+/// directory is not a setting: [`TrustStoreBuilder::state_dir`] takes it. The type is
+/// `Describe`, so a `Partial<TrustStoreSettings>` is filled from text and built, and it is
+/// `#[non_exhaustive]`: start from [`Default`] and assign the fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, coqui_builder::Describe)]
+#[builder(setters_on = TrustStoreBuilder)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct TrustStoreSettings {
@@ -393,24 +381,55 @@ pub struct TrustStoreSettings {
 
 impl TrustStoreSettings {
     /// Every setting that differs from its default, named by key path (`waiting.limits.total`).
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
-        NonDefault::of_settings(self)
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
+        coqui_builder::non_defaults(self)
     }
 }
 
-/// Builds a [`TrustStore`]: [`TrustStore::builder`], the settings, then [`build`](Self::build).
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct TrustStoreBuilder {
-    state_dir: PathBuf,
+/// What a [`TrustStoreBuilder`] collects: the settings, the directory and the clock.
+///
+/// The directory is required, the clock is the system clock unless given. Build the store with
+/// [`TrustStore::builder`].
+#[derive(coqui_builder::Builder, Debug)]
+#[builder(build = TrustStore, fallible)]
+pub struct TrustStoreParts {
     settings: TrustStoreSettings,
-    clock: Clock,
+    #[builder(input)]
+    state_dir: PathBuf,
+    #[builder(input)]
+    clock: Option<Clock>,
+}
+
+impl TryFrom<TrustStoreParts> for TrustStore {
+    type Error = Error;
+
+    /// Opens the store (creating the directories when absent).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] when the directories cannot be created.
+    fn try_from(parts: TrustStoreParts) -> Result<Self, Error> {
+        let root = parts.state_dir.join("peers");
+        fs::create_dir_all(root.join("accepted")).map_err(Error::Io)?;
+        fs::create_dir_all(root.join("waiting")).map_err(Error::Io)?;
+        Ok(TrustStore {
+            root,
+            waiting: Arc::new(Mutex::new(WaitingQueue::from_settings(
+                parts.settings.waiting,
+            ))),
+            events: Arc::default(),
+            clock: parts.clock.unwrap_or_default(),
+            rotation: parts.settings.rotation,
+        })
+    }
 }
 
 impl TrustStoreBuilder {
     /// The bounds on the waiting queue. Default 16 per source, 1000 in all, 60 seconds.
     pub fn limits(mut self, limits: WaitingLimits) -> Self {
-        self.settings.waiting.limits = limits;
+        self.partial_mut()
+            .put("waiting.limits", limits)
+            .expect("waiting.limits is a key of the settings");
         self
     }
 
@@ -418,86 +437,44 @@ impl TrustStoreBuilder {
     /// counts each address alone, which lets the holder of a subnet fill the queue; values above
     /// 128 are 128. IPv4 sources, IPv4-mapped IPv6 ones included, always count per address.
     pub fn ipv6_prefix(mut self, bits: u8) -> Self {
-        self.settings.waiting.ipv6_prefix = bits;
+        self.partial_mut()
+            .put("waiting.ipv6_prefix", bits)
+            .expect("waiting.ipv6_prefix is a key of the settings");
         self
     }
 
     /// What a newcomer to a full source gets. Default [`WhenFull::Refuse`], so that strangers
     /// sharing a source cannot flush those already waiting.
     pub fn when_full(mut self, when_full: WhenFull) -> Self {
-        self.settings.waiting.when_full = when_full;
+        self.partial_mut()
+            .put("waiting.when_full", when_full)
+            .expect("waiting.when_full is a key of the settings");
         self
     }
 
     /// Record a new peer from one source at most once per `interval`, each record being a synced
     /// write a stranger can cause. Default one second; zero is no limit.
     pub fn record_interval(mut self, interval: Duration) -> Self {
-        self.settings.waiting.record_interval = interval;
+        self.partial_mut()
+            .put("waiting.record_interval", interval)
+            .expect("waiting.record_interval is a key of the settings");
         self
-    }
-
-    /// How keys are rotated. Default 24 hours, promoted automatically.
-    pub fn rotation(mut self, options: RotationOptions) -> Self {
-        self.settings.rotation = options;
-        self
-    }
-
-    /// The clock invitation expiry and key retirement read. Default the system clock.
-    pub fn clock(mut self, clock: Clock) -> Self {
-        self.clock = clock;
-        self
-    }
-
-    /// Every setting from `settings`. Replaces the limits, the grouping, the full-source
-    /// behaviour, the record interval and the rotation set before, and is replaced by what is set
-    /// after it. The clock is code, not a setting, and stays.
-    pub fn settings(mut self, settings: TrustStoreSettings) -> Self {
-        self.settings = settings;
-        self
-    }
-
-    /// Opens the store (creating the directories when absent).
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Io`] when the directories cannot be created.
-    pub fn build(self) -> Result<TrustStore, Error> {
-        let root = self.state_dir.join("peers");
-        fs::create_dir_all(root.join("accepted")).map_err(Error::Io)?;
-        fs::create_dir_all(root.join("waiting")).map_err(Error::Io)?;
-        Ok(TrustStore {
-            root,
-            waiting: Arc::new(Mutex::new(
-                WaitingQueue::builder(self.settings.waiting.limits)
-                    .settings(self.settings.waiting)
-                    .build(),
-            )),
-            events: Arc::default(),
-            clock: self.clock,
-            rotation: self.settings.rotation,
-        })
     }
 }
 
 impl TrustStore {
-    /// A builder for the store under `<state_dir>/peers`, with every setting at its default and
-    /// the system clock.
-    pub fn builder(state_dir: &Path) -> TrustStoreBuilder {
-        TrustStoreBuilder {
-            state_dir: state_dir.to_path_buf(),
-            settings: TrustStoreSettings::default(),
-            clock: Clock::system(),
-        }
-    }
-
     /// Opens (creating when absent) the store under `<state_dir>/peers` with every setting at its
-    /// default: `TrustStore::builder(state_dir).build()`.
+    /// default: `TrustStore::builder().state_dir(state_dir).build()`.
     ///
     /// # Errors
     ///
     /// [`Error::Io`] when the directories cannot be created.
     pub fn open(state_dir: &Path) -> Result<Self, Error> {
-        Self::builder(state_dir).build()
+        Self::try_from(TrustStoreParts {
+            settings: TrustStoreSettings::default(),
+            state_dir: state_dir.to_path_buf(),
+            clock: None,
+        })
     }
 
     /// This store with a new, empty waiting queue under `settings`, the replacement for the queue it
@@ -516,11 +493,7 @@ impl TrustStore {
     fn reconfigured(mut self, change: impl FnOnce(&mut TrustStoreSettings)) -> Self {
         let mut settings = self.settings();
         change(&mut settings);
-        self.waiting = Arc::new(Mutex::new(
-            WaitingQueue::builder(settings.waiting.limits)
-                .settings(settings.waiting)
-                .build(),
-        ));
+        self.waiting = Arc::new(Mutex::new(WaitingQueue::from_settings(settings.waiting)));
         self.rotation = settings.rotation;
         self
     }
@@ -534,7 +507,7 @@ impl TrustStore {
     }
 
     /// Every setting that differs from its default, named by key path.
-    pub fn non_defaults(&self) -> Vec<NonDefault> {
+    pub fn non_defaults(&self) -> Vec<coqui_builder::NonDefault> {
         self.settings().non_defaults()
     }
 

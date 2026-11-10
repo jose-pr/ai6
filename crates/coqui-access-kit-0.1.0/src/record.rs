@@ -1,7 +1,7 @@
 //! Bounds on the fields of a record a provider keeps.
 
 use coqui_access::Limit;
-use coqui_access::guatiao::{FromValue, Schema, ToValue};
+use coqui_builder::Describe;
 
 use crate::table::check_field;
 
@@ -11,8 +11,7 @@ use crate::table::check_field;
 /// address and 1 024 in a display name. They bound memory and what a log line can carry, not
 /// trust. Every field is also refused when empty or holding a control character
 /// ([`check_field`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Describe)]
 #[non_exhaustive]
 pub struct RecordLimits {
     /// Groups one record holds.
@@ -104,7 +103,7 @@ impl RecordLimits {
 
 #[cfg(test)]
 mod tests {
-    use coqui_access::guatiao::Map;
+    use coqui_builder::Partial;
 
     use super::*;
 
@@ -130,13 +129,13 @@ mod tests {
     #[test]
     fn record_limits_read_from_configuration_with_defaults() {
         assert_eq!(
-            RecordLimits::from_value(&Map::new().into()).unwrap(),
+            Partial::<RecordLimits>::new().build().unwrap(),
             RecordLimits::DEFAULT
         );
-        let mut tuned = Map::new();
-        tuned.set("groups", 4u32);
-        tuned.set("field_bytes", Limit::UNBOUNDED.to_value().unwrap());
-        let read = RecordLimits::from_value(&tuned.into()).unwrap();
+        let mut tuned = Partial::<RecordLimits>::new();
+        tuned.set("groups", "4").unwrap();
+        tuned.set("field_bytes", "none").unwrap();
+        let read = tuned.build().unwrap();
         assert_eq!(
             (read.groups, read.field_bytes),
             (Limit::at(4), Limit::UNBOUNDED)

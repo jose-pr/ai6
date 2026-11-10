@@ -245,6 +245,7 @@ pub mod guatiao::exports::value
 #[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_bool(bool, *mut guatiao::value::value::Value) -> guatiao::value::status::Status
 #[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_bytes(*const guatiao::value::alloc::Allocator, guatiao::value::types::buffer::Bytes<'_>, *mut guatiao::value::value::Value) -> guatiao::value::status::Status
 #[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_clone(*const guatiao::value::alloc::Allocator, *const guatiao::value::value::Value, *mut guatiao::value::value::Value) -> guatiao::value::status::Status
+#[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_display(*const guatiao::value::value::Value, *const guatiao::value::alloc::Allocator, *mut guatiao::value::value::Value) -> guatiao::value::status::Status
 #[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_free(*mut guatiao::value::value::Value) -> guatiao::value::status::Status
 #[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_is_sensitive(*const guatiao::value::value::Value) -> bool
 #[no_mangle] pub unsafe c fn guatiao::exports::value::guatiao_value_list(*const guatiao::value::alloc::Allocator, *mut guatiao::value::value::Value) -> guatiao::value::status::Status
@@ -2637,10 +2638,12 @@ pub fn guatiao::schema::build::KindBuilder::min_length(self, u64) -> guatiao::sc
 pub fn guatiao::schema::build::KindBuilder::multiple_of(self, f64) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::null() -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::null_in(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+pub fn guatiao::schema::build::KindBuilder::nullable(self) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::open_enumeration(&[(&str, &str)]) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::open_enumeration_in(guatiao::value::alloc::Alloc, &[(&str, &str)]) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::pattern(self, &str) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::property_names(self, guatiao::schema::build::KindBuilder) -> guatiao::schema::build::KindBuilder
+pub fn guatiao::schema::build::KindBuilder::sensitive(self) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::string() -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::string_in(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::title(self, &str) -> guatiao::schema::build::KindBuilder
@@ -3379,10 +3382,12 @@ pub fn guatiao::schema::build::KindBuilder::min_length(self, u64) -> guatiao::sc
 pub fn guatiao::schema::build::KindBuilder::multiple_of(self, f64) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::null() -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::null_in(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
+pub fn guatiao::schema::build::KindBuilder::nullable(self) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::open_enumeration(&[(&str, &str)]) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::open_enumeration_in(guatiao::value::alloc::Alloc, &[(&str, &str)]) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::pattern(self, &str) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::property_names(self, guatiao::schema::build::KindBuilder) -> guatiao::schema::build::KindBuilder
+pub fn guatiao::schema::build::KindBuilder::sensitive(self) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::string() -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::string_in(guatiao::value::alloc::Alloc) -> guatiao::schema::build::KindBuilder
 pub fn guatiao::schema::build::KindBuilder::title(self, &str) -> guatiao::schema::build::KindBuilder
@@ -6388,6 +6393,8 @@ impl core::default::Default for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::default() -> guatiao::value::value::Value
 impl core::fmt::Debug for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for guatiao::value::value::Value
+pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Send for guatiao::value::value::Value
 impl core::marker::Sync for guatiao::value::value::Value
 impl core::ops::drop::Drop for guatiao::value::value::Value
@@ -6634,6 +6641,8 @@ pub fn guatiao::value::types::text::Text::try_from(guatiao::value::value::Value)
 impl core::default::Default for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::default() -> guatiao::value::value::Value
 impl core::fmt::Debug for guatiao::value::value::Value
+pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Send for guatiao::value::value::Value
 impl core::marker::Sync for guatiao::value::value::Value
@@ -8685,6 +8694,8 @@ impl core::default::Default for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::default() -> guatiao::value::value::Value
 impl core::fmt::Debug for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for guatiao::value::value::Value
+pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Send for guatiao::value::value::Value
 impl core::marker::Sync for guatiao::value::value::Value
 impl core::ops::drop::Drop for guatiao::value::value::Value
@@ -10659,6 +10670,8 @@ pub fn guatiao::value::types::text::Text::try_from(guatiao::value::value::Value)
 impl core::default::Default for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::default() -> guatiao::value::value::Value
 impl core::fmt::Debug for guatiao::value::value::Value
+pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for guatiao::value::value::Value
 pub fn guatiao::value::value::Value::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Send for guatiao::value::value::Value
 impl core::marker::Sync for guatiao::value::value::Value

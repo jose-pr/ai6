@@ -1,4 +1,4 @@
-# coqui-net-acl/. at 6cbcb4b937ea1902291aaf1636d4d6bd391adc3a, with what it inherits written out.
+# coqui-net-acl/. at 839435acc29b76ec0190b7099f870863313d3fcd, with what it inherits written out.
 [package]
 name = "coqui-net-acl"
 version = "0.0.0-alpha.0"
@@ -20,23 +20,23 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 serde = ["dep:serde"]
-guatiao = ["dep:guatiao"]
+describe = ["dep:coqui-builder"]
 [dependencies]
 [dependencies.serde]
 version = "1"
 default-features = false
 features = ["derive", "std"]
 optional = true
-[dependencies.guatiao]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 default-features = false
 features = ["derive"]
 optional = true
 [dev-dependencies]
 toml = "0.9"
-[dev-dependencies.guatiao-serde]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+[dev-dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 default-features = false
-features = ["json", "toml", "yaml"]
+features = ["derive", "serde"]

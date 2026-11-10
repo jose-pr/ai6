@@ -1,4 +1,4 @@
-# coqui-peer-noise/. at 6fd5137ef13d908581f6d1c9b0ca6b1bc19e3df3, with what it inherits written out.
+# coqui-peer-noise/. at 3a5b30689780a6e6291af565ff6abbaae515973c, with what it inherits written out.
 test = [{ name = "pair", required-features = ["pin"] }, { name = "pair_vectors", required-features = ["pin"] }]
 example = [{ name = "pair", required-features = ["pin"] }]
 [package]
@@ -25,11 +25,10 @@ pin = ["coqui-peer/pin"]
 [dependencies]
 [dependencies.coqui-peer]
 git = "https://github.com/Boriken-Dev/coqui-peer"
-rev = "381e2a8144a228e592dc7d82eeb7db85885422ec"
-[dependencies.guatiao]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-default-features = false
+rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive"]
 [dependencies.x25519-dalek]
 version = "2.0.1"
@@ -58,15 +57,15 @@ default-features = false
 features = ["alloc"]
 [dev-dependencies]
 tempfile = "3"
+toml = "=1.1.8"
 serde_json = "1"
 [dev-dependencies.curve25519-dalek]
 version = "4.1"
 default-features = false
-[dev-dependencies.guatiao-serde]
-git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-default-features = false
-features = ["json", "toml"]
+[dev-dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive", "serde"]
 [dev-dependencies.snow]
 version = "0.10"
 default-features = false

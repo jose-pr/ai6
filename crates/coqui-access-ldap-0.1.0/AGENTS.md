@@ -5,19 +5,19 @@ signature, contract and gotchas, so the crate can be used without reading its so
 ships inside the package and is self-contained. Development documentation lives with the
 source at <https://github.com/Boriken-Dev/coqui-access>.
 
-MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`, `coqui-access-kit` (feature
+MSRV Rust 1.89. No Cargo features. Depends on `coqui-access`, `coqui-builder` (feature `zeroize`), `guatiao-builder`, `coqui-access-kit` (feature
 `cache`, for lookups), `coqui-peer-tls` (for the `ca_file` client configuration), `ldap3` (sync, rustls with ring) and `rustls`. No `unsafe` code. The loadable
 library is the separate crate `coqui-access-ldap-plugin`.
 
 ```rust
-pub struct LdapAccountsConfig {
+pub struct LdapAccountsConfig {            // coqui_builder::Describe; the provider config is guatiao_builder::Described<LdapAccountsConfig>
     pub url: String,                      // ldaps:// or ldap:// with start_tls
     pub start_tls: bool,                  // default false
-    pub cache: CacheSetting,               // default true: lookups kept 5 s, "not found" 1 s
+    pub cache: CacheSetting,               // `true` (default: lookups kept 5 s, "not found" 1 s), `false`, or `{ ttl, negative_ttl, max_entries }`
     pub ca_file: Option<String>,          // PEM; the only trusted roots, under Policy::default()
     pub base: String,                     // search root
     pub bind: Option<String>,             // service account DN
-    pub bind_password: Option<String>,    // set together with bind
+    pub bind_password: Option<Secret<String>>,   // coqui_builder::Secret: wiped on drop, shown as `***`; set together with bind
     pub user_filter: String,              // default "(sAMAccountName={name})"; must contain {name}
     pub name_attribute: String,           // default "sAMAccountName"
     pub group_attribute: String,          // default "memberOf"; empty disables direct groups
@@ -28,7 +28,7 @@ pub struct LdapAccountsConfig {
 }
 pub struct LdapAccounts;                  // provider id "coqui_access_ldap"
 impl LdapAccounts {
-    pub fn new(config: LdapAccountsConfig) -> Result<Self, String>;
+    pub fn new(config: LdapAccountsConfig) -> Result<Self, String>;   // also TryFrom<LdapAccountsConfig> and TryFrom<Described<LdapAccountsConfig>>
     pub fn non_defaults(&self) -> &[coqui_peer_tls::NonDefault];   // what the ca_file TLS config allows past the default
     pub fn cache(&self) -> coqui_access_kit::CacheOptions;     // how lookups are kept
 }

@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-api at 981a64ad05a4039f674d9ca204bf4aaeb6db7398, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-api at c15c0ff96d4bf8b8f56aae671a6ab73f8319825a, with what it inherits written out.
 bin = [{ name = "acp-harness-check", required-features = ["contract"] }]
 example = [{ name = "echo_harness", crate-type = ["cdylib"] }]
 test = [{ name = "echo", required-features = ["contract"] }, { name = "check", required-features = ["contract"] }]
@@ -22,15 +22,15 @@ publish = false
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
-contract = ["dep:serde_json", "dep:coqui-acp", "guatiao/load"]
+contract = ["dep:serde_json", "dep:guatiao-serde", "dep:coqui-acp", "dep:rustix", "dep:win32job", "guatiao/load"]
 [dependencies]
 [dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 features = ["provider"]
 [dependencies.guatiao-channel]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 [dependencies.serde]
 version = "1"
 default-features = false
@@ -41,14 +41,32 @@ optional = true
 [dependencies.serde_json]
 version = "1"
 optional = true
+[dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+default-features = false
+optional = true
+[target]
+[target."cfg(unix)"]
+[target."cfg(unix)".dependencies]
+[target."cfg(unix)".dependencies.rustix]
+version = "1.1"
+default-features = false
+features = ["std", "process"]
+optional = true
+[target."cfg(windows)"]
+[target."cfg(windows)".dependencies]
+[target."cfg(windows)".dependencies.win32job]
+version = "2.0.3"
+optional = true
 [dev-dependencies]
 [dev-dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 features = ["provider", "load"]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 default-features = false
 [dev-dependencies.serde_json]
 version = "1"

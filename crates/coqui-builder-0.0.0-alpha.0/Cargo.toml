@@ -1,0 +1,50 @@
+# coqui-builder/. at c1875f8276bd6366c38e9133fdb1181a0ffbaaad, with what it inherits written out.
+test = [{ name = "shapes", required-features = ["derive", "std"] }, { name = "derive_leaf", required-features = ["derive"] }, { name = "option_none", required-features = ["derive"] }, { name = "meaning", required-features = ["derive"] }, { name = "differences_vectors", required-features = ["derive"] }, { name = "credential", required-features = ["derive"] }, { name = "profile", required-features = ["derive"] }, { name = "partial", required-features = ["derive"] }, { name = "source", required-features = ["derive"] }, { name = "env", required-features = ["derive", "std"] }, { name = "inspect", required-features = ["derive"] }, { name = "report", required-features = ["derive"] }, { name = "non_defaults", required-features = ["derive"] }, { name = "describable", required-features = ["derive"] }, { name = "union", required-features = ["derive", "std"] }, { name = "builder", required-features = ["derive", "std"] }, { name = "configured", required-features = ["derive"] }, { name = "secret", required-features = ["zeroize", "derive"] }, { name = "serde_partial", required-features = ["serde", "derive"] }, { name = "settings_shapes", required-features = ["derive", "std"] }, { name = "primitive_setters", required-features = ["derive", "std"] }, { name = "setters_on", required-features = ["derive", "std"] }]
+[package]
+name = "coqui-builder"
+version = "0.0.0-alpha.0"
+description = "Describe, fill, check and build any struct field by field: builders, partials and profiles, with no dependencies"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-builder"
+homepage = "https://boriken-dev.github.io/coqui-builder/"
+keywords = ["builder", "settings", "configuration", "profile"]
+categories = ["config", "no-std"]
+exclude = [".*", "*.local.*", "/tools/"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[dependencies]
+[dependencies.coqui-builder-derive]
+version = "=0.0.0-alpha.0"
+path = "crates/coqui-builder-derive"
+optional = true
+[dependencies.zeroize]
+version = "1.9.1"
+optional = true
+default-features = false
+features = ["alloc"]
+[dependencies.serde]
+version = "1.0.229"
+optional = true
+default-features = false
+features = ["alloc"]
+[dev-dependencies]
+serde_json = "1"
+toml = "=1.1.8"
+[features]
+default = ["std"]
+std = []
+derive = ["dep:coqui-builder-derive"]
+zeroize = ["dep:zeroize"]
+serde = ["dep:serde"]
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unsafe_code = "forbid"

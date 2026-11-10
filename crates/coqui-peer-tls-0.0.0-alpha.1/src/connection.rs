@@ -14,7 +14,7 @@ use rustls::{DigitallySignedStruct, DistinguishedName, ServerConfig, SignatureSc
 use crate::config::Base;
 use crate::error::{PeerError, Refusal};
 use crate::trust::PeerClientVerifier;
-use coqui_peer::NonDefault;
+use coqui_builder::NonDefault;
 
 /// The server configurations of one listener whose connections reach rustls without this
 /// crate's accept helpers, such as quinn, which runs the verifier on threads of its own and

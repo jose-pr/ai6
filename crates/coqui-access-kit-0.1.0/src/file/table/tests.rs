@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use coqui_access::guatiao::{FromValue, Schema, ToValue};
+use coqui_builder::{Leaf, Partial};
 use serde::de::DeserializeSeed;
 
 use super::*;
@@ -32,8 +33,8 @@ fn item(name: &str) -> Item {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromValue, Schema, ToValue)]
-#[map(crate = ::coqui_access::guatiao, rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Leaf)]
+#[map(rename_all = "lowercase")]
 enum Format {
     Toml,
     Json,
@@ -264,17 +265,21 @@ fn a_source_names_one_kind_and_a_sibling_beside_it() {
 
 #[test]
 fn a_source_reads_from_configuration_and_needs_a_format() {
-    let written = Source::file("items.json", Format::Json).to_value().unwrap();
-    assert_eq!(
-        Source::<Format>::from_value(&written).unwrap(),
-        Source::file("items.json", Format::Json)
-    );
-    let read = |text: &str| {
-        let value =
-            guatiao_serde::from_serde(&mut serde_json::Deserializer::from_str(text)).unwrap();
-        Source::<Format>::from_value(&value)
+    let read = |keys: &[(&str, &str)]| -> Option<Source<Format>> {
+        let mut partial = Partial::<Source<Format>>::new();
+        for (key, text) in keys {
+            partial.set(key, text).ok()?;
+        }
+        partial.build().ok()
     };
-    assert!(read(r#"{"file": {"path": "items.json", "format": "json"}}"#).is_ok());
-    assert!(read(r#"{"file": {"path": "items.json"}}"#).is_err());
-    assert!(read(r#"{"file": {"path": "items.json", "format": "yaml"}}"#).is_err());
+    assert_eq!(
+        read(&[("file.path", "items.json"), ("file.format", "json")]),
+        Some(Source::file("items.json", Format::Json))
+    );
+    assert_eq!(read(&[]), Some(Source::<Format> { file: None }));
+    assert_eq!(read(&[("file.path", "items.json")]), None);
+    assert_eq!(
+        read(&[("file.path", "items.json"), ("file.format", "yaml")]),
+        None
+    );
 }

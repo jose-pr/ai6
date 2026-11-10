@@ -11,7 +11,7 @@ use guatiao::Status;
 use guatiao::library::{Object, ProviderError};
 use guatiao_channel::{Channel, ChannelSink};
 
-use super::host::{PATIENCE, handed};
+use super::host::{self, PATIENCE};
 use crate::{AcpHarness, StartRequest};
 
 /// The sink: hands each message to the transport's reader.
@@ -80,12 +80,15 @@ impl Write for Outbox {
 
 pub(super) fn serves_the_client(harness: &dyn AcpHarness, cwd: &str) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
-    let (_shared, spawner, _unused_sink) = handed();
+    let host::Handed {
+        spawner, keeper, ..
+    } = host::handed();
     let channel = harness
         .start(
             StartRequest::new(),
             spawner,
             Forward(Some(tx)).into_object(),
+            keeper,
         )
         .map_err(|e| format!("start refused: {}", e.message()))?;
     let inbox = Inbox {

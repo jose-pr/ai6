@@ -51,7 +51,7 @@ cargo add coqui-peer@0.0.0-alpha.1
 | `pin` | `spake2`, `hkdf`, `hmac`, `rand_core` | PIN pairing (`Pairing::pin`), `Random::os` | off |
 | `coqui-transport` | `coqui-transport` | module `transport`: `PeerFrame`, and a `coqui-transport` channel as a `MessageTransport` | off |
 
-Rust 1.89 or later. A default build depends on `data-encoding`, `guatiao`, `guatiao-serde`, `sha1`, `sha2`, `subtle` and
+Rust 1.89 or later. A default build depends on `coqui-builder` (`derive`), `data-encoding`, `sha1`, `sha2`, `subtle` and
 `zeroize`.
 
 ## Quick start
@@ -76,7 +76,7 @@ assert_eq!(pinned, key.id());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Settings go in a builder, by name, and a settings type fills them whole from a file:
+Settings go in a builder, by name, and a `Partial` of a settings type fills them whole from a file:
 
 ```rust,no_run
 use std::time::Duration;
@@ -84,7 +84,8 @@ use coqui_peer::{TrustStore, TrustStoreSettings, WaitingLimits, WhenFull};
 
 let mut limits = WaitingLimits::default();
 limits.per_source = 4;
-let store = TrustStore::builder(std::path::Path::new("/var/lib/app"))
+let store = TrustStore::builder()
+    .state_dir("/var/lib/app")
     .limits(limits)
     .when_full(WhenFull::ReplaceOldest)
     .record_interval(Duration::from_millis(500))
@@ -97,9 +98,10 @@ for setting in store.non_defaults() {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`TrustStoreSettings`, `WaitingSettings`, `pair::PairingDeskSettings` and the option types they hold are
-guatiao values: `guatiao_serde::text::toml` (or json, yaml) reads them, an absent key is its default and an
-unknown key is refused. `builder(..).settings(s)` takes one whole.
+`TrustStoreSettings`, `WaitingSettings`, `pair::PairingDeskSettings` and the option types they hold
+derive `coqui_builder::Describe`: a `Partial` of one reads from TOML, JSON or the environment (`coqui-builder`'s
+`serde` feature and `Env`), an absent key is its default and an unknown key is refused. `builder().fill(partial)`
+takes one whole; the directory is not a key, it is the builder's `state_dir`.
 
 Running a method's handshake over a stream, with a deadline:
 
@@ -114,7 +116,7 @@ let channel = established.session;          // what the method produced
 
 | Module | Purpose |
 | --- | --- |
-| `coqui_peer` | `PeerId`, `Digest`; `TrustStore`, `WaitingQueue`, invitations and rotation; `KeyMaterial`; `Clock`, `Random`, `NonDefault`; the `Handshake` and `Method` traits, the drivers and the frame functions; `Error`. |
+| `coqui_peer` | `PeerId`, `Digest`; `TrustStore`, `WaitingQueue`, invitations and rotation; `KeyMaterial`; `Clock`, `Random`; the `Handshake` and `Method` traits, the drivers and the frame functions; `Error`. |
 | `coqui_peer::pair` | Pairing by invitation, PIN or device flow: `Pairing`, `PairingJoiner`, `PairingResponder`, `PairingDesk` and their options. |
 | `coqui_peer::asynch` | The drivers and frame functions over tokio streams and async message transports (`tokio`). |
 | `coqui_peer::file` | Atomic writes: `write_new` never replaces, `replace` does; owner-only on request. |

@@ -9,52 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Builders.** `ServerBuilder::new(&identity, ClientAuth)` and `ClientBuilder::new(impl
-  Into<ServerAuth>)` build a configuration by setting name (`alpn`, `policy`, `identity`,
-  `settings`), then `build()`; `ServerBuilder::configs()` gives the `ServerConfigs` of a listener.
+- **Builders.** `ServerBuilder::new()` (`identity`, `client_auth`) and `ClientBuilder::new()` (`server`,
+  `identity`) build a configuration by setting name (`alpn`, `policy`, `fill`, `fill_from`), then
+  `build()`; `ServerBuilder::configs()` gives the `ServerConfigs` of a listener. They are derived by
+  coqui-builder from `ServerParts` and `ClientParts`; `build` returns `BuildError<PeerError>`
+  (`Missing` names an input not given, `Failed` is the `PeerError`), and a builder is not `Clone`.
+  The setters of `TlsSettings` are methods of the two builders, and `coqui_peer_tls::prelude` has the
+  setter traits (`TlsSettingsSetters`, `PolicySetters`, `PairConfigSetters`) for a builder in another crate.
   The choices the old function names encoded are values: `ClientAuth::{None, Required(Trust),
   Verifier(..)}` for a server and `ServerAuth::{Trust(Trust), Verifier(..)}` for a client (a
   `Trust` converts into it). `Identity::builder()` (`not_before`, `not_after`, `valid_for`, then
   `generate()`) does the same for a generated identity; `valid_for` and `not_after` set one end,
   and the last called wins.
-- `TlsSettings { alpn, policy }`, `Policy` and `PairConfig` derive guatiao's `ToValue`, `FromValue`
-  and `Schema` in every build, so TOML, JSON and YAML read into them through `guatiao-serde` and
-  the schema carries the defaults; builders take `settings(TlsSettings)`. `alpn` entries are text
-  of 1 to 255 bytes. `Policy::from_value_over` reads a document over a base policy, merging key by
-  key.
+- `TlsSettings { alpn, policy }`, `Policy` and `PairConfig` derive `coqui_builder::Describe` in every
+  build, so a `coqui_builder::Partial` of each is filled from text (coqui-builder's `serde` feature
+  reads TOML, JSON and the other serde formats; `Env` reads the environment) and built, with the
+  defaults the real ones. `Alpn` is an application protocol name of 1 to 255 bytes held as text, with
+  `TryFrom<&str>` and `TryFrom<&[u8]>`. `Policy::deserialize_over` (`serde`) reads a document over a
+  base policy, merging key by key. `Built::non_defaults()` and the builders' `non_defaults()` come
+  from coqui-builder's `Configured`.
 - `PeerServerVerifier::new(&trust, &policy)` and `PeerClientVerifier::builder(&trust)` (`policy`,
   `addresses`, `build`) are the verifiers; `Addressed::new(io, source).local(local)` wraps a stream
   that cannot name its addresses, for `accept`, `pair_accept` and their async forms.
-- Coqui-net-acl's `Acl`, coqui-peer's `WaitingLimits` and `Digest` are guatiao values in their own
-  crates.
+- Coqui-net-acl's `Acl` (feature `describe`), coqui-peer's `WaitingLimits` and `Digest` are described by
+  coqui-builder in their own crates.
 
 ### Changed
 
-- **Breaking: the text form of `Policy` is the guatiao form.** The `serde` feature forwards to it.
+- **Breaking: the text form of `Policy` is read through coqui-builder.** The `serde` feature reads
+  `Policy` through it and never writes one.
   The flat `waiting_per_source`, `waiting_total` and `waiting_rerecord_secs` are the table `waiting`
-  (`per_source`, `total`, `rerecord`, a duration: a number of seconds, `[secs, nanos]` or
-  `{secs, nanos}`). The earlier form's `policy_version`, `profile` and flat `waiting_*` keys are unknown
-  keys now; a stored document is rewritten once. The vectors in `tests/vectors/policy/` are
-  regenerated.
+  (`per_source`, `total`, `rerecord`, a duration: `60`, `30s`, `250ms`; `[secs, nanos]` and
+  `{secs, nanos}` are not read). The earlier form's `policy_version`, `profile` and flat `waiting_*` keys are unknown
+  keys now; a stored document is rewritten once. The vectors in `tests/vectors/policy/` write
+  `rerecord` as `"60s"`.
 - **Breaking: `Policy`, `PairConfig` and `Built` are `#[non_exhaustive]`.** Start from a preset or
   `Default` and assign fields; a struct literal no longer compiles outside the crate.
-- **Breaking: the `guatiao` types are in every build.** `guatiao` is a normal dependency; `serde`
-  is the only optional layer.
-- **Breaking: `Policy::non_defaults` is the places where the policy departs from the schema's
-  defaults** (`guatiao::schema::differences`), not a hand-kept list of looser settings. It names a
+- **Breaking: the settings types are described in every build.** `coqui-builder` is a normal
+  dependency; `serde` is the only optional layer. `guatiao` and `guatiao-serde` are no dependency.
+- **Breaking: `Policy::non_defaults` is the places where the policy departs from the defaults**
+  (`coqui_builder::non_defaults`), not a hand-kept list of looser settings. It names a
   setting by its key path (`waiting.per_source`), reports `crypto`, `cipher_profiles`,
   `cipher_suites` and `kx_groups`, which it never did, and reports a stricter setting too, so
-  `Policy::modern()` lists `tls_versions`. Values are text, or compact JSON for a list or a
-  duration (`["1.3"]`, `[60,0]`); `non_defaults_against(&base)` compares with `base`.
+  `Policy::modern()` lists `tls_versions`. `value` and `default` are `coqui_builder::Shown`, printed
+  as their type and text (`bool(true)`, `Duration(60s)`, `[TlsVersion(1.3)]`, `unset`);
+  `non_defaults_against(&base)` compares with `base`. An access list present is one entry, `acl`.
 - **Breaking: a weakened setting is a non-default setting.** `Policy::weakened` and `weakened_against` are
   `non_defaults` and `non_defaults_against`, `ServerConfigs::weakened` is `non_defaults`, and the public field
-  `Built::weakened` is `Built::non_defaults` . The entries are coqui-peer's
-  `NonDefault { setting, value, default }` (its `strict` field is now `default`) and coqui-net-acl's likewise.
+  `Built::weakened` is `Built::non_defaults()`. The entries are `coqui_builder::NonDefault
+  { setting, value, default }` (`NonDefault` is re-exported from there, no longer from coqui-peer).
   The old names are gone: nothing keeps an alias before a release without a pre-release tag.
+- **Breaking: `Built::non_defaults` is a method.** `Built` holds the `Policy` it was built under
+  (`Built::policy`); `non_defaults()` lists that policy's settings that differ from the default,
+  named as `Policy::non_defaults` names them (`tls_versions`). The builders' own `non_defaults()` is
+  over `TlsSettings`: its keys carry the `policy.` prefix (`policy.tls_versions`) and `alpn` is
+  listed when set.
+- **Breaking: `ServerBuilder::new(&identity, auth)` is `ServerBuilder::new().identity(&identity).client_auth(auth)`, and
+  `ClientBuilder::new(server)` is `ClientBuilder::new().server(server)`.** `build` and `configs`
+  return `Result<_, BuildError<PeerError>>`; `settings(s)` is `fill(Partial::from(s))`. The builders
+  are no longer `Clone`.
+- **Breaking: an application protocol is an `Alpn`** (text of 1 to 255 bytes): `TlsSettings::alpn` is
+  `Vec<Alpn>`, the builders' `alpn` takes `Vec<Alpn>` instead of raw byte strings, and a protocol
+  name that is not UTF-8 cannot be offered. `PairConfig::alpn` is an `Alpn`.
+- **Breaking: `PairConfig::timeout` is `Option<Duration>`.** `None`, the text `never`, replaces
+  `Duration::MAX` as no deadline.
 
 ### Removed
 
 - **Breaking:** `Policy::name`, which was informational and changed nothing.
+- **Breaking:** `Policy::from_value_over`, `impl Serialize for Policy` and the `Serialize` and `Deserialize`
+  impls of `TlsSettings` and `PairConfig`; a settings value is read through a `coqui_builder::Partial`
+  and never written. `Policy` keeps `Deserialize` and `Policy::deserialize_over` (`serde`).
+- **Breaking:** the raw-bytes `alpn` setter of the builders, and the `guatiao` and `guatiao-serde`
+  dependencies.
 - **Breaking:** the `client_auth = none` entry that every server-TLS configuration added to its list, and
   `CLIENT_AUTH_SETTING` with it: choosing the server-TLS function is the choice, not a setting left off its default.
 

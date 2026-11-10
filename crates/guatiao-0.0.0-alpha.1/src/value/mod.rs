@@ -16,6 +16,7 @@ pub mod alloc;
 // with that module's own `//!` header, resolves its links in THIS scope,
 // and reports the dead ones with no file or line to find them by.
 pub mod convert;
+mod display;
 pub mod error;
 pub mod merge;
 mod raw;

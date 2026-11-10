@@ -41,8 +41,8 @@ let authorizer = RoleAuthorizer::builder()
 ```
 
 `RolePolicy` holds the same data (`scope_kinds`, `roles`, `rules`) for a caller that keeps
-its policy elsewhere: `RoleAuthorizer::new(policy)`. It derives guatiao's value traits, so
-any format carries it, and it is the configuration of the `coqui_roles` provider
+its policy elsewhere: `RoleAuthorizer::new(policy)`. It derives `coqui_builder::Describe`, so
+any format fills it (`Partial<RolePolicy>`), and it is the configuration of the `coqui_roles` provider
 `RoleAuthorizer` derives.
 
 The plugin takes `{ "scope_kinds": ["site"], "roles": [{ "name": "viewer", "actions":
@@ -55,7 +55,7 @@ The plugin takes `{ "scope_kinds": ["site"], "roles": [{ "name": "viewer", "acti
 | --- | --- |
 | `RoleAuthorizer` | `builder()`, `new(policy)`; implements `Authorizer`. |
 | `RoleAuthorizerBuilder` | `scope_kinds`, `role`, `rule`, `build`. |
-| `RolePolicy`, `Role`, `Rule` | The policy as plain data and provider configuration; guatiao value traits. |
+| `RolePolicy`, `Role`, `Rule` | The policy as plain data and provider configuration; `Describe`. |
 | `RolePolicyError` | An invalid policy. |
 | `RoleLimits` | The bounds, each a `coqui_access::Limit` the caller changes or lifts. |
 

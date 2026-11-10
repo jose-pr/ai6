@@ -1,18 +1,19 @@
 //! The settings of the methods as plain values a file, a form or a peer fills.
 
+use crate::handshake::WebCryptoBuilder;
 use crate::message::DEFAULT_MAX_MESSAGE;
+use crate::pairing::PairingMethodBuilder;
 use crate::session::DEFAULT_SESSION_LIMIT;
 
-/// What a [`WebCryptoBuilder`](crate::WebCryptoBuilder) takes whole through `settings`.
+/// What a [`WebCryptoBuilder`](crate::WebCryptoBuilder) collects as settings, in the form a file,
+/// a form or a peer fills.
 ///
 /// Identities, trust and the random source are not settings: they hold keys and code, so the
-/// builder takes them as arguments. Every key is optional (an absent one is its default) and an
-/// unknown key is refused. The type is a guatiao value (`from_value`, `to_value`, `schema`), and
-/// `guatiao_serde::text` reads and writes its text. It is `#[non_exhaustive]`: start from
-/// [`Default`] and assign the fields.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+/// builder takes them as inputs. Every key is optional (an absent one is its default) and an
+/// unknown key is refused. The type is `Describe`, so a `Partial<WebCryptoSettings>` is filled
+/// from text and built. It is `#[non_exhaustive]`: start from [`Default`] and assign the fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, coqui_builder::Describe)]
+#[builder(setters_on = WebCryptoBuilder)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WebCryptoSettings {
@@ -37,13 +38,12 @@ impl Default for WebCryptoSettings {
     }
 }
 
-/// What a [`PairingMethodBuilder`](crate::PairingMethodBuilder) takes whole through `settings`.
+/// What a [`PairingMethodBuilder`](crate::PairingMethodBuilder) collects as settings.
 ///
 /// Read as [`WebCryptoSettings`] is. A pairing session carries no application records, so it has no
 /// session limit.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, coqui_builder::Describe)]
+#[builder(setters_on = PairingMethodBuilder)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PairingSettings {

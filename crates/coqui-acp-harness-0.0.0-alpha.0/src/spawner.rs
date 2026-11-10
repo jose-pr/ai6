@@ -8,15 +8,17 @@ use alloc::vec::Vec;
 use core::time::Duration;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{
-    Environment, ErrorOutput, LinkState, ProcessExit, ProcessSpawner, READ_LINK_DOWN,
-    READ_TIMED_OUT, SpawnSpec, SpawnedProcess, SpawnerInfo, TerminalSize,
+    Environment, ErrorOutput, FileInfo, LinkState, PrivateDir, ProcessExit, ProcessSpawner,
+    READ_LINK_DOWN, READ_TIMED_OUT, SecretBytes, SpawnSpec, SpawnedProcess, SpawnerInfo,
+    TerminalSize,
 };
 
 use crate::process::{ErrorStream, Exit, Launch, Process, Spawn, Spawned, start};
@@ -27,10 +29,14 @@ use crate::process::{ErrorStream, Exit, Launch, Process, Spawn, Spawned, start};
 /// A process's tree ends at `kill`, when it is destroyed, and when the host ends without either:
 /// [`PlainSpawn`](crate::PlainSpawn) says how on each platform. No terminal: a spec asking for one is
 /// refused `GUATIAO_ERR_UNSUPPORTED`.
-#[derive(Clone, Copy, Debug)]
+///
+/// It serves the kind's file methods in one directory when given one with [`files`](Self::files),
+/// and says `files` false and refuses them `GUATIAO_ERR_UNSUPPORTED` otherwise.
+#[derive(Clone, Debug)]
 #[must_use]
 pub struct LocalSpawner {
     buffer: usize,
+    files: Option<PrivateDir>,
 }
 
 impl Default for LocalSpawner {
@@ -42,13 +48,31 @@ impl Default for LocalSpawner {
 impl LocalSpawner {
     /// A spawner holding at most 1 MiB of each output stream unread.
     pub const fn new() -> Self {
-        Self { buffer: 1 << 20 }
+        Self {
+            buffer: 1 << 20,
+            files: None,
+        }
     }
 
     /// Holds at most `bytes` of each output stream unread; past it, the program waits to write.
     pub const fn buffer(mut self, bytes: usize) -> Self {
         self.buffer = bytes;
         self
+    }
+
+    /// Serves the file methods in `dir`, which must exist: an account's private directory.
+    pub fn files(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.files = Some(PrivateDir::new(dir));
+        self
+    }
+
+    fn root(&self) -> Result<&PrivateDir, ProviderError> {
+        self.files.as_ref().ok_or_else(|| {
+            refused(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "this spawner has no private files",
+            )
+        })
     }
 }
 
@@ -72,6 +96,7 @@ impl ProcessSpawner for LocalSpawner {
         info.separate_error = true;
         info.kills_escaped = cfg!(any(windows, target_os = "linux", target_os = "android"));
         info.ends_with_host = cfg!(any(windows, unix));
+        info.files = self.files.is_some();
         Ok(info)
     }
 
@@ -107,6 +132,29 @@ impl ProcessSpawner for LocalSpawner {
         Ok(LocalProcess::new(spawned, self.buffer)
             .map_err(|e| io_refused(&e))?
             .into_object())
+    }
+
+    fn write_file(
+        &self,
+        path: &str,
+        bytes: Secret<SecretBytes>,
+        private: bool,
+    ) -> Result<(), ProviderError> {
+        self.root()?.write(path, bytes.expose().as_slice(), private)
+    }
+
+    fn read_file(&self, path: &str, max_bytes: u64) -> Result<Secret<SecretBytes>, ProviderError> {
+        self.root()?
+            .read(path, max_bytes)
+            .map(|bytes| Secret::new(SecretBytes::new(bytes)))
+    }
+
+    fn file_info(&self, path: &str) -> Result<Option<FileInfo>, ProviderError> {
+        self.root()?.info(path)
+    }
+
+    fn remove_file(&self, path: &str) -> Result<(), ProviderError> {
+        self.root()?.remove(path)
     }
 }
 

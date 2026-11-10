@@ -9,21 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Breaking: the builders and settings are derived by `coqui-builder`.** `WebCrypto::builder()` and
+  `PairingMethod::builder()` take no arguments: the identity is the input `.identity(..)`, and `build()` returns
+  `Result<_, Missing>`, an error naming `identity` until it is given. `WebCryptoBuilder` and `PairingMethodBuilder`
+  are no longer `Clone`; `responders`, `initiators` and `random` take `impl Into<..>`. The settings' keys are
+  setters of the builders (`max_message`, `session_limit`), `fill(Partial<..>)` and `fill_from(source)` layer a
+  document or the environment under them, and `WebCryptoParts` and `PairingMethodParts` are what a builder
+  collects. `WebCryptoSettings` and `PairingSettings` derive `coqui_builder::Describe` and are read as
+  `Partial<..>`; their keys, defaults and the refusal of unknown keys are unchanged. The setter traits are in
+  `prelude`.
+- **Breaking: `NonDefault` is `coqui_builder::NonDefault`**, re-exported at the root. Its `value` and `default` are
+  shown as `Type(text)`: `usize(4096)`, `u64(1000)`, and `Random(caller's)` against `Random(operating system's)`.
+- `coqui-peer` is pinned at `984db3d`, and `guatiao` and `guatiao-serde` are no longer dependencies.
 - **Breaking: a weakened setting is a non-default setting.** `WebCrypto::non_defaults` and `PairingMethod::non_defaults` return coqui-peer's `NonDefault { setting, value, default }`,
   one for every setting that differs from its default, named by key path (`max_message`, `session_limit`), and
   `random` when it is replaced.
 
 ### Removed
 
+- **Breaking:** `WebCryptoBuilder::settings` and `PairingMethodBuilder::settings`: `fill(Partial::from(settings))`
+  takes a whole settings value. The `ToValue`, `FromValue` and `Schema` derives of `WebCryptoSettings` and
+  `PairingSettings`, and the writing of their text, with the `guatiao` and `guatiao-serde` dependencies.
 - **Breaking:** the always-on `initiators` and `responders` = `any-with-key-proof` entries of a pairing method:
   admitting any proved key is what a pairing method is, not a setting left off its default.
 
 ### Added
 
-- **Builders and settings.** `WebCrypto::builder(identity)` and `PairingMethod::builder(identity)` set a method up by
-  the setting's name (`responders`, `initiators`, `max_message`, `session_limit`, `random`, `settings`), then `build()`;
-  there is no `new`. `WebCryptoSettings { max_message, session_limit }` and `PairingSettings { max_message }` are guatiao
-  values a file fills, and `settings(..)` takes one whole. `WebCryptoHandshake::bind` sets the outer-channel binding.
+- **Builders and settings.** `WebCrypto::builder()` and `PairingMethod::builder()` set a method up by the
+  setting's name (`identity`, `responders`, `initiators`, `max_message`, `session_limit`, `random`), then `build()`;
+  there is no `new`. `WebCryptoSettings { max_message, session_limit }` and `PairingSettings { max_message }` are
+  values a file fills. `WebCryptoHandshake::bind` sets the outer-channel binding.
 - `WebCrypto` and `WebCryptoHandshake`: the `coqui_peer::Method` named `webcrypto`, as initiator and
   responder, ending in a `Session`.
 - `Session`, `Sealer`, `Opener`: an id both ends agree on, per-direction AES-256-GCM records with an inner

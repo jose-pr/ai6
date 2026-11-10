@@ -1,4 +1,4 @@
-# coqui-access/providers/access/ldap/plugin at 253add5b09384ee73a89e7ea2880e430e3976fbd, with what it inherits written out.
+# coqui-access/providers/access/ldap/plugin at ce68969a397073dcef0a37fb00a83888b767e273, with what it inherits written out.
 [package]
 name = "coqui-access-ldap-plugin"
 description = "coqui-access-ldap as a library a host loads"

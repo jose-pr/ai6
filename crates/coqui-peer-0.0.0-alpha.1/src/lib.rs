@@ -20,9 +20,9 @@ pub mod file;
 mod id;
 mod key;
 mod method;
-mod non_default;
 pub mod pair;
 pub mod pem;
+pub mod prelude;
 mod random;
 mod store;
 #[cfg(feature = "coqui-transport")]
@@ -39,14 +39,13 @@ pub use error::Error;
 pub use id::{Digest, PeerId};
 pub use key::{KeyMaterial, MAX_KEY_BYTES};
 pub use method::{Established, Framing, Handshake, Method};
-pub use non_default::NonDefault;
 pub use random::Random;
 pub use store::{
     FORMAT_VERSION, Invitation, InvitationEntry, InvitationId, InvitationOptions, MAX_LABEL,
     Retiring, RotationEvent, RotationOptions, Successor, TrustStore, TrustStoreBuilder,
-    TrustStoreSettings, WaitingEntry, WaitingLimits,
+    TrustStoreParts, TrustStoreSettings, WaitingEntry, WaitingLimits,
 };
 pub use waiting::{
-    Admission, DEFAULT_RECORD_INTERVAL, WaitingQueue, WaitingQueueBuilder, WaitingSettings,
-    WhenFull,
+    Admission, DEFAULT_RECORD_INTERVAL, WaitingQueue, WaitingQueueBuilder, WaitingQueueParts,
+    WaitingSettings, WhenFull,
 };

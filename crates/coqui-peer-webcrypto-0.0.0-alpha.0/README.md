@@ -70,8 +70,8 @@ impl MessageTransport for Pipe {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (dialer, listener) = (Identity::generate()?, Identity::generate()?);
-    let client = WebCrypto::builder(dialer.clone()).responders(Trust::pinned([listener.peer_id()])).build();
-    let server = WebCrypto::builder(listener).initiators(Trust::pinned([dialer.peer_id()])).build();
+    let client = WebCrypto::builder().identity(dialer.clone()).responders(Trust::pinned([listener.peer_id()])).build()?;
+    let server = WebCrypto::builder().identity(listener).initiators(Trust::pinned([dialer.peer_id()])).build()?;
 
     let ((to_server, from_client), (to_client, from_server)) = (channel(), channel());
     let serving = thread::spawn(move || {

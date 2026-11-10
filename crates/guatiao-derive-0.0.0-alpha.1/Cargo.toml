@@ -1,4 +1,4 @@
-# guatiao/crates/guatiao-derive at 0350bae7fef4cef2aa46ce73f1ef6be15983d83b, with what it inherits written out.
+# guatiao/crates/guatiao-derive at e0136dcc9760ddd6dd8dc89fc4d41320eec6306e, with what it inherits written out.
 [package]
 name = "guatiao-derive"
 description = "Derive macros for guatiao: ToValue, FromValue and Schema, and, behind features, the `kind` attribute and the Provider and Form derives -- the proc-macro half, reached through `guatiao` features"

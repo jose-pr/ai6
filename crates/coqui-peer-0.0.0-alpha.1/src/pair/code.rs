@@ -12,7 +12,7 @@ use crate::random::Random;
 /// what a person typed, and grouping a code for display, is the caller's. Any alphabet and
 /// length with a meaning is accepted; [`combinations`](CodeAlphabet::combinations) says how many
 /// codes there are, which is what an attacker's one guess is against.
-#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[derive(Debug, Clone, PartialEq, Eq, coqui_builder::Describe)]
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct CodeAlphabet {

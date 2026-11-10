@@ -4,11 +4,13 @@
 
 extern crate alloc;
 
+pub mod accounts;
 mod agent;
 mod launch;
 mod limits;
 pub mod mode;
 pub mod parse;
+mod provider;
 mod session;
 
 use alloc::string::String;
@@ -22,6 +24,7 @@ pub use launch::{
     ClientInfo, CodexLaunch, ThreadStart, toml_value, valid_config_key, valid_thread_id,
 };
 pub use parse::{Parser, ParserLimits};
+pub use provider::{CodexProvider, ProviderSettings};
 pub use session::{
     AnswerCheck, CodexSession, CodexSettings, Model, models_of, user_input, version_of,
 };

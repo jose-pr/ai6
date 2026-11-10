@@ -14,13 +14,15 @@ A kind is a C ABI. Its table carries a hash of every slot as spelled, so adding,
 
 | kind | table | `FLOOR_HASH` | who implements it |
 | --- | --- | --- | --- |
-| `acp_harness` | `AcpHarnessVtable` | `1326996142` | the provider |
+| `acp_harness` | `AcpHarnessVtable` | `4111118208` | the provider |
 | `channel` | `ChannelVtable` | `3787630980` | the provider (Guatiao's, re-exported) |
 | `channel_sink` | `ChannelSinkVtable` | `4115266557` | the host (Guatiao's, re-exported) |
-| `process_spawner` | `ProcessSpawnerVtable` | `1466370631` | the host |
+| `process_spawner` | `ProcessSpawnerVtable` | `4134697914` | the host |
 | `spawned_process` | `SpawnedProcessVtable` | `3306532587` | the host |
+| `account_keeper` | `AccountKeeperVtable` | `708146915` | the host |
+| `login_prompter` | `LoginPrompterVtable` | `2606822037` | the host |
 
-The package holds all five as data in `include/coqui_acp_api.kinds.json`, every model's JSON Schema in `include/coqui_acp_api.schemas.json`, and the kinds for Python in `python/coqui_acp_api_kinds.py` (written by `python/write_kinds.py`).
+The package holds all seven as data in `include/coqui_acp_api.kinds.json`, every model's JSON Schema in `include/coqui_acp_api.schemas.json`, and the kinds for Python in `python/coqui_acp_api_kinds.py` (written by `python/write_kinds.py`).
 
 **How the kind changes.** Until its first release every method a harness has to answer is required, and a method added or changed is a break: every provider rebuilds, and the hash moves. No compatibility code is kept: no default so that an older provider loads, no deprecated alias, no reading of an older request's shape. After its first release the kind grows only by appending, as Guatiao provides for released kinds.
 
@@ -30,37 +32,44 @@ The package holds all five as data in `include/coqui_acp_api.kinds.json`, every 
 #[guatiao::kind(name = "acp_harness")]
 pub trait AcpHarness: Send + Sync {
     fn describe(&self) -> Result<HarnessInfo, ProviderError>;
-    fn start(&self, request: StartRequest, spawner: Object<dyn ProcessSpawner>, sink: Object<dyn ChannelSink>)
-        -> Result<Object<dyn Channel>, ProviderError>;
-    fn refusal(&self, requirements: Vec<Requirement>, environment: Secret<Environment>)
+    fn accounts(&self) -> Result<AccountCatalog, ProviderError>;
+    fn start(&self, request: StartRequest, spawner: Object<dyn ProcessSpawner>, sink: Object<dyn ChannelSink>,
+             keeper: Object<dyn AccountKeeper>) -> Result<Object<dyn Channel>, ProviderError>;
+    fn refusal(&self, requirements: Vec<Requirement>, environment: Secret<Environment>, account: Option<AccountRef>)
         -> Result<Option<String>, ProviderError>;
     fn program(&self) -> Result<Option<String>, ProviderError>;
-    fn import_session(&self, session: SessionImport, spawner: Object<dyn ProcessSpawner>)
+    fn import_session(&self, session: SessionImport, spawner: Object<dyn ProcessSpawner>, keeper: Object<dyn AccountKeeper>)
         -> Result<ImportReport, ProviderError>;
-    fn export_session(&self, export: SessionExport, spawner: Object<dyn ProcessSpawner>)
+    fn export_session(&self, export: SessionExport, spawner: Object<dyn ProcessSpawner>, keeper: Object<dyn AccountKeeper>)
         -> Result<ExportPage, ProviderError>;
-    fn models(&self, environment: Secret<Environment>) -> Result<ModelListing, ProviderError>;     // default: unknown
+    fn models(&self, request: ModelsRequest, spawner: Object<dyn ProcessSpawner>, keeper: Object<dyn AccountKeeper>)
+        -> Result<ModelListing, ProviderError>;                                                       // default: unknown
     fn session_record(&self, query: SessionQuery) -> Result<Option<SessionRecordFile>, ProviderError>; // default: None
-    fn usage(&self, query: UsageQuery, spawner: Object<dyn ProcessSpawner>) -> Result<UsageReport, ProviderError>;
-                                                                                                    // default: unsupported
+    fn usage(&self, query: UsageQuery, spawner: Object<dyn ProcessSpawner>, keeper: Object<dyn AccountKeeper>)
+        -> Result<UsageReport, ProviderError>;                                                        // default: unsupported
+    fn login(&self, request: LoginRequest, spawner: Object<dyn ProcessSpawner>, prompter: Object<dyn LoginPrompter>)
+        -> Result<LoginOutcome, ProviderError>;
+    fn renew(&self, request: RenewRequest, spawner: Object<dyn ProcessSpawner>) -> Result<RenewReport, ProviderError>;
     fn non_defaults(&self) -> Result<Vec<NonDefault>, ProviderError>;                               // default: empty
 }
 ```
 
-Every method is synchronous; a host calls them from a thread of its own. Every method answers for the provider **as configured**: a host builds an instance from the provider's settings (`offer.instantiate(&settings)`) and asks it, so `describe` and `refusal` are a configured harness's answers. The six without a default are the ones a host acts on for every harness (a harness that cannot import says so by refusing, with its reason); the four defaults are true answers for a harness with nothing to say (no way to list models, no record kept, no usage to report, settings its schema shows in full).
+Every method is synchronous; a host calls them from a thread of its own. Every method answers for the provider **as configured**: a host builds an instance from the provider's settings (`offer.instantiate(&settings)`) and asks it, so `describe` and `refusal` are a configured harness's answers. The nine without a default are the ones a host acts on for every harness (a harness that cannot import says so by refusing, with its reason; one with no way to sign in answers `login` `GUATIAO_ERR_UNSUPPORTED`); the four defaults are true answers for a harness with nothing to say (no way to list models, no record kept, no usage to report, settings its schema shows in full). Every object a method is handed (`spawner`, `sink`, `keeper`, `prompter`) is the provider's from then on, and it destroys each, even when it refuses.
 
 - `describe`: who the harness is and what its `initialize` will advertise, with nothing started. Cheap, the same on every call.
-- `start`: one ACP connection. The host is the client, the provider the agent. `spawner` and `sink` are handed over: the provider destroys both, even when it refuses, and the spawner by the time it calls `closed`. It returns once the channel takes messages; the program may start later, and a failure then is answered in ACP before the provider closes. It refuses exactly when `refusal` would for the request's requirements, with the same status: `GUATIAO_ERR_UNSUPPORTED` for a requirement it cannot hold, `GUATIAO_ERR_BAD_VALUE` for a request it cannot read. It never starts with a requirement left out.
-- `refusal`: why the harness could not hold a connection to **all of** `requirements` together, started with `environment`, in a sentence; `None` when it can. An empty environment asks about the configuration alone and is answered. `GUATIAO_ERR_BAD_VALUE` for requirements `start` would refuse as unreadable. A host asks before it starts a connection and passes over a harness that would refuse.
+- `accounts`: the kinds of account the harness takes, the ways to sign in to make one, and every variable it reads for a credential ("Accounts", below). Cheap, the same on every call.
+- `start`: one ACP connection. The host is the client, the provider the agent. `spawner` and `sink` are handed over: the provider destroys both, even when it refuses, and the spawner by the time it calls `closed`. It returns once the channel takes messages; the program may start later, and a failure then is answered in ACP before the provider closes. It refuses exactly when `refusal` would for the request's requirements, with the same status: `GUATIAO_ERR_UNSUPPORTED` for a requirement it cannot hold, `GUATIAO_ERR_BAD_VALUE` for a request it cannot read. It never starts with a requirement left out. With `request.account` it applies the account first ("Accounts"), and `keeper` is handed over like the spawner: the provider reports through it what happens to the account's login while the connection runs, and destroys it by the time it calls `closed`.
+- `refusal`: why the harness could not hold a connection to **all of** `requirements` together, started with `environment`, in a sentence; `None` when it can. An empty environment asks about the configuration alone and is answered. `GUATIAO_ERR_BAD_VALUE` for requirements `start` would refuse as unreadable, and for an `account` (an `AccountRef`: a grant without its credentials) of a kind it does not list. A host asks before it starts a connection and passes over a harness that would refuse.
 - `program`: the program the harness starts through the spawner (a path, or a name looked up on the `PATH` where it runs, the start's environment's `PATH` when that sets one); `None` for one that starts none.
 - `import_session`: seeds a session at the host's UUID from a history (below); an empty history seeds a fresh one. A UUID the provider already holds is `GUATIAO_ERR_BAD_VALUE`, never overwritten: a host moving a session back to a harness that still holds it imports at a new UUID or into a fresh store. Answers an `ImportReport`. Refuses `GUATIAO_ERR_UNSUPPORTED`, with the reason, when the harness cannot import at all or does not read the history's version; `GUATIAO_ERR_BAD_VALUE` for an id that is not a UUID or already names a session, or a history it cannot read. Never a session half seeded and never a silent fallback: a harness with no native session to seed (a generic ACP agent) may import by replaying the history as context in its first prompt, and then says so in the report's losses (`replayed_as_prompt`).
 - `export_session`: one page of the history of a session it reported, by its UUID, in the standard format, as it is. A page is whole lines, each ended by a line feed, never more than `max_bytes`: the caller's memory bound, since one line can hold a whole tool output or an attachment. A next line longer than `max_bytes` (line feed included) is refused `GUATIAO_ERR_BAD_VALUE` with the message `line too large: <N> bytes` (`LINE_TOO_LARGE`, read back with `line_too_large(message) -> Option<u64>`), so the host asks again with a `max_bytes` of at least N or stops and says why. Only the first page starts with the header, which carries the format's version and the digest of the whole body. `next` names the page after; absent, the export is complete; the pages joined are the export of one page as large as the whole. `after` is opaque, the provider's own. `GUATIAO_ERR_NOT_FOUND` for a session it does not have; `GUATIAO_ERR_BAD_VALUE` for an `after` it never gave or one the session has changed since (the host starts again from the first page); `GUATIAO_ERR_UNSUPPORTED`, with the reason, when it cannot export.
-- `models`: what the account behind `environment` may use, with no model turn, or why it cannot say.
+- `models`: what the account behind `request` (a `ModelsRequest`: `environment`, `account`) may use, with no model turn, or why it cannot say. `spawner` and `keeper` are handed over as `import_session`'s are.
 - `session_record`: where the harness keeps its own record of a session, by the UUID it reported.
-- `usage`: what the account behind `query`'s environment has used and has left, with no session and no model turn, as a `UsageReport` ("Usage", below). Cheap: a host may poll it as often as it likes. A harness that learns usage only during a turn answers the newest report its connections saw for `query.account`, with its `observed_at`. A provider that runs a program to ask (Codex's `account/rateLimits/read`) runs it through `spawner` and destroys it, as `import_session` does. The default, `UsageReport::unsupported("this harness reports no usage")`, is a true answer. Never carries a value of the environment.
+- `login`, `renew`: sign in to make an account, and renew one with no model turn ("Accounts").
+- `usage`: what the account behind `query` has used and has left, with no session and no model turn, as a `UsageReport` ("Usage", below). Cheap: a host may poll it as often as it likes. A harness that learns usage only during a turn answers the newest report its connections saw for `query.account`'s `id`, with its `observed_at`. A provider that runs a program to ask (Codex's `account/rateLimits/read`) runs it through `spawner`, on the account's directory, and destroys it, as `import_session` does. The default, `UsageReport::unsupported("this harness reports no usage")`, is a true answer. Never carries a value of the environment.
 - `non_defaults`: how a configured harness departs from its defaults in ways its settings' schema cannot show (the detail of a rule a setting holds as text). The rest a host reads from the schema itself, with Guatiao's `schema::differences`.
 
-**Nothing a provider answers carries a value of an environment**: not an answer, a refusal, an error or a log line. `Secret<Environment>` prints `[redacted]`, and its schema marks it `writeOnly` and `x-sensitive`. The copies Guatiao's proxy makes of an argument while converting it are not wiped.
+**Nothing a provider answers carries a value of an environment or a credential**: not an answer, a refusal, an error, a log line or an argument vector. `Secret<Environment>` prints `[redacted]`, and its schema marks it `writeOnly` and `x-sensitive`. The copies Guatiao's proxy makes of an argument while converting it are not wiped.
 
 A provider in-process is trusted code: the kind cannot check that it keeps a requirement, and a requirement it accepts is its promise.
 
@@ -92,6 +101,10 @@ A message's size limit is each side's own setting; the kind sets none. Requests 
 pub trait ProcessSpawner: Send + Sync {
     fn describe(&self) -> Result<SpawnerInfo, ProviderError>;
     fn spawn(&self, spec: SpawnSpec) -> Result<Object<dyn SpawnedProcess>, ProviderError>;
+    fn write_file(&self, path: &str, bytes: Secret<SecretBytes>, private: bool) -> Result<(), ProviderError>;
+    fn read_file(&self, path: &str, max_bytes: u64) -> Result<Secret<SecretBytes>, ProviderError>;
+    fn file_info(&self, path: &str) -> Result<Option<FileInfo>, ProviderError>;   // None: not there
+    fn remove_file(&self, path: &str) -> Result<(), ProviderError>;               // not there: no error
 }
 #[guatiao::kind(object, name = "spawned_process")]
 pub trait SpawnedProcess: Send + Sync {
@@ -118,7 +131,9 @@ pub fn SpawnSpec::new(program) -> SpawnSpec;  .arg(a)  .cwd(d)  .environment(env
 #[non_exhaustive] pub enum ErrorOutput { Separate /* default */, Merged, Discarded }   // "separate" | "merged" | "discarded"
 #[non_exhaustive] pub struct TerminalSize { pub rows: u16, pub cols: u16 }   TerminalSize::new(rows, cols)
 #[non_exhaustive] pub struct SpawnerInfo { pub os: String, pub arch: String, pub local: bool, pub terminal: bool,
-    pub separate_error: bool, pub survives_link_loss: bool, pub kills_escaped: bool, pub ends_with_host: bool }
+    pub separate_error: bool, pub survives_link_loss: bool, pub kills_escaped: bool, pub ends_with_host: bool,
+    pub files: bool }
+#[non_exhaustive] pub struct FileInfo { pub len: u64, pub modified_ms: i64 }   FileInfo::new(len, modified_ms)   // Unix epoch
 pub fn SpawnerInfo::new(os, arch, local: bool) -> SpawnerInfo   // the rest false
 #[non_exhaustive] pub struct ProcessExit { pub running: bool, pub code: Option<i64>, pub signal: Option<i64> }
 ProcessExit::running();  ProcessExit::ended(code, signal)
@@ -126,6 +141,8 @@ ProcessExit::running();  ProcessExit::ended(code, signal)
 ```
 
 **A provider never weakens a spec to fit a spawner.** A spawner that cannot keep standard error apart says so (`separate_error` false) and refuses `ErrorOutput::Separate` with `GUATIAO_ERR_UNSUPPORTED`; a provider that needs it (a JSON-lines harness reads its standard output as protocol) refuses in turn, with the reason, and never falls back to `Merged`. The same holds for a terminal.
+
+**The file methods** serve one private directory the host granted the spawner: an account's `state_dir`, or a login's. **The host resolves every path** against that directory and never trusts a provider's. `path` is relative to it, and is `GUATIAO_ERR_NOT_FOUND`, on a spawner with no such directory too, when it is empty, absolute, has a `..` part, has a `:` (a drive or a stream), has a part ending in a dot or a space or one a Windows device answers to (`NUL`, `COM1`, `CONIN$` ...), leads out of the directory through a link, names a file that is not a regular file (a pipe), or names a file with another name for the same data (a hard link, where the system lets the host see it: Unix, not Windows). What is opened is checked after it is opened, so a link planted after a check is not followed out. `write_file` makes the directories on the way and replaces a file; on Unix it makes the file in a temporary name beside it, owner-only (mode 0600) when `private`, and renames it into place, so there is no moment it holds bytes and others can read it; on Windows `private` adds nothing and **the granted directory's ACL is the guard**. `read_file` of a file longer than `max_bytes` is `GUATIAO_ERR_BAD_VALUE`, of one that is not there `GUATIAO_ERR_NOT_FOUND`. A spawner that cannot (a transport without files) says `files` false and refuses all four `GUATIAO_ERR_UNSUPPORTED`; a provider whose account kind needs a directory then refuses that kind. `PrivateDir` is the one implementation, on this machine, that `LocalSpawner` and the suite's spawner share; `contract::spawner_files(spawner, root)` holds any host's spawner to the same rules. File bytes cross as Guatiao's bytes kind in `Secret<SecretBytes>` (wiped when dropped; `Debug` shows the length only).
 
 `os` and `arch` are spelled as `std::env::consts` spells them: which rules the programs' paths follow (`PathStyle::of_os`). `kills_escaped` says whether `kill` reaches processes that left the program's group or session; `ends_with_host`, whether the tree ends when the host dies without a kill.
 
@@ -138,9 +155,11 @@ What a host sends (`StartRequest`, `Requirement`, `SessionQuery`, `SessionImport
     pub environment: Secret<Environment>,   // over the configuration's; sensitive
     pub working_roots: Vec<String>,         // every session's directories lie in one; empty adds none
     pub requirements: Vec<Requirement>,     // what the connection is held to; each name once
-    pub account: Option<String>,            // the host's id for the account; echoed into every usage report, never interpreted
+    pub account: Option<AccountGrant>,      // the account to run on; its `id` is echoed into every usage report, never interpreted
+    pub cache_lifetime: CacheLifetime,      // how long the prompt cache should live; Default
 }
-StartRequest::new();  StartRequest::builder() -> StartRequestBuilder   // .environment(env) .working_root(r) .requirement(r) .account(id) .build()
+StartRequest::new();  StartRequest::builder() -> StartRequestBuilder   // .environment(env) .working_root(r) .requirement(r) .account(grant) .cache_lifetime(l) .build()
+#[non_exhaustive] pub enum CacheLifetime { Default, Short, Long }   // "default" "short" "long"; the harness's own, about five minutes, about an hour
 
 #[non_exhaustive] pub struct Requirement { pub name: String, pub value: Option<Value> }
 Requirement::new(name);  Requirement::with_value(name, value);  requirement.narrowing() -> Result<Narrowing, RequirementError>
@@ -157,7 +176,7 @@ pub struct Environment;   // BTreeMap<String, String> inside; Debug names the va
 Environment::new(); .insert(name, value); .get(name); .iter(); .names(); .len(); .is_empty(); FromIterator; From<BTreeMap<String, String>>
 
 #[non_exhaustive] pub struct HarnessInfo { pub title: String, pub versions: Vec<u16>, pub takes: Takes, pub resumes_wider: bool,
-    pub usage: UsageSupport }
+    pub usage: UsageSupport, pub cache_lifetime: Option<String> }
 HarnessInfo::new(title, versions)
 #[non_exhaustive] #[derive(Default)] pub struct Takes { pub images: bool, pub audio: bool, pub embedded_context: bool,
     pub mcp_http: bool, pub mcp_sse: bool, pub load: bool, pub resume: bool, pub additional_directories: bool, pub system_prompt: bool }
@@ -167,11 +186,12 @@ ModelListing::unknown(reason);  ModelListing::of(models)
 #[non_exhaustive] pub struct SessionQuery { pub session_id: String, pub working_directory: String, pub environment: Secret<Environment> }
 SessionQuery::new(session_id, working_directory).environment(env)
 #[non_exhaustive] pub struct SessionImport { pub session_id: String, pub working_directory: String, pub history: String,
-    pub environment: Secret<Environment> }
-SessionImport::new(session_id, working_directory, history).environment(env)
+    pub environment: Secret<Environment>, pub account: Option<AccountGrant> }
+SessionImport::new(session_id, working_directory, history).environment(env).account(grant)
 #[non_exhaustive] pub struct SessionExport { pub session_id: String, pub working_directory: String,
-    pub environment: Secret<Environment>, pub after: Option<String>, pub max_bytes: u64 /* DEFAULT_PAGE_BYTES */ }
-SessionExport::new(session_id, working_directory).environment(env).after(next).max_bytes(n)
+    pub environment: Secret<Environment>, pub account: Option<AccountGrant>, pub after: Option<String>,
+    pub max_bytes: u64 /* DEFAULT_PAGE_BYTES */ }
+SessionExport::new(session_id, working_directory).environment(env).account(grant).after(next).max_bytes(n)
 pub const DEFAULT_PAGE_BYTES: u64 = 1 << 20;
 pub const LINE_TOO_LARGE: &str = "line too large: ";   // a refusal's message: "line too large: <N> bytes"
 pub fn line_too_large(message: &str) -> Option<u64>   // N, from such a message
@@ -186,6 +206,8 @@ ImportReport::new()
 ```
 
 `usage`: what the harness can report (`UsageSupport { sources, spend, needs_turn }`; empty `sources` is none), which `initialize` agrees with: a harness that reports any advertises the usage capability, one that reports none does not. `needs_turn` is true for a harness that learns its usage only during a turn (Claude Code): `_coqui_acp/usage` then answers what the connection last saw, a host keeps a timed retry instead of polling, and the capability carries `"needs_turn": true` (absent means false). False means a read re-reads the account, so a host may poll it (Codex). `needs_session` is true for a harness whose figures come from the process a session starts and need no turn (Antigravity): with a session open a read re-reads, with none it answers what the connection last saw and starts nothing, and the capability carries `"needs_session": true` (absent means false).
+
+`cache_lifetime` (`HarnessInfo`) says in a sentence what the harness does with `StartRequest::cache_lifetime` (Claude Code sets `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`); absent, it has no such control and ignores the hint. The hint never refuses a start.
 
 `resumes_wider`: a session held to requirements can be reopened (`session/load` or `session/resume`) on a later connection started with fewer, and then has what that connection allows. A host that changes what a session may do starts a new connection with the new requirements and reopens the session there.
 
@@ -260,7 +282,7 @@ Bucket::new(id);  bucket.resets_in(now: i64) -> Option<Duration>
 #[non_exhaustive] pub struct ModelSpend { pub model: String, pub input: u64, pub output: u64, pub cache_read: u64,
     pub cache_write: u64, pub cost_micro_usd: Option<u64> }                                      // ModelSpend::new(model)
 #[non_exhaustive] pub struct UsageSupport { pub sources: Vec<Source>, pub spend: bool, pub needs_turn: bool, pub needs_session: bool }   // none(); new(sources, spend); .needs_turn(bool); .needs_session(bool); reports()
-#[non_exhaustive] pub struct UsageQuery { pub environment: Secret<Environment>, pub account: Option<String> }   // new(); .environment(env); .account(id)
+#[non_exhaustive] pub struct UsageQuery { pub environment: Secret<Environment>, pub account: Option<AccountGrant> }   // new(); .environment(env); .account(grant)
 pub const USAGE_CAPABILITY: &str = "dev.boriken.coqui.acp/usage";   pub const USAGE_METHOD: &str = "_coqui_acp/usage";
 pub const USAGE_NOTIFICATION: &str = "_coqui_acp/usage_update";     pub const LIMIT_META_KEY: &str = "dev.boriken.coqui.acp/limit";
 pub const USAGE_VERSION: u32 = 1;
@@ -285,7 +307,57 @@ pub const USAGE_VERSION: u32 = 1;
 | notification | `_coqui_acp/usage_update` | `{"sessionId"?: uuid, "report": UsageReport}`: the whole report on every change (a bucket's figures, status or reset, a limit hit, a session's spend after a turn), never a delta |
 | refused turn | the turn's answer (version 2: the `idle` update) | `stopReason: "refusal"` and `_meta[LIMIT_META_KEY]` holding the `LimitHit` |
 
-The request needs no session and no turn and is cheap, so a host may poll it; how often is the host's choice. `account` is the host's id for the account a connection runs on, taken from `StartRequest.account` (else the client's opt-in), echoed into every report and never interpreted; a host that launched the connection overwrites it in what it relays, so a provider cannot misattribute. It picks no credentials.
+The request needs no session and no turn and is cheap, so a host may poll it; how often is the host's choice. `account` is the host's id for the account a connection runs on, taken from `StartRequest.account`'s `id` (else the client's opt-in), echoed into every report and never interpreted; a host that launched the connection overwrites it in what it relays, so a provider cannot misattribute.
+
+## Accounts (`coqui_acp_api::account`)
+
+A provider owns every fact about how its harness takes an account: kinds, variables, directories, files, login commands, renewal and endpoints. The host owns which accounts exist, their secrets at rest, who holds one, claims and limits. A credential crosses only as `Secret<Credentials>`: its schema is `writeOnly` and `x-sensitive`, its `Debug` names the keys and never a value, and wiping it zeroes both.
+
+```rust
+pub const HARNESS_LOGIN: &str = "harness-login";   // every catalog lists it: nothing handed over, nothing cleared
+pub struct Credentials;   // BTreeMap<String, String> inside, keyed by the sensitive setting's key path; a file is one entry holding its text
+Credentials::new(); .insert(k, v); .get(k); .iter(); .keys(); .len(); .is_empty(); FromIterator; From<BTreeMap<String, String>>
+#[non_exhaustive] pub struct AccountGrant { pub id: String, pub kind: String, pub settings: Value, pub credentials: Secret<Credentials>,
+    pub state_dir: Option<String>, pub revision: u64 }
+AccountGrant::new(id, kind);  .settings(v) .credentials(c) .state_dir(d) .revision(n);  .reference() -> AccountRef;  .check_id()
+#[non_exhaustive] pub struct AccountRef { id, kind, settings, state_dir, revision }   // a grant without credentials
+pub fn is_account_id(&str) -> bool;  pub const ACCOUNT_ID_MAX: usize = 128;
+#[non_exhaustive] pub struct AccountCatalog { pub kinds: Vec<AccountKindInfo>, pub logins: Vec<LoginMethodInfo>, pub credential_variables: Vec<String> }
+AccountCatalog::new() /* only harness-login */;  .kind(id)
+#[non_exhaustive] pub struct AccountKindInfo { pub id: String, pub title: String, pub description: String, pub settings: Value,
+    pub endpoints: Vec<EndpointSlot>, pub rotates: bool, pub history_portable: bool, pub state_dir: bool, pub renews: bool, pub notices: Vec<String> }
+AccountKindInfo::new(id, title);  AccountKindInfo::harness_login()
+#[non_exhaustive] pub struct EndpointSlot { pub key: Option<String>, pub purpose: String /* MODEL_API AUTH PROXY */, pub default: Option<String> }
+EndpointSlot::new(purpose).key(k).default_url(u)
+#[non_exhaustive] pub struct LoginMethodInfo { pub id: String, pub title: String, pub description: String, pub produces: String,
+    pub inputs: Value, pub steps: Vec<String> /* OPEN_URL USER_CODE ASK PASTE_CODE */, pub remote: bool }
+#[non_exhaustive] pub struct LoginRequest { pub method: String, pub inputs: Value, pub state_dir: String, pub timeout_ms: u64 /* DEFAULT_LOGIN_TIMEOUT_MS: 600000 */ }
+#[non_exhaustive] pub struct LoginOutcome { pub kind: String, pub settings: Value, pub credentials: Secret<Credentials>,
+    pub label: Option<String>, pub expires_at: Option<String>, pub checked: bool }
+#[non_exhaustive] pub struct RenewRequest { pub account: AccountGrant }
+#[non_exhaustive] pub struct RenewReport { pub credentials: Option<Secret<Credentials>>, pub expires_at: Option<String>, pub not_renewed_because: Option<String> }
+#[non_exhaustive] pub struct ModelsRequest { pub environment: Secret<Environment>, pub account: Option<AccountGrant> }
+#[guatiao::kind(object, name = "account_keeper")]
+pub trait AccountKeeper: Send + Sync {
+    fn renewed(&self, renewal: AccountRenewal) -> Result<(), ProviderError>;   // AccountRenewal { id, from_revision, credentials: Secret<Credentials>, expires_at, sequence }
+    fn lost(&self, loss: AccountLoss) -> Result<(), ProviderError>;            // AccountLoss { id, reason, sequence }
+}
+#[guatiao::kind(object, name = "login_prompter")]
+pub trait LoginPrompter: Send + Sync {
+    fn say(&self, text: &str) -> Result<(), ProviderError>;
+    fn open_url(&self, open: OpenUrl) -> Result<(), ProviderError>;            // OpenUrl { url, user_code: Option<String>, expires_ms: Option<u64> }
+    fn ask(&self, form: LoginForm) -> Result<LoginAnswer, ProviderError>;      // LoginForm { title, schema }; LoginAnswer { values: Value, secrets: Secret<Credentials> }
+    fn cancelled(&self) -> Result<bool, ProviderError>;
+}
+```
+
+- **The catalog.** `kinds[].settings` is a guatiao (JSON) schema of the kind's non-secret settings; a credential is a property marked `writeOnly` and `x-sensitive` (both, never one), typed text, with no default or example, and its key is the key in `Credentials`. `endpoints` name the URLs the kind talks to (`key` a text setting holding an absolute `http(s)` URL, `default` what is used without it) for the host's egress policy. `rotates`: a renewal replaces a credential so that an older copy stops working (an unmeasured rotation says `true`); the host holds such an account exclusively. `history_portable`: a session of one account resumes on another of the kind. `state_dir`: the kind needs a private directory. `renews`: `renew` can renew it. `notices`: what using it weakens. `credential_variables` is every variable any kind reads for a credential.
+- **An account id** is the host's label and nothing more: a provider never puts it in a path or an argument vector, so `is_account_id` asks no more than 1 to 128 bytes and no control character.
+- **Applying a grant** (`start`, `import_session`, `export_session`, `models`, `usage`, `renew`). The provider removes every name in `credential_variables` from what it starts (`SpawnSpec::remove_environment`, or `clear_environment`), then sets the chosen kind's; writes the kind's files into `state_dir` through the spawner (only when absent, after looking at what is there: the file the host last wrote may have been renewed since); and starts the harness on them. `harness-login` hands nothing over and clears nothing; with no account the environment passes as it is. `BAD_VALUE`: a kind it does not list, settings its schema refuses, a credential missing or one the kind does not take, a missing `state_dir` for a kind that needs one, an id that is not an account id. `UNSUPPORTED`, with the reason: a kind it cannot apply through the spawner (`files` false). A credential is in no answer, refusal, error, log or argument vector; a variable set to it is the one place it is allowed.
+- **Renewals come back.** A provider of a kind with files looks at them through `file_info` and `read_file` on a deadline of its own, every `renew_poll_ms` (its setting; 30000 by default), whatever traffic there is, while a connection runs, and after each import, export, models call and close. A file whose content changed is `AccountKeeper::renewed` (whole credentials, `from_revision` the grant's); a file deleted or blanked is `lost`, never `renewed`. **Every keeper live for the account hears each event**, a connection's and a call's alike, not the first to notice. Each event carries a `sequence`, one count per account for renewals and losses together (1, 2, 3 ... with no repeat for as long as the provider lives), so chained rotations are ordered; **the host deduplicates by (account, sequence)** and stores a renewal only when it is newer. A change is recorded before anyone is told, so it is one event, not one for each looker. A provider calls a keeper with no lock of its own held. The first time a provider looks at an account it has no record of, a file there that was changed after the provider began is news (told as a renewal and kept), and an older one is replaced by the grant's copy.
+- **`renew`** renews with no model turn: new credentials, or `not_renewed_because`. `UNSUPPORTED` for a kind whose `renews` is false; `GONE` with the reason when the refresh lost the login (a blank or missing login file is lost, never renewed from nothing).
+- **`login`.** The provider runs the CLI in `LoginRequest::state_dir` through the spawner, relays what it prints through the prompter (`say`, `open_url` with a device or user code, `ask` for a form), and reads the files it wrote into `LoginOutcome::credentials`; `checked` says a call that spends nothing verified it. The person cancelling makes every prompter call answer `GONE` and `cancelled` true; that, or `timeout_ms` passing, makes the provider kill the CLI's whole tree and answer `GONE` `login cancelled` / `login timed out` within two seconds. A provider runs a watchdog of its own: at the deadline it answers even if a prompter call has not returned (the call ends by itself, and the provider lets go of the prompter and spawner then), so a host's `ask` should return by `timeout_ms`. The CLI a login starts has every credential variable cleared, as a connection's program has. A key the CLI refused is `BAD_VALUE` `login refused: <the CLI's reason>`; another failure `INTERNAL` with a reason that holds no input and no URL query; an unlisted method `BAD_VALUE`; a provider with no method `UNSUPPORTED`. The host removes the login's `state_dir` however it ended.
+- **Endpoints and the cache hint.** The host reads the slots plus the grant's settings; a value that is not an `https` URL (or `http` to loopback) is the host's to refuse before it starts.
 
 ## A provider in another language
 
@@ -296,16 +368,21 @@ Every method takes and answers plain data; `start` also takes the spawner and th
 ```rust
 pub struct contract::Contract;   // #[must_use]
 Contract::new(name) .version(u16 /* 1 */) .holds(Vec<Requirement> /* read_only, no_commands */) .message_limit(bytes)
-    .imports(bool /* true */)
+    .imports(bool /* true */)  .logins(bool /* true */)  .account(kind)  .program_agent(bool /* false */)
     .run(&dyn AcpHarness) -> Result<(), contract::Failures>
+contract::spawner_files(&dyn ProcessSpawner, root: &Path) -> Result<(), contract::Failures>   // a host's spawner, in its directory
 #[non_exhaustive] pub struct contract::Failure { pub check: &'static str, pub message: String }
 pub struct contract::Failures { pub provider: String, pub failures: Vec<Failure> }   // Display lists each
 ```
 
-Every provider of the kind passes it, configured to drive the **contract agent**: a real harness supplies a stand-in for its program that behaves as the module's documentation says (`close`, `wait`, `ask`, `read PATH`, else `echo: TEXT`; a harness whose `describe` lists usage sources also understands `quota P` and `limit`). It checks the methods, requirements, secrets, ACP and its errors, seeding a session at the host's UUID (empty, then resumed; exported after turns, imported at another UUID, then resumed; what an import and an export refuse), paging an export (pages join to the whole, the header with its digest on the first only, a one-byte page refused with the next line's size, an unknown or stale `after` refused), usage (a harness that reports none advertises nothing and answers `_coqui_acp/usage` with `-32601`; one that reports answers it with no session and no turn, grows `revision` on a change and not on a repeat, tells only the client that asked, echoes the account, ends a limited turn `refusal` with the `LimitHit`, and has `usage()` agree with its last connection), reopening, cancel, permission answers, client capabilities, back-pressure, every close, working roots, the size limit and a real `coqui_acp::Client`. It makes and removes a directory under the system's temporary one, with a link (a junction on Windows) when the platform allows.
+Every provider of the kind passes it, configured to drive the **contract agent**: a real harness supplies a stand-in for its program that behaves as the module's documentation says (`close`, `wait`, `ask`, `read PATH`, else `echo: TEXT`; a harness whose `describe` lists usage sources also understands `quota P` and `limit`). It checks the methods, requirements, secrets, ACP and its errors, seeding a session at the host's UUID (empty, then resumed; exported after turns, imported at another UUID, then resumed; what an import and an export refuse), paging an export (pages join to the whole, the header with its digest on the first only, a one-byte page refused with the next line's size, an unknown or stale `after` refused), usage (a harness that reports none advertises nothing and answers `_coqui_acp/usage` with `-32601`; one that reports answers it with no session and no turn, grows `revision` on a change and not on a repeat, tells only the client that asked, echoes the account, ends a limited turn `refusal` with the `LimitHit`, and has `usage()` agree with its last connection), accounts (below), reopening, cancel, permission answers, client capabilities, back-pressure, every close, working roots, the size limit and a real `coqui_acp::Client`. **The accounts checks** give the provider a virtual spawner that starts nothing (every `spawn` is answered with an idle process, and records its spec) and serves files in a directory of the suite's, and a canary for every credential. They hold the catalog (schemas parse, credentials marked sensitive, endpoints, methods and steps well formed, the same answer twice, `harness-login` listed, no login method when logins are off); that a start on each kind (all of them, or `--account` alone) removes every credential variable from what the provider spawns and leaves the canary out of every argument vector, message and close reason, and ends the programs it started; that an unknown kind, a bad id, a missing credential or directory and a spawner without files are refused as above in every call that takes an account, saying nothing of a credential; that a rotated file is `renewed` once and a blanked or deleted one `lost` once (the suite rewrites the file the provider wrote and calls `models` on the account until a keeper hears); that `renew` answers as the catalog says; and, for each login method, that it completes and what it made starts, that cancelling at the first prompt and while waiting answers `GONE` within two seconds with every program it started killed, and that a 300 ms timeout does too. A provider that spawns the real harness is held to the same by a spawner that runs it: `Contract::program_agent(true)` makes the suite's spawner start what it is asked on this machine (standard error apart, no terminal; a program is ended when it exits, and killed with its whole tree: a job object on Windows, a process group on Unix), still recording every spec, in a home of the suite's (`ACP_HARNESS_CHECK_HOME` when set, else a fresh directory removed at the end), and the provider's settings name a stand-in for the program that behaves as the table above says for `wait`, `ask`, `echo: TEXT` and, when `describe` lists usage sources, `quota P` and `limit`. What a program cannot do is then not asked: `read PATH` (it cannot ask the client for a file), `close` (a program that ends ends a session, not the connection) and the exact figures of `quota` and `limit` (their ids, the token bucket, `retry_after`), of which the shape is kept (the report changes and tells a client that asked, agrees with the kind's answer when the harness learns usage in a turn, and a limit refuses the turn with a `LimitHit` and is kept). A session is given a first turn before it is reopened, since a program keeps one from its first turn on.
 
-`acp-harness-check` runs it on a provider with no Rust of the provider's own: `--library FILE`, or `--source SOURCE_LIBRARY --source-config JSON` for one a Guatiao source loads; `--provider KEY`, `--settings JSON` (build an instance), `--version N`, `--holds NAME[=JSON]` (repeated), `--message-limit N`, `--no-imports` (it must refuse `import_session` with a reason). Exits 0, 1 listing each rule broken, or 2 when the provider could not be loaded.
+Whatever the agent, the suite reads a harness's updates by their kind (it takes the words from `agent_message_chunk` and ignores a title, commands or a usage figure around them), picks the option to allow once and the one to reject once by their `kind`, takes any order of answers to requests sent together, treats a reply that chooses no offered option (an error, an outcome nobody knows, an option never put, an allow option of another harness) as a refusal that ends the turn `end_turn` with the tool not run, and only the cancelled outcome as a cancel, and counts a turn as unanswered while only updates arrive.
+
+It makes and removes a directory under the system's temporary one, with a link (a junction on Windows) when the platform allows.
+
+`acp-harness-check` runs it on a provider with no Rust of the provider's own: `--library FILE`, or `--source SOURCE_LIBRARY --source-config JSON` for one a Guatiao source loads; `--provider KEY`, `--settings JSON` (build an instance), `--version N`, `--holds NAME[=JSON]` (repeated), `--message-limit N`, `--no-imports` (it must refuse `import_session` with a reason), `--no-logins` (it lists no login method and must refuse `login` `UNSUPPORTED` with a reason), `--account KIND` (the account checks on that kind alone), `--program-agent` (the provider starts its harness's own program, which the checker's spawner starts for real: `--settings` must name a stand-in for it; the checker runs again in a home of its own, `ACP_HARNESS_CHECK_HOME`, with no `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and every program the suite starts gets that home, so a real command line on the `PATH` never reaches the person's; what the spec's environment sets stays). `--holds none` says the provider holds no requirement. Exits 0, 1 listing each rule broken, or 2 when the provider could not be loaded.
 
 ## Tests
 
-`examples/echo_harness.rs` is the contract agent in Rust, built by `cargo test` into a `cdylib` the tests load, with settings (`title`, `max_message_bytes`, `imports`, `usage` of `none` (the default) or `scripted`) a host builds instances from. `examples/provider-python/harness/acp_echo_harness.py` in the repository is the same in Python.
+`examples/echo_harness.rs` is the contract agent in Rust, built by `cargo test` into a `cdylib` the tests load, with settings (`title`, `max_message_bytes`, `imports`, `usage` of `none` (the default) or `scripted`, `logins`, `renew_poll_ms`) a host builds instances from. It takes accounts of `echo-login` (a file credential in the account's directory, `auth_file`; rotates, renews; watched, and told to the keeper when it changes) and `echo-key` (`api_key` in `ECHO_API_KEY`), besides `harness-login`, and offers the login methods `scripted` (ask, open_url, user_code), `waiting` (open_url, then a wait a cancel or a timeout ends) and `api-key` (ask). `examples/provider-python/harness/acp_echo_harness.py` in the repository is the same in Python.
