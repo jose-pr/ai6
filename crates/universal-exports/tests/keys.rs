@@ -185,7 +185,6 @@ impl Accounts for Keys {
         });
         Ok(PutOutcome {
             secret: Some(secret),
-            ..PutOutcome::default()
         })
     }
 
