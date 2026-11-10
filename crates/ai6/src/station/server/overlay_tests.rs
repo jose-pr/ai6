@@ -642,7 +642,7 @@ mod theater {
         );
         let pyz = root.path().join("dotagents.pyz");
         fs::write(&pyz, DOTAGENTS).unwrap();
-        let pin = crate::directorates::q::overlays::Digest::of(DOTAGENTS.as_bytes());
+        let pin = coqui_aos::Digest::of(DOTAGENTS.as_bytes());
         let state = on_theater(
             root.path(),
             &dir,
