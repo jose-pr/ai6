@@ -69,6 +69,28 @@ impl MissionState {
     }
 }
 
+/// The pool account a provider limit parked a Mission on, and the model it needs room for.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParkedOn {
+    /// The account as `pool/account`.
+    pub account: String,
+    /// The model the Mission's Agent asks for; none for a routed Agent, whose route is not known
+    /// at the limit, so any bucket of the account may hold it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl ParkedOn {
+    /// Parked on `account`, needing room for `model`.
+    pub fn new(account: impl Into<String>, model: Option<String>) -> Self {
+        Self {
+            account: account.into(),
+            model,
+        }
+    }
+}
+
 /// A Mission as stored and returned by the daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mission {
@@ -104,6 +126,10 @@ pub struct Mission {
     /// When a parked Mission resumes, as Unix seconds; set only while `state` is `Parked`.
     #[serde(default)]
     pub parked_until: Option<i64>,
+    /// The pool account whose limit parked this Mission and the model it needs room for, while
+    /// `state` is `Parked` on one; a Station that finds room on the account resumes it early.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked_on: Option<ParkedOn>,
     /// Why a blocked Mission stopped when AI6 itself stopped it (`budget`), or why a held one
     /// is held; unset when the Agent or the terminal is what is waiting. Cleared by the next
     /// state change.
@@ -313,6 +339,7 @@ impl MissionStore {
             cover: None,
             revision: 1,
             parked_until: None,
+            parked_on: None,
             blocked_reason: None,
             failure: None,
             reported_failure: None,
@@ -421,6 +448,7 @@ impl MissionStore {
         }
         mission.state = state;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.failure = None;
         mission.reported_failure = None;
@@ -454,6 +482,17 @@ impl MissionStore {
     ///
     /// Parking again moves the resume time, so a repeated limit report is harmless.
     pub fn park(&mut self, mission_id: &str, until: i64) -> Result<Mission, MissionError> {
+        self.park_on(mission_id, until, None)
+    }
+
+    /// Parks as [`park`](Self::park), waiting on `on` when it is given; parked again without one,
+    /// a Mission keeps what it waits on.
+    pub fn park_on(
+        &mut self,
+        mission_id: &str,
+        until: i64,
+        on: Option<ParkedOn>,
+    ) -> Result<Mission, MissionError> {
         let mut next = self.missions.clone();
         let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
         if !matches!(
@@ -468,8 +507,12 @@ impl MissionStore {
                 to: MissionState::Parked,
             });
         }
+        let kept = (mission.state == MissionState::Parked)
+            .then(|| mission.parked_on.take())
+            .flatten();
         mission.state = MissionState::Parked;
         mission.parked_until = Some(until);
+        mission.parked_on = on.or(kept);
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -572,6 +615,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Blocked;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = Some(reason.to_owned());
         mission.revision += 1;
         let updated = mission.clone();
@@ -594,6 +638,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Failed;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.waiting = None;
         mission.failure = Some(reason.to_owned());
@@ -616,6 +661,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Failed;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.waiting = None;
         mission.failure = None;
@@ -650,6 +696,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Held;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = Some(reason.to_owned());
         mission.failure = None;
         mission.reported_failure = None;
@@ -695,6 +742,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Quarantined;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.revision += 1;
         let updated = mission.clone();
@@ -778,6 +826,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Queued;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.waiting = None;
         mission.agent_id = Some(agent_id);
@@ -812,6 +861,7 @@ impl MissionStore {
         }
         mission.state = MissionState::Queued;
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.failure = None;
         mission.reported_failure = None;
@@ -893,6 +943,7 @@ impl MissionStore {
         mission.agent_id = Some(agent_id);
         mission.brief_digest = Some(digest.to_owned());
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.failure = None;
         mission.reported_failure = None;
@@ -936,6 +987,7 @@ impl MissionStore {
         mission.agent_id = Some(agent_id);
         mission.amendments.push(amendment);
         mission.parked_until = None;
+        mission.parked_on = None;
         mission.blocked_reason = None;
         mission.failure = None;
         mission.reported_failure = None;

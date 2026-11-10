@@ -38,12 +38,6 @@ pub(super) enum Read {
     Report(Box<UsageReport>),
 }
 
-/// A Mission parked on an account, and the model it needs room for.
-struct Waiting {
-    account: AccountRef,
-    model: Option<String>,
-}
-
 /// When an account is read next, and how often it was found used up in a row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Schedule {
@@ -53,12 +47,12 @@ struct Schedule {
 
 #[derive(Default)]
 struct Inner {
-    waiting: BTreeMap<String, Waiting>,
     schedules: BTreeMap<String, Schedule>,
 }
 
-/// The Station's memory of limited accounts: the Missions parked on each, and when each is read
-/// next.
+/// When this Station reads each limited account next. The Missions waiting on an account are the
+/// parked Missions that name it, read from the Mission book on every pass, so a restart loses
+/// nothing but the schedule.
 #[derive(Default)]
 pub(super) struct UsageWatch {
     inner: Mutex<Inner>,
@@ -72,45 +66,15 @@ impl UsageWatch {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-
-    /// Notes that `mission_id` waits on the limited `account`, needing room for `model` (any
-    /// model when none is named).
-    pub(super) fn hold(&self, account: &AccountRef, mission_id: &str, model: Option<String>) {
-        self.lock().waiting.insert(
-            mission_id.to_owned(),
-            Waiting {
-                account: account.clone(),
-                model,
-            },
-        );
-    }
-
-    /// The models of the Missions waiting on `account`.
-    fn needs_of(&self, account: &AccountRef) -> Vec<(String, Option<String>)> {
-        self.lock()
-            .waiting
-            .iter()
-            .filter(|(_, waiting)| waiting.account == *account)
-            .map(|(id, waiting)| (id.clone(), waiting.model.clone()))
-            .collect()
-    }
-
-    fn forget_waiting(&self, mission_ids: &[String]) {
-        let mut inner = self.lock();
-        for id in mission_ids {
-            inner.waiting.remove(id);
-        }
-    }
 }
 
-/// Whether a pass is due and none runs; `true` marks one running until [`end`].
+/// Whether no pass runs; `true` marks one running until [`end`].
 pub(super) fn begin(state: &DaemonState) -> bool {
-    state.roster.settings().usage.refresh_every.0 > std::time::Duration::ZERO
-        && state
-            .usage_watch
-            .running
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
+    state
+        .usage_watch
+        .running
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
 }
 
 /// Marks the pass [`begin`] started as over.
@@ -125,27 +89,36 @@ pub(super) fn run(state: &DaemonState) {
     });
 }
 
-/// Asks `handler` for the usage of the account behind `environment`, when it can be asked with no
-/// turn: a handler that learns its usage only during a turn, or with a session open, or reports
-/// none, is not asked.
+/// Why `handler` is not asked to read an account between turns, when it is not: it learns its
+/// usage only during a turn, or with a session open, or reports none. Asking costs no credential.
+pub(super) fn unreadable(handler: &dyn AgentHandler) -> Option<Read> {
+    let support = match handler.usage_support() {
+        Ok(support) => support,
+        Err(error) => return Some(Read::Failed(error.to_string())),
+    };
+    if !support.reports() {
+        return Some(Read::NotPolled("this handler reports no usage".to_owned()));
+    }
+    if support.needs_turn {
+        return Some(Read::NotPolled(
+            "this handler learns its usage only during a turn".to_owned(),
+        ));
+    }
+    if support.needs_session {
+        return Some(Read::NotPolled(
+            "this handler learns its usage only with a session open".to_owned(),
+        ));
+    }
+    None
+}
+
+/// Asks `handler` for the usage of the account behind `environment`, unless [`unreadable`].
 pub(super) fn read_through(
     handler: &dyn AgentHandler,
     environment: BTreeMap<String, String>,
 ) -> Read {
-    let support = match handler.usage_support() {
-        Ok(support) => support,
-        Err(error) => return Read::Failed(error.to_string()),
-    };
-    if !support.reports() {
-        return Read::NotPolled("this handler reports no usage".to_owned());
-    }
-    if support.needs_turn {
-        return Read::NotPolled("this handler learns its usage only during a turn".to_owned());
-    }
-    if support.needs_session {
-        return Read::NotPolled(
-            "this handler learns its usage only with a session open".to_owned(),
-        );
+    if let Some(skipped) = unreadable(handler) {
+        return skipped;
     }
     match handler.usage(environment) {
         Ok(report) if report.supported => Read::Report(Box::new(report)),
@@ -184,6 +157,10 @@ fn read_account(state: &DaemonState, account: &AccountState) -> Read {
         Ok(handler) => handler,
         Err(_) => return Read::NotPolled("this handler is not on this Station".to_owned()),
     };
+    // Only a read that will happen leases the credential.
+    if let Some(skipped) = unreadable(handler.as_ref()) {
+        return skipped;
+    }
     match models::with_account(state, &broker, pool, member, &holder, |environment| {
         read_through(handler.as_ref(), environment)
     }) {
@@ -271,12 +248,21 @@ pub(super) fn pass(state: &DaemonState, now: i64, read: &dyn Fn(&AccountState) -
     let Ok(states) = state.intake.accounts() else {
         return;
     };
+    let now_f = now as f64;
     let limited: Vec<&AccountState> = states
         .iter()
         .filter(|account| {
-            account.profiles.contains_key(&state.station_id) && account.is_limited(now as f64)
+            account.profiles.contains_key(&state.station_id) && account.is_limited(now_f)
         })
         .collect();
+    // A limit lifted early, by a re-read on another Station: the Missions still parked on the
+    // account for a time to come are due now.
+    for account in states
+        .iter()
+        .filter(|account| account.limited_until.is_none())
+    {
+        resume_lifted(state, &account.account, now);
+    }
     // An account no longer limited, or a setting of 0, leaves nothing to schedule.
     state.usage_watch.lock().schedules.retain(|key, _| {
         every > 0
@@ -302,7 +288,7 @@ pub(super) fn pass(state: &DaemonState, now: i64, read: &dyn Fn(&AccountState) -
         if !due {
             continue;
         }
-        let waiting = state.usage_watch.needs_of(&account.account);
+        let waiting = parked_on(state, &account.account);
         let report = match read(account) {
             Read::NotPolled(why) => {
                 // Its timed retry is the stated time; looking again before then answers the same.
@@ -356,6 +342,42 @@ pub(super) fn pass(state: &DaemonState, now: i64, read: &dyn Fn(&AccountState) -
     }
 }
 
+/// The Missions of this Station's book parked on `account` for a time to come, with the model
+/// each needs room for. A Mission that has left `Parked` names nothing.
+fn parked_on(state: &DaemonState, account: &AccountRef) -> Vec<(String, Option<String>)> {
+    let key = account.to_string();
+    let now = state.clock.now();
+    state
+        .missions
+        .lock()
+        .map(|missions| {
+            missions
+                .list()
+                .into_iter()
+                .filter(|mission| {
+                    mission.state == MissionState::Parked
+                        && mission.parked_until.is_some_and(|until| until > now)
+                })
+                .filter_map(|mission| {
+                    let on = mission.parked_on?;
+                    (on.account == key).then(|| (mission.mission_id.to_string(), on.model))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Resumes, at the next scheduler pass, the Missions parked on `account` whose limit is gone.
+fn resume_lifted(state: &DaemonState, account: &AccountRef, now: i64) {
+    for (mission_id, _) in parked_on(state, account) {
+        if park_mission(state, &mission_id, now) {
+            eprintln!(
+                "ai6: account {account} is no longer limited; Mission {mission_id:?} resumes"
+            );
+        }
+    }
+}
+
 fn back_off(state: &DaemonState, key: &str, now: i64, (every, factor, longest): (u64, u32, u64)) {
     if let Some(schedule) = state.usage_watch.lock().schedules.get_mut(key) {
         schedule.exhausted_reads = schedule.exhausted_reads.saturating_add(1);
@@ -378,17 +400,14 @@ fn free(
         );
         return;
     }
-    let mut resumed = Vec::new();
     for (mission_id, _) in waiting {
         if is_parked(state, mission_id) && park_mission(state, mission_id, now) {
             eprintln!(
                 "ai6: account {} has room again; Mission {mission_id:?} resumes",
                 account.account
             );
-            resumed.push(mission_id.clone());
         }
     }
-    state.usage_watch.forget_waiting(&resumed);
 }
 
 /// Keeps the account out, and its parked Missions parked, until the later reset the provider now
@@ -430,6 +449,7 @@ fn is_parked(state: &DaemonState, mission_id: &str) -> bool {
 mod tests {
     use super::*;
     use crate::directorates::m::identity::MissionId;
+    use crate::directorates::m::mission::{MissionStore, ParkedOn};
     use crate::directorates::registry::accounts::AccountProfile;
     use coqui_acp_api::UsageSupport;
     use guatiao::library::ProviderError;
@@ -518,11 +538,12 @@ mod tests {
             .missions
             .lock()
             .unwrap()
-            .park("waits", STATED_RESET)
+            .park_on(
+                "waits",
+                STATED_RESET,
+                Some(ParkedOn::new("pool/one", Some("model-a".to_owned()))),
+            )
             .unwrap();
-        state
-            .usage_watch
-            .hold(&account, "waits", Some("model-a".to_owned()));
         (state, now, account)
     }
 
@@ -846,6 +867,132 @@ mod tests {
         assert_eq!(reads.get(), 1);
         assert!(state.usage_watch.lock().schedules.is_empty());
         assert!(account_state(&state, &account).limited_until.is_some());
-        assert!(!begin(&state), "a pass is not begun when reads are off");
+        assert!(
+            begin(&state),
+            "a pass still runs: it resumes a lifted limit"
+        );
+        assert!(!begin(&state), "but never two at once");
+        end(&state);
+    }
+
+    fn declared_by(state: &DaemonState, account: &AccountRef) {
+        let profile = AccountProfile {
+            handler: "mock-limit".to_owned(),
+            kind: "claude-oauth-token".to_owned(),
+            operations: vec!["G".to_owned()],
+            priority: 0,
+            max_concurrent: None,
+            labels: BTreeMap::new(),
+        };
+        state
+            .intake
+            .declare_account(account, &state.station_id, &profile)
+            .unwrap();
+    }
+
+    fn has_room() -> Read {
+        Read::Report(boxed(vec![bucket(
+            "mine",
+            100,
+            STATED_RESET,
+            Coverage::Only {
+                models: vec!["model-a".to_owned()],
+            },
+        )]))
+    }
+
+    #[test]
+    fn a_restarted_station_resumes_what_was_parked_before_it_from_the_mission_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, account) = limited_account(root.path(), "");
+        // The Mission names its account and model in its own record.
+        let parked = state.missions.lock().unwrap().get("waits").unwrap().clone();
+        assert_eq!(
+            parked.parked_on,
+            Some(ParkedOn::new("pool/one", Some("model-a".to_owned())))
+        );
+        let restarted = DaemonState {
+            usage_watch: Default::default(),
+            ..state.clone()
+        };
+        let read = |_: &AccountState| has_room();
+        pass(&restarted, START, &read);
+        assert_eq!(parked_until_of(&restarted), Some(STATED_RESET));
+        pass(&restarted, START + 301, &read);
+        assert_eq!(account_state(&restarted, &account).limited_until, None);
+        assert_eq!(parked_until_of(&restarted), Some(START + 301));
+    }
+
+    #[test]
+    fn a_read_by_another_station_frees_the_account_and_this_stations_mission_resumes() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, account) = limited_account(root.path(), "");
+        // Another Station declares the account too, over the same Registry, with no Mission of
+        // its own parked on it.
+        let other = DaemonState {
+            station_id: "other".to_owned(),
+            missions: Arc::new(std::sync::Mutex::new(MissionStore::default())),
+            usage_watch: Default::default(),
+            ..state.clone()
+        };
+        declared_by(&other, &account);
+        let read = |_: &AccountState| has_room();
+        pass(&other, START, &read);
+        pass(&other, START + 301, &read);
+        assert_eq!(account_state(&other, &account).limited_until, None);
+        assert_eq!(
+            parked_until_of(&state),
+            Some(STATED_RESET),
+            "not its Mission"
+        );
+        // The Station that parked it sees the limit gone and reads nothing.
+        let unread = |_: &AccountState| -> Read { panic!("the account is not limited") };
+        pass(&state, START + 302, &unread);
+        assert_eq!(parked_until_of(&state), Some(START + 302));
+    }
+
+    #[test]
+    fn a_limit_that_ran_out_by_itself_does_not_resume_a_mission_before_its_grace() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, account) = limited_account(root.path(), "");
+        // The account's own mark lapses at the stated reset; the Mission waits to reset + grace.
+        let unread = |_: &AccountState| -> Read { Read::NotPolled(String::new()) };
+        pass(&state, STATED_RESET + 1, &unread);
+        assert!(account_state(&state, &account).limited_until.is_some());
+        assert_eq!(parked_until_of(&state), Some(STATED_RESET));
+    }
+
+    #[test]
+    fn a_mission_that_left_parked_no_longer_counts_toward_the_next_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now, account) = limited_account(root.path(), "");
+        assert_eq!(parked_on(&state, &account).len(), 1);
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition("waits", MissionState::Abandoned)
+            .unwrap();
+        let left = state.missions.lock().unwrap().get("waits").unwrap().clone();
+        assert_eq!(
+            left.parked_on, None,
+            "it names nothing once it leaves Parked"
+        );
+        assert!(parked_on(&state, &account).is_empty());
+        // Its model does not hold the account's next limit: a bucket of another model that is
+        // used up is no reason to keep waiting, and nothing waits at all.
+        let read = |_: &AccountState| {
+            Read::Report(boxed(vec![bucket(
+                "mine",
+                100,
+                STATED_RESET,
+                Coverage::Only {
+                    models: vec!["model-a".to_owned()],
+                },
+            )]))
+        };
+        pass(&state, START, &read);
+        pass(&state, START + 301, &read);
+        assert_eq!(account_state(&state, &account).limited_until, None);
     }
 }

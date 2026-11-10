@@ -1135,7 +1135,9 @@ A Station reads each pool account it declared that the Registry holds limited, o
 Office's Roster settings, applied at the next pass): every `refresh_every` seconds (300; 0 never reads), each
 read that finds the account still used up multiplying the wait by `backoff_factor` (2) up to `backoff_max`
 (3600). A read that finds no bucket covering the waiting Missions' models used up frees the account; one that
-shows the reset later keeps the account out and re-parks them to the new time. A handler that learns its usage
+shows the reset later keeps the account out and re-parks them to the new time. The Missions waiting on an account are the parked ones whose record names it (`parked_on`: the account and the
+model they need, none for a routed Agent), so a restarted Station, or one that finds the limit lifted by another
+Station's read, resumes them. A handler that learns its usage
 only during a turn is never read: its account waits for the time the limit stated. The board shows each window
 with the models it covers and when it was read (`ai6ctl pools`, column `READ_UNIX`, and the Account Pools page).
 

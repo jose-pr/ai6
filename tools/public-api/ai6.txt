@@ -1649,6 +1649,7 @@ pub ai6::directorates::m::mission::Mission::handle: core::option::Option<alloc::
 pub ai6::directorates::m::mission::Mission::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::m::mission::Mission::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::operation_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::parked_on: core::option::Option<ai6::directorates::m::mission::ParkedOn>
 pub ai6::directorates::m::mission::Mission::parked_until: core::option::Option<i64>
 pub ai6::directorates::m::mission::Mission::plan: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::prompt: alloc::string::String
@@ -1681,6 +1682,7 @@ pub fn ai6::directorates::m::mission::MissionStore::list(&self) -> alloc::vec::V
 pub fn ai6::directorates::m::mission::MissionStore::note_denied_tools(&mut self, &str, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::park_on(&mut self, &str, i64, core::option::Option<ai6::directorates::m::mission::ParkedOn>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::quarantine(&mut self, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::reassign(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::record_brief_digest(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -1699,6 +1701,11 @@ pub fn ai6::directorates::m::mission::MissionStore::set_plan(&mut self, &str, co
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_waiting(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<bool, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::transition(&mut self, &str, ai6::directorates::m::mission::MissionState) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+#[non_exhaustive] pub struct ai6::directorates::m::mission::ParkedOn
+pub ai6::directorates::m::mission::ParkedOn::account: alloc::string::String
+pub ai6::directorates::m::mission::ParkedOn::model: core::option::Option<alloc::string::String>
+impl ai6::directorates::m::mission::ParkedOn
+pub fn ai6::directorates::m::mission::ParkedOn::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
 pub mod ai6::directorates::m::placement
 #[non_exhaustive] pub enum ai6::directorates::m::placement::ExecutionMode
 pub ai6::directorates::m::placement::ExecutionMode::Field

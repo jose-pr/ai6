@@ -7786,7 +7786,7 @@ fn handle_limit(
         .as_ref()
         .and_then(|limit| lifts_at(state.clock.now(), limit));
     // The limited account is marked and freed whatever the policy.
-    let rotation = accounts::on_limit(state, &mission, lifts, policy.1);
+    let (rotation, waits_on) = accounts::on_limit(state, &mission, lifts, policy.1);
 
     if policy.0 == OnLimit::Rotate {
         match rotation {
@@ -7837,7 +7837,7 @@ fn handle_limit(
         .as_secs_f64()
         .ceil() as i64;
     let until = parked_until(state.clock.now(), resets_at, retry_after, policy.1, grace);
-    if park_mission(state, mission_id, until) {
+    if park_mission_on(state, mission_id, until, waits_on) {
         queue_event(state, mission_id, event);
     }
 }
@@ -7870,11 +7870,22 @@ fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
 
 /// Parks a Mission until `until` (Unix seconds) and records it; whether it was parked.
 fn park_mission(state: &DaemonState, mission_id: &str, until: i64) -> bool {
+    park_mission_on(state, mission_id, until, None)
+}
+
+/// Parks as [`park_mission`], waiting on the pool account whose limit stopped the Mission when
+/// it is given; parked again without one, a Mission keeps what it waits on.
+fn park_mission_on(
+    state: &DaemonState,
+    mission_id: &str,
+    until: i64,
+    on: Option<crate::directorates::m::mission::ParkedOn>,
+) -> bool {
     let parked = state
         .missions
         .lock()
         .ok()
-        .is_some_and(|mut missions| missions.park(mission_id, until).is_ok());
+        .is_some_and(|mut missions| missions.park_on(mission_id, until, on).is_ok());
     if parked {
         sync_session_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Parked);

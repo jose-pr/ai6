@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use crate::directorates::m::mission::Mission;
+use crate::directorates::m::mission::ParkedOn;
 use crate::directorates::m::placement;
 use crate::directorates::m::roster::{Agent, AgentRoute};
 use crate::directorates::q::{
@@ -1008,12 +1009,12 @@ pub(super) fn on_limit(
     mission: &Mission,
     resets_at: Option<i64>,
     fallback_secs: u64,
-) -> Rotation {
+) -> (Rotation, Option<ParkedOn>) {
     let mission_id = mission.mission_id.as_str();
     let Some((account, carried, until)) =
         mark_limited(state, mission.into(), resets_at, fallback_secs)
     else {
-        return Rotation::Unpooled;
+        return (Rotation::Unpooled, None);
     };
     let now = state.clock.now();
     let operation = mission.operation_id.as_deref();
@@ -1023,9 +1024,8 @@ pub(super) fn on_limit(
         .ok();
     // A Mission that waits out this limit is resumed early when a re-read of the account finds
     // room for its model; a routed Agent's route is not known here, so any bucket may hold it.
-    state.usage_watch.hold(
-        &account,
-        mission_id,
+    let waits_on = ParkedOn::new(
+        account.to_string(),
         agent
             .as_ref()
             .filter(|agent| !agent.is_routed())
@@ -1083,7 +1083,7 @@ pub(super) fn on_limit(
                 .detail("next", next),
         );
     }
-    rotation
+    (rotation, Some(waits_on))
 }
 
 /// Whether any of `pools`' accounts that `keep` admits has room at `now`, an account with no
