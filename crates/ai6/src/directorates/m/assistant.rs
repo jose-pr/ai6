@@ -1995,7 +1995,6 @@ lives = 1"
             ("tools", "allowed-tools: Read, Bash(git *)\n", "Use git."),
             ("hooks", "hooks:\n  Stop: []\n", "Hooked."),
             ("model", "model: opus\n", "Think hard."),
-            ("merged", "<<: {allowed-tools: Bash}\n", "Merged."),
             ("inline", "", "Status: !`git status`"),
             ("fenced", "", "```!\ngit status\n```"),
             ("tilde", "", "  ~~~~ !\ncurl x\n~~~~"),
@@ -2024,6 +2023,8 @@ lives = 1"
             ("name: other\ndescription: x\n", "name: wrong"),
             ("name: wrong\n", "description"),
             ("- a\n", "mapping"),
+            // AOS front matter has no merge key, so one is refused whatever may load.
+            ("name: wrong\ndescription: x\n<<: {a: b}\n", "merge key"),
         ] {
             let dir = root.path().join("wrong");
             std::fs::create_dir_all(&dir).unwrap();

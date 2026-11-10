@@ -3119,24 +3119,9 @@ pub fn ai6::directorates::q::outbound::SecretSet::new(impl core::iter::traits::c
 pub fn ai6::directorates::q::outbound::check(&str, &ai6::directorates::q::outbound::SecretSet, &ai6::directorates::q::outbound::LinkRule, ai6::bounds::Limit, ai6::directorates::m::issues::OnSecret) -> core::result::Result<alloc::string::String, ai6::directorates::q::outbound::Refusal>
 pub fn ai6::directorates::q::outbound::check_person(&str, ai6::bounds::Limit) -> core::result::Result<alloc::string::String, ai6::directorates::q::outbound::Refusal>
 pub mod ai6::directorates::q::overlays
-pub enum ai6::directorates::q::overlays::Change
-pub ai6::directorates::q::overlays::Change::Activate
-pub ai6::directorates::q::overlays::Change::Add
-pub ai6::directorates::q::overlays::Change::Remove
-pub ai6::directorates::q::overlays::Change::Sync
-#[non_exhaustive] pub enum ai6::directorates::q::overlays::DigestErrorKind
-pub ai6::directorates::q::overlays::DigestErrorKind::CaseCollision
-pub ai6::directorates::q::overlays::DigestErrorKind::InvalidName
-pub ai6::directorates::q::overlays::DigestErrorKind::Io
-pub ai6::directorates::q::overlays::DigestErrorKind::NonUtf8Name
-pub ai6::directorates::q::overlays::DigestErrorKind::SpecialFile
-pub ai6::directorates::q::overlays::DigestErrorKind::Symlink
-pub ai6::directorates::q::overlays::DigestErrorKind::TooLarge
-impl ai6::directorates::q::overlays::DigestErrorKind
-pub const fn ai6::directorates::q::overlays::DigestErrorKind::class(self) -> &'static str
 #[non_exhaustive] pub enum ai6::directorates::q::overlays::OverlayFrom
 pub ai6::directorates::q::overlays::OverlayFrom::Path(std::path::PathBuf)
-pub ai6::directorates::q::overlays::OverlayFrom::Source(ai6::directorates::q::overlays::Source)
+pub ai6::directorates::q::overlays::OverlayFrom::Source(coqui_aos::source::Source)
 #[non_exhaustive] pub enum ai6::directorates::q::overlays::OverlayList
 pub ai6::directorates::q::overlays::OverlayList::Loadout
 pub ai6::directorates::q::overlays::OverlayList::Operation
@@ -3157,297 +3142,51 @@ pub ai6::directorates::q::overlays::OverlayRefusal::Unpinned(alloc::string::Stri
 impl core::error::Error for ai6::directorates::q::overlays::OverlayRefusal
 impl core::fmt::Display for ai6::directorates::q::overlays::OverlayRefusal
 pub fn ai6::directorates::q::overlays::OverlayRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub enum ai6::directorates::q::overlays::Phase
-pub ai6::directorates::q::overlays::Phase::Install
-pub ai6::directorates::q::overlays::Phase::Remove
-pub ai6::directorates::q::overlays::Phase::Sync
-impl ai6::directorates::q::overlays::Phase
-pub const fn ai6::directorates::q::overlays::Phase::name(self) -> &'static str
-#[non_exhaustive] pub enum ai6::directorates::q::overlays::SourceKind
-pub ai6::directorates::q::overlays::SourceKind::Directory
-pub ai6::directorates::q::overlays::SourceKind::Git
-pub ai6::directorates::q::overlays::SourceKind::Url
-#[non_exhaustive] pub enum ai6::directorates::q::overlays::TreeEntry
-pub ai6::directorates::q::overlays::TreeEntry::Directory
-pub ai6::directorates::q::overlays::TreeEntry::File(alloc::vec::Vec<u8>)
-pub ai6::directorates::q::overlays::TreeEntry::Special
-pub ai6::directorates::q::overlays::TreeEntry::Symlink
-pub struct ai6::directorates::q::overlays::Composition
-pub ai6::directorates::q::overlays::Composition::active: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Composition::context: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub ai6::directorates::q::overlays::Composition::install_order: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Composition::missing: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub ai6::directorates::q::overlays::Composition::root_variables: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub ai6::directorates::q::overlays::Composition::routing: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Composition::rules: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub ai6::directorates::q::overlays::Composition::skill_collisions: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Composition::skills: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub struct ai6::directorates::q::overlays::Cycle(pub alloc::vec::Vec<alloc::string::String>)
-impl core::error::Error for ai6::directorates::q::overlays::Cycle
-impl core::fmt::Display for ai6::directorates::q::overlays::Cycle
-pub fn ai6::directorates::q::overlays::Cycle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::Dependency
-pub ai6::directorates::q::overlays::Dependency::environment: alloc::string::String
-pub ai6::directorates::q::overlays::Dependency::file: alloc::string::String
-pub ai6::directorates::q::overlays::Dependency::lock: core::option::Option<alloc::string::String>
-pub ai6::directorates::q::overlays::Dependency::runtime: alloc::string::String
-pub struct ai6::directorates::q::overlays::Digest(_)
-impl ai6::directorates::q::overlays::Digest
-pub fn ai6::directorates::q::overlays::Digest::bytes(&self) -> &[u8; 32]
-pub fn ai6::directorates::q::overlays::Digest::of(&[u8]) -> Self
-pub fn ai6::directorates::q::overlays::Digest::parse(&str) -> core::result::Result<Self, alloc::string::String>
-impl core::fmt::Display for ai6::directorates::q::overlays::Digest
-pub fn ai6::directorates::q::overlays::Digest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for ai6::directorates::q::overlays::Digest
-pub type ai6::directorates::q::overlays::Digest::Err = alloc::string::String
-pub fn ai6::directorates::q::overlays::Digest::from_str(&str) -> core::result::Result<Self, alloc::string::String>
-pub struct ai6::directorates::q::overlays::DigestError
-pub ai6::directorates::q::overlays::DigestError::kind: ai6::directorates::q::overlays::DigestErrorKind
-pub ai6::directorates::q::overlays::DigestError::path: alloc::string::String
-impl core::error::Error for ai6::directorates::q::overlays::DigestError
-impl core::fmt::Display for ai6::directorates::q::overlays::DigestError
-pub fn ai6::directorates::q::overlays::DigestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::DotenvLine
-pub ai6::directorates::q::overlays::DotenvLine::literal: bool
-pub ai6::directorates::q::overlays::DotenvLine::name: alloc::string::String
-pub ai6::directorates::q::overlays::DotenvLine::text: alloc::string::String
-pub struct ai6::directorates::q::overlays::Effective
-pub ai6::directorates::q::overlays::Effective::dependencies: alloc::vec::Vec<ai6::directorates::q::overlays::Dependency>
-pub ai6::directorates::q::overlays::Effective::env: ai6::directorates::q::overlays::Environment
-pub ai6::directorates::q::overlays::Effective::env_scripts: alloc::vec::Vec<ai6::directorates::q::overlays::ScriptRun>
-pub ai6::directorates::q::overlays::Effective::needs: ai6::directorates::q::overlays::Needs
-pub ai6::directorates::q::overlays::Effective::node: core::option::Option<ai6::directorates::q::overlays::Document>
-pub ai6::directorates::q::overlays::Effective::python: core::option::Option<ai6::directorates::q::overlays::Document>
-pub ai6::directorates::q::overlays::Effective::setup: core::option::Option<ai6::directorates::q::overlays::SetupRun>
-pub ai6::directorates::q::overlays::Effective::supported: bool
-pub ai6::directorates::q::overlays::Effective::ungranted: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Effective::weakenings: alloc::vec::Vec<ai6::directorates::q::overlays::Weakening>
-pub struct ai6::directorates::q::overlays::Environment
-impl ai6::directorates::q::overlays::Environment
-pub fn ai6::directorates::q::overlays::Environment::get(&self, &str) -> core::option::Option<&str>
-pub fn ai6::directorates::q::overlays::Environment::is_secret(&self, &str) -> bool
-pub fn ai6::directorates::q::overlays::Environment::new<I: core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, alloc::string::String)>>(I, bool) -> Self
-pub fn ai6::directorates::q::overlays::Environment::set(&mut self, &str, alloc::string::String, bool)
-pub fn ai6::directorates::q::overlays::Environment::unset(&mut self, &str)
-pub fn ai6::directorates::q::overlays::Environment::values(&self) -> &[(alloc::string::String, alloc::string::String)]
-impl core::fmt::Debug for ai6::directorates::q::overlays::Environment
-pub fn ai6::directorates::q::overlays::Environment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::Environments
-pub ai6::directorates::q::overlays::Environments::blocked: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Environments::conflicts: alloc::vec::Vec<ai6::directorates::q::overlays::PackageConflict>
-pub ai6::directorates::q::overlays::Environments::environments: alloc::vec::Vec<ai6::directorates::q::overlays::PackageEnvironment>
-pub ai6::directorates::q::overlays::Environments::left: alloc::vec::Vec<ai6::directorates::q::overlays::LeftEnvironment>
-pub struct ai6::directorates::q::overlays::Facts
-pub ai6::directorates::q::overlays::Facts::base_env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub ai6::directorates::q::overlays::Facts::enforces_network: core::option::Option<bool>
-pub ai6::directorates::q::overlays::Facts::env_scripts_enabled: core::option::Option<bool>
-pub ai6::directorates::q::overlays::Facts::grants: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>
-pub ai6::directorates::q::overlays::Facts::host_env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub ai6::directorates::q::overlays::Facts::identity: alloc::string::String
-pub ai6::directorates::q::overlays::Facts::interpreters: core::option::Option<alloc::vec::Vec<alloc::string::String>>
-pub ai6::directorates::q::overlays::Facts::os: alloc::string::String
-pub ai6::directorates::q::overlays::Facts::packages: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub ai6::directorates::q::overlays::Facts::pinned: bool
-pub ai6::directorates::q::overlays::Facts::provider_values: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
-pub ai6::directorates::q::overlays::Facts::providers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
-pub ai6::directorates::q::overlays::Facts::read_limits: ai6::directorates::q::overlays::ReadLimits
-pub ai6::directorates::q::overlays::Facts::root: alloc::string::String
-pub ai6::directorates::q::overlays::Facts::secret_files: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
-pub ai6::directorates::q::overlays::Facts::secrets: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
-pub ai6::directorates::q::overlays::Facts::state: core::option::Option<alloc::string::String>
-pub ai6::directorates::q::overlays::Facts::tree: ai6::directorates::q::overlays::OverlayTree
-impl core::fmt::Debug for ai6::directorates::q::overlays::Facts
-pub fn ai6::directorates::q::overlays::Facts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::Issue
-pub ai6::directorates::q::overlays::Issue::at: alloc::string::String
-pub ai6::directorates::q::overlays::Issue::code: &'static str
 pub struct ai6::directorates::q::overlays::IssuedDigest
 pub ai6::directorates::q::overlays::IssuedDigest::digest: alloc::string::String
 pub ai6::directorates::q::overlays::IssuedDigest::overlay: alloc::string::String
 pub struct ai6::directorates::q::overlays::IssuedOverlay
 pub ai6::directorates::q::overlays::IssuedOverlay::identity: alloc::string::String
-pub ai6::directorates::q::overlays::IssuedOverlay::manifest: ai6::directorates::q::overlays::Document
+pub ai6::directorates::q::overlays::IssuedOverlay::manifest: coqui_aos::read::Document
 pub ai6::directorates::q::overlays::IssuedOverlay::record: ai6::directorates::q::overlays::OverlayRecord
 pub struct ai6::directorates::q::overlays::IssuedOverlays
 pub ai6::directorates::q::overlays::IssuedOverlays::install_order: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::q::overlays::IssuedOverlays::overlays: alloc::vec::Vec<ai6::directorates::q::overlays::IssuedOverlay>
 pub ai6::directorates::q::overlays::IssuedOverlays::weakenings: alloc::vec::Vec<ai6::directorates::q::overlays::Weakening>
-pub struct ai6::directorates::q::overlays::LeftEnvironment
-pub ai6::directorates::q::overlays::LeftEnvironment::environment: alloc::string::String
-pub ai6::directorates::q::overlays::LeftEnvironment::overlay: alloc::string::String
-pub ai6::directorates::q::overlays::LeftEnvironment::runtime: alloc::string::String
-pub ai6::directorates::q::overlays::LeftEnvironment::then: alloc::string::String
-pub struct ai6::directorates::q::overlays::Needs
-pub ai6::directorates::q::overlays::Needs::commands: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Needs::interpreters: alloc::vec::Vec<alloc::string::String>
 pub struct ai6::directorates::q::overlays::OverlayRecord
 impl ai6::directorates::q::overlays::OverlayRecord
 pub fn ai6::directorates::q::overlays::OverlayRecord::from(&self) -> &ai6::directorates::q::overlays::OverlayFrom
 pub fn ai6::directorates::q::overlays::OverlayRecord::identity(&self) -> alloc::string::String
 pub fn ai6::directorates::q::overlays::OverlayRecord::name(&self) -> &str
 pub fn ai6::directorates::q::overlays::OverlayRecord::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::q::overlays::OverlayFrom) -> Self
-pub fn ai6::directorates::q::overlays::OverlayRecord::pin(&self) -> core::option::Option<ai6::directorates::q::overlays::Digest>
-pub fn ai6::directorates::q::overlays::OverlayRecord::pinned(self, ai6::directorates::q::overlays::Digest) -> Self
+pub fn ai6::directorates::q::overlays::OverlayRecord::pin(&self) -> core::option::Option<coqui_aos::digest::Digest>
+pub fn ai6::directorates::q::overlays::OverlayRecord::pinned(self, coqui_aos::digest::Digest) -> Self
 pub fn ai6::directorates::q::overlays::OverlayRecord::secrets(&self) -> &[alloc::string::String]
 pub fn ai6::directorates::q::overlays::OverlayRecord::with_secrets(self, alloc::vec::Vec<alloc::string::String>) -> Self
-pub struct ai6::directorates::q::overlays::OverlayTree
-impl ai6::directorates::q::overlays::OverlayTree
-pub fn ai6::directorates::q::overlays::OverlayTree::contains(&self, &str) -> bool
-pub fn ai6::directorates::q::overlays::OverlayTree::from_paths<I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>>(I) -> Self
-pub fn ai6::directorates::q::overlays::OverlayTree::from_texts<I: core::iter::traits::collect::IntoIterator<Item = (S, T)>, S: core::convert::Into<alloc::string::String>, T: core::convert::Into<alloc::string::String>>(I) -> Self
-pub fn ai6::directorates::q::overlays::OverlayTree::paths(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
-pub fn ai6::directorates::q::overlays::OverlayTree::text(&self, &str) -> core::option::Option<&str>
-pub fn ai6::directorates::q::overlays::OverlayTree::with_text(self, &str, impl core::convert::Into<alloc::string::String>) -> Self
-pub struct ai6::directorates::q::overlays::PackageConflict
-pub ai6::directorates::q::overlays::PackageConflict::environment: alloc::string::String
-pub ai6::directorates::q::overlays::PackageConflict::overlays: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::PackageConflict::package: alloc::string::String
-pub ai6::directorates::q::overlays::PackageConflict::runtime: alloc::string::String
-pub struct ai6::directorates::q::overlays::PackageEnvironment
-pub ai6::directorates::q::overlays::PackageEnvironment::environment: alloc::string::String
-pub ai6::directorates::q::overlays::PackageEnvironment::files: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub ai6::directorates::q::overlays::PackageEnvironment::locked: bool
-pub ai6::directorates::q::overlays::PackageEnvironment::overlays: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::PackageEnvironment::runtime: alloc::string::String
-pub struct ai6::directorates::q::overlays::PartialLock(pub alloc::string::String)
-pub struct ai6::directorates::q::overlays::Preparation
-pub ai6::directorates::q::overlays::Preparation::activates: bool
-pub ai6::directorates::q::overlays::Preparation::arguments: core::option::Option<alloc::vec::Vec<alloc::string::String>>
-pub ai6::directorates::q::overlays::Preparation::phase: core::option::Option<ai6::directorates::q::overlays::Phase>
-pub ai6::directorates::q::overlays::Preparation::record: core::option::Option<ai6::directorates::q::overlays::SetupRecord>
-pub ai6::directorates::q::overlays::Preparation::steps: alloc::vec::Vec<alloc::string::String>
-pub struct ai6::directorates::q::overlays::ReadError
-impl ai6::directorates::q::overlays::ReadError
-pub fn ai6::directorates::q::overlays::ReadError::class(&self) -> &str
-pub fn ai6::directorates::q::overlays::ReadError::line(&self) -> core::option::Option<usize>
-impl core::error::Error for ai6::directorates::q::overlays::ReadError
-impl core::fmt::Display for ai6::directorates::q::overlays::ReadError
-pub fn ai6::directorates::q::overlays::ReadError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::ReadLimits
-pub ai6::directorates::q::overlays::ReadLimits::bytes: ai6::bounds::Limit
-pub ai6::directorates::q::overlays::ReadLimits::depth: ai6::bounds::Limit
-impl core::default::Default for ai6::directorates::q::overlays::ReadLimits
-pub fn ai6::directorates::q::overlays::ReadLimits::default() -> Self
 pub struct ai6::directorates::q::overlays::ReadOverlay
-pub ai6::directorates::q::overlays::ReadOverlay::digest: ai6::directorates::q::overlays::TreeDigest
-pub ai6::directorates::q::overlays::ReadOverlay::issues: alloc::vec::Vec<ai6::directorates::q::overlays::Issue>
-pub ai6::directorates::q::overlays::ReadOverlay::manifest: ai6::directorates::q::overlays::Document
+pub ai6::directorates::q::overlays::ReadOverlay::digest: coqui_aos::digest::TreeDigest
+pub ai6::directorates::q::overlays::ReadOverlay::issues: alloc::vec::Vec<coqui_aos::validate::Issue>
+pub ai6::directorates::q::overlays::ReadOverlay::manifest: coqui_aos::read::Document
 pub ai6::directorates::q::overlays::ReadOverlay::skills: alloc::vec::Vec<(alloc::string::String, core::result::Result<(), alloc::string::String>)>
 impl ai6::directorates::q::overlays::ReadOverlay
-pub fn ai6::directorates::q::overlays::ReadOverlay::tree(&self) -> ai6::directorates::q::overlays::OverlayTree
+pub fn ai6::directorates::q::overlays::ReadOverlay::tree(&self) -> coqui_aos::defaults::OverlayTree
 pub fn ai6::directorates::q::overlays::ReadOverlay::usable(&self) -> bool
-pub struct ai6::directorates::q::overlays::Refusal
-pub ai6::directorates::q::overlays::Refusal::class: alloc::string::String
-pub ai6::directorates::q::overlays::Refusal::subject: alloc::string::String
-impl core::convert::From<(ai6::directorates::q::overlays::SubstitutionError, &str)> for ai6::directorates::q::overlays::Refusal
-pub fn ai6::directorates::q::overlays::Refusal::from((ai6::directorates::q::overlays::SubstitutionError, &str)) -> Self
-impl core::error::Error for ai6::directorates::q::overlays::Refusal
-impl core::fmt::Display for ai6::directorates::q::overlays::Refusal
-pub fn ai6::directorates::q::overlays::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::Resolution
-pub ai6::directorates::q::overlays::Resolution::install_order: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::Resolution::missing: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub struct ai6::directorates::q::overlays::ScriptRun
-pub ai6::directorates::q::overlays::ScriptRun::args: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::ScriptRun::interpreter: alloc::string::String
-pub ai6::directorates::q::overlays::ScriptRun::path: alloc::string::String
-pub ai6::directorates::q::overlays::ScriptRun::timeout: u64
-pub struct ai6::directorates::q::overlays::SetupRecord
-pub ai6::directorates::q::overlays::SetupRecord::digest: alloc::string::String
-pub ai6::directorates::q::overlays::SetupRecord::phase: ai6::directorates::q::overlays::Phase
-pub struct ai6::directorates::q::overlays::SetupRun
-pub ai6::directorates::q::overlays::SetupRun::args: alloc::vec::Vec<alloc::string::String>
-pub ai6::directorates::q::overlays::SetupRun::interpreter: alloc::string::String
-pub ai6::directorates::q::overlays::SetupRun::network: bool
-pub ai6::directorates::q::overlays::SetupRun::path: alloc::string::String
-pub ai6::directorates::q::overlays::SetupRun::timeout: u64
 pub struct ai6::directorates::q::overlays::SkillSummary
 pub ai6::directorates::q::overlays::SkillSummary::argument_hint: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::overlays::SkillSummary::description: alloc::string::String
 pub ai6::directorates::q::overlays::SkillSummary::user_invocable: bool
-pub struct ai6::directorates::q::overlays::Source
-pub ai6::directorates::q::overlays::Source::kind: ai6::directorates::q::overlays::SourceKind
-pub ai6::directorates::q::overlays::Source::location: alloc::string::String
-pub ai6::directorates::q::overlays::Source::path: core::option::Option<alloc::string::String>
-pub ai6::directorates::q::overlays::Source::reference: core::option::Option<alloc::string::String>
-impl ai6::directorates::q::overlays::Source
-pub fn ai6::directorates::q::overlays::Source::parse(&str) -> core::result::Result<Self, ai6::directorates::q::overlays::SourceError>
-pub fn ai6::directorates::q::overlays::Source::shown(&self) -> alloc::string::String
-pub struct ai6::directorates::q::overlays::SourceError(_)
-impl core::error::Error for ai6::directorates::q::overlays::SourceError
-impl core::fmt::Display for ai6::directorates::q::overlays::SourceError
-pub fn ai6::directorates::q::overlays::SourceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::SubstitutionError
-pub ai6::directorates::q::overlays::SubstitutionError::class: &'static str
-pub ai6::directorates::q::overlays::SubstitutionError::name: alloc::string::String
-impl core::error::Error for ai6::directorates::q::overlays::SubstitutionError
-impl core::fmt::Display for ai6::directorates::q::overlays::SubstitutionError
-pub fn ai6::directorates::q::overlays::SubstitutionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6::directorates::q::overlays::TreeDigest
-pub ai6::directorates::q::overlays::TreeDigest::digest: ai6::directorates::q::overlays::Digest
-pub ai6::directorates::q::overlays::TreeDigest::files: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Digest>
-impl ai6::directorates::q::overlays::TreeDigest
-pub fn ai6::directorates::q::overlays::TreeDigest::lines(&self) -> alloc::vec::Vec<alloc::vec::Vec<u8>>
-pub struct ai6::directorates::q::overlays::TreeLimits
-pub ai6::directorates::q::overlays::TreeLimits::bytes: ai6::bounds::Limit
-pub ai6::directorates::q::overlays::TreeLimits::file_bytes: ai6::bounds::Limit
-pub ai6::directorates::q::overlays::TreeLimits::files: ai6::bounds::Limit
 pub struct ai6::directorates::q::overlays::Weakening
 pub ai6::directorates::q::overlays::Weakening::id: alloc::string::String
 pub ai6::directorates::q::overlays::Weakening::subject: alloc::string::String
-pub const ai6::directorates::q::overlays::DEFAULT_KEYS: [&str; 9]
-pub const ai6::directorates::q::overlays::EXCLUDED_COMPONENTS: [&str; 10]
-pub const ai6::directorates::q::overlays::INTERPRETERS: [&str; 5]
-pub const ai6::directorates::q::overlays::LATER_MANIFEST: &str
-pub const ai6::directorates::q::overlays::MANIFEST: &str
+impl core::convert::From<&coqui_aos::apply::NonDefaultSetting> for ai6::directorates::q::overlays::Weakening
+pub fn ai6::directorates::q::overlays::Weakening::from(&coqui_aos::apply::NonDefaultSetting) -> Self
 pub const ai6::directorates::q::overlays::SKILL_INERT_KEYS: [&str; 12]
-pub fn ai6::directorates::q::overlays::applies(&[ai6::directorates::q::overlays::Issue]) -> bool
-pub fn ai6::directorates::q::overlays::check_requirements(&str, bool) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::overlays::check_skill(&std::path::Path, &str, bool, &str, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
-pub fn ai6::directorates::q::overlays::compose(&alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::OverlayTree>) -> core::result::Result<ai6::directorates::q::overlays::Composition, ai6::directorates::q::overlays::Cycle>
-pub fn ai6::directorates::q::overlays::composed_environment(&[(&ai6::directorates::q::overlays::Document, ai6::directorates::q::overlays::Facts)], ai6::directorates::q::overlays::Environment, &mut alloc::vec::Vec<ai6::directorates::q::overlays::Weakening>) -> core::result::Result<ai6::directorates::q::overlays::Environment, ai6::directorates::q::overlays::Refusal>
-pub fn ai6::directorates::q::overlays::composition_order(&alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, &[alloc::string::String]) -> alloc::vec::Vec<alloc::string::String>
-pub fn ai6::directorates::q::overlays::context_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
-pub fn ai6::directorates::q::overlays::current_os() -> &'static str
-pub fn ai6::directorates::q::overlays::default_on(&ai6::directorates::q::overlays::Document, &str) -> bool
-pub fn ai6::directorates::q::overlays::default_paths(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<serde_json::value::Value>
-pub fn ai6::directorates::q::overlays::dependencies_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::overlays::Dependency>, ai6::directorates::q::overlays::PartialLock>
-pub fn ai6::directorates::q::overlays::digest_entries<'a, I>(I) -> core::result::Result<ai6::directorates::q::overlays::TreeDigest, ai6::directorates::q::overlays::DigestError> where I: core::iter::traits::collect::IntoIterator<Item = (alloc::vec::Vec<&'a [u8]>, &'a ai6::directorates::q::overlays::TreeEntry)>
-pub fn ai6::directorates::q::overlays::effective(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::Facts) -> core::result::Result<ai6::directorates::q::overlays::Effective, ai6::directorates::q::overlays::Refusal>
-pub fn ai6::directorates::q::overlays::env_files_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<serde_json::value::Value>
-pub fn ai6::directorates::q::overlays::environments(&alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::OverlayTree>, &str, &[alloc::string::String]) -> core::result::Result<ai6::directorates::q::overlays::Environments, alloc::string::String>
-pub fn ai6::directorates::q::overlays::hooks_asked(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> core::option::Option<alloc::string::String>
-pub fn ai6::directorates::q::overlays::is_reserved_variable(&str) -> bool
-pub fn ai6::directorates::q::overlays::is_sensitive_variable(&str) -> bool
-pub fn ai6::directorates::q::overlays::is_variable_name(&str) -> bool
-pub fn ai6::directorates::q::overlays::issue_overlays(&[alloc::string::String], &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::OverlayRecord>, &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, bool) -> core::result::Result<ai6::directorates::q::overlays::IssuedOverlays, ai6::directorates::q::overlays::OverlayRefusal>
-pub fn ai6::directorates::q::overlays::named_files(&ai6::directorates::q::overlays::Document) -> alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
-pub fn ai6::directorates::q::overlays::normalize_name(&str) -> alloc::string::String
-pub fn ai6::directorates::q::overlays::os_matches(core::option::Option<&[alloc::string::String]>, &str) -> bool
-pub fn ai6::directorates::q::overlays::parse_dotenv(&[u8]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::overlays::DotenvLine>, ai6::directorates::q::overlays::ReadError>
-pub fn ai6::directorates::q::overlays::paths_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<serde_json::value::Value>
-pub fn ai6::directorates::q::overlays::preparation(ai6::directorates::q::overlays::Change, core::option::Option<&ai6::directorates::q::overlays::SetupRecord>, core::option::Option<&str>, core::option::Option<&ai6::directorates::q::overlays::SetupRun>, &[ai6::directorates::q::overlays::Dependency], core::option::Option<&str>) -> ai6::directorates::q::overlays::Preparation
-pub fn ai6::directorates::q::overlays::read_document(&[u8], &ai6::directorates::q::overlays::ReadLimits) -> core::result::Result<ai6::directorates::q::overlays::Document, ai6::directorates::q::overlays::ReadError>
-pub fn ai6::directorates::q::overlays::read_dotenv(&[u8], &mut ai6::directorates::q::overlays::Environment) -> core::result::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>, ai6::directorates::q::overlays::ReadError>
-pub fn ai6::directorates::q::overlays::read_env_script_output(&[u8]) -> core::result::Result<ai6::directorates::q::overlays::ScriptOutput, ai6::directorates::q::overlays::ReadError>
+pub fn ai6::directorates::q::overlays::hooks_asked(&coqui_aos::read::Document, &coqui_aos::defaults::OverlayTree) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::q::overlays::issue_overlays(&[alloc::string::String], &[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::OverlayRecord>, &alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_aos::read::Document>, bool) -> core::result::Result<ai6::directorates::q::overlays::IssuedOverlays, ai6::directorates::q::overlays::OverlayRefusal>
 pub fn ai6::directorates::q::overlays::read_overlay(&std::path::Path, &ai6::station::limits::OverlayLimits) -> core::result::Result<ai6::directorates::q::overlays::ReadOverlay, alloc::string::String>
-pub fn ai6::directorates::q::overlays::resolve(&alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::directorates::q::overlays::Document>, &[alloc::string::String]) -> core::result::Result<ai6::directorates::q::overlays::Resolution, ai6::directorates::q::overlays::Cycle>
-pub fn ai6::directorates::q::overlays::root_variable(&str) -> alloc::string::String
-pub fn ai6::directorates::q::overlays::rules_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
-pub fn ai6::directorates::q::overlays::setup_phase(ai6::directorates::q::overlays::Change, core::option::Option<&str>, core::option::Option<&str>) -> core::option::Option<ai6::directorates::q::overlays::Phase>
 pub fn ai6::directorates::q::overlays::skill_description(&std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::q::overlays::skill_summary(&std::path::Path) -> core::option::Option<ai6::directorates::q::overlays::SkillSummary>
-pub fn ai6::directorates::q::overlays::skills_of(&ai6::directorates::q::overlays::Document, &ai6::directorates::q::overlays::OverlayTree) -> alloc::vec::Vec<alloc::string::String>
-pub fn ai6::directorates::q::overlays::state_variable(&str) -> alloc::string::String
-pub fn ai6::directorates::q::overlays::substitute(&str, &ai6::directorates::q::overlays::Lookup<'_>) -> core::result::Result<alloc::string::String, ai6::directorates::q::overlays::SubstitutionError>
-pub fn ai6::directorates::q::overlays::tree_digest(&std::path::Path, &ai6::directorates::q::overlays::TreeLimits) -> core::result::Result<ai6::directorates::q::overlays::TreeDigest, ai6::directorates::q::overlays::DigestError>
-pub fn ai6::directorates::q::overlays::valid_license(&str) -> bool
-pub fn ai6::directorates::q::overlays::valid_overlay_name(&str) -> bool
-pub fn ai6::directorates::q::overlays::valid_relative_path(&str) -> bool
-pub fn ai6::directorates::q::overlays::validate(&ai6::directorates::q::overlays::Document, core::option::Option<&ai6::directorates::q::overlays::OverlayTree>) -> alloc::vec::Vec<ai6::directorates::q::overlays::Issue>
-pub type ai6::directorates::q::overlays::Document = serde_json::map::Map<alloc::string::String, serde_json::value::Value>
-pub type ai6::directorates::q::overlays::Lookup<'a> = (dyn core::ops::function::Fn(&str) -> core::result::Result<core::option::Option<alloc::string::String>, ai6::directorates::q::overlays::SubstitutionError> + 'a)
-pub type ai6::directorates::q::overlays::ScriptOutput = alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub mod ai6::directorates::q::provision
 #[non_exhaustive] pub enum ai6::directorates::q::provision::StepStatus
 pub ai6::directorates::q::provision::StepStatus::Changed
@@ -9303,8 +9042,7 @@ pub ai6::station::limits::OverlayLimits::manifest_depth: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::output_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::unpinned: bool
 impl ai6::station::limits::OverlayLimits
-pub fn ai6::station::limits::OverlayLimits::manifest(&self) -> ai6::directorates::q::overlays::ReadLimits
-pub fn ai6::station::limits::OverlayLimits::tree(&self) -> ai6::directorates::q::overlays::TreeLimits
+pub fn ai6::station::limits::OverlayLimits::settings(&self) -> coqui_aos::limits::Settings
 pub fn ai6::station::limits::OverlayLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::station::limits::OverlayLimits
 pub fn ai6::station::limits::OverlayLimits::default() -> Self

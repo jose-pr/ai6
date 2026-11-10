@@ -1052,19 +1052,8 @@ fn an_overlay_md_is_the_manifest_and_its_body_arrives_as_context() {
         source.path(),
         "tools",
         &[
-            (
-                "OVERLAY.md",
-                "---
-name: tools
----
-Context body
-",
-            ),
-            (
-                "bin/helper",
-                "x
-",
-            ),
+            ("OVERLAY.md", "---\nname: tools\n---\nContext body\n"),
+            ("bin/helper", "x\n"),
         ],
     );
     let list = records([record("tools", &dir)]);
@@ -1074,13 +1063,7 @@ Context body
         .unwrap()
         .context
         .unwrap();
-    assert!(
-        text.contains(
-            "From `OVERLAY.md`:
-Context body"
-        ),
-        "{text}"
-    );
+    assert!(text.contains("From `OVERLAY.md`:\nContext body"), "{text}");
     assert!(!text.contains("name: tools"), "{text}");
 }
 

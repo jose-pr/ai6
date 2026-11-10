@@ -371,27 +371,12 @@ fn an_overlay_md_is_the_manifest_and_both_manifests_are_refused() {
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(file, text).unwrap();
     };
-    write(
-        "OVERLAY.md",
-        "---
-name: tools
----
-Context.
-",
-    );
-    write(
-        "bin/helper",
-        "#!/bin/sh
-",
-    );
+    write("OVERLAY.md", "---\nname: tools\n---\nContext.\n");
+    write("bin/helper", "#!/bin/sh\n");
     let read = read_overlay(root.path(), &OverlayLimits::default()).unwrap();
     assert_eq!(read.manifest["name"], "tools");
     // An overlay with both files has no one manifest.
-    write(
-        "overlay.cfg",
-        "name = \"tools\"
-",
-    );
+    write("overlay.cfg", "name = \"tools\"\n");
     let refusal = read_overlay(root.path(), &OverlayLimits::default()).unwrap_err();
     assert!(refusal.contains("two-manifests"), "{refusal}");
 }
