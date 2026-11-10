@@ -137,7 +137,7 @@ mod tests {
             "station_labels": {"site": "london"},
             "stations": ["hq-1", "hq-2"],
             "green_ink": {"preset": "licensed", "unattended": {"field": ["push"]}},
-            "workspace": {"source": "/srv/plans", "base": "main"},
+            "workspace": {"source": "/srv/plans", "settings": {"base": "main"}},
             "sources": {"jira": "LCS"},
             "cover_identity": {"name": "LCS", "email": "lcs@example.invalid"},
         }));
@@ -160,7 +160,7 @@ mod tests {
                     "kinds": ["push"],
                     "unattended": {"field": ["push"], "desk": ["read"]},
                 },
-                "workspace": {"base": "main"},
+                "workspace": {"settings": {"base": "main"}},
                 "cover_identity": {"name": "Fortitude"},
             })
         );
@@ -173,7 +173,7 @@ mod tests {
         assert_eq!(origin("parent"), Some("FORTITUDE"));
         assert_eq!(origin("path"), None, "never inherited");
         assert_eq!(origin("workspace.source"), None);
-        assert_eq!(origin("workspace.base"), Some("BODYGUARD"));
+        assert_eq!(origin("workspace.settings.base"), Some("BODYGUARD"));
     }
 
     #[test]

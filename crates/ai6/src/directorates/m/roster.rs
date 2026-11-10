@@ -155,7 +155,7 @@ pub const DEFAULT_WAKES_PER_HOUR: u32 = 60;
 #[map(deny_unknown_fields)]
 pub struct AgentRoute {
     /// The harness this route runs, from those the Stations report.
-    #[schema(title = "Handler", format = "reported:handlers")]
+    #[schema(title = "Handler", format = "provider:ai6_agent_handler")]
     pub handler: String,
     /// What this source calls the model; the Agent's model when empty.
     #[schema(title = "Model", format = "used:model")]
@@ -164,7 +164,11 @@ pub struct AgentRoute {
     #[schema(title = "Reasoning effort", format = "used:effort", advanced)]
     pub effort: Option<String>,
     /// Settings for this route's handler; the Agent's when empty.
-    #[schema(title = "Handler settings", format = "settings-of:handler", advanced)]
+    #[schema(
+        title = "Handler settings",
+        format = "settings-of:handler#agent",
+        advanced
+    )]
     #[map(with = guatiao_serde::adapt::object, default)]
     pub handler_settings: serde_json::Map<String, serde_json::Value>,
     /// The account pool this route draws from; the Agent's when empty.
@@ -2203,50 +2207,83 @@ impl Default for OperationDefinition {
 }
 
 /// How an Operation's Missions get their working directory.
+///
+/// The safe house is a provider the Stations report, and what it takes is that provider's own
+/// configuration: the keys of its schema marked for the Operation (`x-section = "operation"`).
+/// Those of a safe house that cuts copies are `base`, `branch`, `isolate`, `checkpoint_remote`
+/// and `checkpoint_secs`, which the Station's placement reads (see [`Workspace`]).
 #[derive(Debug, Clone, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 struct WorkspaceDefinition {
     /// The safe house that makes each Mission's copy. Leave it empty to use git when the
     /// checkout is a git repository.
-    #[schema(title = "Safe house")]
+    #[schema(title = "Safe house", format = "provider:ai6_safehouse")]
     provider: Option<String>,
     /// Where the work comes from, when it is not the checkout path.
     #[schema(title = "Source", advanced)]
     source: Option<String>,
-    /// The revision each Mission starts from.
-    #[schema(title = "Start from revision", advanced)]
-    #[map(default = Workspace::default().base)]
-    base: String,
-    /// The name each Mission's branch gets; {id}, {slug} and {operation} are filled in.
-    #[schema(title = "Branch name", advanced)]
-    #[map(default = Workspace::default().branch)]
-    branch: String,
-    /// Give each Mission its own copy. Off, Missions work in the source itself.
-    #[schema(title = "A copy for each Mission", advanced)]
-    #[map(default = Workspace::default().isolate)]
-    isolate: bool,
-    /// The git remote, by name or address, each Mission's work is saved to, so a later attempt
-    /// on another Station carries on from it. Leave it empty to push nothing.
-    #[schema(title = "Save work to remote", advanced)]
-    checkpoint_remote: Option<String>,
-    /// How often a running Mission's work is saved.
-    #[schema(title = "Save every", format = "seconds", advanced)]
-    #[map(default = Workspace::default().checkpoint_secs)]
-    checkpoint_secs: u64,
+    /// The chosen safe house's own settings for this Operation.
+    #[schema(
+        title = "Safe house settings",
+        format = "settings-of:provider#operation"
+    )]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    settings: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for WorkspaceDefinition {
     fn default() -> Self {
-        let workspace = Workspace::default();
         Self {
-            provider: workspace.provider,
+            provider: None,
             source: None,
-            base: workspace.base,
-            branch: workspace.branch,
-            isolate: workspace.isolate,
-            checkpoint_remote: workspace.checkpoint_remote,
-            checkpoint_secs: workspace.checkpoint_secs,
+            settings: serde_json::Map::new(),
         }
+    }
+}
+
+impl WorkspaceDefinition {
+    /// The workspace these settings describe, every unset key at its default. The settings a safe
+    /// house shares with the Station's placement are read here by name and type.
+    fn resolve(self, id: &str) -> Result<Workspace, RosterError> {
+        let mut workspace = Workspace {
+            provider: self.provider,
+            source: self.source.map(|path| expand_path(&path)),
+            ..Workspace::default()
+        };
+        let bad = |key: &str, wanted: &str| {
+            error(format!(
+                "Operation {id:?}: workspace.settings.{key} must be {wanted}"
+            ))
+        };
+        for (key, value) in self.settings {
+            match key.as_str() {
+                "base" => {
+                    workspace.base = value.as_str().ok_or_else(|| bad(&key, "text"))?.to_owned();
+                }
+                "branch" => {
+                    workspace.branch = value.as_str().ok_or_else(|| bad(&key, "text"))?.to_owned();
+                }
+                "isolate" => {
+                    workspace.isolate =
+                        value.as_bool().ok_or_else(|| bad(&key, "true or false"))?;
+                }
+                "checkpoint_remote" => {
+                    workspace.checkpoint_remote = match value {
+                        serde_json::Value::Null => None,
+                        serde_json::Value::String(remote) => Some(remote),
+                        _ => return Err(bad(&key, "text")),
+                    };
+                }
+                "checkpoint_secs" => {
+                    workspace.checkpoint_secs = value
+                        .as_u64()
+                        .ok_or_else(|| bad(&key, "a whole number of seconds"))?;
+                }
+                // Another key is the safe house's own; its schema judges it where it is loaded.
+                _ => {}
+            }
+        }
+        Ok(workspace)
     }
 }
 
@@ -2308,6 +2345,7 @@ impl OperationDefinition {
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
         crate::directorates::q::check_overlay_list(&self.overlays, None)
             .map_err(|message| error(format!("Operation {id:?}: {message}")))?;
+        let workspace = self.workspace.resolve(&id)?;
         Ok(Operation {
             id,
             parent: self.parent,
@@ -2320,15 +2358,7 @@ impl OperationDefinition {
             roster: self.roster,
             clearance: self.clearance.as_str().to_owned(),
             max_concurrent: self.max_concurrent,
-            workspace: Workspace {
-                provider: self.workspace.provider,
-                source: self.workspace.source.map(|path| expand_path(&path)),
-                base: self.workspace.base,
-                branch: self.workspace.branch,
-                isolate: self.workspace.isolate,
-                checkpoint_remote: self.workspace.checkpoint_remote,
-                checkpoint_secs: self.workspace.checkpoint_secs,
-            },
+            workspace,
             station_labels: self.station_labels,
             stations: self.stations,
             cover: self.cover,
@@ -2498,7 +2528,11 @@ pub(crate) struct AgentDefinition {
     extends: Option<String>,
 
     /// The harness that runs its Sessions, from those the Stations report.
-    #[schema(title = "Handler", section = "harness", format = "reported:handlers")]
+    #[schema(
+        title = "Handler",
+        section = "harness",
+        format = "provider:ai6_agent_handler"
+    )]
     handler: Option<String>,
     /// The model it asks for; the harness's default when empty.
     #[schema(title = "Model", section = "harness", format = "used:model")]
@@ -2514,7 +2548,7 @@ pub(crate) struct AgentDefinition {
     #[schema(
         title = "Handler settings",
         section = "harness",
-        format = "settings-of:handler",
+        format = "settings-of:handler#agent",
         advanced
     )]
     #[map(with = guatiao_serde::adapt::object, default)]
@@ -3462,7 +3496,7 @@ effort = "low"
         directory.write(
             "operations.toml",
             &format!(
-                "[operation.G]\nname = \"project\"\npath = {:?}\nworkspace = {{ provider = \"git\", source = \"/srv/project\", base = \"main\", branch = \"ai6/{{id}}\", isolate = false }}\nroster = [\"JamesBond\"]\nclearance = \"00\"
+                "[operation.G]\nname = \"project\"\npath = {:?}\nworkspace = {{ provider = \"git\", source = \"/srv/project\", settings = {{ base = \"main\", branch = \"ai6/{{id}}\", isolate = false }} }}\nroster = [\"JamesBond\"]\nclearance = \"00\"
 station_labels = {{ station = \"dev\" }}
 cover_identity = {{ name = \"Station\", email = \"station@example.invalid\" }}
 sources = {{ jira = \"GUA\" }}\n",
@@ -3809,7 +3843,7 @@ sources = {{ jira = \"GUA\" }}\n",
         let directory = TestDirectory::new();
         directory.write(
             "operations.toml",
-            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nplacement = \"pack\"\nlost_after_secs = 10\nworkspace = { checkpoint_remote = \"origin\", checkpoint_secs = 60 }\n",
+            "[operation.A]\n[operation.B]\non_lost = \"fail\"\nplacement = \"pack\"\nlost_after_secs = 10\nworkspace = { settings = { checkpoint_remote = \"origin\", checkpoint_secs = 60 } }\n",
         );
         let roster = Roster::load(&directory.0).unwrap();
         let defaults = roster.operation("A").unwrap();
@@ -3832,8 +3866,8 @@ sources = {{ jira = \"GUA\" }}\n",
             "on_lost = \"ignore\"",
             "placement = \"random\"",
             "lost_after_secs = 0",
-            "workspace = { checkpoint_secs = 0 }",
-            "workspace = { checkpoint_remote = \" \" }",
+            "workspace = { settings = { checkpoint_secs = 0 } }",
+            "workspace = { settings = { checkpoint_remote = \" \" } }",
         ] {
             directory.write("operations.toml", &format!("[operation.C]\n{invalid}\n"));
             assert!(Roster::load(&directory.0).is_err(), "{invalid}");
@@ -4186,7 +4220,7 @@ sources = {{ jira = \"GUA\" }}\n",
             "operations.toml",
             "[operation.BODYGUARD]\ndescription = \"The deception plan\"\npath = \"/srv/lcs\"\n\
              stations = [\"hq-1\"]\nstation_labels = { site = \"london\" }\n\
-             workspace = { source = \"/srv/plans\", base = \"main\" }\n\
+             workspace = { source = \"/srv/plans\", settings = { base = \"main\" } }\n\
              sources = { jira = \"LCS\" }\n\
              [operation.BODYGUARD.green_ink]\npreset = \"licensed\"\n\
              [operation.BODYGUARD.sleepers.weekly]\nschedule = \"0 3 * * 0\"\ntitle = \"Review\"\n\

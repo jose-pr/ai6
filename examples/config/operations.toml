@@ -14,7 +14,7 @@
 [operation.G]
 name = "AI6"
 path = "."
-workspace = { provider = "git", base = "HEAD", branch = "ai6/{id}-{slug}", isolate = true }
+workspace = { provider = "git", settings = { base = "HEAD", branch = "ai6/{id}-{slug}", isolate = true } }
 roster = ["007", "008", "Tanner"]
 
 # Spending limits are off unless set (preset = "strict" sets conservative ones).

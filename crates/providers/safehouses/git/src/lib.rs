@@ -23,10 +23,32 @@ use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
 
 use worktree::{Runner, Worktree};
 
-/// `git` provider configuration; every field has a default.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+/// `git` provider configuration; every field has a default. The fields in the `operation`
+/// section are an Operation's to set (`workspace.settings`); the Station's placement reads them
+/// to build each Mission's [`SafeHouseSpec`] and its checkpoints. The others are the Station's.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::ai6::guatiao)]
 pub struct GitConfig {
+    /// The revision each Mission starts from.
+    #[schema(title = "Start from revision", section = "operation")]
+    #[map(default = "HEAD".to_owned())]
+    pub base: String,
+    /// The name each Mission's branch gets; {id}, {slug} and {operation} are filled in.
+    #[schema(title = "Branch name", section = "operation")]
+    #[map(default = "{id}-{slug}".to_owned())]
+    pub branch: String,
+    /// Give each Mission its own copy. Off, Missions work in the source itself.
+    #[schema(title = "A copy for each Mission", section = "operation")]
+    #[map(default = true)]
+    pub isolate: bool,
+    /// The git remote, by name or address, each Mission's work is saved to, so a later attempt
+    /// on another Station carries on from it. Empty pushes nothing.
+    #[schema(title = "Save work to remote", section = "operation")]
+    pub checkpoint_remote: Option<String>,
+    /// Seconds between saves of a running Mission's work.
+    #[schema(title = "Save every", format = "seconds", section = "operation")]
+    #[map(default = 300)]
+    pub checkpoint_secs: u64,
     /// Milliseconds one Git command may run before it is killed. Default 120000.
     #[map(default = 120_000)]
     pub git_timeout_ms: u64,
@@ -39,6 +61,11 @@ pub struct GitConfig {
 impl Default for GitConfig {
     fn default() -> Self {
         Self {
+            base: "HEAD".to_owned(),
+            branch: "{id}-{slug}".to_owned(),
+            isolate: true,
+            checkpoint_remote: None,
+            checkpoint_secs: 300,
             git_timeout_ms: 120_000,
             measure_every_ms: 250,
         }
@@ -46,7 +73,7 @@ impl Default for GitConfig {
 }
 
 /// Makes a Mission's workspace with Git: a worktree, or a clone.
-#[derive(Debug, Clone, Copy, Default, ai6::guatiao::Provider)]
+#[derive(Debug, Clone, Default, ai6::guatiao::Provider)]
 #[provider(
     SafeHouseProvider,
     id = "git",

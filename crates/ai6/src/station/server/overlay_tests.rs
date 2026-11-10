@@ -17,7 +17,7 @@ const SKILL: &str = "---\nname: review\ndescription: Reviews a change.\n---\n\nH
 fn overlay_state(root: &Path, dir: &Path, clearance: &str, mission: &str) -> DaemonState {
     let mut state = test_state(
         root,
-        "workspace = { provider = \"mock-plain\", isolate = false }\n",
+        "workspace = { provider = \"mock-plain\", settings = { isolate = false } }\n",
         &format!("[agent.007]\nhandler = \"mock-recorder\"\nclearance = {clearance:?}\n"),
     );
     let checkout = root.join("checkout");

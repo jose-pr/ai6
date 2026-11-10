@@ -191,7 +191,10 @@ fn the_configured_width_bounds_the_directory_name() {
         mission_id: "mission-abcdefghij".to_owned(),
         ..spec(&source, &state)
     };
-    let copier = Copier::new(CopyConfig { name_chars: 4 });
+    let copier = Copier::new(CopyConfig {
+        name_chars: 4,
+        ..CopyConfig::default()
+    });
     let session = copier.open(&spec.to_value().unwrap()).unwrap();
     let info = describe(&session);
     let name = Path::new(&info.path).file_name().unwrap().to_string_lossy();

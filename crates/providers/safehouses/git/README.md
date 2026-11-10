@@ -42,7 +42,7 @@ and in `operations.toml`:
 ```toml
 [operation.G]
 path = "~/work/project"
-workspace = { provider = "git", base = "main", branch = "ai6/{id}-{slug}" }
+workspace = { provider = "git", settings = { base = "main", branch = "ai6/{id}-{slug}" } }
 ```
 
 ## Development

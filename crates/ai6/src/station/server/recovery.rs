@@ -1299,7 +1299,7 @@ mod tests {
     async fn a_session_lost_with_its_station_is_tried_again_elsewhere_from_its_checkpoint() {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
-        let operation = "workspace = { provider = \"mock-safehouse\", checkpoint_remote = \"origin\", checkpoint_secs = 1 }\n";
+        let operation = "workspace = { provider = \"mock-safehouse\", settings = { checkpoint_remote = \"origin\", checkpoint_secs = 1 } }\n";
         // Each Station posts 007 on its own handler, so the attempts get distinct provider IDs.
         let a = station(
             root.path(),

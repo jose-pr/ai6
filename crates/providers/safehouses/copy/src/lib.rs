@@ -24,6 +24,10 @@ use tree::Tree;
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
 #[map(crate = ::ai6::guatiao)]
 pub struct CopyConfig {
+    /// Give each Mission its own copy. Off, Missions work in the source itself.
+    #[schema(title = "A copy for each Mission", section = "operation")]
+    #[map(default = true)]
+    pub isolate: bool,
     /// Characters of an Operation or Mission ID kept in the name of its directory (a hash of
     /// the whole ID follows, so distinct IDs never collide). Default 72.
     #[map(default = 72)]
@@ -32,7 +36,10 @@ pub struct CopyConfig {
 
 impl Default for CopyConfig {
     fn default() -> Self {
-        Self { name_chars: 72 }
+        Self {
+            isolate: true,
+            name_chars: 72,
+        }
     }
 }
 
