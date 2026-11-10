@@ -872,6 +872,22 @@ fn parse_value(root: &Value, node: Option<&Value>, text: &str) -> Result<Value, 
         };
     }
     if has("string") || guess {
+        // A string field takes a quoted value as the string inside the quotes (TOML's basic
+        // `"3"` or literal `'3'`), and any other text as it is.
+        if has("string") {
+            if text.starts_with('"')
+                && let Ok(parsed) = serde_json::from_str::<String>(text)
+            {
+                return Ok(Value::String(parsed));
+            }
+            if text.len() >= 2
+                && text.starts_with('\'')
+                && text.ends_with('\'')
+                && !text[1..text.len() - 1].contains('\'')
+            {
+                return Ok(Value::String(text[1..text.len() - 1].to_owned()));
+            }
+        }
         return Ok(Value::String(text.to_owned()));
     }
     Err(format!(

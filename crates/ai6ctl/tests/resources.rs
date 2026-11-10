@@ -732,7 +732,8 @@ async fn the_loadout_families_have_their_own_action_and_a_station_s_own_records(
         );
     }
 
-    // No form yet: a value is read as the text it looks like, and a codename stays text.
+    // The loadout has a form: a text field takes a quoted value as the text inside the quotes,
+    // and a codename stays text.
     boss(
         &deployment,
         &[
@@ -741,6 +742,7 @@ async fn the_loadout_families_have_their_own_action_and_a_station_s_own_records(
             "007",
             "env.PATH=/opt/bin",
             "env.LEVEL=\"3\"",
+            "env.PLAIN=3",
             "env.CODE=007",
         ],
     )
@@ -750,7 +752,7 @@ async fn the_loadout_families_have_their_own_action_and_a_station_s_own_records(
             .unwrap();
     assert_eq!(
         shown["loadout"]["007"]["env"],
-        json!({"PATH": "/opt/bin", "LEVEL": "3", "CODE": "007"})
+        json!({"PATH": "/opt/bin", "LEVEL": "3", "PLAIN": "3", "CODE": "007"})
     );
     assert_eq!(shown["loadout"]["007"]["secrets"], json!(["forge"]));
 
