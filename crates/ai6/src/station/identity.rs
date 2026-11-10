@@ -10,18 +10,24 @@
 use std::fmt;
 use std::path::Path;
 
+use coqui_builder::builder::BuildError;
+
 pub use coqui_peer::{Digest, WaitingEntry, WaitingLimits};
+use coqui_peer_tls::{Alpn, ClientAuth, ClientBuilder, PeerError, ServerBuilder};
 pub use coqui_peer_tls::{
     Built, CaPolicy, Identity, NonDefault, PeerId, PeerIdentity, Pins, Policy, Trust, TrustStore,
     TrustStoreExt,
 };
-use coqui_peer_tls::{ClientAuth, ClientBuilder, PeerError, ServerBuilder};
 use rustls::{ClientConfig, ServerConfig};
 
 use crate::directorates::registry::sealed::StationSealingKey;
 
 /// The ALPN protocol Stations speak to each other.
 pub const STATION_ALPN: &[u8] = b"ai6-station/1";
+
+fn station_alpn() -> Result<Alpn, PeerError> {
+    Alpn::try_from(STATION_ALPN)
+}
 
 /// The identity file in a state directory: the certificate (and any intermediates) followed by
 /// its private key.
@@ -38,6 +44,8 @@ pub enum StationIdentityError {
     Tls(PeerError),
     /// The trust store or a fingerprint was refused.
     Peers(coqui_peer::Error),
+    /// A builder was not given an input it needs; the text names them.
+    Incomplete(String),
 }
 
 impl fmt::Display for StationIdentityError {
@@ -45,6 +53,7 @@ impl fmt::Display for StationIdentityError {
         match self {
             Self::Tls(error) => error.fmt(formatter),
             Self::Peers(error) => error.fmt(formatter),
+            Self::Incomplete(inputs) => formatter.write_str(inputs),
         }
     }
 }
@@ -54,6 +63,7 @@ impl std::error::Error for StationIdentityError {
         match self {
             Self::Tls(error) => Some(error),
             Self::Peers(error) => Some(error),
+            Self::Incomplete(_) => None,
         }
     }
 }
@@ -67,6 +77,24 @@ impl From<PeerError> for StationIdentityError {
 impl From<coqui_peer::Error> for StationIdentityError {
     fn from(error: coqui_peer::Error) -> Self {
         Self::Peers(error)
+    }
+}
+
+impl From<BuildError<PeerError>> for StationIdentityError {
+    fn from(error: BuildError<PeerError>) -> Self {
+        match error {
+            BuildError::Failed(error) => Self::Tls(error),
+            other => Self::Incomplete(other.to_string()),
+        }
+    }
+}
+
+impl From<BuildError<coqui_peer::Error>> for StationIdentityError {
+    fn from(error: BuildError<coqui_peer::Error>) -> Self {
+        match error {
+            BuildError::Failed(error) => Self::Peers(error),
+            other => Self::Incomplete(other.to_string()),
+        }
     }
 }
 
@@ -89,7 +117,8 @@ pub fn open_identity(state_dir: &Path) -> Result<Identity, StationIdentityError>
 ///
 /// Returns an error when the directories cannot be created.
 pub fn open_peers(state_dir: &Path, policy: &Policy) -> Result<TrustStore, StationIdentityError> {
-    Ok(TrustStore::builder(state_dir)
+    Ok(TrustStore::builder()
+        .state_dir(state_dir)
         .limits(policy.waiting)
         .build()?)
 }
@@ -113,9 +142,10 @@ pub fn client_config(
     policy: &Policy,
 ) -> Result<Built<ClientConfig>, StationIdentityError> {
     let trust = Trust::Pinned(Pins::fixed([*server]));
-    Ok(ClientBuilder::new(trust)
+    Ok(ClientBuilder::new()
+        .server(trust)
         .identity(identity)
-        .alpn([STATION_ALPN])
+        .alpn([station_alpn()?])
         .policy(policy.clone())
         .build()?)
 }
@@ -132,12 +162,12 @@ pub fn server_config(
     trust: &Trust,
     policy: &Policy,
 ) -> Result<Built<ServerConfig>, StationIdentityError> {
-    Ok(
-        ServerBuilder::new(identity, ClientAuth::Required(trust.clone()))
-            .alpn([STATION_ALPN])
-            .policy(policy.clone())
-            .build()?,
-    )
+    Ok(ServerBuilder::new()
+        .identity(identity)
+        .client_auth(ClientAuth::Required(trust.clone()))
+        .alpn([station_alpn()?])
+        .policy(policy.clone())
+        .build()?)
 }
 
 /// What a Station's identity signs about its sealing key. A TLS 1.3 handshake's signed text starts
@@ -328,7 +358,7 @@ mod tests {
         // Modern differs from the default only in the versions it offers.
         assert_eq!(
             server
-                .non_defaults
+                .non_defaults()
                 .iter()
                 .map(|setting| setting.setting.as_str())
                 .collect::<Vec<_>>(),
@@ -425,12 +455,12 @@ mod tests {
         let built = server_config(&identity, &Trust::AnyWithKeyProof, &policy).unwrap();
         assert!(
             built
-                .non_defaults
+                .non_defaults()
                 .iter()
                 .any(|setting| setting.setting == "check_validity")
         );
         assert_eq!(
-            built.non_defaults.len(),
+            built.non_defaults().len(),
             2,
             "the versions and the validity check"
         );
