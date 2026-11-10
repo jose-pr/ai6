@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Providers are reported with the schema and form of their configuration. Every Station publishes, at
+  check-in, each provider it has loaded of any kind (`providers`, bounded by `[scheduler]
+  provider_catalog_bytes`, 512 KiB by default; past it the schemas and forms are left out and each
+  entry keeps its digest), and Universal Exports reports its own. `GET /v1/user/stations/{id}/providers`
+  and `GET /v1/user/providers` (with `?kind=`) answer them. A field that picks a provider is a choice of
+  the providers the hosts report for its kind, with the chosen provider's settings drawn from its own
+  schema and form beside it, in Outer Office's Agent and Theater forms; a write whose settings are not
+  the chosen provider's is refused, naming the provider and the key.
+- Outer Office edits Theaters, loadouts, sandbox profiles, MCP servers, overlays, secrets, secret
+  providers and account pools in the schema-drawn record form, on the Roster page, under
+  `config.read` and `config.manage` on each family.
+
 - API keys beside people's sign-in. The `unex` record's `authenticators` is an ordered list of
   `{provider, config}` in place of `authenticator` and `authenticator_config`; each credential goes to
   the provider that claims it (a bearer key to the key provider, a name and a password to the others in

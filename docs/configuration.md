@@ -843,6 +843,34 @@ table bounds a Station's connection to its field runner with `connect_timeout_ms
 `initialize_timeout_ms` 20000 and `request_timeout_ms` 30000
 ([Theaters](theaters.md)).
 
+## Providers a record can choose
+
+A record that picks a provider (an Agent's `handler`, a Theater's transport or Theater provider, an
+Operation's safe house, a pool's `handler`, a secret provider's `provider`) does not make the
+provider's name a free text. Every Station reports, at check-in, each provider it has loaded with the
+Guatiao kind it serves, the JSON Schema of its configuration and the form over it (the one the
+provider declares, else the one its schema implies); Universal Exports reports its own the same way.
+A provider added to a library appears there with no change in AI6, and a Station that carries a
+catalog larger than `[scheduler] provider_catalog_bytes` (512 KiB) leaves the schemas and forms out
+and keeps each provider's digest.
+
+- `GET /v1/user/stations/{id}/providers` answers one Station's providers (`station.read` on the
+  Station); `gateway` in place of the Station answers the gateway's own (`config.read` on
+  `config:unex`). `GET /v1/user/providers` answers every provider the person may read, once each,
+  with the hosts that have it and the IDs whose schema is not the same on every host; `?kind=` limits
+  it to one Guatiao kind (`ai6_agent_handler`, `ai6_transport`, `ai6_safehouse`, ...).
+- Outer Office draws a field whose schema `format` is `provider:<kind>` as a choice of the providers
+  reported for that kind (open to typing only while no host reports any). The field beside it whose
+  format is `settings-of:<field>` is drawn from the chosen provider's own schema and form, and
+  changes with the choice; `flat-settings-of:<field>` is the same for settings written beside the
+  provider's name, as a secret provider's are. A `#section` after the name (`settings-of:handler#agent`)
+  limits the form to the provider's fields marked with that `x-section`: an Agent sets only what a
+  handler marks `agent`. What the form does not draw stays as stored.
+- A write through the gateway (a record route or `apply`) is refused, naming the provider and the
+  key, when its settings are not the chosen provider's, and when the provider is not one any host
+  reports of that kind while other hosts report providers of that kind. A provider no Station reports
+  is not judged: the Stations may be down.
+
 ## Configuration providers
 
 A provider holds records of each **family**, each record either **global** or one
@@ -870,8 +898,8 @@ no-op is stored at once.
 | `agent`, `role` | `agents` | no | no | live | Roster page, route | `[agent.<codename>]`, `[role.<id>]` |
 | `assistant` | `agents` | no | yes | live | Roster page, route | `[assistant]`, Moneypenny's settings |
 | `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
-| `theater` | `theaters` | yes | no | restart | `ai6ctl`, route `theaters` | `[theater.<id>]` |
-| `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `pool` | `loadouts` | yes | no | live | `ai6ctl`, routes `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, each under `config.read` and `config.manage` on `config:<family>` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
+| `theater` | `theaters` | yes | no | restart | Roster page (Theaters), `ai6ctl`, route `theaters` | `[theater.<id>]` |
+| `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider`, `pool` | `loadouts` | yes | no | live | Roster page, `ai6ctl`, routes `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, each under `config.read` and `config.manage` on `config:<family>` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
 | `cables` | `cables` | yes | yes | restart | `ai6ctl`, own action and confirmation | the whole file: grants, inbound, channels, limits |
 | `plugin` | `plugins` | yes | no | restart | `ai6ctl`, own action and confirmation | `[[library]]` entries, keyed by their `file` |
 | `station` | `station` | yes | yes | restart | Outer Office Stations page | the whole file: the Station's runtime settings |
@@ -1112,6 +1140,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `check_in` | 15 | **Between check-ins with the Registry.** Seconds between the Station's check-ins with the Registry. |
 | `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
+| `provider_catalog_bytes` | 512 KiB | **Largest provider catalog.** Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out. |
 | `shutdown_wait` | 2 | **Wait for each loop when stopping.** Seconds the Station waits for each of its loops when it stops. |
 <!-- schema:record.station.scheduler:end -->
 

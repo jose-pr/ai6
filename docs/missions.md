@@ -746,7 +746,7 @@ What it was last seen doing, oldest first:
 - tool: Edit
 ```
 
-The work survives only if it was **checkpointed**. With `workspace.checkpoint_remote` set
+The work survives only if it was **checkpointed**. With `workspace.settings.checkpoint_remote` set
 (see [Operations](operations.md#workspace)), the Station saves each running Session's safe
 house every `checkpoint_secs`: one commit on top of the branch's own commits that also
 holds the uncommitted changes, pushed to the Mission's branch on that remote, without

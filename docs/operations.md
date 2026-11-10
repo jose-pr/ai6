@@ -14,7 +14,7 @@ path = "~/projects/guatiao"
 roster = ["007", "006"]
 clearance = "field"
 max_concurrent = 3
-workspace = { provider = "git", base = "origin/main", branch = "agent/{id}-{slug}", isolate = true }
+workspace = { provider = "git", settings = { base = "origin/main", branch = "agent/{id}-{slug}", isolate = true } }
 station_labels = { gpu = "yes", os = "linux" }
 stations = ["lab-gpu", "hq-1"]
 cover = "covert"
@@ -43,11 +43,12 @@ recorded in the Mission report.
 | --- | --- | --- |
 | `provider` | `git` when the path is a Git checkout, else none | The safe-house provider ID. With none, Missions work in `path` directly and cover is not checked |
 | `source` | the Operation's `path` | Where the work comes from (a local path) |
-| `base` | `HEAD` | Revision a safe house starts from |
-| `branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
-| `isolate` | `true` | `false` works in `source` itself instead of a separate copy |
-| `checkpoint_remote` | none | A Git remote (name or URL) each running Mission's safe house is checkpointed to, on its own branch, so a later attempt on another Station starts from its work. Unset pushes nothing |
-| `checkpoint_secs` | `300` | Seconds between checkpoints while a Session runs. Must be above zero |
+| `settings` | `{}` | The chosen safe house's own settings for this Operation, drawn in Outer Office from the provider's schema (the fields it marks `operation`). A safe house that cuts copies takes the keys below |
+| `settings.base` | `HEAD` | Revision a safe house starts from |
+| `settings.branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
+| `settings.isolate` | `true` | `false` works in `source` itself instead of a separate copy |
+| `settings.checkpoint_remote` | none | A Git remote (name or URL) each running Mission's safe house is checkpointed to, on its own branch, so a later attempt on another Station starts from its work. Unset pushes nothing |
+| `settings.checkpoint_secs` | `300` | Seconds between checkpoints while a Session runs. Must be above zero |
 
 Two providers ship: `git` (a worktree on its own branch; commits are audited) and `copy`
 (a plain copy of the directory, always kept, no history).

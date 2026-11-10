@@ -6236,6 +6236,23 @@ unaccepted one is a `weakened` line; `off` checks nothing. The Station's check-i
 `Plugins::handler_with(provider, settings)` builds a handler with an Agent's `handler_settings`
 beside its provider's `[providers.<id>]` table: both are keys of the provider's own configuration type.
 
+`ai6::providers` is what a host reports of the providers it loaded, and the check a write makes against it:
+
+```rust
+pub struct ProviderEntry { pub id, name, version: String, pub kinds: Vec<String> /* "ai6_safehouse", ... */,
+    pub library, unavailable: Option<String>, pub schema, form: Option<serde_json::Value> /* the configuration's JSON Schema and its form */,
+    pub schema_omitted: bool, pub digest: String }   // Serialize + Deserialize; the check-in carries `providers: [ProviderEntry]`
+impl ProviderEntry { pub fn without_schema(self) -> Self; pub fn serves(&self, kind: &str) -> bool }
+Plugins::catalog() -> Vec<ProviderEntry>   // every loaded provider of every kind; `[scheduler] provider_catalog_bytes` bounds the check-in's copy
+// A field whose schema format is `provider:<kind>` picks a provider; `settings-of:<field>[#section]` holds that provider's settings;
+// `flat-settings-of:<field>` stands for settings written beside the provider's name.
+pub const PROVIDER_FORMAT, SETTINGS_FORMAT, FLAT_SETTINGS_FORMAT: &str;
+pub fn settings_of(format: &str) -> Option<(&str, Option<&str>)>;
+pub fn check_provider_settings(schema: &Value, definition: &Value, reports: &[(String, Vec<ProviderEntry>)]) -> Result<(), String>;
+```
+
+A Station also answers `GET /internal/providers` with its catalog.
+
 `ai6::provider_settings` carries a record's settings to a provider as its Guatiao value, never as text:
 
 ```rust
