@@ -1,0 +1,53 @@
+# coqui-aos/rust at c73cf23ace7dd43c6bd14e9f2f4cb74741aaa3a9, with what it inherits written out.
+test = [{ name = "tree", required-features = ["fs"] }]
+[package]
+name = "coqui-aos"
+version = "0.0.0-alpha.0"
+description = "The Agent Overlay Specification (AOS) in Rust: reading overlays, validating manifests, tree digests, composition and the environment an overlay builds, through a filesystem trait the caller supplies"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-aos"
+homepage = "https://boriken-dev.github.io/coqui-aos/"
+keywords = ["aos", "agent", "overlay", "manifest", "configuration"]
+categories = ["config", "parser-implementations"]
+exclude = [".*", "*.local.*", "/tests/"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = ["fs"]
+fs = []
+[dependencies]
+unicode-general-category = "1"
+[dependencies.guatiao]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+default-features = false
+features = ["derive"]
+[dependencies.granit-parser]
+version = "2"
+default-features = false
+features = ["std"]
+[dependencies.serde_json]
+version = "1"
+features = ["preserve_order"]
+[dependencies.sha2]
+version = "0.10"
+default-features = false
+[dependencies.toml]
+version = "1"
+default-features = false
+features = ["std", "parse", "serde", "preserve_order"]
+[dev-dependencies]
+base64 = "0.22"
+tempfile = "3"
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unsafe_code = "forbid"
