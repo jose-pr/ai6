@@ -656,9 +656,8 @@ fn event(kind: &str, text: &str) -> AgentEvent {
         text: Some(text.to_owned()),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 

@@ -31,7 +31,8 @@ use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
-    AgentEvent, AgentMessage, AgentSession, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
+    AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, Refill,
+    Spend, UsageReport, infer_limit,
 };
 use serde_json::{Value, json};
 
@@ -726,7 +727,10 @@ struct CodexSession {
     request_id: AtomicU64,
     effort: Option<String>,
     /// The latest quota window the account reported as used up.
-    exhausted: Mutex<Option<UsageLimit>>,
+    exhausted: Mutex<Option<LimitHit>>,
+    /// What the thread's requests have used since this process started: Codex reports each
+    /// request, and its own running total survives a resume.
+    spent: Mutex<Spend>,
     /// For a restricted (answer-only, assistant or `desk`) thread, what it may use.
     restricted: Option<Restriction>,
     /// Whether a command it starts is reported as the tool `exec_command`: an assistant with
@@ -770,6 +774,7 @@ impl CodexSession {
             request_id: AtomicU64::new(0),
             effort,
             exhausted: Mutex::new(None),
+            spent: Mutex::new(Spend::new("")),
             restricted: None,
             reports_commands: false,
             tripped: AtomicBool::new(false),
@@ -880,9 +885,8 @@ impl CodexSession {
             text: Some(reason),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         });
         Ok(())
     }
@@ -908,9 +912,8 @@ impl CodexSession {
                     text: Some(text),
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 });
             }
         }
@@ -1084,6 +1087,18 @@ impl CodexSession {
             if self.reports_commands && started_item(&message) == Some("commandExecution") {
                 event.tools.push(COMMAND_TOOL.to_owned());
             }
+            if let Some(spend) = event
+                .report
+                .as_mut()
+                .and_then(|report| report.spend.as_mut())
+            {
+                let mut spent = lock(&self.spent)?;
+                spent.input = spent.input.saturating_add(spend.input);
+                spent.output = spent.output.saturating_add(spend.output);
+                spent.cache_read = spent.cache_read.saturating_add(spend.cache_read);
+                spent.cache_write = spent.cache_write.saturating_add(spend.cache_write);
+                *spend = spent.clone();
+            }
             lock(&self.events)?.push_back(event);
         }
         Ok(())
@@ -1177,9 +1192,8 @@ impl CodexSession {
             text: Some(reason.to_owned()),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         });
         Ok(GateVerdict::Hold(reason.to_owned()))
     }
@@ -1361,9 +1375,30 @@ fn window_name(window: &Value, position: &str) -> String {
     }
 }
 
+/// The bucket one Codex rate-limit window is: `usedPercent` as thousandths, `resetsAt` in Unix
+/// seconds, exhausted once it is used up.
+fn bucket_of(window: &Value, position: &str) -> Bucket {
+    let mut bucket = Bucket::new(window_name(window, position));
+    if let Some(percent) = window.get("usedPercent").and_then(Value::as_f64) {
+        bucket.limit = Some(1000);
+        bucket.used = Some((percent * 10.0).round().clamp(0.0, 1000.0) as u64);
+        if percent >= 100.0 {
+            bucket.status = BucketStatus::Exhausted;
+        }
+    }
+    bucket.refill = Refill::FixedWindow {
+        length: window
+            .get("windowDurationMins")
+            .and_then(Value::as_u64)
+            .map(|minutes| std::time::Duration::from_secs(minutes.saturating_mul(60))),
+        resets_at: window.get("resetsAt").and_then(Value::as_i64),
+    };
+    bucket
+}
+
 /// Every quota window an `account/rateLimits/updated` notification reports: `usedPercent`
 /// as thousandths, `resetsAt` in Unix seconds.
-fn decode_quota(message: &Value) -> Vec<QuotaReport> {
+fn decode_quota(message: &Value) -> Vec<Bucket> {
     if message.get("method").and_then(Value::as_str) != Some("account/rateLimits/updated") {
         return Vec::new();
     }
@@ -1374,15 +1409,7 @@ fn decode_quota(message: &Value) -> Vec<QuotaReport> {
         .iter()
         .filter_map(|position| {
             let window = limits.get(position).filter(|window| window.is_object())?;
-            Some(QuotaReport {
-                window: window_name(window, position),
-                used_permille: window
-                    .get("usedPercent")
-                    .and_then(Value::as_f64)
-                    .map(|percent| (percent * 10.0).round().clamp(0.0, 1000.0) as u16),
-                resets_at: window.get("resetsAt").and_then(Value::as_i64),
-                status: None,
-            })
+            Some(bucket_of(window, position))
         })
         .collect()
 }
@@ -1391,7 +1418,7 @@ fn decode_quota(message: &Value) -> Vec<QuotaReport> {
 ///
 /// The usage-limit error that follows does not always repeat the reset time, so the session
 /// keeps the latest exhausted window as a hint.
-fn exhausted_window(message: &Value) -> Option<UsageLimit> {
+fn exhausted_window(message: &Value) -> Option<LimitHit> {
     if message.get("method")?.as_str()? != "account/rateLimits/updated" {
         return None;
     }
@@ -1400,16 +1427,18 @@ fn exhausted_window(message: &Value) -> Option<UsageLimit> {
         .iter()
         .filter_map(|key| {
             let window = limits.get(key)?;
-            (window.get("usedPercent")?.as_f64()? >= 100.0).then(|| UsageLimit {
-                resets_at: window.get("resetsAt").and_then(Value::as_i64),
-                window: match window.get("windowDurationMins").and_then(Value::as_i64) {
+            (window.get("usedPercent")?.as_f64()? >= 100.0).then(|| {
+                let mut hit = LimitHit::new(0);
+                hit.resets_at = window.get("resetsAt").and_then(Value::as_i64);
+                hit.bucket = match window.get("windowDurationMins").and_then(Value::as_i64) {
                     Some(300 | 10_080) => Some(window_name(window, "")),
                     _ => None,
-                },
+                };
+                hit
             })
         })
         // Work resumes only when every exhausted window has reset.
-        .max_by_key(|limit| limit.resets_at)
+        .max_by_key(|hit| hit.resets_at)
 }
 
 /// Recognises the usage-limit error Codex reports on a failed turn.
@@ -1417,10 +1446,7 @@ fn exhausted_window(message: &Value) -> Option<UsageLimit> {
 /// The error object (`params.error`, or `params.turn.error` on `turn/failed` and a failed
 /// `turn/completed`) names the limit in `codexErrorInfo`; its reset time is `resetsAt` in
 /// Unix seconds when present, else the exhausted window last reported by the account.
-fn decode_limit(
-    message: &Value,
-    hint: Option<&UsageLimit>,
-) -> Option<(UsageLimit, Option<String>)> {
+fn decode_limit(message: &Value, hint: Option<&LimitHit>) -> Option<(LimitHit, Option<String>)> {
     let params = message.get("params")?;
     let error = match message.get("method")?.as_str()? {
         "error" => params.get("error")?,
@@ -1446,12 +1472,19 @@ fn decode_limit(
         .get("resetsAt")
         .and_then(Value::as_i64)
         .or_else(|| hint.and_then(|hint| hint.resets_at));
-    let window = hint.and_then(|hint| hint.window.clone());
     let text = error
         .get("message")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    Some((UsageLimit { resets_at, window }, text))
+    let mut hit = LimitHit::new(0);
+    hit.resets_at = resets_at;
+    hit.bucket = hint.and_then(|hint| hint.bucket.clone());
+    // A wait the message states (`try again in 90 seconds`) is the refusal's own.
+    hit.retry_after = text
+        .as_deref()
+        .and_then(|text| infer_limit(text, &["limit"]))
+        .and_then(|stated| stated.retry_after);
+    Some((hit, text))
 }
 
 /// The tokens one model request used, from a `thread/tokenUsage/updated` notification.
@@ -1459,21 +1492,18 @@ fn decode_limit(
 /// The notification also carries the thread's running total, which survives a resume, so
 /// only `last` (the latest request) is read and reported as an addition. Codex reports no
 /// cost. Its `inputTokens` include the cached ones, which are split out here.
-fn decode_usage(message: &Value) -> Option<TokenUsage> {
+fn decode_usage(message: &Value) -> Option<Spend> {
     if message.get("method")?.as_str()? != "thread/tokenUsage/updated" {
         return None;
     }
     let last = message.pointer("/params/tokenUsage/last")?;
     let count = |key: &str| last.get(key).and_then(Value::as_u64).unwrap_or(0);
     let cached = count("cachedInputTokens");
-    Some(TokenUsage {
-        input: count("inputTokens").saturating_sub(cached),
-        output: count("outputTokens"),
-        cache_read: cached,
-        cache_write: 0,
-        cost_micro_usd: 0,
-        cumulative: false,
-    })
+    let mut spend = Spend::new("");
+    spend.input = count("inputTokens").saturating_sub(cached);
+    spend.output = count("outputTokens");
+    spend.cache_read = cached;
+    Some(spend)
 }
 
 /// The tool an `item/started` notification begins: a web search, or an MCP or dynamic
@@ -1496,7 +1526,21 @@ fn decode_tools(message: &Value) -> Vec<String> {
     name.map(str::to_owned).into_iter().collect()
 }
 
-fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent> {
+/// What a notification tells of the account's usage: one request's spend (an addition, which
+/// the session turns into a running total) and the rate-limit windows.
+fn decode_report(message: &Value) -> Option<UsageReport> {
+    let spend = decode_usage(message);
+    let buckets = decode_quota(message);
+    if spend.is_none() && buckets.is_empty() {
+        return None;
+    }
+    let mut report = UsageReport::new();
+    report.spend = spend;
+    report.buckets = buckets;
+    Some(report)
+}
+
+fn decode_event(message: &Value, hint: Option<&LimitHit>) -> Option<AgentEvent> {
     let method = message.get("method")?.as_str().unwrap_or("event");
     if let Some((limit, text)) = decode_limit(message, hint) {
         return Some(AgentEvent {
@@ -1504,9 +1548,8 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
             text,
             data: serde_json::to_vec(message).ok(),
             limit: Some(limit),
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         });
     }
     let kind = match method {
@@ -1525,9 +1568,8 @@ fn decode_event(message: &Value, hint: Option<&UsageLimit>) -> Option<AgentEvent
         text,
         data: serde_json::to_vec(message).ok(),
         limit: None,
-        usage: decode_usage(message),
         tools: decode_tools(message),
-        quota: decode_quota(message),
+        report: decode_report(message),
     })
 }
 
@@ -1573,9 +1615,8 @@ impl AgentSession for CodexSession {
                     text: Some(reason),
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 }));
             }
             read => read?,
@@ -1589,9 +1630,8 @@ impl AgentSession for CodexSession {
                     text: Some(text),
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 }));
             }
         };
@@ -3792,7 +3832,7 @@ mod tests {
             } }
         });
         let hint = exhausted_window(&snapshot).unwrap();
-        assert_eq!(hint.window.as_deref(), Some("five_hour"));
+        assert_eq!(hint.bucket.as_deref(), Some("five_hour"));
 
         let failed = json!({
             "method": "turn/completed",
@@ -3805,7 +3845,7 @@ mod tests {
         assert_eq!(event.kind, LIMIT_EVENT);
         let limit = event.limit.unwrap();
         assert_eq!(limit.resets_at, Some(1_790_000_000));
-        assert_eq!(limit.window.as_deref(), Some("five_hour"));
+        assert_eq!(limit.bucket.as_deref(), Some("five_hour"));
         assert_eq!(
             decode_event(&failed, None)
                 .unwrap()
@@ -3827,36 +3867,52 @@ mod tests {
         });
         let event = decode_event(&snapshot, None).unwrap();
         assert_eq!(event.kind, "account/rateLimits/updated");
+        let quota = event.report.unwrap().buckets;
         assert_eq!(
-            event.quota,
+            quota
+                .iter()
+                .map(|bucket| (
+                    bucket.id.as_str(),
+                    UsageReport::fraction_permille(bucket),
+                    bucket.refill.clone()
+                ))
+                .collect::<Vec<_>>(),
             [
-                QuotaReport {
-                    window: "five_hour".to_owned(),
-                    used_permille: Some(425),
-                    resets_at: Some(1_790_000_000),
-                    status: None,
-                },
-                QuotaReport {
-                    window: "weekly".to_owned(),
-                    used_permille: Some(400),
-                    resets_at: Some(1_790_500_000),
-                    status: None,
-                },
+                (
+                    "five_hour",
+                    Some(425),
+                    Refill::FixedWindow {
+                        length: Some(std::time::Duration::from_secs(300 * 60)),
+                        resets_at: Some(1_790_000_000)
+                    }
+                ),
+                (
+                    "weekly",
+                    Some(400),
+                    Refill::FixedWindow {
+                        length: Some(std::time::Duration::from_secs(10_080 * 60)),
+                        resets_at: Some(1_790_500_000)
+                    }
+                ),
             ]
         );
         let partial = json!({
             "method": "account/rateLimits/updated",
             "params": { "rateLimits": { "primary": { "usedPercent": 99.0, "resetsAt": 1 } } }
         });
-        let quota = decode_event(&partial, None).unwrap().quota;
+        let quota = decode_event(&partial, None)
+            .unwrap()
+            .report
+            .unwrap()
+            .buckets;
         assert_eq!(quota.len(), 1);
         assert_eq!(
-            quota[0].window, "primary",
+            quota[0].id, "primary",
             "an unnamed window keeps its position"
         );
-        assert_eq!(quota[0].used_permille, Some(990));
+        assert_eq!(UsageReport::fraction_permille(&quota[0]), Some(990));
         let other = json!({ "method": "turn/completed", "params": {} });
-        assert!(decode_event(&other, None).unwrap().quota.is_empty());
+        assert!(decode_event(&other, None).unwrap().report.is_none());
     }
 
     #[test]
@@ -5218,17 +5274,17 @@ mod tests {
     fn a_token_usage_notification_reports_the_last_request_as_an_addition() {
         let event = decode_event(&token_usage_notification(), None).unwrap();
         assert_eq!(event.kind, "thread/tokenUsage/updated");
+        let spend = event.report.unwrap().spend.unwrap();
         assert_eq!(
-            event.usage,
-            Some(TokenUsage {
-                input: 500,
-                output: 300,
-                cache_read: 700,
-                cache_write: 0,
-                cost_micro_usd: 0,
-                cumulative: false,
-            })
+            (
+                spend.input,
+                spend.output,
+                spend.cache_read,
+                spend.cache_write
+            ),
+            (500, 300, 700, 0)
         );
+        assert_eq!(spend.cost_micro_usd, None, "Codex reports no cost");
     }
 
     #[test]
@@ -5253,12 +5309,12 @@ mod tests {
     #[test]
     fn other_notifications_and_a_total_without_last_carry_no_usage() {
         let delta = json!({ "method": "item/agentMessage/delta", "params": { "delta": "hi" } });
-        assert_eq!(decode_event(&delta, None).unwrap().usage, None);
+        assert!(decode_event(&delta, None).unwrap().report.is_none());
         let total_only = json!({
             "method": "thread/tokenUsage/updated",
             "params": { "tokenUsage": { "total": { "totalTokens": 1 } } }
         });
-        assert_eq!(decode_event(&total_only, None).unwrap().usage, None);
+        assert!(decode_event(&total_only, None).unwrap().report.is_none());
     }
 
     /// Real Codex 0.164.0 listed skills of its home and of the project only: `skills.*` settings and

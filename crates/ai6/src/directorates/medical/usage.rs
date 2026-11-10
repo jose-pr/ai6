@@ -1,6 +1,6 @@
 //! Token and cost accounting for Agent Sessions, and the budgets checked against it.
 //!
-//! Handlers report what the provider reports ([`TokenUsage`]); a [`UsageTracker`] turns
+//! Handlers report what the provider reports ([`Spend`]); a [`UsageTracker`] turns
 //! that into additions to a ledger, so a resumed Session is never counted twice. Measuring
 //! is always on. A [`Budget`] limit exists only when the operator sets one or chooses the
 //! `strict` preset.
@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use coqui_acp_provider::TokenUsage;
+use coqui_acp_api::Spend;
 
 /// Thousandths of a limit at which a warning is raised unless configured otherwise (80%).
 pub const DEFAULT_WARN_AT_PERMILLE: u16 = 800;
@@ -23,6 +23,19 @@ pub const STRICT_MISSION_TOKENS: u64 = 5_000_000;
 pub const STRICT_MISSION_COST_USD: f64 = 10.0;
 /// Per-Operation daily cost limit of the `strict` preset, in whole dollars.
 pub const STRICT_OPERATION_COST_USD_PER_DAY: f64 = 50.0;
+
+/// The session spend an event carries, when its report has one.
+pub fn spend_of(event: &coqui_acp_provider::AgentEvent) -> Option<&Spend> {
+    event.report.as_ref()?.spend.as_ref()
+}
+
+/// The quota buckets an event carries.
+pub fn buckets_of(event: &coqui_acp_provider::AgentEvent) -> &[coqui_acp_api::Bucket] {
+    event
+        .report
+        .as_ref()
+        .map_or(&[], |report| report.buckets.as_slice())
+}
 
 /// Accumulated usage: the sum of everything a Session, Mission or day consumed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,13 +78,13 @@ impl UsageTotals {
         *self == Self::default()
     }
 
-    fn from_usage(usage: &TokenUsage) -> Self {
+    fn from_spend(spend: &Spend) -> Self {
         Self {
-            input: usage.input,
-            output: usage.output,
-            cache_read: usage.cache_read,
-            cache_write: usage.cache_write,
-            cost_micro_usd: usage.cost_micro_usd,
+            input: spend.input,
+            output: spend.output,
+            cache_read: spend.cache_read,
+            cache_write: spend.cache_write,
+            cost_micro_usd: spend.cost_micro_usd.unwrap_or(0),
         }
     }
 
@@ -104,13 +117,10 @@ pub struct UsageTracker {
 }
 
 impl UsageTracker {
-    /// What `usage` adds to the ledger. A cumulative report that went down is treated as
-    /// a new counter and counts in full, so spend is never lost.
-    pub fn observe(&mut self, usage: &TokenUsage) -> UsageTotals {
-        let reported = UsageTotals::from_usage(usage);
-        if !usage.cumulative {
-            return reported;
-        }
+    /// What `spend`, a running total, adds to the ledger. A total that went down is treated
+    /// as a new counter and counts in full, so spend is never lost.
+    pub fn observe(&mut self, spend: &Spend) -> UsageTotals {
+        let reported = UsageTotals::from_spend(spend);
         let delta = if reported.fits_after(&self.last) {
             reported.since(&self.last)
         } else {
@@ -453,27 +463,24 @@ pub struct MissionUsage {
 mod tests {
     use super::*;
 
-    fn usage(input: u64, output: u64, cost: u64, cumulative: bool) -> TokenUsage {
-        TokenUsage {
-            input,
-            output,
-            cache_read: 0,
-            cache_write: 0,
-            cost_micro_usd: cost,
-            cumulative,
-        }
+    fn usage(input: u64, output: u64, cost: u64) -> Spend {
+        let mut spend = Spend::new("session");
+        spend.input = input;
+        spend.output = output;
+        spend.cost_micro_usd = Some(cost);
+        spend
     }
 
     #[test]
     fn cumulative_reports_become_additions_and_a_restart_counts_in_full() {
         let mut tracker = UsageTracker::default();
-        assert_eq!(tracker.observe(&usage(100, 10, 5, true)).tokens(), 110);
-        assert_eq!(tracker.observe(&usage(250, 30, 12, true)).tokens(), 170);
+        assert_eq!(tracker.observe(&usage(100, 10, 5)).tokens(), 110);
+        assert_eq!(tracker.observe(&usage(250, 30, 12)).tokens(), 170);
         // A resumed provider process counts from zero again.
-        let restarted = tracker.observe(&usage(40, 5, 2, true));
+        let restarted = tracker.observe(&usage(40, 5, 2));
         assert_eq!((restarted.input, restarted.cost_micro_usd), (40, 2));
-        // Per-step reports are additions already.
-        assert_eq!(tracker.observe(&usage(7, 1, 1, false)).tokens(), 8);
+        // The same total again adds nothing.
+        assert_eq!(tracker.observe(&usage(40, 5, 2)).tokens(), 0);
     }
 
     #[test]

@@ -220,8 +220,7 @@ pub(super) fn give_up(
             text: Some(reason.to_owned()),
             data: None,
             limit: None,
-            usage: None,
-            quota: Vec::new(),
+            report: None,
             tools: Vec::new(),
         },
     );
@@ -1620,9 +1619,8 @@ mod tests {
             text: text.map(str::to_owned),
             data: None,
             limit: None,
-            usage: None,
             tools: tools.iter().map(|tool| (*tool).to_owned()).collect(),
-            quota: Vec::new(),
+            report: None,
         };
         let mut notes = Notes::default();
         notes.record(&event("text", Some("  editing\n the   parser "), &[]));

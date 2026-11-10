@@ -417,8 +417,7 @@ pub(super) mod testing {
             text: Some(text.to_owned()),
             data: None,
             limit: None,
-            usage: None,
-            quota: Vec::new(),
+            report: None,
             tools: Vec::new(),
         }
     }

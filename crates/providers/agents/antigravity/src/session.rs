@@ -11,7 +11,9 @@ use ai6::directorates::q::terminal::{
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status};
-use ai6::{AgentEvent, AgentMessage, DENIED_EVENT, LIMIT_EVENT, TokenUsage, UsageLimit};
+use ai6::{
+    AgentEvent, AgentMessage, DENIED_EVENT, LIMIT_EVENT, LimitHit, Spend, UsageReport, infer_limit,
+};
 use serde_json::{Value, json};
 
 use crate::files::SessionFiles;
@@ -49,6 +51,9 @@ pub(crate) struct AntigravitySession {
     expected_session_id: Mutex<Option<SessionId>>,
     restricted: Option<Restriction>,
     limit_phrases: Vec<String>,
+    /// What the model calls of this process have used: agy reports each call, and its own total
+    /// runs across every launch of the conversation.
+    spent: Mutex<Spend>,
     /// Messages waiting for the `init` line that says which conversation this is.
     held: Mutex<Vec<String>>,
     /// Whether an `init` line has been read from the running agy.
@@ -103,6 +108,7 @@ impl AntigravitySession {
             expected_session_id: Mutex::new(expected_session_id),
             restricted,
             limit_phrases,
+            spent: Mutex::new(Spend::new("")),
             held: Mutex::new(Vec::new()),
             initialized: AtomicBool::new(false),
             pending: Mutex::new(VecDeque::new()),
@@ -227,11 +233,11 @@ impl AntigravitySession {
         Ok(())
     }
 
-    fn is_limit(&self, text: &str) -> bool {
-        let text = text.to_lowercase();
-        self.limit_phrases
-            .iter()
-            .any(|phrase| text.contains(&phrase.to_lowercase()))
+    /// The limit a failed turn's words state, by the configured phrases; none when the list is
+    /// empty or no phrase is there.
+    fn inferred_limit(&self, text: &str) -> Option<LimitHit> {
+        let phrases: Vec<&str> = self.limit_phrases.iter().map(String::as_str).collect();
+        infer_limit(text, &phrases)
     }
 
     /// What the end of agy's output means: the turn an interrupt ended, a limit its last words
@@ -247,12 +253,9 @@ impl AntigravitySession {
         }
         let reason = self.exit_reason()?;
         eprintln!("ai6: {reason}");
-        if self.is_limit(&reason) {
+        if let Some(hit) = self.inferred_limit(&reason) {
             let mut limited = event(LIMIT_EVENT, Some(reason));
-            limited.limit = Some(UsageLimit {
-                resets_at: None,
-                window: None,
-            });
+            limited.limit = Some(hit);
             return Ok(limited);
         }
         Ok(event("failed", Some(reason)))
@@ -404,7 +407,15 @@ impl AntigravitySession {
                     return Ok(None);
                 }
                 let mut said = event("text", Some(text).filter(|text| !text.trim().is_empty()));
-                said.usage = usage;
+                if let Some(call) = usage {
+                    let mut spent = lock(&self.spent)?;
+                    spent.input = spent.input.saturating_add(call.input);
+                    spent.output = spent.output.saturating_add(call.output);
+                    spent.cache_read = spent.cache_read.saturating_add(call.cache_read);
+                    let mut report = UsageReport::new();
+                    report.spend = Some(spent.clone());
+                    said.report = Some(report);
+                }
                 said.data = Some(line);
                 Ok(Some(said))
             }
@@ -521,12 +532,9 @@ impl AntigravitySession {
                 .or_else(|| reason.map(|reason| format!("the turn ended early: {reason}")))
                 .unwrap_or_else(|| format!("the turn ended with status {status}"));
             self.ended.store(status == "ERROR", Ordering::Release);
-            let mut closing = if self.is_limit(&text) {
+            let mut closing = if let Some(hit) = self.inferred_limit(&text) {
                 let mut limited = event(LIMIT_EVENT, Some(text));
-                limited.limit = Some(UsageLimit {
-                    resets_at: None,
-                    window: None,
-                });
+                limited.limit = Some(hit);
                 limited
             } else {
                 event("failed", Some(text))
@@ -614,17 +622,14 @@ fn server_of(step: &Value) -> Option<&str> {
 /// A model call's usage, on the `DONE` update of its response step. `result` also has a total, but
 /// that one runs across every launch of the conversation (agy 1.4.12), so the steps are what is
 /// counted. `input_tokens` leaves out `cache_read_tokens`, and `output_tokens` holds the thinking.
-fn decode_usage(usage: Option<&Value>) -> Option<TokenUsage> {
+fn decode_usage(usage: Option<&Value>) -> Option<Spend> {
     let usage = usage?;
     let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-    Some(TokenUsage {
-        input: count("input_tokens"),
-        output: count("output_tokens"),
-        cache_read: count("cache_read_tokens"),
-        cache_write: 0,
-        cost_micro_usd: 0,
-        cumulative: false,
-    })
+    let mut spend = Spend::new("");
+    spend.input = count("input_tokens");
+    spend.output = count("output_tokens");
+    spend.cache_read = count("cache_read_tokens");
+    Some(spend)
 }
 
 fn event(kind: &str, text: Option<String>) -> AgentEvent {
@@ -633,9 +638,8 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         text,
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 

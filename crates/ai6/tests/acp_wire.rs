@@ -13,9 +13,8 @@ use ai6::directorates::section_00::acp::{
 use ai6::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{Status, Value as GuatiaoValue};
-use coqui_acp_provider::{
-    AgentEvent, AgentMessage, AgentSession, QuotaReport, TokenUsage, UsageLimit,
-};
+use coqui_acp_api::{Bucket, LimitHit, Refill, Spend, Status as BucketStatus, UsageReport};
+use coqui_acp_provider::{AgentEvent, AgentMessage, AgentSession};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -28,9 +27,8 @@ fn event(kind: &str, text: Option<&str>) -> AgentEvent {
         text: text.map(str::to_owned),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 
@@ -229,27 +227,34 @@ fn connect_facade(
 #[test]
 fn a_handler_runs_through_the_facade_with_every_event_verbatim() {
     let mut limit = event("limit", Some("five hour window used"));
-    limit.limit = Some(UsageLimit {
+    let mut hit = LimitHit::new(1_789_990_000);
+    hit.bucket = Some("five_hour".to_owned());
+    hit.resets_at = Some(1_790_000_000);
+    hit.retry_after = Some(Duration::from_secs(90));
+    limit.limit = Some(hit);
+    let mut bucket = Bucket::new("five_hour");
+    bucket.used = Some(1000);
+    bucket.limit = Some(1000);
+    bucket.status = BucketStatus::Exhausted;
+    bucket.refill = Refill::FixedWindow {
+        length: None,
         resets_at: Some(1_790_000_000),
-        window: Some("five_hour".to_owned()),
-    });
-    limit.quota = vec![QuotaReport {
-        window: "five_hour".to_owned(),
-        used_permille: Some(1000),
-        resets_at: Some(1_790_000_000),
-        status: Some("rejected".to_owned()),
-    }];
+    };
+    let mut exhausted = UsageReport::new();
+    exhausted.buckets = vec![bucket];
+    limit.report = Some(exhausted);
     let mut tool = event("tool", Some("fetching"));
     tool.tools = vec!["WebFetch".to_owned()];
     let mut spend = event("usage", None);
-    spend.usage = Some(TokenUsage {
-        input: 12,
-        output: 34,
-        cache_read: 5,
-        cache_write: 6,
-        cost_micro_usd: 250_000,
-        cumulative: true,
-    });
+    let mut totals = Spend::new("spend");
+    totals.input = 12;
+    totals.output = 34;
+    totals.cache_read = 5;
+    totals.cache_write = 6;
+    totals.cost_micro_usd = Some(250_000);
+    let mut carried = UsageReport::new();
+    carried.spend = Some(totals);
+    spend.report = Some(carried);
     let mut raw = event("text", Some("with data"));
     raw.data = Some(vec![0, 159, 146, 150, 255]);
     let script = vec![
@@ -439,6 +444,8 @@ struct Script {
     fail_prompt: bool,
     /// Answers a prompt as `grok agent stdio` 1.0 does past its free quota.
     rate_limited: bool,
+    /// The refusal also says how long to wait.
+    says_wait: bool,
 }
 
 #[derive(Default)]
@@ -547,13 +554,18 @@ fn agent_request(
                 if script.rate_limited {
                     responder
                         .respond_with_error(
-                            agent_client_protocol::Error::new(-32003, "Rate limited").data(
+                            agent_client_protocol::Error::new(-32003, "Rate limited").data(format!(
                                 "API error (status 429 Too Many Requests): \
                                  subscription:free-usage-exhausted: You've used all the included \
                                  free usage for model grok-4.7 for now. Usage resets over a rolling \
                                  24-hour window — tokens (actual/limit): 609418/600000. Upgrade to \
-                                 a Grok subscription for higher limits: https://grok.com/super",
-                            ),
+                                 a Grok subscription for higher limits: https://grok.com/super{}",
+                                if script.says_wait {
+                                    " Retry after 90 seconds."
+                                } else {
+                                    ""
+                                }
+                            )),
                         )
                         .unwrap();
                     return;
@@ -680,9 +692,12 @@ fn an_external_agents_turn_becomes_text_cost_and_completion() {
     let seen_events = until(&session, &["completed"]);
     assert_eq!(seen_events[0].kind, "text");
     assert_eq!(seen_events[0].text.as_deref(), Some("hello"));
-    let usage = seen_events[1].usage.expect("cost is reported");
-    assert_eq!(usage.cost_micro_usd, 250_000);
-    assert!(usage.cumulative);
+    let usage = seen_events[1]
+        .report
+        .as_ref()
+        .and_then(|report| report.spend.as_ref())
+        .expect("cost is reported");
+    assert_eq!(usage.cost_micro_usd, Some(250_000));
     assert_eq!(seen_events.last().unwrap().kind, "completed");
     assert_eq!(session.session_id().unwrap().unwrap().as_str(), "ext-1");
     let calls = seen.calls.lock().unwrap();
@@ -724,6 +739,47 @@ fn an_agents_rate_limit_stops_the_session_as_limited_when_its_words_are_named() 
         events.last().unwrap().kind,
         "failed",
         "without its words it is an ordinary failure"
+    );
+}
+
+#[test]
+fn a_limit_read_from_a_refusal_keeps_the_wait_it_states_and_the_default_words_apply() {
+    let (session, _) = connect_agent(
+        Script {
+            rate_limited: true,
+            says_wait: true,
+            ..Script::default()
+        },
+        AcpOptions {
+            limit_phrases: ai6::DEFAULT_LIMIT_PHRASES
+                .iter()
+                .map(|phrase| (*phrase).to_owned())
+                .collect(),
+            ..external("go")
+        },
+    );
+    let events = until(&session.unwrap(), &["failed", "completed", "limit"]);
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, "limit");
+    let hit = last.limit.as_ref().unwrap();
+    assert_eq!(hit.retry_after, Some(Duration::from_secs(90)));
+    assert_eq!(hit.resets_at, None);
+    assert!(hit.observed_at > 0, "the client dates what it read");
+    let (none, _) = connect_agent(
+        Script {
+            rate_limited: true,
+            ..Script::default()
+        },
+        AcpOptions {
+            limit_phrases: Vec::new(),
+            ..external("go")
+        },
+    );
+    let events = until(&none.unwrap(), &["failed", "completed", "limit"]);
+    assert_eq!(
+        events.last().unwrap().kind,
+        "failed",
+        "an empty list infers nothing"
     );
 }
 

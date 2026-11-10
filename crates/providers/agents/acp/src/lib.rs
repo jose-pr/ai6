@@ -141,22 +141,21 @@ impl AcpSettings {
     }
 }
 
-/// How the Grok CLI words a limit (`Rate limited`, with xAI's `subscription:free-usage-exhausted`;
-/// out of credits, `402 Payment Required` with `personal-team-blocked:spending-limit`) and how other
-/// agents commonly do.
+/// The words every handler reads a limit by, with the Grok CLI's own for running out of credits
+/// (`402 Payment Required` with `personal-team-blocked:spending-limit`) and its free quota
+/// (`subscription:free-usage-exhausted`).
 fn limit_phrases() -> Vec<String> {
-    [
-        "rate limited",
-        "rate limit exceeded",
-        "usage-exhausted",
-        "usage limit",
-        "quota exceeded",
-        "spending-limit",
-        "run out of credits",
-        "402 payment required",
-    ]
-    .map(str::to_owned)
-    .to_vec()
+    ai6::DEFAULT_LIMIT_PHRASES
+        .iter()
+        .copied()
+        .chain([
+            "usage-exhausted",
+            "spending-limit",
+            "run out of credits",
+            "402 payment required",
+        ])
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Runs an ACP agent for each Session.
@@ -643,17 +642,22 @@ unconfined_desk = true
                 .unwrap()
                 .limit_phrases
                 .iter()
-                .any(|phrase| phrase == "rate limited"),
+                .any(|phrase| phrase == "usage-exhausted"),
             "the Grok CLI's words count by default"
         );
         let session = |text: &str| {
-            confined
-                .settings()
-                .unwrap()
-                .limit_phrases
-                .iter()
-                .any(|phrase| text.to_lowercase().contains(phrase))
+            let settings = confined.settings().unwrap();
+            let phrases: Vec<&str> = settings.limit_phrases.iter().map(String::as_str).collect();
+            ai6::infer_limit(text, &phrases).is_some()
         };
+        assert!(
+            session("Rate limited: try again later"),
+            "the shared words count by default"
+        );
+        assert!(
+            !session("503 No capacity available"),
+            "a shortage of capacity is no quota"
+        );
         assert!(
             session(
                 "Internal error: API error (status 402 Payment Required): \

@@ -154,9 +154,8 @@ fn settle(state: &DaemonState, mission_id: &str, verdict: &MissionVerdict) {
         text: Some(spoken),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     };
     let finished = FinishOutcome {
         cover_blown: false,

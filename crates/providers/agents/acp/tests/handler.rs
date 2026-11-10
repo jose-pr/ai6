@@ -143,9 +143,9 @@ fn a_reported_cost_becomes_usage() {
     let (_, events) = run(&[("FAKE_COST", "0.5")], "");
     let cost = events
         .iter()
-        .find_map(|event| event.usage)
+        .find_map(|event| event.report.as_ref()?.spend.clone())
         .expect("a cost event");
-    assert_eq!(cost.cost_micro_usd, 500_000);
+    assert_eq!(cost.cost_micro_usd, Some(500_000));
 }
 
 #[test]

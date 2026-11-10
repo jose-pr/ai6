@@ -43,9 +43,8 @@ fn extension_event(seq: u64, kind: &str, text: Option<&str>) -> Value {
         text: text.map(str::to_owned),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     };
     json!({
         "sessionId": "ext-1",

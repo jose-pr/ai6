@@ -483,9 +483,8 @@ fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn Ag
                             text: Some(error.to_string()),
                             data: None,
                             limit: None,
-                            usage: None,
                             tools: Vec::new(),
-                            quota: Vec::new(),
+                            report: None,
                         };
                         notify(&operation, &provider, Some(&event));
                         end_turn(&operation, &provider, &event);
@@ -573,8 +572,8 @@ fn notify(operation: &Operation, provider: &Option<String>, event: Option<&Agent
             })),
         );
     }
-    if let Some(usage) = &event.usage
-        && usage.cost_micro_usd > 0
+    if let Some(usage) = crate::directorates::medical::usage::spend_of(event)
+        && let Some(cost) = usage.cost_micro_usd.filter(|cost| *cost > 0)
     {
         send(
             "session/update",
@@ -582,7 +581,7 @@ fn notify(operation: &Operation, provider: &Option<String>, event: Option<&Agent
                 "sessionUpdate": "usage_update",
                 "used": usage.input + usage.output + usage.cache_read + usage.cache_write,
                 "size": 0,
-                "cost": {"amount": usage.cost_micro_usd as f64 / 1_000_000.0, "currency": "USD"},
+                "cost": {"amount": cost as f64 / 1_000_000.0, "currency": "USD"},
             })),
         );
     }

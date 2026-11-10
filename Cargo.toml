@@ -105,10 +105,15 @@ agent-client-protocol = { version = "3.6", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # The ACP client above the SDK: connect, resume and turn state, permission deciding, line transports.
 # Pinned by revision until a release.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "374534143b419d4f94f63d286db508642bdfdc1a" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398" }
 # The agent session kind a handler returns and its events, shared with every project hosting agent
 # providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "374534143b419d4f94f63d286db508642bdfdc1a" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398" }
+# The usage model (buckets, limits, spend) and the words that read a failed turn as a limit; the same
+# revision as coqui-acp.
+coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398" }
+# The Antigravity quota reader (`antigravity`) and the usage tracker that merges readings; same revision.
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398", default-features = false }
 # A2A 1.0 over a proven coqui-agentic-peer link, for Liaison. The three move together: coqui-a2a
 # names the link crate and its channel crate at these revisions.
 coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "7b7adcd1e5638764e0e38b374e20b6dc9a04eaae" }

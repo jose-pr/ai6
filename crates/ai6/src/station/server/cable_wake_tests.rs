@@ -76,9 +76,8 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         text,
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 

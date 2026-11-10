@@ -773,9 +773,8 @@ mod tests {
             text: None,
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         };
         assert_eq!(
             verify_done(&state, &free, event("completed")).kind,

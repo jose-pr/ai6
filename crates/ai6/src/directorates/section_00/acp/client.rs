@@ -16,9 +16,9 @@ use super::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, PermissionDecider, PermissionDecision,
     PermissionRequest, RESTRICTED_KINDS, RefuseAll, UNBOUNDED_MS,
 };
+use coqui_acp_api::{LimitHit, Spend, UsageReport, infer_limit};
 use coqui_acp_provider::{
     AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, LIMIT_EVENT, TURN_CANCELLED,
-    TokenUsage, UsageLimit,
 };
 
 /// The `_meta` key of `session/load` that asks a runner to replay what follows a sequence number.
@@ -189,21 +189,27 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         text,
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 
-/// A turn stopped by a provider's limit, which names neither a reset time nor a window.
-fn limit_event(text: String) -> AgentEvent {
+/// A turn stopped by a limit read from its failure text: the hit holds what the text states, and
+/// nothing else is known of the window.
+fn limit_event(text: String, mut hit: LimitHit) -> AgentEvent {
+    hit.observed_at = unix_now();
     AgentEvent {
-        limit: Some(UsageLimit {
-            resets_at: None,
-            window: None,
-        }),
+        limit: Some(hit),
         ..event(LIMIT_EVENT, Some(text))
     }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|since| i64::try_from(since.as_secs()).ok())
+        .unwrap_or(0)
 }
 
 /// Whether an event ends its turn: `blocked` does only as the agent's own cancel.
@@ -540,11 +546,10 @@ impl AcpSession {
         }
     }
 
-    fn is_limit(&self, text: &str) -> bool {
-        let text = text.to_lowercase();
-        self.limit_phrases
-            .iter()
-            .any(|phrase| text.contains(&phrase.to_lowercase()))
+    /// The limit a failed turn's text states, by the configured words; none when the list is empty.
+    fn inferred_limit(&self, text: &str) -> Option<LimitHit> {
+        let phrases: Vec<&str> = self.limit_phrases.iter().map(String::as_str).collect();
+        infer_limit(text, &phrases)
     }
 
     fn absorb(&self, incoming: Event) {
@@ -568,13 +573,13 @@ impl AcpSession {
             }
             Event::Cost { amount, currency } => {
                 if currency.eq_ignore_ascii_case("USD") {
-                    let mut report = event("usage", None);
-                    report.usage = Some(TokenUsage {
-                        cost_micro_usd: (amount * 1_000_000.0).round().max(0.0) as u64,
-                        cumulative: true,
-                        ..TokenUsage::default()
-                    });
-                    state.push(None, report);
+                    let mut spend = Spend::new("");
+                    spend.cost_micro_usd = Some((amount * 1_000_000.0).round().max(0.0) as u64);
+                    let mut usage = UsageReport::new();
+                    usage.spend = Some(spend);
+                    let mut carried = event("usage", None);
+                    carried.report = Some(usage);
+                    state.push(None, carried);
                 } else {
                     state.push(
                         None,
@@ -607,13 +612,12 @@ impl AcpSession {
             Event::Failed(text) => {
                 // A lost connection's failure may quote the agent's last words, which are no
                 // provider's answer: only a turn's own failure counts as a limit.
-                let failed = if !self.events_capability
-                    && !self.session.connection_lost()
-                    && self.is_limit(&text)
-                {
-                    limit_event(text)
-                } else {
-                    event("failed", Some(text))
+                let hit = (!self.events_capability && !self.session.connection_lost())
+                    .then(|| self.inferred_limit(&text))
+                    .flatten();
+                let failed = match hit {
+                    Some(hit) => limit_event(text, hit),
+                    None => event("failed", Some(text)),
                 };
                 state.push(None, failed);
             }

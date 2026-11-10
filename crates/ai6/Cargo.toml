@@ -68,6 +68,7 @@ required-features = ["cli"]
 [dependencies]
 agent-client-protocol = { workspace = true, optional = true }
 coqui-acp = { workspace = true, optional = true }
+coqui-acp-api.workspace = true
 coqui-acp-provider.workspace = true
 futures = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }

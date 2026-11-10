@@ -1473,9 +1473,8 @@ pub(super) mod testing {
                 text: verdict(request.model.as_deref()).map(str::to_owned),
                 data: None,
                 limit: None,
-                usage: None,
                 tools: Vec::new(),
-                quota: Vec::new(),
+                report: None,
             };
             Ok(MockSession::with_event(session, event).into_object())
         }

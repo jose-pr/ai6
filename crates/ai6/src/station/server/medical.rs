@@ -18,7 +18,8 @@ use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::sessions::SessionUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
 use crate::directorates::registry::store::{AuditRecord, Brief};
-use coqui_acp_provider::{AgentEvent, AgentSession, TokenUsage};
+use coqui_acp_api::Spend;
+use coqui_acp_provider::{AgentEvent, AgentSession};
 
 /// The `blocked_reason` of a Mission a budget stopped.
 pub(super) const BUDGET_REASON: &str = "budget";
@@ -49,7 +50,7 @@ pub(super) fn record_usage(
     state: &DaemonState,
     mission_id: &str,
     tracker: &mut UsageTracker,
-    reported: &TokenUsage,
+    reported: &Spend,
 ) -> Option<Recorded> {
     let delta = tracker.observe(reported);
     super::accounts::record_usage(state, mission_id, delta.tokens());
@@ -182,9 +183,8 @@ fn announce(
             text: Some(text),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
     let record = AuditRecord {
@@ -292,9 +292,8 @@ pub(super) fn sync_exposure(
                 text: Some(exposure.source.clone()),
                 data: None,
                 limit: None,
-                usage: None,
                 tools: Vec::new(),
-                quota: Vec::new(),
+                report: None,
             },
         );
     }
@@ -576,9 +575,8 @@ fn stop_for_quarantine(state: &DaemonState, mission: &Mission, records: &[Quaran
             text: Some(format!("Agent quarantined: {reason}")),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
 }

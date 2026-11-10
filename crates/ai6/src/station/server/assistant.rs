@@ -2287,8 +2287,12 @@ impl Pump {
     /// limit marks it, so another route is taken. What the person should know of that when the
     /// turn ends there, for a routed Agent.
     fn count(&mut self, event: &AgentEvent) -> Option<String> {
-        accounts::observe_quota(&self.state, &self.session_name, &event.quota);
-        if let Some(reported) = &event.usage {
+        accounts::observe_quota(
+            &self.state,
+            &self.session_name,
+            crate::directorates::medical::usage::buckets_of(event),
+        );
+        if let Some(reported) = crate::directorates::medical::usage::spend_of(event) {
             let delta = self.usage.observe(reported);
             self.unreported_tokens
                 .set(self.unreported_tokens.get().saturating_add(delta.tokens()));
@@ -2302,7 +2306,9 @@ impl Pump {
             operation: None,
         };
         let fallback = self.outbox.desk().limit_fallback.0.as_secs();
-        let resets_at = event.limit.as_ref().and_then(|limit| limit.resets_at);
+        let resets_at = event.limit.as_ref().and_then(|limit| {
+            crate::directorates::m::limits::lifts_at(self.state.clock.now(), limit)
+        });
         let (account, _, until) = accounts::mark_limited(&self.state, holder, resets_at, fallback)?;
         eprintln!(
             "ai6: assistant conversation {}: account {account} is limited until {until} (Unix \
@@ -3368,9 +3374,8 @@ mod tests {
             text: text.map(str::to_owned),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         }
     }
 
@@ -4046,10 +4051,7 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
             {
                 events.extend(self.before_limit.lock().unwrap().clone());
                 let mut limit = event(LIMIT_EVENT, Some(GROK_LIMIT));
-                limit.limit = Some(coqui_acp_provider::UsageLimit {
-                    resets_at: None,
-                    window: None,
-                });
+                limit.limit = Some(coqui_acp_api::LimitHit::new(0));
                 events.push_back(limit);
             } else {
                 events.push_back(event(EVENT_TEXT, Some("an answer")));

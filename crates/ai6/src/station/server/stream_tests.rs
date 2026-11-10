@@ -116,9 +116,8 @@ fn stream_event(kind: &str, text: Option<&str>) -> AgentEvent {
         text: text.map(str::to_owned),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 

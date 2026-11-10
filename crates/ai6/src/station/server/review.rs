@@ -185,9 +185,8 @@ fn blocked_event(text: &str) -> AgentEvent {
         text: Some(text.to_owned()),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 
@@ -1322,9 +1321,8 @@ async fn finish_passed(state: &DaemonState, mission_id: &str) {
         text: Some("its review passed".to_owned()),
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     };
     publish_finished_event(state, mission_id, event, Some(finished));
 }
@@ -1395,9 +1393,8 @@ async fn refuse(state: &DaemonState, mission_id: &str, reason: &str) {
             text: Some(format!("its review refused it: {reason}")),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
 }

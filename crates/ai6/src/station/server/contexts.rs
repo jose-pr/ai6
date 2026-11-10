@@ -44,7 +44,7 @@ impl EventTape {
             "text": event.text,
             "tools": event.tools,
         });
-        if let Some(usage) = &event.usage {
+        if let Some(usage) = crate::directorates::medical::usage::spend_of(event) {
             line["usage"] = json!(usage);
         }
         if let Some(data) = &event.data {

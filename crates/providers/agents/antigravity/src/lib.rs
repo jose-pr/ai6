@@ -144,20 +144,15 @@ const RESERVED_SETTINGS: [&str; 5] = [
     "allowNonWorkspaceAccess",
 ];
 
-/// How agy 1.4.12 words a quota limit: `RESOURCE_EXHAUSTED` and `Error 429` in the `error` of a
-/// turn's `result`, seen when a stand-in model answered 429 to an API key; the last two are strings
-/// of its binary for a signed-in account's quota, not seen in a run. `QUOTA_EXHAUSTED` is the reason
-/// Google's error details carry, which agy prints as it gets them.
+/// The words every handler reads a limit by. They cover agy 1.4.12's wording (`RESOURCE_EXHAUSTED`
+/// and `Error 429` in a turn's `result`; `QUOTA_EXHAUSTED`, the reason Google's error details
+/// carry) and leave out its 503 `No capacity available`, which is a shortage and no quota.
 fn limit_phrases() -> Vec<String> {
-    [
-        "RESOURCE_EXHAUSTED",
-        "Error 429",
-        "QUOTA_EXHAUSTED",
-        "exhausted your quota",
-        "individual quota reached",
-    ]
-    .map(str::to_owned)
-    .to_vec()
+    ai6::DEFAULT_LIMIT_PHRASES
+        .iter()
+        .copied()
+        .map(str::to_owned)
+        .collect()
 }
 
 impl AntigravitySettings {

@@ -2556,9 +2556,8 @@ pub(crate) mod testing {
             text: Some(text),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         }
     }
 

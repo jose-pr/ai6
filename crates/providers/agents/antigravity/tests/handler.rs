@@ -1243,11 +1243,13 @@ fn a_model_calls_usage_is_counted_from_its_step_as_agy_reports_it() {
     let events = events_until(&session, &["completed"]);
     let usage = events
         .iter()
-        .find_map(|event| event.usage)
+        .find_map(|event| event.report.as_ref()?.spend.clone())
         .expect("the step's usage");
     assert_eq!((usage.input, usage.output, usage.cache_read), (40, 35, 70));
-    assert!(!usage.cumulative, "the result's total runs across launches");
-    assert_eq!(events.last().unwrap().usage, None, "counted once");
+    assert!(
+        events.last().unwrap().report.is_none(),
+        "the result's total runs across launches, so it is not counted again"
+    );
 }
 
 #[test]

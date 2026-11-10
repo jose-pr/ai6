@@ -79,7 +79,9 @@ use crate::directorates::m::approvals::GREEN_INK_REASON;
 use crate::directorates::m::config::{ConfigProvider, FileProvider};
 use crate::directorates::m::cover::{CoverAudit, CoverReport};
 use crate::directorates::m::identity::MAX_ID_BYTES;
-use crate::directorates::m::limits::{DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, parked_until};
+use crate::directorates::m::limits::{
+    DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, lifts_at, parked_until,
+};
 use crate::directorates::m::mission::{
     LaunchManifest, Mission, MissionError, MissionState, MissionStore, SessionHold,
 };
@@ -6952,9 +6954,13 @@ fn spawn_event_pump_with_monitor(
                     notes.record(&event);
                     notes.write_if_due(&state, &mission_id);
                     medical::expose_by_tools(&state, &exposure, &event);
-                    accounts::observe_quota(&state, &mission_id, &event.quota);
+                    accounts::observe_quota(
+                        &state,
+                        &mission_id,
+                        crate::directorates::medical::usage::buckets_of(&event),
+                    );
                     medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
-                    if let Some(reported) = &event.usage
+                    if let Some(reported) = crate::directorates::medical::usage::spend_of(&event)
                         && let Some(recorded) =
                             medical::record_usage(&state, &mission_id, &mut usage_tracker, reported)
                         && medical::enforce_budget(
@@ -6998,9 +7004,8 @@ fn spawn_event_pump_with_monitor(
                                 text: Some("the interrupted turn ended".to_owned()),
                                 data: None,
                                 limit: None,
-                                usage: event.usage,
                                 tools: Vec::new(),
-                                quota: Vec::new(),
+                                report: event.report.clone(),
                             },
                         );
                         break;
@@ -7058,9 +7063,8 @@ fn spawn_event_pump_with_monitor(
                         text: Some(error),
                         data: None,
                         limit: None,
-                        usage: None,
                         tools: Vec::new(),
-                        quota: Vec::new(),
+                        report: None,
                     };
                     let finished = finish_operation(&state, &mission_id, &session);
                     let event = with_login_note(&state, &mission_id, event);
@@ -7101,9 +7105,8 @@ fn spawn_event_pump_with_monitor(
                             text: Some("terminal output resumed".to_owned()),
                             data: None,
                             limit: None,
-                            usage: None,
                             tools: Vec::new(),
-                            quota: Vec::new(),
+                            report: None,
                         },
                     );
                 }
@@ -7122,9 +7125,8 @@ fn spawn_event_pump_with_monitor(
                     text: Some("waiting at a terminal prompt".to_owned()),
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 };
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
@@ -7159,9 +7161,8 @@ fn spawn_event_pump_with_monitor(
                     text: Some(reason),
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 };
                 gate.close();
                 apply_event_state(&state, &mission_id, &event);
@@ -7318,9 +7319,8 @@ fn refuse_resumed_session(
             text: Some(RESUME_NOT_RETAINED.to_owned()),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
 }
@@ -7381,9 +7381,8 @@ fn stop_for_clearance(
             text: Some(text),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
 }
@@ -7764,8 +7763,17 @@ fn handle_limit(
             |operation| (operation.on_limit, operation.limit_fallback_secs),
         );
     let resets_at = event.limit.as_ref().and_then(|limit| limit.resets_at);
+    let retry_after = event
+        .limit
+        .as_ref()
+        .and_then(|limit| limit.retry_after)
+        .map(|wait| wait.as_secs());
+    let lifts = event
+        .limit
+        .as_ref()
+        .and_then(|limit| lifts_at(state.clock.now(), limit));
     // The limited account is marked and freed whatever the policy.
-    let rotation = accounts::on_limit(state, &mission, resets_at, policy.1);
+    let rotation = accounts::on_limit(state, &mission, lifts, policy.1);
 
     if policy.0 == OnLimit::Rotate {
         match rotation {
@@ -7815,7 +7823,7 @@ fn handle_limit(
         .0
         .as_secs_f64()
         .ceil() as i64;
-    let until = parked_until(state.clock.now(), resets_at, policy.1, grace);
+    let until = parked_until(state.clock.now(), resets_at, retry_after, policy.1, grace);
     if park_mission(state, mission_id, until) {
         queue_event(state, mission_id, event);
     }
@@ -8634,9 +8642,8 @@ queue = 1
             text: None,
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -8659,9 +8666,8 @@ queue = 1
             text: None,
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         };
         let finished = FinishOutcome {
             cover_blown: true,
@@ -8686,7 +8692,7 @@ queue = 1
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError, Registry};
     use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
-    use coqui_acp_provider::{TokenUsage, UsageLimit};
+    use coqui_acp_api::{LimitHit, Spend, UsageReport};
     use std::sync::atomic::AtomicI64;
 
     /// A Registry directory of its own for each test: a shared one carries incidents and
@@ -9028,9 +9034,8 @@ queue = 1
                     text: None,
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 },
             )
         }
@@ -9100,9 +9105,8 @@ queue = 1
                 text: Some(text.to_owned()),
                 data: None,
                 limit: None,
-                usage: None,
                 tools: Vec::new(),
-                quota: Vec::new(),
+                report: None,
             };
             Ok(MockSession {
                 session_id: SessionId::try_new("provider-session-denied")
@@ -9129,9 +9133,8 @@ queue = 1
                     text: Some(self.notice.clone()),
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 });
             }
             Ok(session.into_object())
@@ -9327,13 +9330,19 @@ queue = 1
                     kind: LIMIT_EVENT.to_owned(),
                     text: Some("usage limit reached".to_owned()),
                     data: None,
-                    limit: Some(UsageLimit {
-                        resets_at,
-                        window: Some("five_hour".to_owned()),
+                    limit: Some({
+                        let mut hit = LimitHit::new(0);
+                        hit.bucket = Some("five_hour".to_owned());
+                        hit.resets_at = resets_at;
+                        hit.retry_after = request
+                            .environment
+                            .get("MOCK_LIMIT_RETRY_AFTER")
+                            .and_then(|secs| secs.parse().ok())
+                            .map(Duration::from_secs);
+                        hit
                     }),
-                    usage: None,
                     tools: Vec::new(),
-                    quota: Vec::new(),
+                    report: None,
                 },
             )
             .into_object())
@@ -9382,16 +9391,16 @@ queue = 1
                         text: None,
                         data: None,
                         limit: None,
-                        usage: Some(TokenUsage {
-                            input: figures[0],
-                            output: figures[1],
-                            cache_read: 0,
-                            cache_write: 0,
-                            cost_micro_usd: figures[2],
-                            cumulative: true,
-                        }),
                         tools: Vec::new(),
-                        quota: Vec::new(),
+                        report: Some({
+                            let mut spend = Spend::new("spend");
+                            spend.input = figures[0];
+                            spend.output = figures[1];
+                            spend.cost_micro_usd = Some(figures[2]);
+                            let mut report = UsageReport::new();
+                            report.spend = Some(spend);
+                            report
+                        }),
                     }
                 })
                 .collect::<VecDeque<_>>();
@@ -9402,9 +9411,8 @@ queue = 1
                     text: None,
                     data: None,
                     limit: None,
-                    usage: None,
                     tools: tools.split(',').map(str::to_owned).collect(),
-                    quota: Vec::new(),
+                    report: None,
                 });
             }
             let session_id = SessionId::try_new("provider-session-spend")
@@ -10331,6 +10339,30 @@ queue = 1
                 .unwrap()
                 .parked_until,
             Some(1_090)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_that_states_its_wait_parks_for_it_instead_of_the_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "limit_fallback_secs = 900\n",
+            "[agent.007]\nhandler = \"mock-limit\"\n[agent.007.env]\nMOCK_LIMIT_RESET = \"none\"\nMOCK_LIMIT_RETRY_AFTER = \"120\"\n",
+            1_000,
+        );
+        start_mission_one(&state).await;
+        wait_for_state(&state, "mission-1", MissionState::Parked).await;
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .parked_until,
+            Some(1_120),
+            "the stated wait, not the 900 s fallback"
         );
     }
 
@@ -14366,9 +14398,8 @@ queue = 1
                 text: Some(text),
                 data: None,
                 limit: None,
-                usage: None,
                 tools: Vec::new(),
-                quota: Vec::new(),
+                report: None,
             }))
         }
 
@@ -14717,9 +14748,8 @@ queue = 1
                 text: Some(text),
                 data: None,
                 limit: None,
-                usage: None,
                 tools: Vec::new(),
-                quota: Vec::new(),
+                report: None,
             };
             loop {
                 let mut pending = self.pending.lock().unwrap();

@@ -205,9 +205,8 @@ impl Desk {
                 )),
                 data: None,
                 limit: None,
-                usage: None,
                 tools: Vec::new(),
-                quota: Vec::new(),
+                report: None,
             },
         );
         hold(state, &asked.mission);
@@ -573,9 +572,8 @@ async fn take_up_rearmed(
             )),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
 }
@@ -702,9 +700,8 @@ fn told(state: &DaemonState, approval: &Approval, now: f64) {
             )),
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         },
     );
 }

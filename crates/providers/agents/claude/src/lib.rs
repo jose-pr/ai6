@@ -29,8 +29,8 @@ use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
 use ai6::{
-    AgentEvent, AgentMessage, AgentSession, DENIED_EVENT, LIMIT_EVENT, QuotaReport, TokenUsage,
-    UsageLimit,
+    AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
+    LimitHit, Refill, Spend, UsageReport, infer_limit,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -1480,7 +1480,7 @@ fn add_budget(argv: &mut Vec<String>, max_cost_micro_usd: Option<u64>) {
 
 /// The usage a `result` event reports: `usage` token counts and `total_cost_usd`, both
 /// running totals for the Claude Code process.
-fn decode_usage(value: &Value) -> Option<TokenUsage> {
+fn decode_usage(value: &Value) -> Option<Spend> {
     if value.get("type").and_then(Value::as_str)? != "result" {
         return None;
     }
@@ -1495,14 +1495,27 @@ fn decode_usage(value: &Value) -> Option<TokenUsage> {
             .and_then(Value::as_u64)
             .unwrap_or(0)
     };
-    Some(TokenUsage {
-        input: count("input_tokens"),
-        output: count("output_tokens"),
-        cache_read: count("cache_read_input_tokens"),
-        cache_write: count("cache_creation_input_tokens"),
-        cost_micro_usd: cost.map_or(0, micro_usd),
-        cumulative: true,
-    })
+    let mut spend = Spend::new("");
+    spend.input = count("input_tokens");
+    spend.output = count("output_tokens");
+    spend.cache_read = count("cache_read_input_tokens");
+    spend.cache_write = count("cache_creation_input_tokens");
+    spend.cost_micro_usd = cost.map(micro_usd);
+    Some(spend)
+}
+
+/// What an event tells of the account's usage: the Claude Code process's running spend on a
+/// `result`, and the window of a `rate_limit_event`.
+fn decode_report(value: &Value) -> Option<UsageReport> {
+    let spend = decode_usage(value);
+    let buckets = decode_quota(value);
+    if spend.is_none() && buckets.is_empty() {
+        return None;
+    }
+    let mut report = UsageReport::new();
+    report.spend = spend;
+    report.buckets = buckets;
+    Some(report)
 }
 
 struct ClaudeSession {
@@ -1872,9 +1885,8 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
         text,
         data: None,
         limit: None,
-        usage: None,
         tools: Vec::new(),
-        quota: Vec::new(),
+        report: None,
     }
 }
 
@@ -1884,23 +1896,22 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
 /// `resetsAt` in Unix seconds), and an error `result` whose text names the limit, either as
 /// `... usage limit reached|<unix seconds>` or as prose with only a local clock time, which
 /// leaves `resets_at` unset rather than guessing a date.
-fn decode_limit(value: &Value) -> Option<(UsageLimit, Option<String>)> {
+fn decode_limit(value: &Value) -> Option<(LimitHit, Option<String>)> {
     match value.get("type").and_then(Value::as_str)? {
         "rate_limit_event" => {
             let info = value.get("rate_limit_info")?;
             if info.get("status").and_then(Value::as_str) != Some("rejected") {
                 return None;
             }
-            let limit = UsageLimit {
-                resets_at: info
-                    .get("resetsAt")
-                    .and_then(Value::as_i64)
-                    .map(unix_seconds),
-                window: info
-                    .get("rateLimitType")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            };
+            let mut limit = LimitHit::new(0);
+            limit.resets_at = info
+                .get("resetsAt")
+                .and_then(Value::as_i64)
+                .map(unix_seconds);
+            limit.bucket = info
+                .get("rateLimitType")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             Some((limit, None))
         }
         "result" if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
@@ -1926,7 +1937,16 @@ fn decode_limit(value: &Value) -> Option<(UsageLimit, Option<String>)> {
             } else {
                 None
             };
-            Some((UsageLimit { resets_at, window }, Some(text.to_owned())))
+            // A wait the words state (`retry after 90 seconds`) is the refusal's own.
+            let stated = infer_limit(
+                text,
+                &["429", "usage limit", "limit reached", "hit your limit"],
+            );
+            let mut limit = LimitHit::new(0);
+            limit.resets_at = resets_at;
+            limit.bucket = window;
+            limit.retry_after = stated.and_then(|stated| stated.retry_after);
+            Some((limit, Some(text.to_owned())))
         }
         _ => None,
     }
@@ -1935,33 +1955,40 @@ fn decode_limit(value: &Value) -> Option<(UsageLimit, Option<String>)> {
 /// The quota a `rate_limit_event` reports, whatever its status: the window
 /// (`rateLimitType`), the status, `resetsAt`, and `utilization` as thousandths when it is a
 /// fraction between 0 and 1.
-fn decode_quota(value: &Value) -> Vec<QuotaReport> {
+fn decode_quota(value: &Value) -> Vec<Bucket> {
     if value.get("type").and_then(Value::as_str) != Some("rate_limit_event") {
         return Vec::new();
     }
     let Some(info) = value.get("rate_limit_info") else {
         return Vec::new();
     };
-    vec![QuotaReport {
-        window: info
-            .get("rateLimitType")
+    let mut bucket = Bucket::new(
+        info.get("rateLimitType")
             .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_owned(),
-        used_permille: info
-            .get("utilization")
-            .and_then(Value::as_f64)
-            .filter(|fraction| (0.0..=1.0).contains(fraction))
-            .map(|fraction| (fraction * 1000.0).round() as u16),
+            .unwrap_or("unknown"),
+    );
+    if let Some(used) = info
+        .get("utilization")
+        .and_then(Value::as_f64)
+        .filter(|fraction| (0.0..=1.0).contains(fraction))
+    {
+        bucket.limit = Some(1000);
+        bucket.used = Some((used * 1000.0).round() as u64);
+    }
+    bucket.refill = Refill::FixedWindow {
+        length: None,
         resets_at: info
             .get("resetsAt")
             .and_then(Value::as_i64)
             .map(unix_seconds),
-        status: info
-            .get("status")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-    }]
+    };
+    bucket.status = match info.get("status").and_then(Value::as_str) {
+        Some("allowed") => BucketStatus::Ok,
+        Some("allowed_warning") => BucketStatus::Warning,
+        Some("rejected") => BucketStatus::Exhausted,
+        _ => BucketStatus::Unknown,
+    };
+    vec![bucket]
 }
 
 /// A Unix timestamp that may be in seconds or milliseconds.
@@ -1984,9 +2011,8 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
             text,
             data: Some(line),
             limit: Some(limit),
-            usage: decode_usage(value),
             tools: Vec::new(),
-            quota: decode_quota(value),
+            report: decode_report(value),
         });
     }
     let tools = decode_tools(value);
@@ -2015,9 +2041,8 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
         text,
         data: Some(line),
         limit: None,
-        usage: decode_usage(value),
         tools,
-        quota: decode_quota(value),
+        report: decode_report(value),
     })
 }
 
@@ -3198,13 +3223,9 @@ mod tests {
         });
         let event = decode_event(&value, b"{}".to_vec()).unwrap();
         assert_eq!(event.kind, LIMIT_EVENT);
-        assert_eq!(
-            event.limit,
-            Some(UsageLimit {
-                resets_at: Some(1_790_000_000),
-                window: Some("five_hour".to_owned()),
-            })
-        );
+        let limit = event.limit.expect("a limit");
+        assert_eq!(limit.resets_at, Some(1_790_000_000));
+        assert_eq!(limit.bucket.as_deref(), Some("five_hour"));
     }
 
     #[test]
@@ -3218,22 +3239,24 @@ mod tests {
                 "rateLimitType": "five_hour"
             }
         });
+        let rejected = quota_of(&rejected);
+        assert_eq!(rejected[0].id, "five_hour");
+        assert_eq!(UsageReport::fraction_permille(&rejected[0]), None);
+        assert_eq!(rejected[0].status, BucketStatus::Exhausted);
         assert_eq!(
-            decode_event(&rejected, b"{}".to_vec()).unwrap().quota,
-            [QuotaReport {
-                window: "five_hour".to_owned(),
-                used_permille: None,
-                resets_at: Some(1_790_000_000),
-                status: Some("rejected".to_owned()),
-            }]
+            rejected[0].refill,
+            Refill::FixedWindow {
+                length: None,
+                resets_at: Some(1_790_000_000)
+            }
         );
         let warning = json!({
             "type": "rate_limit_event",
             "rate_limit_info": { "status": "allowed_warning", "resetsAt": 1_790_000_000 }
         });
-        let quota = decode_event(&warning, b"{}".to_vec()).unwrap().quota;
-        assert_eq!(quota[0].window, "unknown");
-        assert_eq!(quota[0].status.as_deref(), Some("allowed_warning"));
+        let quota = quota_of(&warning);
+        assert_eq!(quota[0].id, "unknown");
+        assert_eq!(quota[0].status, BucketStatus::Warning);
         // `utilization` is in the SDK's published SDKRateLimitInfo type; only a fraction is
         // taken, since its scale is not documented there.
         let measured = json!({
@@ -3245,24 +3268,28 @@ mod tests {
             }
         });
         assert_eq!(
-            decode_event(&measured, b"{}".to_vec()).unwrap().quota[0].used_permille,
+            UsageReport::fraction_permille(&quota_of(&measured)[0]),
             Some(250)
         );
         let percent = json!({
             "type": "rate_limit_event",
             "rate_limit_info": { "status": "allowed", "utilization": 25 }
         });
-        assert_eq!(
-            decode_event(&percent, b"{}".to_vec()).unwrap().quota[0].used_permille,
-            None
-        );
+        assert_eq!(UsageReport::fraction_permille(&quota_of(&percent)[0]), None);
         let result = json!({ "type": "result", "result": "done" });
-        assert!(
-            decode_event(&result, b"{}".to_vec())
-                .unwrap()
-                .quota
-                .is_empty()
-        );
+        assert!(quota_of(&result).is_empty());
+    }
+
+    fn quota_of(value: &Value) -> Vec<Bucket> {
+        decode_event(value, b"{}".to_vec())
+            .unwrap()
+            .report
+            .map(|report| report.buckets)
+            .unwrap_or_default()
+    }
+
+    fn spend_of(value: &Value) -> Option<Spend> {
+        decode_event(value, b"{}".to_vec())?.report?.spend
     }
 
     #[test]
@@ -3306,7 +3333,7 @@ mod tests {
         });
         let limit = decode_event(&value, b"{}".to_vec()).unwrap().limit.unwrap();
         assert_eq!(limit.resets_at, None);
-        assert_eq!(limit.window.as_deref(), Some("five_hour"));
+        assert_eq!(limit.bucket.as_deref(), Some("five_hour"));
     }
 
     /// As Claude Code 2.1.316 reports a 429 from a LiteLLM gateway, past its retries.
@@ -3323,6 +3350,7 @@ mod tests {
         }))
         .expect("a limit");
         assert_eq!(limit.resets_at, None);
+        assert_eq!(limit.retry_after, None);
         assert!(text.unwrap().contains("Request rejected (429)"));
         assert!(
             decode_limit(&serde_json::json!({
@@ -5674,34 +5702,40 @@ denied_tools = [\"Bash(rm *)\"]
     fn a_result_reports_tokens_and_cost_as_running_totals() {
         let event = decode_event(&result_with_usage(), b"{}".to_vec()).unwrap();
         assert_eq!(event.kind, "completed");
+        let spend = event.report.unwrap().spend.unwrap();
         assert_eq!(
-            event.usage,
-            Some(TokenUsage {
-                input: 12,
-                output: 345,
-                cache_read: 101_112,
-                cache_write: 6_789,
-                cost_micro_usd: 12_346,
-                cumulative: true,
-            })
+            (
+                spend.input,
+                spend.output,
+                spend.cache_read,
+                spend.cache_write,
+                spend.cost_micro_usd
+            ),
+            (12, 345, 101_112, 6_789, Some(12_346))
         );
     }
 
     #[test]
     fn only_a_result_carries_usage_and_a_cost_alone_is_enough() {
         let assistant = json!({ "type": "assistant", "usage": { "input_tokens": 5 } });
-        assert_eq!(
-            decode_event(&assistant, b"{}".to_vec()).unwrap().usage,
-            None
-        );
+        assert_eq!(spend_of(&assistant), None);
         let bare = json!({ "type": "result", "result": "ok" });
-        assert_eq!(decode_event(&bare, b"{}".to_vec()).unwrap().usage, None);
+        assert_eq!(spend_of(&bare), None);
         let cost_only = json!({ "type": "result", "total_cost_usd": 1.5 });
-        let usage = decode_event(&cost_only, b"{}".to_vec())
-            .unwrap()
-            .usage
-            .unwrap();
-        assert_eq!((usage.input, usage.cost_micro_usd), (0, 1_500_000));
+        let usage = spend_of(&cost_only).unwrap();
+        assert_eq!((usage.input, usage.cost_micro_usd), (0, Some(1_500_000)));
+    }
+
+    #[test]
+    fn a_429_that_states_its_wait_carries_it_as_retry_after() {
+        let (limit, _) = decode_limit(&json!({
+            "type": "result",
+            "is_error": true,
+            "api_error_status": 429,
+            "result": "API Error: Request rejected (429) - quota exceeded, retry after 90 seconds",
+        }))
+        .expect("a limit");
+        assert_eq!(limit.retry_after, Some(std::time::Duration::from_secs(90)));
     }
 
     #[test]
@@ -5819,7 +5853,7 @@ denied_tools = [\"Bash(rm *)\"]
         value["result"] = json!("Claude AI usage limit reached|1790000000");
         let event = decode_event(&value, b"{}".to_vec()).unwrap();
         assert_eq!(event.kind, LIMIT_EVENT);
-        assert_eq!(event.usage.unwrap().output, 345);
+        assert_eq!(event.report.unwrap().spend.unwrap().output, 345);
     }
 
     #[test]

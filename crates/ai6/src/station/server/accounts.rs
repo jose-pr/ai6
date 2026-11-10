@@ -25,7 +25,7 @@ use crate::directorates::registry::accounts::{
 };
 use crate::directorates::registry::sessions::SessionRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use coqui_acp_provider::QuotaReport;
+use coqui_acp_api::{Bucket, Refill, Status as BucketStatus, UsageReport};
 
 use super::DaemonState;
 
@@ -918,30 +918,40 @@ pub(super) fn record_usage(state: &DaemonState, mission_id: &str, tokens: u64) {
     }
 }
 
-/// Records the quota windows a provider reported on the account `mission_id`'s Session holds.
-pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, reports: &[QuotaReport]) {
-    if reports.is_empty() {
+/// The quota window a provider's bucket describes, as the account's record keeps it.
+pub(crate) fn window_of(bucket: &Bucket, now: f64) -> QuotaWindow {
+    let mut window = QuotaWindow::new(&bucket.id, now);
+    if let Some(used) = UsageReport::fraction_permille(bucket) {
+        window = window.used_permille(used);
+    }
+    if let Refill::FixedWindow {
+        resets_at: Some(at),
+        ..
+    } = &bucket.refill
+    {
+        window = window.resets_at(*at as f64);
+    }
+    match &bucket.status {
+        BucketStatus::Ok => window = window.status("allowed"),
+        BucketStatus::Warning => window = window.status("allowed_warning"),
+        BucketStatus::Exhausted => window = window.status("rejected"),
+        _ => {}
+    }
+    window
+}
+
+/// Records the quota buckets a provider reported on the account `mission_id`'s Session holds.
+pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, buckets: &[Bucket]) {
+    if buckets.is_empty() {
         return;
     }
     let Some(account) = held(state, mission_id) else {
         return;
     };
     let now = state.clock.now() as f64;
-    let windows: Vec<QuotaWindow> = reports
+    let windows: Vec<QuotaWindow> = buckets
         .iter()
-        .map(|report| {
-            let mut window = QuotaWindow::new(&report.window, now);
-            if let Some(used) = report.used_permille {
-                window = window.used_permille(used);
-            }
-            if let Some(at) = report.resets_at {
-                window = window.resets_at(at as f64);
-            }
-            if let Some(status) = &report.status {
-                window = window.status(status);
-            }
-            window
-        })
+        .map(|bucket| window_of(bucket, now))
         .collect();
     if let Err(error) = state.intake.report_quota(&account, &windows) {
         eprintln!("ai6: quota of account {account} not recorded: {error}");
@@ -1240,9 +1250,8 @@ pub(super) mod testing {
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError};
     use crate::guatiao::{Provider, Status};
-    use coqui_acp_provider::{
-        AgentEvent, AgentSession, LIMIT_EVENT, QuotaReport, TokenUsage, UsageLimit,
-    };
+    use coqui_acp_api::{Bucket, LimitHit, Refill, Spend, UsageReport};
+    use coqui_acp_provider::{AgentEvent, AgentSession, LIMIT_EVENT};
 
     use super::super::tests::MockSession;
 
@@ -1281,29 +1290,31 @@ pub(super) mod testing {
         let credential = credential(environment);
         let limited =
             credential.contains("-limited-") && LIMITED.lock().unwrap().insert(credential.clone());
+        let mut bucket = Bucket::new("five_hour");
+        bucket.limit = Some(1000);
+        bucket.used = Some(if limited { 1000 } else { 300 });
+        bucket.refill = Refill::FixedWindow {
+            length: None,
+            resets_at: Some(POOLED_RESET),
+        };
+        let mut report = UsageReport::new();
+        report.buckets = vec![bucket];
+        if !limited {
+            let mut spend = Spend::new("pooled");
+            spend.input = 100;
+            spend.output = 20;
+            report.spend = Some(spend);
+        }
+        let mut hit = LimitHit::new(0);
+        hit.bucket = Some("five_hour".to_owned());
+        hit.resets_at = Some(POOLED_RESET);
         AgentEvent {
             kind: if limited { LIMIT_EVENT } else { "completed" }.to_owned(),
             text: None,
             data: None,
-            limit: limited.then_some(UsageLimit {
-                resets_at: Some(POOLED_RESET),
-                window: Some("five_hour".to_owned()),
-            }),
-            usage: (!limited).then_some(TokenUsage {
-                input: 100,
-                output: 20,
-                cache_read: 0,
-                cache_write: 0,
-                cost_micro_usd: 0,
-                cumulative: true,
-            }),
+            limit: limited.then_some(hit),
             tools: Vec::new(),
-            quota: vec![QuotaReport {
-                window: "five_hour".to_owned(),
-                used_permille: Some(if limited { 1000 } else { 300 }),
-                resets_at: Some(POOLED_RESET),
-                status: None,
-            }],
+            report: Some(report),
         }
     }
 
