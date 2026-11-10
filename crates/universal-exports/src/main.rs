@@ -734,9 +734,9 @@ fn sign_in_providers(
     for (index, entry) in record.authenticators.iter().enumerate() {
         let id = entry.provider.as_str();
         let at = |reason: String| format!("unex.authenticators[{index}] ({id}): {reason}");
-        let value = config(&entry.config).map_err(&at)?;
+        let value = config(&entry.config).map_err(at)?;
         if let Some(value) = &value {
-            plugins.check_settings(id, value).map_err(&at)?;
+            plugins.check_settings(id, value).map_err(at)?;
         }
         let authenticator: Arc<dyn Authenticator> = plugins
             .authenticator(id, value.as_ref())
