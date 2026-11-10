@@ -361,6 +361,8 @@ impl universal_exports::KeyProvider
 pub fn universal_exports::KeyProvider::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Accounts>) -> Self
 pub fn universal_exports::KeyProvider::with_lifetime(self, core::option::Option<f64>) -> Self
 pub fn universal_exports::KeyProvider::with_use_precision(self, core::option::Option<f64>) -> Self
+impl core::fmt::Debug for universal_exports::KeyProvider
+pub fn universal_exports::KeyProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct universal_exports::LaunchManifest
 pub universal_exports::LaunchManifest::agent_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::effort: core::option::Option<alloc::string::String>
