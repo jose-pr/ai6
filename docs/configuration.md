@@ -1244,7 +1244,7 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 | --- | --- | --- |
 | `manifest_bytes` | 1 MiB | **Largest overlay manifest.** Bytes of an overlay's `overlay.cfg`, or of one of its `aos` env files. |
 | `manifest_depth` | 64 | **Deepest overlay manifest.** Nesting of a manifest's arrays and tables, its top table being the first level. |
-| `files` | 4,096 | **Files in an overlay.** Files in one overlay, the excluded names (`.git`, `node_modules`, ...) not counted. |
+| `files` | 4,096 | **Files in an overlay.** Files and directories in one overlay, the excluded names (`.git`, `node_modules`, ...) not counted. |
 | `bytes` | 64 MiB | **Largest overlay.** Bytes of one overlay's files together. |
 | `file_bytes` | 16 MiB | **Largest overlay file.** Bytes of one file of an overlay. |
 | `unpinned` | `false` | **Issue overlays without a pin.** Issue an overlay whose `[overlay.<name>]` has no pin, reporting it as `unpinned` each time; without this such an overlay is refused. A weakening. |

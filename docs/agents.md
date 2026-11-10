@@ -1171,7 +1171,8 @@ An overlay is a directory of what an Agent works with: rules, context, skills, k
 programs and environment. A loadout issues overlays to its Agent, and an Operation adds its own,
 since which standards apply belongs to the project. The format is the
 [Agent Overlay Spec](https://boriken-dev.github.io/agent-overlay-spec/) (AOS), edition
-`0.1.0-draft`: a tree with an optional `overlay.cfg` manifest.
+`0.1.0-draft`: a tree with an optional manifest, `overlay.cfg` or `OVERLAY.md`. Reading, validating,
+composing and the tree digest are the shared `coqui-aos` crate's.
 
 A Station fetches each overlay to a store keyed by its digest, verifies it at every Session start,
 and gives the Session a read-only copy outside its working directory, so no commit can hold it.
@@ -1217,16 +1218,15 @@ overlays = ["rust"]
   overrides it: to accept other bytes, change the pin. An overlay with no pin is refused unless
   the `station` record's `[overlays] unpinned = true`, a weakening reported as `unpinned` for
   each such overlay every time it is issued.
-- **`OVERLAY.md`.** A later AOS edition reads `OVERLAY.md` as the manifest when there is no
-  `overlay.cfg`. This AI6 reads edition `0.1.0-draft` at `061b8f5`: an overlay with `OVERLAY.md` and
-  no `overlay.cfg` is refused, naming the file, by `ai6 overlay pin` and at every Session start; it is
-  never read as having no manifest.
+- **`OVERLAY.md`.** When there is no `overlay.cfg`, the manifest is the front matter of `OVERLAY.md`
+  (YAML unless a `#!` format line names another format) and its body is the overlay's context. An
+  overlay with both files is refused (`two-manifests`).
 - **Hooks.** A later AOS edition runs an overlay's hooks (a `[hooks]` table, or a `hook.<ext>`
   script at the root), and a `pre-tool` hook can deny a call. This AI6 runs none, so an overlay that
   asks for one is refused, naming the table or the file, rather than run with weaker guards than its
   author wrote.
 - **`ai6 overlay pin DIR`** reads an overlay as a Station does, running nothing: it prints each
-  file with its SHA-256 and the `pin`. It exits non-zero, printing no pin, when `overlay.cfg`
+  file with its SHA-256 and the `pin`. It exits non-zero, printing no pin, when the manifest
   does not read or validate against the files, or a skill fails the `SKILL.md` checks. Problems
   under `about`, which is informational, are printed and do not stop it. `ai6 assistant
   pin-skill` computes the same digest.

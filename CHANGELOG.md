@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Overlays are read by the shared `coqui-aos` crate (reading, validating, composing, the environment and the
+  tree digest); AI6 keeps fetching, the store, Theaters and the refusal of hooks. An overlay whose manifest is
+  `OVERLAY.md` is read, its body being its context; a manifest or `SKILL.md` front matter is read as AOS reads
+  any (no YAML tag, anchor, alias or merge key); a refusal reads `class: subject at line N column M`; and
+  `[overlays] files` counts directories with files. Every vector of the specification's eight files passes.
+
 - A sign-in lasts while it is used: `[gateway] session_idle` (thirty minutes) ends one that is not renewed, each
   `POST /v1/auth/renew` moves the idle deadline on and answers `idle_ends_at`, and `session_max` is unset by
   default, so there is no fixed twelve-hour cut. The session cookie follows the same rules.

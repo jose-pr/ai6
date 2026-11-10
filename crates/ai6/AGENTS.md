@@ -974,7 +974,7 @@ naming a skill the catalog lacks. `check_skill(dir, name, allow_tools, tools_set
 (`directorates::q::overlays`) reads `<dir>/SKILL.md` (a regular file of at most `file_bytes`,
 `[harness] manifest_file_bytes` here, never through a link; the settings check uses the
 defaults; a refusal names `tools_setting`, `assistant.skills_allow_tools` here): front matter between two `---` lines
-must parse as a YAML mapping (`serde-saphyr`; duplicate keys refused, merge keys expanded) with
+must read as an AOS front-matter mapping (`coqui_aos::read_front_matter`: duplicate keys, tags, anchors, aliases and merge keys refused) with
 `name` equal to the catalog's name and a non-empty `description`; unless `allow_tools`, it
 may hold only `SKILL_INERT_KEYS` and no injected command (any `` !` ``, or a fence of three or
 more backticks or tildes followed by `!`). So the skill directories must be readable wherever
@@ -1063,7 +1063,7 @@ impl ProjectManifest {
 ```
 
 `read_tree` reads a whole directory (a skill: `ai6 assistant pin-skill DIR`) through
-`directorates::q::overlays::tree_digest` within the same limits, so `digest()` is the AOS tree
+`coqui_aos::tree_digest` within the same limits, so `digest()` is the AOS tree
 digest an overlay's pin is: excluded names (`.git`, `node_modules`, `__pycache__`, ...) and
 `.pyc` files are no members, and a link, special file, name that is no AOS relative path or two
 paths equal under ASCII case is an error. Paths are relative to it; `root` itself must be a
@@ -4488,18 +4488,18 @@ and applies only the secrets: see "Credentials" under the Station daemon.
 
 ## Overlays (`ai6::directorates::q::overlays`)
 
-Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`, vectors of coqui-aos `c73cf23a`
-in `tests/fixtures/aos-vectors/`): reading, validating, digesting, resolving and composing,
-and the environment, setup and dependencies an overlay asks for, as pure functions. Nothing
-here runs a script, installs a package, starts a server or reads the network: a Station's own
-`station::overlays` (not public) fetches overlays to its store under `<state_dir>/overlays`,
-places them on a Theater and prepares them, and hands the handler `AgentStart::overlays`. The
-Store class (catalogs, icons) is not implemented.
+Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`). Reading, validating, digesting,
+resolving, composing, and the environment, setup and dependencies an overlay asks for, are the
+`coqui-aos` crate's (`coqui_aos::{read_overlay, validate, tree_digest, compose, effective, ...}`,
+the vectors in `tests/fixtures/aos-vectors/` run against it by `tests/aos_vectors`); this module is the
+host's part. Nothing here runs a script, installs a package, starts a server or reads the network: a
+Station's own `station::overlays` (not public) fetches overlays to its store under
+`<state_dir>/overlays`, places them on a Theater and prepares them, and hands the handler
+`AgentStart::overlays`.
 
 ```rust
-pub const MANIFEST: &str = "overlay.cfg";
-pub const LATER_MANIFEST: &str = "OVERLAY.md";   // read_overlay refuses a tree with it and no overlay.cfg
-pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String>;   // [hooks], or a root hook.<ext>: read_overlay refuses it
+pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String>;   // [hooks], or a root hook script: read_overlay refuses it
+pub struct Weakening { pub id: String, pub subject: String }   // Ord; From<&coqui_aos::NonDefaultSetting>; also the host's own ids
 #[non_exhaustive] pub enum OverlayFrom { Source(Source), Path(PathBuf) }
 pub struct OverlayRecord;   // [overlay.<name>]
 impl OverlayRecord {
@@ -4508,7 +4508,7 @@ impl OverlayRecord {
     pub fn pin(&self) -> Option<Digest>; pub fn secrets(&self) -> &[String];
 }
 pub struct ReadOverlay { pub digest: TreeDigest, pub manifest: Document, pub issues: Vec<Issue>,
-    pub skills: Vec<(String, Result<(), String>)> }   // tree(), usable()
+    pub skills: Vec<(String, Result<(), String>)> }   // tree() (paths and the manifest's text), usable()
 pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, String>;   // `ai6 overlay pin DIR`
 #[non_exhaustive] pub enum OverlayList { Loadout, Operation }
 #[non_exhaustive] pub enum OverlayRefusal { InvalidName { list, name }, Unknown { list, name },
@@ -4518,59 +4518,24 @@ pub struct IssuedOverlays { pub install_order: Vec<String>, pub overlays: Vec<Is
 pub fn issue_overlays(loadout: &[String], operation: &[String],
     records: &BTreeMap<String, OverlayRecord>, manifests: &BTreeMap<String, Document>,
     allow_unpinned: bool) -> Result<IssuedOverlays, OverlayRefusal>;
-
-// AOS
-pub type Document = serde_json::Map<String, serde_json::Value>;   // the data model
-pub struct ReadLimits { pub bytes: Limit /* 1 MiB */, pub depth: Limit /* 64 */ }
-pub struct ReadError;   // class() (AOS error class), line(); Display names no document text
-pub fn read_document(data: &[u8], limits: &ReadLimits) -> Result<Document, ReadError>;
-pub fn parse_dotenv(data: &[u8]) -> Result<Vec<DotenvLine>, ReadError>;
-pub fn read_dotenv(data: &[u8], env: &mut Environment) -> Result<Vec<(String, String)>, ReadError>;
-pub fn read_env_script_output(data: &[u8]) -> Result<ScriptOutput, ReadError>;
-pub fn substitute(text: &str, lookup: &Lookup<'_>) -> Result<String, SubstitutionError>;
-pub fn valid_overlay_name(&str) -> bool; pub fn normalize_name(&str) -> String;
-pub fn root_variable(identity: &str) -> String; pub fn state_variable(identity: &str) -> String;
-pub fn valid_relative_path(&str) -> bool; pub fn is_reserved_variable(&str) -> bool;
-pub fn is_sensitive_variable(&str) -> bool; pub fn os_matches(Option<&[String]>, &str) -> bool; pub fn current_os() -> &'static str;
-pub struct Source { pub kind: SourceKind, pub location, pub reference: Option<String>, pub path: Option<String> }   // parse(), shown()
-pub struct Digest;   // sha256: and 64 hex; of(bytes), parse(text), bytes(), Display lowercase
-pub struct TreeLimits { pub files: Limit, pub bytes: Limit, pub file_bytes: Limit }
-pub struct TreeDigest { pub digest: Digest, pub files: BTreeMap<String, Digest> }   // lines()
-pub fn tree_digest(root: &Path, limits: &TreeLimits) -> Result<TreeDigest, DigestError>;
-pub fn digest_entries(entries) -> Result<TreeDigest, DigestError>;   // abstract (components, TreeEntry)
-pub struct OverlayTree;   // from_paths, from_texts; paths(), contains(), text()
-pub fn validate(manifest: &Document, tree: Option<&OverlayTree>) -> Vec<Issue>;   // Issue { at, code }
-pub fn applies(issues: &[Issue]) -> bool;   // only problems under /about
-pub fn resolve(..) -> Result<Resolution, Cycle>; pub fn composition_order(..) -> Vec<String>;
-pub fn compose(overlays, requested, trees) -> Result<Composition, Cycle>;
-pub fn environments(overlays, active, trees, os, removed) -> Result<Environments, String>;
-pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Refusal>;
-pub fn composed_environment(active: &[(&Document, Facts)], base: Environment, &mut Vec<Weakening>) -> Result<Environment, Refusal>;
-pub fn setup_phase(Change, recorded: Option<&str>, digest: Option<&str>) -> Option<Phase>;
-pub fn preparation(Change, Option<&SetupRecord>, digest, setup, dependencies, fails) -> Preparation;
 pub fn check_skill(dir: &Path, name: &str, allow_tools: bool, tools_setting: &str, file_bytes: Limit) -> Result<(), String>;
+pub fn skill_description(dir: &Path) -> Option<String>;  pub fn skill_summary(dir: &Path) -> Option<SkillSummary>;
 pub const SKILL_INERT_KEYS: [&str; 12];
 ```
 
-`read_document` drops one byte-order mark, takes the format from a `#!` first line (its last
-word, after the last `/` or `\`, leading dots dropped, ASCII lowercased) or else TOML, and
-parses through `anycfg` with codecs of its own over guatiao's `Value`: TOML refuses a date,
-JSON a duplicate key, a lone surrogate, `NaN` and comments, YAML (from `granit-parser`
-events) any tag, anchor, alias, merge key, directive, second document and U+0085/U+2028/U+2029,
-typing plain scalars by the 1.2 core schema. The value is checked against the data model:
-no null, finite floats, signed 64-bit integers, `30.0` kept a float, within `depth`. Every
-error carries an AOS class (`parse-error`, `duplicate-key`, `yaml-tag`, `too-deep`, ...).
+`OverlayLimits::settings()` is the `coqui_aos::Settings` a read uses: `manifest_bytes`,
+`manifest_depth`, `files` (files and directories together), `bytes` and `file_bytes` map to the
+reader's `manifest_bytes`, `manifest_depth`, `tree_files`, `tree_bytes` and `file_bytes`; every other
+bound is the reader's default. `read_overlay` reads `OVERLAY.md` or `overlay.cfg` (both is
+`two-manifests`) and refuses a tree that asks for hooks, which AI6 does not run.
 
-`OverlayTree::with_text(path, text)` adds a file's text; `skill_description(dir)` reads a `SKILL.md`'s
-`description`; `check_requirements(text, locked)` refuses an option, a direct URL, or in a lock a
-requirement not pinned with `==`. `IssuedDigest { overlay, digest }` is what a launch records.
+`IssuedDigest { overlay, digest }` is what a launch records. `check_skill` reads the front matter of
+a `SKILL.md` as AOS reads any front matter (restricted YAML: no tag, anchor, alias or merge key).
 
 `issue_overlays` refuses a name that is no overlay name or no record's (`InvalidName`,
 `Unknown`, naming the list), resolves `requires` over the records whose manifests are given
 (a cycle or a missing requirement refuses), orders by `(priority, name, identity)`, and
 refuses an overlay without a pin unless `allow_unpinned`, which reports `unpinned` for it.
-
-`Environment`'s `Debug` lists names only, and `Facts`' omits grants, secrets and files.
 
 Secret references can be leased through `SecretBroker`:
 
