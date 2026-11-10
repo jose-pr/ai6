@@ -3585,12 +3585,22 @@ async fn resumed_token(
     }
     let session_end = cookie.issued_at() + table.session_max.as_secs_f64();
     let ttl = sign_in_ttl(table, table.access_token_ttl.0).as_secs_f64();
-    let issued = store_bearer(
+    // A resumed sign-in is in use: its cookie goes on from now, and the new token with it.
+    keep_cookie(
         registry.clone(),
+        cookie.token_id(),
+        now,
+        idle_seconds(table),
+        session_end,
+    )
+    .await;
+    let kept = idle_seconds(table).map_or(session_end, |idle| (now + idle).min(session_end));
+    let issued = store_bearer(
+        registry,
         person.id,
         Times {
             issued_at: cookie.issued_at(),
-            expires_at: (now + ttl).min(ends),
+            expires_at: (now + ttl).min(ends.max(kept)),
             now,
             idle: idle_seconds(table),
         },
@@ -3598,15 +3608,6 @@ async fn resumed_token(
         Some(cookie.token_id().to_owned()),
     )
     .await?;
-    // A resumed sign-in is in use: its cookie goes on from now.
-    keep_cookie(
-        registry,
-        cookie.token_id(),
-        now,
-        idle_seconds(table),
-        session_end,
-    )
-    .await;
     Ok(Some((issued, cookie.token_id().to_owned())))
 }
 

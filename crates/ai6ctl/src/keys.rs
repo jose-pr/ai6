@@ -60,7 +60,11 @@ pub(crate) fn parse_lifetime(text: &str) -> Result<f64, String> {
         Some('m') => 60.0,
         Some('h') => 3600.0,
         Some('d') => 86_400.0,
-        Some(other) => return Err(format!("{other:?} is not a unit: use s, m, h or d")),
+        Some(other) => {
+            return Err(format!(
+                "{text:?} is not a duration: {other:?} is not a unit, use s, m, h or d"
+            ));
+        }
     };
     let value: f64 = number
         .trim()

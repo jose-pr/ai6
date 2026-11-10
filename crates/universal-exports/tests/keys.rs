@@ -236,9 +236,10 @@ fn policy(alice_roster: bool) -> ai6::AccessPolicy {
         .roles
         .insert("accountant".into(), ai6::RoleDef::new(["account.manage"]));
     let mut rules = vec![
-        ("account:alice", "config:watch", "watcher"),
+        ("account:alice", "config:cables", "watcher"),
         ("account:admin", "config:accounts", "accountant"),
-        ("group:deployers", "config:watch", "watcher"),
+        ("group:deployers", "config:cables", "watcher"),
+        ("account:robot", "config:cables", "watcher"),
     ];
     if alice_roster {
         rules.push(("account:alice", "config:roster", "rostering"));
@@ -368,11 +369,7 @@ async fn apply_watch(h: &Harness, token: &str) -> StatusCode {
         token,
         Method::POST,
         "/v1/user/resources/apply",
-        Some(apply_body(
-            "watches",
-            "operation:G",
-            json!({"agent": "007"}),
-        )),
+        Some(apply_body("cables", "settings", json!({}))),
     )
     .await
     .0
@@ -428,12 +425,9 @@ async fn people_sign_in_by_password_and_accounts_by_key_each_refused_by_the_othe
     assert!(key.starts_with("ck_"));
 
     // The key is the bearer of a request and acts as its account.
-    let (status, profile) = call(&h, &key, Method::GET, "/v1/user/profile", None).await;
-    assert_eq!(status, StatusCode::OK, "{profile}");
-    assert_eq!(profile["name"], "robot");
+    assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
     // A password is no bearer, and a key is no password.
-    let (status, _) = call(&h, "secret", Method::GET, "/v1/user/profile", None).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(apply_watch(&h, "secret").await, StatusCode::UNAUTHORIZED);
     assert_eq!(
         try_login(&h.base, "robot", &key).await,
         StatusCode::UNAUTHORIZED
@@ -468,12 +462,7 @@ async fn removing_the_key_provider_refuses_keys_and_leaves_sign_in_working() {
     )
     .await;
     let key = made["secret"].as_str().unwrap().to_owned();
-    assert_eq!(
-        call(&with, &key, Method::GET, "/v1/user/profile", None)
-            .await
-            .0,
-        StatusCode::OK
-    );
+    assert_eq!(apply_watch(&with, &key).await, StatusCode::OK);
 
     let without = serve(false).await;
     // The same value, with no provider to claim it.
@@ -483,12 +472,7 @@ async fn removing_the_key_provider_refuses_keys_and_leaves_sign_in_working() {
         .lock()
         .unwrap()
         .push(with.keys.0.lock().unwrap()[0].clone());
-    assert_eq!(
-        call(&without, &key, Method::GET, "/v1/user/profile", None)
-            .await
-            .0,
-        StatusCode::UNAUTHORIZED
-    );
+    assert_eq!(apply_watch(&without, &key).await, StatusCode::UNAUTHORIZED);
     assert_eq!(
         try_login(&without.base, "alice", "secret").await,
         StatusCode::CREATED
@@ -528,7 +512,7 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
         "alice may edit the roster"
     );
 
-    let (_, key) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
+    let (_, key) = make_key(&h, &alice, &["config.manage@config:cables"]).await;
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
     assert_eq!(
         apply_agent(&h, &key).await,
@@ -541,7 +525,7 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
         &key,
         Method::POST,
         "/v1/user/keys",
-        Some(json!({"name": "x", "scopes": ["config.manage@config:watch"]})),
+        Some(json!({"name": "x", "scopes": ["config.manage@config:cables"]})),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -553,11 +537,11 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
     // What the person does not hold, or does not name, makes no key.
     let bob = login(&h.base, "bob").await;
     for (token, scopes) in [
-        (&bob, json!(["config.manage@config:watch"])),
+        (&bob, json!(["config.manage@config:cables"])),
         (&alice, json!(["account.manage@config:accounts"])),
         (&alice, json!([])),
         (&alice, json!(["config.manage"])),
-        (&alice, json!(["nothing@config:watch"])),
+        (&alice, json!(["nothing@config:cables"])),
         (&alice, json!(["config.manage@*"])),
     ] {
         let (status, body) = call(
@@ -576,7 +560,7 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
 async fn a_key_loses_what_its_person_loses() {
     let h = serve(true).await;
     let alice = login(&h.base, "alice").await;
-    let (_, key) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
+    let (_, key) = make_key(&h, &alice, &["config.manage@config:cables"]).await;
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
 
     h.provider
@@ -595,8 +579,8 @@ async fn a_key_loses_what_its_person_loses() {
 async fn revoking_and_expiry_refuse_a_key_at_once() {
     let h = serve(true).await;
     let alice = login(&h.base, "alice").await;
-    let (revoked, first) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
-    let (expiring, second) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
+    let (revoked, first) = make_key(&h, &alice, &["config.manage@config:cables"]).await;
+    let (expiring, second) = make_key(&h, &alice, &["config.manage@config:cables"]).await;
     assert_eq!(apply_watch(&h, &first).await, StatusCode::OK);
     assert_eq!(apply_watch(&h, &second).await, StatusCode::OK);
 
@@ -621,7 +605,9 @@ async fn revoking_and_expiry_refuse_a_key_at_once() {
         &alice,
         Method::POST,
         "/v1/user/keys",
-        Some(json!({"name": "forever", "scopes": ["config.manage@config:watch"], "expires_in": 0})),
+        Some(
+            json!({"name": "forever", "scopes": ["config.manage@config:cables"], "expires_in": 0}),
+        ),
     )
     .await;
     assert_eq!(made["key"]["expires_at"], Value::Null, "{made}");
@@ -630,7 +616,7 @@ async fn revoking_and_expiry_refuse_a_key_at_once() {
         &alice,
         Method::POST,
         "/v1/user/keys",
-        Some(json!({"name": "default", "scopes": ["config.manage@config:watch"]})),
+        Some(json!({"name": "default", "scopes": ["config.manage@config:cables"]})),
     )
     .await;
     assert!(
@@ -644,12 +630,12 @@ async fn keys_are_a_persons_own_and_an_administrator_sees_every_one() {
     let alice = login(&h.base, "alice").await;
     let bob = login(&h.base, "bob").await;
     let admin = login(&h.base, "admin").await;
-    let (id, key) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
+    let (id, key) = make_key(&h, &alice, &["config.manage@config:cables"]).await;
 
     let (_, mine) = call(&h, &alice, Method::GET, "/v1/user/keys", None).await;
     assert_eq!(mine.as_array().unwrap().len(), 1);
     assert_eq!(mine[0]["name"], "deploy");
-    assert_eq!(mine[0]["scopes"], json!(["config.manage@config:watch"]));
+    assert_eq!(mine[0]["scopes"], json!(["config.manage@config:cables"]));
     assert_eq!(mine[0]["last_used_at"], Value::Null);
     let (_, theirs) = call(&h, &bob, Method::GET, "/v1/user/keys", None).await;
     assert_eq!(theirs, json!([]));
@@ -698,7 +684,7 @@ async fn keys_are_a_persons_own_and_an_administrator_sees_every_one() {
 async fn a_keys_value_is_in_no_audit_record_or_error() {
     let h = serve(true).await;
     let alice = login(&h.base, "alice").await;
-    let (id, key) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
+    let (id, key) = make_key(&h, &alice, &["config.manage@config:cables"]).await;
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
     assert_eq!(apply_agent(&h, &key).await, StatusCode::FORBIDDEN);
     let (_, refused) = call(&h, &key, Method::GET, "/v1/user/keys", None).await;
@@ -710,7 +696,7 @@ async fn a_keys_value_is_in_no_audit_record_or_error() {
         None,
     )
     .await;
-    let (_, after) = call(&h, &key, Method::GET, "/v1/user/profile", None).await;
+    let (_, after) = call(&h, &key, Method::GET, "/v1/user/keys", None).await;
 
     let audit = serde_json::to_string(&h.registry.list_audit(200).unwrap()).unwrap();
     assert!(
@@ -760,7 +746,7 @@ async fn a_personal_keys_account_is_not_listed_among_the_accounts() {
     let h = serve(true).await;
     let alice = login(&h.base, "alice").await;
     let admin = login(&h.base, "admin").await;
-    make_key(&h, &alice, &["config.manage@config:watch"]).await;
+    make_key(&h, &alice, &["config.manage@config:cables"]).await;
     let (_, accounts) = call(&h, &admin, Method::GET, "/v1/user/accounts", None).await;
     assert_eq!(accounts, json!([]));
 }

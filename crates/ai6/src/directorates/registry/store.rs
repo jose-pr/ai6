@@ -5059,13 +5059,12 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(
-            registry
-                .extend_access_token(sign_in, now + 7_200.0)
-                .unwrap()
-                .is_none(),
-            "a cookie's end does not move"
-        );
+        // A cookie stands as long as its sign-in is used, so its end moves on like a token's.
+        let moved = registry
+            .extend_access_token(sign_in, now + 7_200.0)
+            .unwrap()
+            .unwrap();
+        assert!(moved.is_session_cookie() && moved.expires_at() >= now + 7_200.0);
         let renewed = registry
             .extend_access_token(first.token_id(), now + 7_200.0)
             .unwrap()
