@@ -82,7 +82,10 @@ pub fn universal_exports::GatewayError::fmt(&self, &mut core::fmt::Formatter<'_>
 pub struct universal_exports::AccessProviders
 impl universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::from_reverse_proxy(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn universal_exports::AccessProviders::keys_only(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>) -> Self
 pub fn universal_exports::AccessProviders::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Authorizer>) -> Self
+pub fn universal_exports::AccessProviders::with_authenticator(self, alloc::sync::Arc<dyn coqui_access::kind::Authenticator>) -> Self
+pub fn universal_exports::AccessProviders::with_keys(self, universal_exports::KeyProvider) -> Self
 pub fn universal_exports::AccessProviders::with_page_authenticator(self, alloc::sync::Arc<dyn coqui_access::kind::Authenticator>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::header::name::HeaderName, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn universal_exports::AccessProviders::with_proxy_secret(self, impl core::convert::Into<alloc::string::String>, usize) -> core::result::Result<Self, alloc::string::String>
@@ -353,6 +356,11 @@ pub universal_exports::IssueWrite::entry: core::option::Option<alloc::string::St
 pub universal_exports::IssueWrite::issue: core::option::Option<alloc::string::String>
 pub universal_exports::IssueWrite::proposal: core::option::Option<alloc::string::String>
 pub universal_exports::IssueWrite::state: alloc::string::String
+pub struct universal_exports::KeyProvider
+impl universal_exports::KeyProvider
+pub fn universal_exports::KeyProvider::new(alloc::sync::Arc<dyn coqui_access::kind::Authenticator>, alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn coqui_access::kind::Accounts>) -> Self
+pub fn universal_exports::KeyProvider::with_lifetime(self, core::option::Option<f64>) -> Self
+pub fn universal_exports::KeyProvider::with_use_precision(self, core::option::Option<f64>) -> Self
 #[non_exhaustive] pub struct universal_exports::LaunchManifest
 pub universal_exports::LaunchManifest::agent_id: core::option::Option<alloc::string::String>
 pub universal_exports::LaunchManifest::effort: core::option::Option<alloc::string::String>
