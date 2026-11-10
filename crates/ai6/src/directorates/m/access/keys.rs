@@ -9,9 +9,7 @@ use core::fmt;
 use core::str::FromStr;
 use std::sync::Arc;
 
-use coqui_access::{
-    AuthorizationDecision, AuthorizationRequest, Authorizer, Person,
-};
+use coqui_access::{AuthorizationDecision, AuthorizationRequest, Authorizer, Person};
 use guatiao::library::ProviderError;
 use guatiao::{FromValue, ToValue};
 
@@ -181,7 +179,12 @@ mod tests {
     fn a_scope_is_action_at_scope_and_nothing_else() {
         let scope: KeyScope = "config.manage@config:plugin".parse().unwrap();
         assert_eq!(scope.to_string(), "config.manage@config:plugin");
-        for bad in ["config.manage", "nothing@config:plugin", "config.manage@plugin", "config.manage@config:"] {
+        for bad in [
+            "config.manage",
+            "nothing@config:plugin",
+            "config.manage@plugin",
+            "config.manage@config:",
+        ] {
             assert!(bad.parse::<KeyScope>().is_err(), "{bad}");
         }
     }
@@ -204,7 +207,11 @@ mod tests {
             person: person.clone(),
             ..request("roster.manage", "config:roster", &[])
         }));
-        narrow(&mut person, "k1", &["config.manage@config:plugin".parse().unwrap()]);
+        narrow(
+            &mut person,
+            "k1",
+            &["config.manage@config:plugin".parse().unwrap()],
+        );
         assert!(is_narrowed(&person));
         assert_eq!(key_id(&person).as_deref(), Some("k1"));
         let ask = |action: &str, resource: &str| AuthorizationRequest {

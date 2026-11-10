@@ -177,6 +177,7 @@ pub use directorates::registry::agent_records::{
     AgentOutcome, AgentOutcomeReport, AgentRecord, AgentTally, ModelTenure, NO_OPERATION,
     OperationRecord,
 };
+pub use directorates::registry::api_keys::{ApiKeyRecord, ApiKeyStore};
 pub use directorates::registry::approvals::{
     Approval, ApprovalLink, ApprovalRequest, ApprovalStatus, ClassAuthorization, Decision,
     EXPIRY_SIGNER, Rearming, Revocation, Ruling,
@@ -200,17 +201,17 @@ pub use directorates::registry::cables::{
     CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
     CableSendRequest, CableState, CableTarget, MAX_CABLE_FANOUT,
 };
-pub use directorates::registry::api_keys::{ApiKeyRecord, ApiKeyStore};
 pub use directorates::registry::clearance::ClearanceGrant;
 pub use directorates::registry::contexts::{
     ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, SessionContext,
 };
 pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
-    AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits, AuditLimits,
-    BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits, HoldLimits,
-    LogbookLimits, MemoryLimits, ProposalLimits, QuarantineLimits, RegistryLimits, SessionLimits,
-    SleeperLimits, SourceLimits, StationLimits, TimelineLimits, TokenLimits, UsageLimits,
+    AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits,
+    AuditLimits, BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits,
+    HoldLimits, LogbookLimits, MemoryLimits, ProposalLimits, QuarantineLimits, RegistryLimits,
+    SessionLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits, TokenLimits,
+    UsageLimits,
 };
 pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,

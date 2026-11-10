@@ -324,7 +324,10 @@ mod tests {
         );
         assert!(!registry.touch_api_key("nobody", 1.0, 0.0).unwrap());
 
-        assert_eq!(registry.remove_api_key("k1").unwrap().unwrap().owner, "alice");
+        assert_eq!(
+            registry.remove_api_key("k1").unwrap().unwrap().owner,
+            "alice"
+        );
         assert_eq!(registry.remove_api_key("k1").unwrap(), None);
         assert_eq!(registry.api_keys(Some("alice")).unwrap().len(), 1);
 

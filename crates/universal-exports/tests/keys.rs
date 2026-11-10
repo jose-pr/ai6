@@ -1,7 +1,6 @@
 //! Several sign-in providers, and people's own API keys: who is let in by what, what a key may
 //! do, and that a key's value is shown once and kept out of every record.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,7 +13,9 @@ use ai6::{
 use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
-use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits, KeyProvider, LiveAccess};
+use universal_exports::{
+    AccessProviders, Gateway, GatewayConfig, GatewayLimits, KeyProvider, LiveAccess,
+};
 
 const STATION_TOKEN: &str = "exports-test-credential-with-more-than-32-bytes";
 const ORIGIN: &str = "https://exports.example";
@@ -73,6 +74,13 @@ impl Authenticator for External {
     }
 }
 
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 #[derive(Clone)]
 struct Held {
     id: String,
@@ -92,7 +100,16 @@ impl Authenticator for Keys {
             return Ok(Verdict::Unknown);
         };
         Ok(
-            match self.0.lock().unwrap().iter().find(|held| held.secret == secret) {
+            match self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|held| held.secret == secret)
+            {
+                Some(held) if held.expires_unix.is_some_and(|end| end <= now_unix()) => {
+                    Verdict::Invalid
+                }
                 Some(held) => Verdict::Valid(Lookup {
                     by: "id".to_owned(),
                     value: held.id.clone(),
@@ -212,9 +229,10 @@ fn policy(alice_roster: bool) -> ai6::AccessPolicy {
         "watcher".into(),
         ai6::RoleDef::new(["config.read", "config.manage"]),
     );
-    policy
-        .roles
-        .insert("rostering".into(), ai6::RoleDef::new(["roster.read", "roster.manage"]));
+    policy.roles.insert(
+        "rostering".into(),
+        ai6::RoleDef::new(["roster.read", "roster.manage"]),
+    );
     policy
         .roles
         .insert("accountant".into(), ai6::RoleDef::new(["account.manage"]));
@@ -248,7 +266,8 @@ async fn serve(with_keys: bool) -> Harness {
     let registry = FileRegistry::open(dir.path().join("registry"));
     let registry_dyn: Arc<dyn RegistryBackend> = Arc::new(registry.clone());
     let live = Arc::new(LiveAccess::new(provider.clone(), Vec::new(), None).unwrap());
-    live.seed(&provider.load("").unwrap(), &registry_dyn).unwrap();
+    live.seed(&provider.load("").unwrap(), &registry_dyn)
+        .unwrap();
     live.apply(&provider.load("").unwrap());
     let people = Arc::new(People(vec!["alice", "bob", "admin", "ext-1", "ext-bad"]));
     let keys = Arc::new(Keys::default());
@@ -350,7 +369,11 @@ async fn apply_watch(h: &Harness, token: &str) -> StatusCode {
         token,
         Method::POST,
         "/v1/user/resources/apply",
-        Some(apply_body("watches", "operation:G", json!({"agent": "007"}))),
+        Some(apply_body(
+            "watches",
+            "operation:G",
+            json!({"agent": "007"}),
+        )),
     )
     .await
     .0
@@ -393,7 +416,14 @@ async fn people_sign_in_by_password_and_accounts_by_key_each_refused_by_the_othe
     let h = serve(true).await;
     let admin = login(&h.base, "admin").await;
     // A service account, made under account.manage, with a key.
-    let (status, made) = call(&h, &admin, Method::PUT, "/v1/user/accounts/robot", Some(json!({}))).await;
+    let (status, made) = call(
+        &h,
+        &admin,
+        Method::PUT,
+        "/v1/user/accounts/robot",
+        Some(json!({})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{made}");
     let key = made["secret"].as_str().unwrap().to_owned();
     assert!(key.starts_with("ck_"));
@@ -405,30 +435,65 @@ async fn people_sign_in_by_password_and_accounts_by_key_each_refused_by_the_othe
     // A password is no bearer, and a key is no password.
     let (status, _) = call(&h, "secret", Method::GET, "/v1/user/profile", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(try_login(&h.base, "robot", &key).await, StatusCode::UNAUTHORIZED);
-    assert_eq!(try_login(&h.base, "alice", &key).await, StatusCode::UNAUTHORIZED);
-    assert_eq!(try_login(&h.base, "alice", "secret").await, StatusCode::CREATED);
+    assert_eq!(
+        try_login(&h.base, "robot", &key).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        try_login(&h.base, "alice", &key).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        try_login(&h.base, "alice", "secret").await,
+        StatusCode::CREATED
+    );
     let (status, methods) = call(&h, "", Method::GET, "/v1/auth/methods", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(methods["methods"], json!(["password"]), "keys are not a sign-in");
+    assert_eq!(
+        methods["methods"],
+        json!(["password"]),
+        "keys are not a sign-in"
+    );
 }
 
 #[tokio::test]
 async fn removing_the_key_provider_refuses_keys_and_leaves_sign_in_working() {
     let with = serve(true).await;
     let admin = login(&with.base, "admin").await;
-    let (_, made) = call(&with, &admin, Method::PUT, "/v1/user/accounts/robot", Some(json!({}))).await;
+    let (_, made) = call(
+        &with,
+        &admin,
+        Method::PUT,
+        "/v1/user/accounts/robot",
+        Some(json!({})),
+    )
+    .await;
     let key = made["secret"].as_str().unwrap().to_owned();
-    assert_eq!(call(&with, &key, Method::GET, "/v1/user/profile", None).await.0, StatusCode::OK);
+    assert_eq!(
+        call(&with, &key, Method::GET, "/v1/user/profile", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
 
     let without = serve(false).await;
     // The same value, with no provider to claim it.
-    without.keys.0.lock().unwrap().push(with.keys.0.lock().unwrap()[0].clone());
+    without
+        .keys
+        .0
+        .lock()
+        .unwrap()
+        .push(with.keys.0.lock().unwrap()[0].clone());
     assert_eq!(
-        call(&without, &key, Method::GET, "/v1/user/profile", None).await.0,
+        call(&without, &key, Method::GET, "/v1/user/profile", None)
+            .await
+            .0,
         StatusCode::UNAUTHORIZED
     );
-    assert_eq!(try_login(&without.base, "alice", "secret").await, StatusCode::CREATED);
+    assert_eq!(
+        try_login(&without.base, "alice", "secret").await,
+        StatusCode::CREATED
+    );
 }
 
 #[tokio::test]
@@ -436,25 +501,55 @@ async fn each_credential_goes_to_the_provider_that_claims_it_in_list_order() {
     let h = serve(false).await;
     // `ext-1` is the first provider's; `alice` falls through it to the second; `ext-bad` is
     // refused by the first, which claimed it, though the second would have let it in.
-    assert_eq!(try_login(&h.base, "ext-1", "secret").await, StatusCode::CREATED);
-    assert_eq!(try_login(&h.base, "alice", "secret").await, StatusCode::CREATED);
-    assert_eq!(try_login(&h.base, "ext-bad", "secret").await, StatusCode::UNAUTHORIZED);
-    assert_eq!(try_login(&h.base, "alice", "wrong").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        try_login(&h.base, "ext-1", "secret").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        try_login(&h.base, "alice", "secret").await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        try_login(&h.base, "ext-bad", "secret").await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        try_login(&h.base, "alice", "wrong").await,
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
 async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_may() {
     let h = serve(true).await;
     let alice = login(&h.base, "alice").await;
-    assert_eq!(apply_agent(&h, &alice).await, StatusCode::OK, "alice may edit the roster");
+    assert_eq!(
+        apply_agent(&h, &alice).await,
+        StatusCode::OK,
+        "alice may edit the roster"
+    );
 
     let (_, key) = make_key(&h, &alice, &["config.manage@config:watch"]).await;
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
-    assert_eq!(apply_agent(&h, &key).await, StatusCode::FORBIDDEN, "not in its scope");
+    assert_eq!(
+        apply_agent(&h, &key).await,
+        StatusCode::FORBIDDEN,
+        "not in its scope"
+    );
     // A key does not make keys, nor read the list of them.
-    let (status, _) = call(&h, &key, Method::POST, "/v1/user/keys", Some(json!({"name": "x", "scopes": ["config.manage@config:watch"]}))).await;
+    let (status, _) = call(
+        &h,
+        &key,
+        Method::POST,
+        "/v1/user/keys",
+        Some(json!({"name": "x", "scopes": ["config.manage@config:watch"]})),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(call(&h, &key, Method::GET, "/v1/user/keys", None).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(
+        call(&h, &key, Method::GET, "/v1/user/keys", None).await.0,
+        StatusCode::FORBIDDEN
+    );
 
     // What the person does not hold, or does not name, makes no key.
     let bob = login(&h.base, "bob").await;
@@ -466,7 +561,14 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
         (&alice, json!(["nothing@config:watch"])),
         (&alice, json!(["config.manage@*"])),
     ] {
-        let (status, body) = call(&h, token, Method::POST, "/v1/user/keys", Some(json!({"name": "x", "scopes": scopes}))).await;
+        let (status, body) = call(
+            &h,
+            token,
+            Method::POST,
+            "/v1/user/keys",
+            Some(json!({"name": "x", "scopes": scopes})),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{scopes}: {body}");
     }
 }
@@ -499,7 +601,14 @@ async fn revoking_and_expiry_refuse_a_key_at_once() {
     assert_eq!(apply_watch(&h, &first).await, StatusCode::OK);
     assert_eq!(apply_watch(&h, &second).await, StatusCode::OK);
 
-    let (status, _) = call(&h, &alice, Method::DELETE, &format!("/v1/user/keys/{revoked}"), None).await;
+    let (status, _) = call(
+        &h,
+        &alice,
+        Method::DELETE,
+        &format!("/v1/user/keys/{revoked}"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(apply_watch(&h, &first).await, StatusCode::UNAUTHORIZED);
 
@@ -508,10 +617,26 @@ async fn revoking_and_expiry_refuse_a_key_at_once() {
     h.registry.put_api_key(&record).unwrap();
     assert_eq!(apply_watch(&h, &second).await, StatusCode::UNAUTHORIZED);
     // A key's life defaults from the setting, and an explicit 0 never ends.
-    let (_, made) = call(&h, &alice, Method::POST, "/v1/user/keys", Some(json!({"name": "forever", "scopes": ["config.manage@config:watch"], "expires_in": 0}))).await;
+    let (_, made) = call(
+        &h,
+        &alice,
+        Method::POST,
+        "/v1/user/keys",
+        Some(json!({"name": "forever", "scopes": ["config.manage@config:watch"], "expires_in": 0})),
+    )
+    .await;
     assert_eq!(made["key"]["expires_at"], Value::Null, "{made}");
-    let (_, made) = call(&h, &alice, Method::POST, "/v1/user/keys", Some(json!({"name": "default", "scopes": ["config.manage@config:watch"]}))).await;
-    assert!(made["key"]["expires_at"].as_f64().unwrap() > made["key"]["created_at"].as_f64().unwrap());
+    let (_, made) = call(
+        &h,
+        &alice,
+        Method::POST,
+        "/v1/user/keys",
+        Some(json!({"name": "default", "scopes": ["config.manage@config:watch"]})),
+    )
+    .await;
+    assert!(
+        made["key"]["expires_at"].as_f64().unwrap() > made["key"]["created_at"].as_f64().unwrap()
+    );
 }
 
 #[tokio::test]
@@ -529,9 +654,25 @@ async fn keys_are_a_persons_own_and_an_administrator_sees_every_one() {
     assert_eq!(mine[0]["last_used_at"], Value::Null);
     let (_, theirs) = call(&h, &bob, Method::GET, "/v1/user/keys", None).await;
     assert_eq!(theirs, json!([]));
-    assert_eq!(call(&h, &bob, Method::GET, "/v1/user/keys?all=true", None).await.0, StatusCode::FORBIDDEN);
-    let (status, _) = call(&h, &bob, Method::DELETE, &format!("/v1/user/keys/{id}"), None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "another person's key is not found");
+    assert_eq!(
+        call(&h, &bob, Method::GET, "/v1/user/keys?all=true", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, _) = call(
+        &h,
+        &bob,
+        Method::DELETE,
+        &format!("/v1/user/keys/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "another person's key is not found"
+    );
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK, "still works");
 
     // The key's use is written down, not its value.
@@ -542,7 +683,14 @@ async fn keys_are_a_persons_own_and_an_administrator_sees_every_one() {
     let (_, everyone) = call(&h, &admin, Method::GET, "/v1/user/keys?all=true", None).await;
     assert_eq!(everyone.as_array().unwrap().len(), 1);
     assert_eq!(everyone[0]["owner_id"], "alice-id");
-    let (status, _) = call(&h, &admin, Method::DELETE, &format!("/v1/user/keys/{id}"), None).await;
+    let (status, _) = call(
+        &h,
+        &admin,
+        Method::DELETE,
+        &format!("/v1/user/keys/{id}"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(apply_watch(&h, &key).await, StatusCode::UNAUTHORIZED);
 }
@@ -555,13 +703,26 @@ async fn a_keys_value_is_in_no_audit_record_or_error() {
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
     assert_eq!(apply_agent(&h, &key).await, StatusCode::FORBIDDEN);
     let (_, refused) = call(&h, &key, Method::GET, "/v1/user/keys", None).await;
-    call(&h, &alice, Method::DELETE, &format!("/v1/user/keys/{id}"), None).await;
+    call(
+        &h,
+        &alice,
+        Method::DELETE,
+        &format!("/v1/user/keys/{id}"),
+        None,
+    )
+    .await;
     let (_, after) = call(&h, &key, Method::GET, "/v1/user/profile", None).await;
 
     let audit = serde_json::to_string(&h.registry.list_audit(200).unwrap()).unwrap();
-    assert!(!audit.contains(&key) && !audit.contains(&key[3..]), "{audit}");
+    assert!(
+        !audit.contains(&key) && !audit.contains(&key[3..]),
+        "{audit}"
+    );
     assert!(!refused.to_string().contains(&key) && !after.to_string().contains(&key));
-    assert!(audit.contains("key.create") && audit.contains("key.revoke"), "{audit}");
+    assert!(
+        audit.contains("key.create") && audit.contains("key.revoke"),
+        "{audit}"
+    );
     // The apply made under the key names the key beside its person.
     assert!(audit.contains(&format!("alice-id via key {id}")), "{audit}");
 }
@@ -570,14 +731,28 @@ async fn a_keys_value_is_in_no_audit_record_or_error() {
 async fn a_service_accounts_key_acts_with_the_accounts_own_grants() {
     let h = serve(true).await;
     let admin = login(&h.base, "admin").await;
-    let (_, made) = call(&h, &admin, Method::PUT, "/v1/user/accounts/deploy", Some(json!({}))).await;
+    let (_, made) = call(
+        &h,
+        &admin,
+        Method::PUT,
+        "/v1/user/accounts/deploy",
+        Some(json!({})),
+    )
+    .await;
     let key = made["secret"].as_str().unwrap().to_owned();
     // Groups confer roles; the account gets them from an administrator's change.
     h.keys.0.lock().unwrap()[0].groups = vec!["deployers".to_owned()];
     assert_eq!(apply_watch(&h, &key).await, StatusCode::OK);
     assert_eq!(apply_agent(&h, &key).await, StatusCode::FORBIDDEN);
     // An account may not take a personal key's name.
-    let (status, _) = call(&h, &admin, Method::PUT, "/v1/user/accounts/uk-sneaky", Some(json!({}))).await;
+    let (status, _) = call(
+        &h,
+        &admin,
+        Method::PUT,
+        "/v1/user/accounts/uk-sneaky",
+        Some(json!({})),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 

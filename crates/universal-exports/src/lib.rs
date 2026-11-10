@@ -3804,7 +3804,10 @@ async fn resolve_user(gateway: &Gateway, token: &str) -> Result<Person, ApiError
         // Not a sign-in's token: a key provider may claim it as a key.
         Err(error)
             if error.status == StatusCode::UNAUTHORIZED
-                && gateway.access.as_ref().is_some_and(|access| access.keys.is_some()) =>
+                && gateway
+                    .access
+                    .as_ref()
+                    .is_some_and(|access| access.keys.is_some()) =>
         {
             keys::resolve(gateway, token)
                 .await?

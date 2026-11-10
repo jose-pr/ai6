@@ -355,7 +355,8 @@ impl EffectiveAccess {
     pub fn is_chief(&self, person: &Person) -> bool {
         // A personal key is never the chief: it acts within its scopes, and a chief's freedom to
         // change the policy itself is not one of them.
-        !super::keys::is_narrowed(person) && self.chiefs.iter().any(|subject| subject.matches(person))
+        !super::keys::is_narrowed(person)
+            && self.chiefs.iter().any(|subject| subject.matches(person))
     }
 
     /// The chief subjects the host named, which no change through the API removes.

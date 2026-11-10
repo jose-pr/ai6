@@ -21,8 +21,8 @@ use uuid::Uuid;
 
 use crate::access_admin::AdminError;
 use crate::{
-    ApiError, Gateway, actor_of, bearer, person_by_id, resolve_signed_in,
-    resource_action_allowed, unix_timestamp,
+    ApiError, Gateway, actor_of, bearer, person_by_id, resolve_signed_in, resource_action_allowed,
+    unix_timestamp,
 };
 
 /// The start of the name of the key provider's account behind a personal key. Accounts made
@@ -78,7 +78,11 @@ impl KeyProvider {
 /// The person a presented key acts as; `None` when no key provider claims the value, or it is
 /// refused (unknown, disabled, expired, revoked, or its person gone).
 pub(crate) async fn resolve(gateway: &Gateway, token: &str) -> Result<Option<Person>, ApiError> {
-    let Some(keys) = gateway.access.as_ref().and_then(|access| access.keys.clone()) else {
+    let Some(keys) = gateway
+        .access
+        .as_ref()
+        .and_then(|access| access.keys.clone())
+    else {
         return Ok(None);
     };
     let attempt = Attempt {
@@ -353,7 +357,10 @@ pub(crate) async fn create(
         id,
         account.clone(),
         person.id.clone(),
-        person.display_name.clone().unwrap_or_else(|| person.name.clone()),
+        person
+            .display_name
+            .clone()
+            .unwrap_or_else(|| person.name.clone()),
         body.name.trim(),
         scopes.iter().map(ToString::to_string).collect(),
         now,
@@ -452,4 +459,3 @@ pub(crate) async fn revoke(
     .await?;
     Ok(Json(Revoked { revoked: true }))
 }
-
