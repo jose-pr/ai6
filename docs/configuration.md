@@ -911,8 +911,7 @@ in a provider's configuration is reported as a weakening: name a file there inst
 <!-- schema:record.unex:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `authenticator` | none | **Sign-in provider.** The Authenticator provider ID for user sign-in. Nobody signs in. |
-| `authenticator_config` | none | **Sign-in provider's configuration.** The Authenticator's configuration. |
+| `authenticators` | none | **Sign-in providers.** The Authenticator providers for sign-in, in the order they are asked. Each answers only for the credentials it claims: a key provider for a bearer key, the others for a name and a password. Default: none; nobody signs in. |
 | `directory` | none | **Directory provider.** The Directory provider ID; required when user access is configured. |
 | `directory_config` | none | **Directory provider's configuration.** The Directory's configuration. |
 | `authorizer` | none | **Custom authorizer.** A custom Authorizer provider ID, in place of the `access` record's role policy; the gateway's chief tier still applies beside it. |
@@ -929,6 +928,7 @@ in a provider's configuration is reported as a weakening: name a file there inst
 | `access_cache_ttl` | 5 | **Keep a found person or a grant for.** Seconds a found person or a granted action is kept; 0 keeps none. |
 | `access_cache_negative_ttl` | 1 | **Keep a miss or a denial for.** Seconds "no such person" or a denial is kept; 0 keeps none. |
 | `access_cache_entries` | 10,000 | **Lookups and decisions kept.** The most lookups, and decisions, kept; 0 keeps none. |
+| `key_ttl` | 7776000 (90 days) | **Personal API key lifetime.** Seconds a personal API key lives when its maker names no expiry; 0 makes such keys last until revoked. |
 | `assistant` | `true` | **Serve Moneypenny.** Whether Moneypenny is served. |
 | `assistant_agent` | `moneypenny` | **The Agent that is Moneypenny.** The roster Agent that is Moneypenny. |
 | `route_text_bytes` | 128 | **Longest route text filter.** The longest `text` filter an Outer Office route may carry, in bytes: in Moneypenny's links and cards, and in the page a message was sent from. 0 reads as 1. |
@@ -971,7 +971,8 @@ pending_per_station = 8
 | `origin_bytes` | 2 KiB | **Longest public origin.** Bytes of the public origin. |
 | `access_token_ttl` | 3,600 | **A sign-in lasts.** Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more than 0 and within `access_token_max_ttl`; longer is looser. |
 | `access_token_max_ttl` | 86,400 (a day) | **Longest token a request may ask for.** The longest lifetime a request for a token may name, in seconds. |
-| `session_max` | 43,200 | **Longest renewed sign-in.** How long renewing keeps a sign-in going, in seconds from when it was made; the password is not asked again until then. `0` turns renewal off, `"none"` lets it run on. |
+| `session_idle` | 1,800 | **Idle sign-in ends after.** Seconds a sign-in may go without a renewal before it ends; each renewal, which an open app makes while its person works, moves the deadline on. A token lasts the shorter of this and `access_token_ttl`. `"none"` turns the idle limit off. |
+| `session_max` | none | **Longest renewed sign-in.** How long renewing keeps a sign-in going, in seconds from when it was made; the password is not asked again until then. `0` turns renewal off, `"none"` (the default) lets it run on while the person keeps working. |
 | `session_cookie` | `true` | **Keep a browser's sign-in in a cookie.** Whether a browser's sign-in also gets an HttpOnly cookie, so a reload signs it back in up to `session_max` after signing in; with `false`, or `session_max` at `0`, a sign-in lives in the app's memory alone. |
 | `compartment_audit` | 60 | **Between audit records of a compartment read.** Seconds between audit records of one person's reads of one resource allowed only by one compartment; the app polls, so `0` writes one for every read. |
 | `socket_buffer_bytes` | 256 KiB | **Smallest socket write buffer.** Bytes the write buffer of a browser's socket holds at least, whatever `frame_bytes` (it holds twice that when that is more). |
