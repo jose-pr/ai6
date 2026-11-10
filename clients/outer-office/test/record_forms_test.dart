@@ -218,7 +218,7 @@ const _kinds = {
 void main() {
   group('the model', () {
     test('every kind of record fits its form and lays out', () {
-      for (final kind in _kinds.keys) {
+      for (final kind in [..._kinds.keys, 'roster']) {
         final model = _model(kind);
         expect(model.layout(), isNotEmpty, reason: kind);
         model.dispose();
@@ -470,6 +470,37 @@ void main() {
       await tester.pumpAndSettle();
       expect(model.value(), {
         'desk': {'idle': 3600, 'live': 'none'},
+      });
+    });
+
+    testWidgets('the roster settings say how often limited accounts are read '
+        'again', (tester) async {
+      final model = _model('roster');
+      addTearDown(model.dispose);
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
+          home: Scaffold(
+            body: SingleChildScrollView(child: OoFormView(model: model)),
+          ),
+        ),
+      );
+      expect(
+        find.text('Re-read a limited account\'s usage every'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Back off re-reads of a used-up account by'),
+        findsOneWidget,
+      );
+      expect(find.text('Longest wait between re-reads'), findsOneWidget);
+      await tester.ensureVisible(_field('usage.refresh_every'));
+      await tester.enterText(_box('usage.refresh_every'), '120');
+      await tester.pumpAndSettle();
+      expect(model.value(), {
+        'usage': {'refresh_every': 120},
       });
     });
 

@@ -147,6 +147,7 @@ const _kinds = {
   'covers': 'Cover policies',
   'reviews': 'Review policies',
   _assistantKind: "Moneypenny's settings",
+  _rosterSettingsKind: 'Roster settings',
   'watches': 'Watches',
 };
 
@@ -160,6 +161,10 @@ const _allKinds = '\u0000all';
 /// The kind of Moneypenny's `[assistant]` settings: at most one record, keyed `settings`.
 const _assistantKind = 'assistant';
 
+/// The kind of the roster-wide settings (`[roster]`, among them how limited accounts are read
+/// again): at most one record, keyed `settings`.
+const _rosterSettingsKind = 'roster';
+
 /// A route's roster `kind` and the kind the gateway's roster API names.
 const _routeKinds = {
   'operation': 'operations',
@@ -168,6 +173,7 @@ const _routeKinds = {
   'cover': 'covers',
   'review': 'reviews',
   'assistant': _assistantKind,
+  'roster': _rosterSettingsKind,
   'watch': 'watches',
 };
 
@@ -534,10 +540,12 @@ class _RosterPageState extends State<RosterPage> {
     ];
     final canEdit =
         widget.board.canManageRecords(_kind) && (records?.writable ?? false);
-    // Moneypenny's settings are one record: once it exists it is edited, not added.
+    // Moneypenny's settings and the roster's are one record each: once it exists it is edited,
+    // not added.
     final canAdd =
         canEdit &&
-        (_kind != _assistantKind || (records?.records.isEmpty ?? false));
+        ((_kind != _assistantKind && _kind != _rosterSettingsKind) ||
+            (records?.records.isEmpty ?? false));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

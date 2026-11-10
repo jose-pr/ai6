@@ -17,6 +17,8 @@ Map<String, Object?> account(
   int? used,
   double? limitedUntil,
   int tokens = 0,
+  List<String> models = const [],
+  double? observedAt,
 }) => {
   'pool': 'team',
   'account': name,
@@ -37,6 +39,8 @@ Map<String, Object?> account(
         'used_permille': used,
         'resets_at': 1_900_000_000.0,
         'status': null,
+        'models': models,
+        'observed_at': ?observedAt,
       },
   ],
   'limited_until': limitedUntil,
@@ -74,7 +78,14 @@ Future<MissionBoard> signedIn(
                       used: 425,
                       tokens: 1200,
                     ),
-                    account('beta', used: 1000, limitedUntil: 1_900_000_000),
+                    account(
+                      'beta',
+                      used: 1000,
+                      limitedUntil: 1_900_000_000,
+                      models: const ['opus'],
+                      observedAt:
+                          DateTime.now().millisecondsSinceEpoch / 1000 - 90,
+                    ),
                   ]
                 : [],
           }),
@@ -172,9 +183,15 @@ void main() {
     expect(find.text('Mission mission-1'), findsOneWidget);
     expect(
       find.textContaining(
-        '0 Sessions · five hour 100.0% · 0 tokens today · Limited, back in ',
+        '0 Sessions · five hour (opus) 100.0% · 0 tokens today · Limited, back in ',
       ),
       findsOneWidget,
+      reason: 'a window names the models it covers',
+    );
+    expect(
+      find.textContaining('Usage read '),
+      findsOneWidget,
+      reason: 'only the account whose usage was read says when',
     );
     expect(find.byType(LinearProgressIndicator), findsNWidgets(2));
 

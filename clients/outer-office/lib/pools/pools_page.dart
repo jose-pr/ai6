@@ -21,9 +21,17 @@ class QuotaWindowSummary {
     this.usedPermille,
     this.resetsAt,
     this.status,
+    this.models = const [],
+    this.observedAt,
   });
 
   final String name;
+
+  /// The models it covers, when the provider names them; empty for every model.
+  final List<String> models;
+
+  /// When it was last read, in Unix seconds.
+  final double? observedAt;
 
   /// Thousandths used, when the provider reported a figure.
   final int? usedPermille;
@@ -38,11 +46,14 @@ class QuotaWindowSummary {
         usedPermille: json['used_permille'] as int?,
         resetsAt: (json['resets_at'] as num?)?.toDouble(),
         status: json['status'] as String?,
+        models: [...?(json['models'] as List<dynamic>?)?.cast<String>()],
+        observedAt: (json['observed_at'] as num?)?.toDouble(),
       );
 
   /// `five hour 42.5%`, or `five hour unknown` when no figure was reported.
   String get label {
-    final window = name.replaceAll('_', ' ');
+    final window =
+        '${name.replaceAll('_', ' ')}${models.isEmpty ? '' : ' (${models.join(', ')})'}';
     return switch (usedPermille) {
       final used? => '$window ${used ~/ 10}.${used % 10}%',
       null => '$window ${status ?? 'unknown'}',
@@ -110,6 +121,14 @@ class PoolAccountSummary {
     return maxConcurrent == null
         ? '$count $noun'
         : '$count/$maxConcurrent $noun';
+  }
+
+  /// When its usage was last read: the newest of its windows'.
+  String? get readLabel {
+    final read = [for (final window in windows) ?window.observedAt];
+    if (read.isEmpty) return null;
+    final newest = read.reduce((a, b) => a > b ? a : b);
+    return newest > 0 ? 'Usage read ${ooRelativeTime(newest)}' : null;
   }
 
   /// The highest window use, as a fraction, when any was reported.
@@ -366,6 +385,7 @@ class _AccountTile extends StatelessWidget {
                 ?limited,
               ].join(' · '),
             ),
+            if (account.readLabel case final read?) Text(read),
             if (account.active.isNotEmpty)
               OoLinkLine([
                 ('Used by', null),
