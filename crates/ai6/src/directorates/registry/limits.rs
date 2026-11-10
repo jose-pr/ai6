@@ -31,6 +31,10 @@ pub struct RegistryLimits {
     #[schema(title = "Agent roles of an Operation")]
     #[map(default)]
     pub agent_roles: AgentRoleLimits,
+    /// `[registry.limits.api_keys]`: personal API keys.
+    #[schema(title = "Personal API keys")]
+    #[map(default)]
+    pub api_keys: ApiKeyLimits,
     /// `[registry.limits.approvals]`: green ink requests and class authorizations.
     #[schema(title = "Green ink requests and class authorizations")]
     #[map(default)]
@@ -538,6 +542,40 @@ impl Default for ClearanceLimits {
         Self {
             record_bytes: Limit::at(16 * KIB),
             grants: Limit::at(10_000),
+            text_bytes: Limit::at(512),
+        }
+    }
+}
+
+/// `[registry.limits.api_keys]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct ApiKeyLimits {
+    /// Bytes of one key's record.
+    #[schema(title = "Largest key record", format = "bytes")]
+    #[map(default = ApiKeyLimits::default().record_bytes)]
+    pub record_bytes: Limit,
+    /// Personal API keys kept.
+    #[schema(title = "Keys kept")]
+    #[map(default = ApiKeyLimits::default().keys)]
+    pub keys: Limit,
+    /// Scopes on one key.
+    #[schema(title = "Scopes on a key")]
+    #[map(default = ApiKeyLimits::default().scopes)]
+    pub scopes: Limit,
+    /// Bytes of a key's name, owner and each scope.
+    #[schema(title = "Longest key name or scope", format = "bytes")]
+    #[map(default = ApiKeyLimits::default().text_bytes)]
+    pub text_bytes: Limit,
+}
+
+impl Default for ApiKeyLimits {
+    fn default() -> Self {
+        Self {
+            record_bytes: Limit::at(16 * KIB),
+            keys: Limit::at(100_000),
+            scopes: Limit::at(256),
             text_bytes: Limit::at(512),
         }
     }

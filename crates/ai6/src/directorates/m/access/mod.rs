@@ -8,6 +8,7 @@
 
 mod effective;
 mod guard;
+mod keys;
 mod lineage;
 mod operation;
 mod policy;
@@ -30,6 +31,11 @@ pub use coqui_roles::{
 };
 pub use effective::{CHIEF_ROLE, EffectiveAccess, Explanation, TierKind, compile};
 pub use guard::{Editor, Refusal, check_change};
+pub use keys::{
+    KEY_ID_ATTRIBUTE, KEY_SCOPES_ATTRIBUTE, KeyNarrowed, KeyScope, KeyScopeError,
+    clear as clear_key, is_narrowed as is_key_narrowed, key_id, narrow as narrow_to_key,
+    permits as key_permits,
+};
 pub use lineage::Lineage;
 pub use operation::{
     AccessSet, OperationAccess, Orphan, RESERVED_ROLES, check_operation_change,

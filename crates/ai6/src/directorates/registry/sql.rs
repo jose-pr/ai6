@@ -27,6 +27,7 @@ mod agents;
 mod approvals;
 mod briefs;
 pub(crate) mod db;
+mod api_keys;
 mod holds;
 mod memories;
 mod mission_issues;

@@ -765,17 +765,47 @@ impl StationRuntime {
 pub type ProviderConfig =
     guatiao_serde::Serde<serde_json::Map<String, serde_json::Value>, guatiao::Map>;
 
+/// One sign-in provider of the `unex` record: an Authenticator and its configuration.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[map(deny_unknown_fields)]
+pub struct SignInProvider {
+    /// The Authenticator provider ID.
+    #[schema(title = "Provider")]
+    pub provider: String,
+    /// The provider's configuration, checked against the provider's own schema. Default: none.
+    #[schema(title = "Provider's configuration", sensitive)]
+    pub config: Option<ProviderConfig>,
+}
+
+impl SignInProvider {
+    /// The provider `provider` with no configuration.
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            config: None,
+        }
+    }
+
+    /// Sets the provider's configuration.
+    #[must_use]
+    pub fn config(mut self, config: ProviderConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+}
+
 /// Universal Exports' settings that are not host-local, the `unex` record.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
 #[map(deny_unknown_fields)]
 pub struct UnexRecord {
-    /// The Authenticator provider ID for user sign-in. Default: none; nobody signs in.
-    #[schema(title = "Sign-in provider")]
-    pub authenticator: Option<String>,
-    /// The Authenticator's configuration. Default: none.
-    #[schema(title = "Sign-in provider's configuration", sensitive)]
-    pub authenticator_config: Option<ProviderConfig>,
+    /// The Authenticator providers for sign-in, in the order they are asked. Each answers only
+    /// for the credentials it claims: a key provider for a bearer key, the others for a name and
+    /// a password. Default: none; nobody signs in.
+    #[schema(title = "Sign-in providers")]
+    #[map(default)]
+    pub authenticators: Vec<SignInProvider>,
     /// The Directory provider ID; required when user access is configured. Default: none.
     #[schema(title = "Directory provider")]
     pub directory: Option<String>,
@@ -830,6 +860,10 @@ pub struct UnexRecord {
     /// The most lookups, and decisions, kept; 0 keeps none. Default: 10000.
     #[schema(title = "Lookups and decisions kept")]
     pub access_cache_entries: Option<u64>,
+    /// Seconds a personal API key lives when its maker names no expiry; 0 makes such keys last
+    /// until revoked. Default: 7776000 (90 days).
+    #[schema(title = "Personal API key lifetime", format = "seconds")]
+    pub key_ttl: Option<f64>,
     /// Whether Moneypenny is served.
     #[schema(title = "Serve Moneypenny")]
     #[map(default = UnexRecord::default_assistant())]
@@ -871,8 +905,7 @@ pub struct UnexRecord {
 impl Default for UnexRecord {
     fn default() -> Self {
         Self {
-            authenticator: None,
-            authenticator_config: None,
+            authenticators: Vec::new(),
             directory: None,
             directory_config: None,
             authorizer: None,
@@ -889,6 +922,7 @@ impl Default for UnexRecord {
             access_cache_ttl: None,
             access_cache_negative_ttl: None,
             access_cache_entries: None,
+            key_ttl: None,
             assistant: Self::default_assistant(),
             assistant_agent: Self::default_assistant_agent(),
             route_text_bytes: None,
@@ -936,8 +970,22 @@ impl UnexRecord {
             }
         }
         let mut found = Vec::new();
+        for (index, entry) in self.authenticators.iter().enumerate() {
+            if let Some(config) = &entry.config {
+                inline(
+                    &format!("authenticators[{index}].config"),
+                    &serde_json::Value::Object(config.0.clone()),
+                    &mut found,
+                );
+            }
+        }
+        if self.key_ttl == Some(0.0) {
+            found.push(
+                "unex.key_ttl 0 makes personal API keys last until revoked; the default is 90 days"
+                    .to_owned(),
+            );
+        }
         for (name, config) in [
-            ("authenticator_config", &self.authenticator_config),
             ("directory_config", &self.directory_config),
             ("authorizer_config", &self.authorizer_config),
             ("accounts_config", &self.accounts_config),

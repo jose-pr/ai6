@@ -353,7 +353,9 @@ impl EffectiveAccess {
 
     /// Whether `person` is a chief subject, stored or from the host.
     pub fn is_chief(&self, person: &Person) -> bool {
-        self.chiefs.iter().any(|subject| subject.matches(person))
+        // A personal key is never the chief: it acts within its scopes, and a chief's freedom to
+        // change the policy itself is not one of them.
+        !super::keys::is_narrowed(person) && self.chiefs.iter().any(|subject| subject.matches(person))
     }
 
     /// The chief subjects the host named, which no change through the API removes.
@@ -446,6 +448,9 @@ impl Authorizer for EffectiveAccess {
         &self,
         request: AuthorizationRequest,
     ) -> Result<AuthorizationDecision, ProviderError> {
+        if !super::keys::permits(&request) {
+            return Ok(AuthorizationDecision::default());
+        }
         let mut allowed = self.global.allows(&request)?;
         if !allowed {
             for tier in self.operation_tiers(&request) {

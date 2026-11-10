@@ -165,7 +165,7 @@ role = \"reviewer\"
         (
             "unex.toml",
             "directory = \"coqui_access_password\"\ndirectory_config = { path = \"accounts.toml\" }\n\
-             authenticator = \"coqui_access_password\"\nassistant = false\n",
+             authenticators = [{ provider = \"coqui_access_password\" }]\nassistant = false\n",
         ),
     ];
     for (name, text) in files {

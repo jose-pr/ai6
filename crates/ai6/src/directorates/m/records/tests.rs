@@ -610,9 +610,10 @@ fn stored_records_keep_their_values_nulls_and_lifted_bounds() {
         })
     );
     let unex = &snapshot.settings.unex;
-    assert_eq!(unex.authenticator.as_deref(), Some("password"));
+    assert_eq!(unex.authenticators.len(), 1);
+    assert_eq!(unex.authenticators[0].provider, "password");
     assert_eq!(
-        Value::Object(unex.authenticator_config.clone().unwrap().0),
+        Value::Object(unex.authenticators[0].config.clone().unwrap().0),
         serde_json::json!({"file": "accounts.toml", "rounds": 12, "ratio": 0.5, "note": null})
     );
     assert!(unex.directory_config.as_ref().unwrap().is_empty());
@@ -657,8 +658,8 @@ fn a_refused_setting_names_its_key_and_never_its_value() {
         (serde_json::json!({"gateway": {"hunter2": 1}}), "hunter2"),
         (serde_json::json!({"directory": ["hunter2"]}), "directory"),
         (
-            serde_json::json!({"authenticator_config": "hunter2"}),
-            "authenticator_config",
+            serde_json::json!({"authenticators": [{"provider": "p", "config": "hunter2"}]}),
+            "authenticators",
         ),
         (
             serde_json::json!({"login": {"name_window": "hunter2"}}),

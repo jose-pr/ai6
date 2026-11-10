@@ -23,6 +23,7 @@ pub use super::mission_ids::MissionEntry;
 
 pub use super::accounts::AccountStore;
 pub use super::agent_records::AgentRecordStore;
+pub use super::api_keys::ApiKeyStore;
 pub use super::approvals::ApprovalStore;
 pub use super::assistant_log::AssistantLogStore;
 pub use super::clearance::ClearanceStore;
@@ -63,6 +64,7 @@ pub trait RegistryBackend:
     Limited
     + AccountStore
     + AgentRecordStore
+    + ApiKeyStore
     + BriefStore
     + StationStore
     + AccessTokenStore
@@ -159,6 +161,7 @@ impl<T> RegistryBackend for T where
         + AssistantLogStore
         + ClearanceStore
         + HoldStore
+        + ApiKeyStore
         + LogbookStore
         + MemoryStore
         + MissionIssueStore

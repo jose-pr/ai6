@@ -203,6 +203,14 @@ CREATE TABLE IF NOT EXISTS ai6_clearance_grants (
     PRIMARY KEY (operation, agent)
 );
 
+CREATE TABLE IF NOT EXISTS ai6_api_keys (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ai6_api_keys_owner ON ai6_api_keys (owner);
+
 CREATE TABLE IF NOT EXISTS ai6_roster_holds (
     operation TEXT NOT NULL,
     agent TEXT NOT NULL,

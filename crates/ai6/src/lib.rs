@@ -35,6 +35,10 @@ pub use directorates::m::access::{
     check_operation_change, compile, compile_with_operations, default_delegable, load_access,
     load_policy, role_authorizer, seeded_policy, validate_operation_access,
 };
+pub use directorates::m::access::{
+    KEY_ID_ATTRIBUTE, KEY_SCOPES_ATTRIBUTE, KeyNarrowed, KeyScope, KeyScopeError, clear_key,
+    is_key_narrowed, key_id, key_permits, narrow_to_key,
+};
 pub use directorates::m::approvals::{
     ActionScope, BUILTIN_KINDS, DEFAULT_APPROVAL_TTL, DEFAULT_PROTECTED, DEFAULT_REQUEST_TTL,
     GREEN_INK_REASON, GreenInkDefinition, GreenInkPolicy, GreenInkPreset, NO_APPROVAL_REASON,
@@ -55,7 +59,7 @@ pub use directorates::m::config::SqlProvider;
 pub use directorates::m::config::{
     ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
     ConfigSnapshot, ConfigStatus, FileProvider, MemoryProvider, ProviderConfig, Settings,
-    StationRuntime, UnexRecord,
+    SignInProvider, StationRuntime, UnexRecord,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{
@@ -196,13 +200,14 @@ pub use directorates::registry::cables::{
     CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
     CableSendRequest, CableState, CableTarget, MAX_CABLE_FANOUT,
 };
+pub use directorates::registry::api_keys::{ApiKeyRecord, ApiKeyStore};
 pub use directorates::registry::clearance::ClearanceGrant;
 pub use directorates::registry::contexts::{
     ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, SessionContext,
 };
 pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
-    AccountLimits, AgentLimits, AgentRoleLimits, ApprovalLimits, AssistantLogLimits, AuditLimits,
+    AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits, AuditLimits,
     BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits, HoldLimits,
     LogbookLimits, MemoryLimits, ProposalLimits, QuarantineLimits, RegistryLimits, SessionLimits,
     SleeperLimits, SourceLimits, StationLimits, TimelineLimits, TokenLimits, UsageLimits,

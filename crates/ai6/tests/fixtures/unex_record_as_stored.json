@@ -6,13 +6,17 @@
   "accounts_config": null,
   "assistant": true,
   "assistant_agent": "moneypenny",
-  "authenticator": "password",
-  "authenticator_config": {
-    "file": "accounts.toml",
-    "note": null,
-    "ratio": 0.5,
-    "rounds": 12
-  },
+  "authenticators": [
+    {
+      "config": {
+        "file": "accounts.toml",
+        "note": null,
+        "ratio": 0.5,
+        "rounds": 12
+      },
+      "provider": "password"
+    }
+  ],
   "authorizer": null,
   "authorizer_config": null,
   "client_address_header": null,
@@ -46,6 +50,7 @@
     "station_token_min_bytes": 32,
     "write_lease_ttl": 30.0
   },
+  "key_ttl": null,
   "login": {
     "address_window": 60.0,
     "forget_every": 256,
