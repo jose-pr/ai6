@@ -2243,6 +2243,17 @@ mod tests {
             named.iter().any(|setting| setting == "tls_versions"),
             "{named:?}"
         );
+        // A reported setting prints as its type and text, the default beside it.
+        let versions = read
+            .non_defaults_against(&default)
+            .into_iter()
+            .find(|difference| difference.setting == "tls_versions")
+            .unwrap();
+        assert_eq!(versions.value.to_string(), "[TlsVersion(1.3)]");
+        assert_eq!(
+            versions.default.to_string(),
+            "[TlsVersion(1.2), TlsVersion(1.3)]"
+        );
         let legacy = settings(Some(serde_json::json!({
             "pin_digests": ["sha256", "sha384", "sha512", "sha1"],
             "require_ems": false,
@@ -2251,6 +2262,22 @@ mod tests {
         .tls_policy()
         .unwrap();
         assert_eq!(legacy.waiting.per_source, 4);
+        // A duration is a number of seconds or a number with a unit, never `[secs, nanos]`.
+        for (text, expected) in [
+            (serde_json::json!("30s"), 30_000),
+            (serde_json::json!("250ms"), 250),
+            (serde_json::json!(30), 30_000),
+        ] {
+            let read = settings(Some(serde_json::json!({"waiting": {"rerecord": text}})))
+                .tls_policy()
+                .unwrap();
+            assert_eq!(read.waiting.rerecord.as_millis(), expected);
+        }
+        assert!(
+            settings(Some(serde_json::json!({"waiting": {"rerecord": [30, 0]}})))
+                .tls_policy()
+                .is_err()
+        );
         assert!(!legacy.non_defaults_against(&default).is_empty());
         // The earlier policy keys are unknown now.
         for key in ["profile", "policy_version", "waiting_per_source"] {
