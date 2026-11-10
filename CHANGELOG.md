@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The coqui crates are on one revision set built on coqui-builder (guatiao, the peer family, coqui-access,
+  coqui-acp, coqui-agentic-peer and coqui-a2a). The Station TLS policy and the access providers' settings
+  read a no-bound as `none` (`null` is a key that is not given) and a duration as `30`, `30s` or `250ms`
+  (never `[secs, nanos]`); a `tls_weakened` entry prints its values as `Type(text)`, for example
+  `tls_versions = [TlsVersion(1.3)] (default [TlsVersion(1.2), TlsVersion(1.3)])`.
 - Overlays are read by the shared `coqui-aos` crate (reading, validating, composing, the environment and the
   tree digest); AI6 keeps fetching, the store, Theaters and the refusal of hooks. An overlay whose manifest is
   `OVERLAY.md` is read, its body being its context; a manifest or `SKILL.md` front matter is read as AOS reads

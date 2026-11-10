@@ -919,9 +919,10 @@ intermediate preset): a key it names replaces the default's, and an unknown key 
 written out as its values, `tls_versions = ["1.3"]` for modern; the keys are `tls_versions`,
 `cipher_suites`, `kx_groups`, `cipher_profiles`, `crypto`, `pin_digests`, `check_validity`,
 `allow_chain_when_pinned`, `allow_resumption`, `require_ems`, `acl` and the table `[waiting]`
-(`per_source`, `total` and `rerecord`, a number of seconds).
+(`per_source`, `total` and `rerecord`, a duration: `60`, `30s` or `250ms`, never `[secs, nanos]`).
 Every setting that differs from the default is logged and sent
-at check-in as `tls_weakened`.
+at check-in as `tls_weakened`, each as `key = value (default value)` with the value printed as its
+type and text, such as `tls_versions = [TlsVersion(1.3)] (default [TlsVersion(1.2), TlsVersion(1.3)])`.
 
 The `unex` record's own keys, and its tables `[gateway]`, `[controls]`, `[timeline]`, `[login]`
 and `[text]` ([Universal Exports limits](#universal-exports-limits)). A credential written inline

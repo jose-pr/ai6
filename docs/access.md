@@ -25,6 +25,10 @@ Each provider takes a JSON object; every key is optional.
 | `coqui_access_proxy` | `trusted`, `user_header`, `certificate_header`, `certificate_encoding` (`pem-url`, `der-base64`, `xfcc`), `subject_header`, `account`, `max_certificate_bytes` |
 | `coqui_roles` | `scope_kinds`, `roles`, `rules`, `limits` |
 
+In a provider's configuration a bound such as `max_chain` or one of `record_limits` is a count or
+`none` (no bound); `null` is a key that was not given and reads the default. A duration is `30`,
+`30s` or `250ms`.
+
 `source` says where records live: `{ "file": { "path": "accounts.toml", "format": "toml" } }`,
 `format` being `toml` or `json`. With no `source` they live in memory and are gone at exit.
 
