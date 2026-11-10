@@ -13,6 +13,10 @@ use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::ConfigRecord;
 use crate::directorates::m::cover::CoverDefinition;
+use crate::directorates::m::family_forms::{
+    LoadoutForm, McpForm, OverlayForm, PoolForm, SandboxForm, SecretForm, SecretProviderForm,
+    TheaterForm,
+};
 use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
@@ -171,6 +175,41 @@ impl ConfigRecord {
             Self::Watch => built::<WatchDefinition>(named(
                 "Scope",
                 "What the watch keeps: m, operation:<codename> or station:<id>. It cannot be changed later.",
+            )),
+            Self::Theater => built::<TheaterForm>(named(
+                "Theater name",
+                "What Operations and Missions reach this Theater by. It cannot be changed later.",
+            )),
+            Self::Loadout => built::<LoadoutForm>(named(
+                "Agent",
+                "The codename of the Agent this loadout is for. It cannot be changed later.",
+            )),
+            Self::Sandbox => built::<SandboxForm>(named(
+                "Sandbox name",
+                "What loadouts choose this profile by. It cannot be changed later.",
+            )),
+            Self::Mcp => built::<McpForm>(named(
+                "Server name",
+                "What loadouts choose this MCP server by. It cannot be changed later.",
+            )),
+            Self::Overlay => built::<OverlayForm>(named(
+                "Overlay name",
+                "What loadouts and Operations choose this overlay by: a letter, then letters,                  digits, '_', '.' or '-'. It cannot be changed later.",
+            )),
+            Self::Secret => built::<SecretForm>(named(
+                "Secret name",
+                "What loadouts lease this secret by. It cannot be changed later.",
+            )),
+            Self::SecretProvider => built::<SecretProviderForm>(named(
+                "Instance name",
+                "What secrets name this configured provider by. It cannot be changed later.",
+            )),
+            Self::Pool => built::<PoolForm>(named(
+                "Pool name",
+                "What routes and Agents choose this pool by. It cannot be changed later.",
+            )),
+            Self::Unex => built::<crate::directorates::m::config::UnexRecord>(the_one(
+                "Universal Exports settings",
             )),
             _ => return Ok(None),
         }

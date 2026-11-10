@@ -17,6 +17,18 @@ const KINDS: [ConfigRecord; 9] = [
     ConfigRecord::Watch,
 ];
 
+/// The families whose records their own parsers read; their forms are declared apart.
+const FAMILIES: [ConfigRecord; 8] = [
+    ConfigRecord::Theater,
+    ConfigRecord::Loadout,
+    ConfigRecord::Sandbox,
+    ConfigRecord::Mcp,
+    ConfigRecord::Overlay,
+    ConfigRecord::Secret,
+    ConfigRecord::SecretProvider,
+    ConfigRecord::Pool,
+];
+
 /// Every key of an Operation's `issues`, apart, since a single `json!` has a recursion limit.
 fn issue_policy_example() -> Value {
     json!({
@@ -57,11 +69,13 @@ fn full_example(record: ConfigRecord) -> Value {
                 "workspace": {
                     "provider": "git",
                     "source": "/srv/alpha.git",
-                    "base": "main",
-                    "branch": "{id}",
-                    "isolate": false,
-                    "checkpoint_remote": "origin",
-                    "checkpoint_secs": 60
+                    "settings": {
+                        "base": "main",
+                        "branch": "{id}",
+                        "isolate": false,
+                        "checkpoint_remote": "origin",
+                        "checkpoint_secs": 60
+                    }
                 },
                 "config": "/etc/alpha",
                 "roster": ["007"],
@@ -325,16 +339,16 @@ fn untitled(schema: &Value) -> Vec<String> {
 
 #[test]
 fn every_kind_has_a_form_that_fits_its_schema() {
-    for record in KINDS {
+    for record in KINDS.into_iter().chain(FAMILIES) {
         let form = record.form().unwrap();
         assert!(form.is_some(), "{record:?}");
     }
-    assert_eq!(ConfigRecord::Theater.form(), Ok(None));
+    assert_eq!(ConfigRecord::Plugin.form(), Ok(None));
 }
 
 #[test]
 fn every_field_a_person_can_write_has_a_title() {
-    for record in KINDS {
+    for record in KINDS.into_iter().chain(FAMILIES) {
         let form = record.form().unwrap().unwrap();
         assert_eq!(untitled(&form.schema), Vec::<String>::new(), "{record:?}");
     }
@@ -352,7 +366,7 @@ fn every_field_a_person_can_write_has_a_title() {
 
 #[test]
 fn every_field_has_words_for_the_person_reading_it() {
-    for record in KINDS {
+    for record in KINDS.into_iter().chain(FAMILIES) {
         let form = record.form().unwrap().unwrap();
         let mut found = Vec::new();
         writable(String::new(), &form.schema, &mut found);
@@ -453,6 +467,235 @@ fn a_key_nothing_declares_is_refused_by_the_type_and_the_schema_alike() {
         let schema_value = from_serde(&form.schema).unwrap();
         let value = from_serde(&example).unwrap();
         assert!(validate_map(SchemaRef::new(&schema_value).unwrap(), &value).is_err());
+    }
+}
+
+/// A record of each family with every key the form draws, as the family's own parser reads it.
+fn family_example(record: ConfigRecord) -> Value {
+    match record {
+        ConfigRecord::Theater => json!({
+            "access": {
+                "ssh": {
+                    "host": "build.example",
+                    "user": "ci",
+                    "port": 2222,
+                    "identity": "/keys/id",
+                    "host_key": "sha256:00",
+                    "trust_on_first_use": false
+                },
+                "transport": {"provider": "qemu", "config": {}},
+                "ephemeral": {
+                    "provider": "ephemeral-container",
+                    "config": {},
+                    "keep_failed": 2,
+                    "keep_failed_hours": 6
+                }
+            },
+            "labels": {"os": "linux"},
+            "agents": "remote-hands",
+            "harnesses": ["claude"],
+            "workdir": "/work",
+            "runner": {
+                "command": "ai6",
+                "state_dir": "/var/ai6",
+                "plugin_paths": ["/opt/ai6"],
+                "terminal": "pty",
+                "connect_timeout_ms": 1000,
+                "initialize_timeout_ms": 1000,
+                "request_timeout_ms": 1000
+            },
+            "requires": {
+                "os": "linux",
+                "harnesses": ["claude>=2.1"],
+                "tools": ["git"],
+                "disk_mb": 1024
+            },
+            "provision": {
+                "runner": "/opt/ai6/ai6",
+                "plugins": ["/opt/ai6/lib.so"],
+                "install": {"git": "apt-get install -y git"},
+                "install_timeout_secs": 600
+            },
+            "cables": "optional"
+        }),
+        ConfigRecord::Loadout => json!({
+            "sandbox": "strict",
+            "mcp": ["files"],
+            "overlays": ["house"],
+            "secrets": ["token"],
+            "env": {"LANG": "C"}
+        }),
+        ConfigRecord::Sandbox => json!({
+            "backend": "bubblewrap",
+            "read_write": ["/work"],
+            "read_only": ["/usr"],
+            "network": ["example.com"]
+        }),
+        ConfigRecord::Mcp => {
+            json!({"command": ["mcp-files", "--root", "/work"], "deny": ["delete"]})
+        }
+        ConfigRecord::Overlay => json!({
+            "path": "/overlays/house",
+            "pin": null,
+            "source": null,
+            "secrets": ["token"]
+        }),
+        ConfigRecord::Secret => json!({
+            "env": "TOKEN",
+            "green_ink": false,
+            "kinds": [],
+            "targets": [],
+            "provider": "file",
+            "key": "/run/token"
+        }),
+        ConfigRecord::SecretProvider => json!({"provider": "file"}),
+        ConfigRecord::Pool => json!({
+            "handler": "claude",
+            "operations": ["G"],
+            "strategy": "round_robin",
+            "login_command": ["claude", "login"],
+            "named_only": true,
+            "account": {
+                "main": {
+                    "kind": "claude-oauth-token",
+                    "secret": "token",
+                    "dir": null,
+                    "env": null,
+                    "priority": 2,
+                    "max_concurrent": 3,
+                    "labels": {"tier": "max"},
+                    "files": [],
+                    "renew_command": [],
+                    "renew_env": {}
+                }
+            }
+        }),
+        other => panic!("no example for {other:?}"),
+    }
+}
+
+/// `value` without the keys that hold null, which a TOML document cannot.
+fn without_nulls(value: Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .filter(|(_, held)| !held.is_null())
+                .map(|(key, held)| (key, without_nulls(held)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+#[test]
+fn a_family_record_fits_its_form_and_is_read_by_its_own_parser() {
+    use crate::directorates::q::LoadoutCatalog;
+
+    for record in FAMILIES {
+        let example = family_example(record);
+        let form = record.form().unwrap().unwrap();
+        let mut missing = Vec::new();
+        all_keys_of(&form.schema, &example, "", &mut missing);
+        missing.retain(|key| {
+            // The pool's account is a map of one shape; its keys are named under the account.
+            // A secret provider's settings are written beside its name, so no key holds them.
+            !key.starts_with(".account.*") && key != ".settings"
+        });
+        assert_eq!(missing, Vec::<String>::new(), "{record:?} example");
+        let schema_value = from_serde(&form.schema).unwrap();
+        let value = from_serde(&example).unwrap();
+        validate_map(SchemaRef::new(&schema_value).unwrap(), &value)
+            .unwrap_or_else(|error| panic!("{record:?} schema: {error}"));
+    }
+
+    // The same records, read by the parsers that accept or refuse them.
+    let mut document = serde_json::Map::new();
+    for (record, key) in [
+        (ConfigRecord::Loadout, "007"),
+        (ConfigRecord::Sandbox, "strict"),
+        (ConfigRecord::Mcp, "files"),
+        (ConfigRecord::Overlay, "house"),
+        (ConfigRecord::Secret, "token"),
+        (ConfigRecord::SecretProvider, "vault"),
+        (ConfigRecord::Pool, "main"),
+    ] {
+        document.insert(
+            record.name().to_owned(),
+            json!({ key: without_nulls(family_example(record)) }),
+        );
+    }
+    let text = toml::to_string(
+        &crate::directorates::m::config::json_to_toml(Value::Object(document)).unwrap(),
+    )
+    .unwrap();
+    text.parse::<LoadoutCatalog>().unwrap_or_else(|error| {
+        panic!(
+            "the loadout families: {error:?} {:?}
+{text}",
+            std::error::Error::source(&error)
+        )
+    });
+
+    let mut theater = family_example(ConfigRecord::Theater);
+    theater["access"] = json!({"transport": {"provider": "qemu", "config": {}}});
+    crate::directorates::m::theaters::Theaters::from_records([("build".to_owned(), theater)])
+        .unwrap();
+}
+
+#[test]
+fn a_provider_choice_is_a_closed_choice_with_the_settings_beside_it() {
+    let agent = ConfigRecord::Agent.form().unwrap().unwrap();
+    let properties = &agent.schema["properties"];
+    assert_eq!(
+        properties["handler"]["format"],
+        "provider:ai6_agent_handler"
+    );
+    assert_eq!(
+        properties["handler_settings"]["format"],
+        "settings-of:handler#agent"
+    );
+    let operation = ConfigRecord::Operation.form().unwrap().unwrap();
+    assert_eq!(
+        operation.schema["properties"]["workspace"]["properties"]["provider"]["format"],
+        "provider:ai6_safehouse"
+    );
+    let unex = ConfigRecord::Unex.form().unwrap().unwrap();
+    let sign_in = &unex.schema["properties"]["authenticators"]["items"]["properties"];
+    assert_eq!(
+        sign_in["provider"]["format"],
+        "provider:coqui_authenticator"
+    );
+    assert_eq!(sign_in["config"]["format"], "settings-of:provider");
+    for record in FAMILIES {
+        let form = record.form().unwrap().unwrap();
+        assert!(
+            !form.schema.to_string().contains("\"settings_toml\""),
+            "{record:?}"
+        );
+    }
+}
+
+#[test]
+fn a_provider_format_names_the_kind_its_library_declares() {
+    use guatiao::library::Kind as _;
+
+    use crate::directorates::q::ephemeral::TheaterProvider;
+    use crate::directorates::q::safehouse::SafeHouseProvider;
+    use crate::directorates::q::secret_kind::SecretProvider;
+    use crate::directorates::q::terminal::Terminal;
+    use crate::directorates::q::transport::Transport;
+    use crate::directorates::section_00::agent::AgentHandler;
+
+    for (kind, declared) in [
+        ("ai6_agent_handler", <dyn AgentHandler>::NAME),
+        ("ai6_safehouse", <dyn SafeHouseProvider>::NAME),
+        ("ai6_transport", <dyn Transport>::NAME),
+        ("ai6_theater_provider", <dyn TheaterProvider>::NAME),
+        ("ai6_secret", <dyn SecretProvider>::NAME),
+        ("ai6_terminal", <dyn Terminal>::NAME),
+    ] {
+        assert_eq!(kind, declared);
     }
 }
 
@@ -713,6 +956,15 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("compartments", ConfigRecord::Compartment),
         ("reviews", ConfigRecord::Review),
         ("watches", ConfigRecord::Watch),
+        ("theaters", ConfigRecord::Theater),
+        ("loadouts", ConfigRecord::Loadout),
+        ("sandboxes", ConfigRecord::Sandbox),
+        ("mcps", ConfigRecord::Mcp),
+        ("overlays", ConfigRecord::Overlay),
+        ("secrets", ConfigRecord::Secret),
+        ("secret_providers", ConfigRecord::SecretProvider),
+        ("pools", ConfigRecord::Pool),
+        ("unex", ConfigRecord::Unex),
     ]
     .into_iter()
     .map(|(kind, record)| {

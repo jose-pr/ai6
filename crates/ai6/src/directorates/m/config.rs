@@ -561,7 +561,7 @@ pub struct StationRuntime {
     #[map(default)]
     pub labels: BTreeMap<String, String>,
     /// The terminal provider harnesses run in. Default: one that suits the handler.
-    #[schema(title = "Terminal provider")]
+    #[schema(title = "Terminal provider", format = "provider:ai6_terminal")]
     pub terminal: Option<String>,
     /// Seconds between samples of each remote Theater's resources; 0 leaves only the
     /// requirements probe. Default: 60.
@@ -767,14 +767,26 @@ pub type ProviderConfig =
 
 /// One sign-in provider of the `unex` record: an Authenticator and its configuration.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
 #[map(deny_unknown_fields)]
 pub struct SignInProvider {
-    /// The Authenticator provider ID.
-    #[schema(title = "Provider")]
+    /// The Authenticator provider ID, from those the gateway reports.
+    #[schema(title = "Provider", format = "provider:coqui_authenticator")]
     pub provider: String,
     /// The provider's configuration, checked against the provider's own schema. Default: none.
-    #[schema(title = "Provider's configuration", sensitive)]
+    #[schema(
+        title = "Provider's configuration",
+        format = "settings-of:provider",
+        sensitive
+    )]
     pub config: Option<ProviderConfig>,
 }
 
@@ -797,7 +809,15 @@ impl SignInProvider {
 
 /// Universal Exports' settings that are not host-local, the `unex` record.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
 #[map(deny_unknown_fields)]
 pub struct UnexRecord {
     /// The Authenticator providers for sign-in, in the order they are asked. Each answers only
@@ -805,6 +825,7 @@ pub struct UnexRecord {
     /// a password. Default: none; nobody signs in.
     #[schema(title = "Sign-in providers")]
     #[map(default)]
+    #[form(form = SignInProvider)]
     pub authenticators: Vec<SignInProvider>,
     /// The Directory provider ID; required when user access is configured. Default: none.
     #[schema(title = "Directory provider")]
@@ -2084,7 +2105,7 @@ pub(crate) fn assemble(
 
 /// A JSON value as TOML, for the loaders that read a TOML document; `null` has no TOML form
 /// and is refused.
-fn json_to_toml(value: serde_json::Value) -> Result<toml::Value, String> {
+pub(crate) fn json_to_toml(value: serde_json::Value) -> Result<toml::Value, String> {
     toml::Value::deserialize(value).map_err(|reason| reason.to_string())
 }
 

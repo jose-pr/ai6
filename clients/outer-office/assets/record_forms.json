@@ -65,6 +65,7 @@
                 "string",
                 "null"
               ],
+              "format": "provider:ai6_safehouse",
               "title": "Safe house",
               "description": "The safe house that makes each Mission's copy. Leave it empty to use git when the checkout is a git repository."
             },
@@ -77,45 +78,13 @@
               "description": "Where the work comes from, when it is not the checkout path.",
               "x-advanced": true
             },
-            "base": {
-              "type": "string",
-              "title": "Start from revision",
-              "description": "The revision each Mission starts from.",
-              "x-advanced": true,
-              "default": "HEAD"
-            },
-            "branch": {
-              "type": "string",
-              "title": "Branch name",
-              "description": "The name each Mission's branch gets; {id}, {slug} and {operation} are filled in.",
-              "x-advanced": true,
-              "default": "{id}-{slug}"
-            },
-            "isolate": {
-              "type": "boolean",
-              "title": "A copy for each Mission",
-              "description": "Give each Mission its own copy. Off, Missions work in the source itself.",
-              "x-advanced": true,
-              "default": true
-            },
-            "checkpoint_remote": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "title": "Save work to remote",
-              "description": "The git remote, by name or address, each Mission's work is saved to, so a later attempt on another Station carries on from it. Leave it empty to push nothing.",
-              "x-advanced": true
-            },
-            "checkpoint_secs": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 18446744073709551615,
-              "format": "seconds",
-              "title": "Save every",
-              "description": "How often a running Mission's work is saved.",
-              "x-advanced": true,
-              "default": 300
+            "settings": {
+              "type": "object",
+              "additionalProperties": {},
+              "format": "settings-of:provider#operation",
+              "title": "Safe house settings",
+              "description": "The chosen safe house's own settings for this Operation.",
+              "default": {}
             }
           },
           "additionalProperties": false,
@@ -123,10 +92,7 @@
           "description": "How each Mission gets its working directory.",
           "x-section": "checkout",
           "default": {
-            "base": "HEAD",
-            "branch": "{id}-{slug}",
-            "isolate": true,
-            "checkpoint_secs": 300
+            "settings": {}
           }
         },
         "config": {
@@ -1771,7 +1737,7 @@
             "string",
             "null"
           ],
-          "format": "reported:handlers",
+          "format": "provider:ai6_agent_handler",
           "title": "Handler",
           "description": "The harness that runs its Sessions, from those the Stations report.",
           "x-section": "harness"
@@ -1799,7 +1765,7 @@
         "handler_settings": {
           "type": "object",
           "additionalProperties": {},
-          "format": "settings-of:handler",
+          "format": "settings-of:handler#agent",
           "title": "Handler settings",
           "description": "Settings for the handler, as its documentation describes them. Most handlers take none.",
           "x-section": "harness",
@@ -1813,7 +1779,7 @@
             "properties": {
               "handler": {
                 "type": "string",
-                "format": "reported:handlers",
+                "format": "provider:ai6_agent_handler",
                 "title": "Handler",
                 "description": "The harness this route runs, from those the Stations report."
               },
@@ -1839,7 +1805,7 @@
               "handler_settings": {
                 "type": "object",
                 "additionalProperties": {},
-                "format": "settings-of:handler",
+                "format": "settings-of:handler#agent",
                 "title": "Handler settings",
                 "description": "Settings for this route's handler; the Agent's when empty.",
                 "x-advanced": true,
@@ -5617,6 +5583,1996 @@
     "key": {
       "title": "Scope",
       "description": "What the watch keeps: m, operation:<codename> or station:<id>. It cannot be changed later."
+    }
+  },
+  "theaters": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "access": {
+          "type": "object",
+          "properties": {
+            "ssh": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "host": {
+                  "type": "string",
+                  "title": "Host",
+                  "description": "Host name or address."
+                },
+                "user": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "title": "User",
+                  "description": "Remote user; the Station's own user name when empty."
+                },
+                "port": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "title": "Port",
+                  "description": "Remote port; 22 when empty."
+                },
+                "identity": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "title": "Identity file",
+                  "description": "Path of the private key file on the Station."
+                },
+                "host_key": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "title": "Host key",
+                  "description": "The host's key as `sha256:HEX`; a connection whose key differs is refused."
+                },
+                "trust_on_first_use": {
+                  "type": "boolean",
+                  "title": "Trust the key at first contact",
+                  "description": "Accept the host's key at first contact when none is pinned. Weaker than pinning.",
+                  "default": false
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "host"
+              ],
+              "title": "SSH",
+              "description": "A host reached over SSH.",
+              "x-advanced": true
+            },
+            "transport": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "format": "provider:ai6_transport",
+                  "title": "Transport",
+                  "description": "The transport that reaches the Theater, from those the Stations report."
+                },
+                "config": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "format": "settings-of:provider",
+                  "title": "Transport settings",
+                  "description": "That transport's settings.",
+                  "default": {}
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "provider"
+              ],
+              "title": "Transport",
+              "description": "A host reached by any other transport, with that transport's own settings."
+            },
+            "ephemeral": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "format": "provider:ai6_theater_provider",
+                  "title": "Theater provider",
+                  "description": "The Theater provider that makes them, from those the Stations report."
+                },
+                "config": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "format": "settings-of:provider",
+                  "title": "Provider settings",
+                  "description": "That provider's settings.",
+                  "default": {}
+                },
+                "keep_failed": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "title": "Failed Theaters kept",
+                  "description": "How many failed Missions' Theaters to keep."
+                },
+                "keep_failed_hours": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "title": "Hours a kept Theater stays",
+                  "description": "How long a kept Theater stays, in hours."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "provider"
+              ],
+              "title": "Made for each Mission",
+              "description": "A template: each Mission gets a fresh Theater made from it."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Reached by",
+          "description": "How the Station reaches it."
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "description": "Labels an Operation's `station_labels` may match.",
+          "default": {}
+        },
+        "agents": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "local",
+            "remote-hands"
+          ],
+          "x-enum-labels": {
+            "auto": "Auto: on the Theater when it can host the harness",
+            "local": "On the Theater: refused when it cannot host it",
+            "remote-hands": "On the Station, acting through the transport"
+          },
+          "title": "Harness runs",
+          "description": "Where the harness may run.",
+          "default": "auto"
+        },
+        "harnesses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "provider:ai6_agent_handler",
+          "title": "Harnesses installed",
+          "description": "Harnesses installed on the Theater.",
+          "default": []
+        },
+        "workdir": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Working directory",
+          "description": "The directory a remote-hands Mission works in when its Operation names none."
+        },
+        "runner": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "command": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Command",
+              "description": "The `ai6` command on the Theater; `ai6` on its `PATH` when empty."
+            },
+            "state_dir": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "State directory",
+              "description": "The runner's state directory on the Theater."
+            },
+            "plugin_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Provider paths",
+              "description": "Directories or library files on the Theater that the runner loads providers from.",
+              "default": []
+            },
+            "terminal": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "provider:ai6_terminal",
+              "title": "Terminal",
+              "description": "The terminal provider the runner uses; one that suits the handler when empty."
+            },
+            "connect_timeout_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Connect timeout (ms)",
+              "description": "Milliseconds a Station waits to connect to the runner.",
+              "x-advanced": true
+            },
+            "initialize_timeout_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Initialize timeout (ms)",
+              "description": "Milliseconds the runner may take to answer `initialize`.",
+              "x-advanced": true
+            },
+            "request_timeout_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Request timeout (ms)",
+              "description": "Milliseconds the runner may take to answer any other request.",
+              "x-advanced": true
+            }
+          },
+          "additionalProperties": false,
+          "title": "Runner",
+          "description": "The runner that supervises harnesses on the Theater.",
+          "x-advanced": true
+        },
+        "requires": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "os": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Operating system",
+              "description": "The operating system: `linux`, `macos`, `freebsd` or `windows`."
+            },
+            "harnesses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Harnesses",
+              "description": "Harness CLIs, as `claude>=2.1` or just `claude`.",
+              "default": []
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Tools",
+              "description": "Other programs Sessions use there, as `git` or `cargo>=1.89`.",
+              "default": []
+            },
+            "disk_mb": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Free disk (MiB)",
+              "description": "Free space, in MiB, in the Theater's working directory."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Requirements",
+          "description": "What the Theater must have before Sessions run there.",
+          "x-advanced": true
+        },
+        "provision": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "runner": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Runner build",
+              "description": "The `ai6` build, a path on the Station, to install as the Theater's runner."
+            },
+            "plugins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Provider libraries",
+              "description": "Provider libraries, paths on the Station, copied for the runner.",
+              "default": []
+            },
+            "install": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "title": "Install commands",
+              "description": "The shell command that installs each program, by name.",
+              "default": {}
+            },
+            "install_timeout_secs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Install timeout (seconds)",
+              "description": "Seconds an install command may run."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Provisioning",
+          "description": "How to install what the Theater lacks.",
+          "x-advanced": true
+        },
+        "cables": {
+          "type": "string",
+          "enum": [
+            "required",
+            "optional"
+          ],
+          "x-enum-labels": {
+            "required": "Required",
+            "optional": "Optional: a reported weakening"
+          },
+          "title": "Cable endpoint",
+          "description": "Whether a Session here must reach its Cable endpoint.",
+          "x-advanced": true,
+          "default": "required"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "access"
+      ]
+    },
+    "form": {},
+    "key": {
+      "title": "Theater name",
+      "description": "What Operations and Missions reach this Theater by. It cannot be changed later."
+    }
+  },
+  "loadouts": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "record:sandboxes",
+          "title": "Sandbox",
+          "description": "The sandbox profile its Sessions run in."
+        },
+        "mcp": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:mcps",
+          "title": "MCP servers",
+          "description": "The MCP servers its Sessions get.",
+          "default": []
+        },
+        "overlays": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:overlays",
+          "title": "Overlays",
+          "description": "The overlays its Sessions are issued.",
+          "default": []
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:secrets",
+          "title": "Secrets",
+          "description": "The secrets its Sessions may be leased.",
+          "default": []
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "description": "Values its Sessions get in their environment; no secret.",
+          "x-advanced": true,
+          "default": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Agent",
+      "description": "The codename of the Agent this loadout is for. It cannot be changed later."
+    }
+  },
+  "sandboxes": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "title": "Backend",
+          "description": "The program that enforces the profile.",
+          "default": "bubblewrap"
+        },
+        "read_write": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Read and write",
+          "description": "Directories the Session may read and write.",
+          "default": []
+        },
+        "read_only": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Read only",
+          "description": "Directories the Session may only read.",
+          "default": []
+        },
+        "network": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Network",
+          "description": "Hosts the Session may reach.",
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Sandbox name",
+      "description": "What loadouts choose this profile by. It cannot be changed later."
+    }
+  },
+  "mcps": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "description": "The program and its arguments."
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools denied",
+          "description": "Tools of the server the Session may not call.",
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    },
+    "form": {},
+    "key": {
+      "title": "Server name",
+      "description": "What loadouts choose this MCP server by. It cannot be changed later."
+    }
+  },
+  "overlays": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Source",
+          "description": "Where the overlay is fetched from."
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Path",
+          "description": "A directory on the Station, absolute or relative to the configuration directory."
+        },
+        "pin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Pinned to",
+          "description": "The digest the overlay must have."
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:secrets",
+          "title": "Secrets",
+          "description": "Secrets the overlay may use.",
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Overlay name",
+      "description": "What loadouts and Operations choose this overlay by: a letter, then letters,                  digits, '_', '.' or '-'. It cannot be changed later."
+    }
+  },
+  "secrets": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Environment variable",
+          "description": "The variable the value is leased to."
+        },
+        "green_ink": {
+          "type": "boolean",
+          "title": "Green ink",
+          "description": "Whether a Mission's commits may carry it past the green ink gate.",
+          "x-advanced": true,
+          "default": false
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Kinds of Mission",
+          "description": "The kinds of Mission that may be leased it.",
+          "default": []
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Delivered to",
+          "description": "Where it may be delivered.",
+          "default": []
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "record:secret_providers",
+          "title": "Provider",
+          "description": "The secret provider that holds it: a configured instance's name or a provider's ID."
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Key",
+          "description": "Its key at that provider."
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Secret name",
+      "description": "What loadouts lease this secret by. It cannot be changed later."
+    }
+  },
+  "secret_providers": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "format": "provider:ai6_secret",
+          "title": "Provider",
+          "description": "The secret provider, from those the Stations report."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {},
+          "format": "flat-settings-of:provider",
+          "title": "Provider settings",
+          "description": "That provider's settings, written beside the provider.",
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ]
+    },
+    "form": {},
+    "key": {
+      "title": "Instance name",
+      "description": "What secrets name this configured provider by. It cannot be changed later."
+    }
+  },
+  "pools": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "handler": {
+          "type": "string",
+          "format": "provider:ai6_agent_handler",
+          "title": "Handler",
+          "description": "The harness the pool's accounts are for, from those the Stations report."
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "format": "record:operations",
+          "title": "Operations",
+          "description": "The Operations that may draw from it; any when empty.",
+          "default": []
+        },
+        "strategy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "headroom",
+                "round_robin",
+                "priority"
+              ],
+              "x-enum-labels": {
+                "headroom": "Headroom: the most quota left",
+                "round_robin": "Round robin",
+                "priority": "Priority"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Strategy",
+          "description": "How it picks among its accounts."
+        },
+        "login_command": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Login command",
+          "description": "The command that logs an account in.",
+          "x-advanced": true
+        },
+        "named_only": {
+          "type": "boolean",
+          "title": "Named accounts only",
+          "description": "Only a route or Mission that names an account may draw from it.",
+          "default": false
+        },
+        "account": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "claude-oauth-token",
+                  "anthropic-api-key",
+                  "anthropic-auth-token",
+                  "openai-api-key",
+                  "codex-access-token",
+                  "config-dir",
+                  "harness-login"
+                ],
+                "x-enum-labels": {
+                  "claude-oauth-token": "Claude Code token",
+                  "anthropic-api-key": "Anthropic API key",
+                  "anthropic-auth-token": "Anthropic bearer token",
+                  "openai-api-key": "OpenAI API key",
+                  "codex-access-token": "Codex access token",
+                  "config-dir": "Directory of an existing login",
+                  "harness-login": "The harness's own login"
+                },
+                "title": "Kind",
+                "description": "How the harness reads the credential."
+              },
+              "secret": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "record:secrets",
+                "title": "Secret",
+                "description": "The secret that holds the credential."
+              },
+              "dir": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "title": "Directory",
+                "description": "The directory of the login, for the kinds that use one."
+              },
+              "env": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "title": "Environment variable",
+                "description": "The variable the credential is delivered in, when not the kind's own."
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": -9223372036854775808,
+                "maximum": 9223372036854775807,
+                "title": "Priority",
+                "description": "Higher is preferred.",
+                "default": 0
+              },
+              "max_concurrent": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 18446744073709551615,
+                "title": "Most at once",
+                "description": "Sessions that may use it at once."
+              },
+              "labels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Labels",
+                "description": "Labels a route or Operation may ask for.",
+                "x-advanced": true,
+                "default": {}
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Login files",
+                "description": "Files of the login sealed in the Registry.",
+                "x-advanced": true,
+                "default": []
+              },
+              "renew_command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Renew command",
+                "description": "The command that renews the login.",
+                "x-advanced": true,
+                "default": []
+              },
+              "renew_env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Renew environment",
+                "description": "Environment the renew command gets.",
+                "x-advanced": true,
+                "default": {}
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          "title": "Accounts",
+          "description": "Its accounts, by name.",
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "handler"
+      ]
+    },
+    "form": {
+      "fields": {
+        "account": {
+          "form": {}
+        }
+      }
+    },
+    "key": {
+      "title": "Pool name",
+      "description": "What routes and Agents choose this pool by. It cannot be changed later."
+    }
+  },
+  "unex": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "authenticators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "format": "provider:coqui_authenticator",
+                "title": "Provider",
+                "description": "The Authenticator provider ID, from those the gateway reports."
+              },
+              "config": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {},
+                "format": "settings-of:provider",
+                "title": "Provider's configuration",
+                "description": "The provider's configuration, checked against the provider's own schema. Default: none.",
+                "x-sensitive": true,
+                "writeOnly": true
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "provider"
+            ]
+          },
+          "title": "Sign-in providers",
+          "description": "The Authenticator providers for sign-in, in the order they are asked. Each answers only for the credentials it claims: a key provider for a bearer key, the others for a name and a password. Default: none; nobody signs in.",
+          "default": []
+        },
+        "directory": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Directory provider",
+          "description": "The Directory provider ID; required when user access is configured. Default: none."
+        },
+        "directory_config": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {},
+          "title": "Directory provider's configuration",
+          "description": "The Directory's configuration. Default: none.",
+          "x-sensitive": true,
+          "writeOnly": true
+        },
+        "authorizer": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Custom authorizer",
+          "description": "A custom Authorizer provider ID, in place of the `access` record's role policy; the gateway's chief tier still applies beside it. Default: none."
+        },
+        "authorizer_config": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {},
+          "title": "Custom authorizer's configuration",
+          "description": "The custom Authorizer's configuration. Default: none.",
+          "x-sensitive": true,
+          "writeOnly": true
+        },
+        "accounts": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Accounts provider",
+          "description": "The Accounts provider ID that keeps the accounts people sign in with, for the account routes. Default: the Authenticator when it offers accounts too."
+        },
+        "accounts_config": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {},
+          "title": "Accounts provider's configuration",
+          "description": "The Accounts provider's configuration. Default: none.",
+          "x-sensitive": true,
+          "writeOnly": true
+        },
+        "proxy_user_header": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Reverse proxy's user header",
+          "description": "The sanitized header a trusted reverse proxy sets to the signed-in user. Default: none."
+        },
+        "proxy_lookup_by": {
+          "type": "string",
+          "title": "Directory attribute of the proxy's user",
+          "description": "The Directory attribute that resolves the reverse proxy's user.",
+          "default": "name"
+        },
+        "page_authenticator": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Page viewers' authenticator",
+          "description": "The Authenticator provider ID that names the person asking for one of Moneypenny's pages from the request itself: `coqui_access_mtls` on the gateway's own TLS, `coqui_access_proxy` behind a front door. It answers only under the pages' base, never for `/v1`. Default: none; pages know a person by the page cookie alone."
+        },
+        "page_authenticator_config": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {},
+          "title": "Page viewers' authenticator's configuration",
+          "description": "The page authenticator's configuration. Default: none.",
+          "x-sensitive": true,
+          "writeOnly": true
+        },
+        "login_tries_per_address": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Tries a minute per client address",
+          "description": "Password or key tries a minute from one client address. Default: 5."
+        },
+        "login_tries_per_name": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Tries in ten minutes per account name",
+          "description": "Tries in ten minutes for one account name, from anywhere. Default: 10."
+        },
+        "client_address_header": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Reverse proxy's client address header",
+          "description": "The header a trusted proxy sets to the client address. Default: none."
+        },
+        "access_cache_ttl": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Keep a found person or a grant for",
+          "description": "Seconds a found person or a granted action is kept; 0 keeps none. Default: 5."
+        },
+        "access_cache_negative_ttl": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Keep a miss or a denial for",
+          "description": "Seconds \"no such person\" or a denial is kept; 0 keeps none. Default: 1."
+        },
+        "access_cache_entries": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Lookups and decisions kept",
+          "description": "The most lookups, and decisions, kept; 0 keeps none. Default: 10000."
+        },
+        "key_ttl": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Personal API key lifetime",
+          "description": "Seconds a personal API key lives when its maker names no expiry; 0 makes such keys last until revoked. Default: 7776000 (90 days)."
+        },
+        "assistant": {
+          "type": "boolean",
+          "title": "Serve Moneypenny",
+          "description": "Whether Moneypenny is served.",
+          "default": true
+        },
+        "assistant_agent": {
+          "type": "string",
+          "title": "The Agent that is Moneypenny",
+          "description": "The roster Agent that is Moneypenny.",
+          "default": "moneypenny"
+        },
+        "route_text_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "format": "bytes",
+          "title": "Longest route text filter",
+          "description": "The longest `text` filter an Outer Office route may carry, in bytes: in Moneypenny's links and cards, and in the page a message was sent from. 0 reads as 1. Default: 128."
+        },
+        "provider_config_depth": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Deepest provider configuration",
+          "description": "How deeply nested a provider configuration may be.",
+          "default": 64
+        },
+        "gateway": {
+          "type": "object",
+          "properties": {
+            "sessions": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Live Sessions",
+              "description": "Live provider Sessions.",
+              "default": 16
+            },
+            "clients_per_session": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Browser connections per Session",
+              "description": "Simultaneous browser connections to one provider Session.",
+              "default": 12
+            },
+            "scrollback_events": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Frames kept for a late client",
+              "description": "Value frames kept per provider Session for a client that joins late.",
+              "default": 64
+            },
+            "frame_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest frame",
+              "description": "Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit.",
+              "default": 262144
+            },
+            "input_frames_per_second": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Browser input frames a second",
+              "description": "Browser input frames accepted per connection per second.",
+              "default": 40
+            },
+            "input_queue": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Queue to the Stations",
+              "description": "Capacity of the queue between the gateway and its Stations, at least 1.",
+              "default": 64
+            },
+            "fanout": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Queue per Session viewer",
+              "description": "Capacity of each per-Session viewer queue, at least 1.",
+              "default": 8
+            },
+            "buffer_budget_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "All the gateway's buffers",
+              "description": "Bytes the gateway may hold in buffers across every Session and connection; the configuration is refused when its limits could exceed it.",
+              "default": 536870912
+            },
+            "client_slots": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Browser connection slots",
+              "description": "Browser connections the gateway keeps slots for; the configuration is refused when its Sessions times connections per Session could exceed it.",
+              "default": 100000
+            },
+            "attach_token_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "An attach token lasts",
+              "description": "Seconds an attach token lives, more than 0.",
+              "default": 300.0
+            },
+            "write_lease_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A terminal write lease lasts",
+              "description": "Seconds a terminal write lease lives, more than 0.",
+              "default": 30.0
+            },
+            "station_token_min_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Shortest Station token",
+              "description": "Characters the Station token holds at least; a smaller value is looser.",
+              "default": 32
+            },
+            "origin_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest public origin",
+              "description": "Bytes of the public origin.",
+              "default": 2048
+            },
+            "access_token_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A sign-in lasts",
+              "description": "Seconds a sign-in that names no lifetime gets, and each renewal gives from then, more than 0 and within `access_token_max_ttl`; longer is looser.",
+              "default": 3600.0
+            },
+            "access_token_max_ttl": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest token a request may ask for",
+              "description": "The longest lifetime a request for a token may name, in seconds.",
+              "default": 86400.0
+            },
+            "session_idle": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Idle sign-in ends after",
+              "description": "Seconds a sign-in may go without a renewal before it ends; each renewal, which an open app makes while its person works, moves the deadline on. A token lasts the shorter of this and `access_token_ttl`. `\"none\"` turns the idle limit off.",
+              "default": 1800.0
+            },
+            "session_max": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest renewed sign-in",
+              "description": "How long renewing keeps a sign-in going, in seconds from when it was made; the password is not asked again until then. `0` turns renewal off, `\"none\"` (the default) lets it run on while the person keeps working.",
+              "default": "none"
+            },
+            "session_cookie": {
+              "type": "boolean",
+              "title": "Keep a browser's sign-in in a cookie",
+              "description": "Whether a browser's sign-in also gets an HttpOnly cookie, so a reload signs it back in up to `session_max` after signing in; with `false`, or `session_max` at `0`, a sign-in lives in the app's memory alone.",
+              "default": true
+            },
+            "compartment_audit": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Between audit records of a compartment read",
+              "description": "Seconds between audit records of one person's reads of one resource allowed only by one compartment; the app polls, so `0` writes one for every read.",
+              "default": 60.0
+            },
+            "socket_buffer_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Smallest socket write buffer",
+              "description": "Bytes the write buffer of a browser's socket holds at least, whatever `frame_bytes` (it holds twice that when that is more).",
+              "default": 262144
+            }
+          },
+          "additionalProperties": false,
+          "title": "The gateway",
+          "description": "`[gateway]`: live Sessions, connections and frames.",
+          "default": {
+            "sessions": 16,
+            "clients_per_session": 12,
+            "scrollback_events": 64,
+            "frame_bytes": 262144,
+            "input_frames_per_second": 40,
+            "input_queue": 64,
+            "fanout": 8,
+            "buffer_budget_bytes": 536870912,
+            "client_slots": 100000,
+            "attach_token_ttl": 300.0,
+            "write_lease_ttl": 30.0,
+            "station_token_min_bytes": 32,
+            "origin_bytes": 2048,
+            "access_token_ttl": 3600.0,
+            "access_token_max_ttl": 86400.0,
+            "session_idle": 1800.0,
+            "session_max": "none",
+            "session_cookie": true,
+            "compartment_audit": 60.0,
+            "socket_buffer_bytes": 262144
+          }
+        },
+        "controls": {
+          "type": "object",
+          "properties": {
+            "controls": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Controls held",
+              "description": "Controls held for status reads and replays; past it the oldest closed one goes, or the control is refused.",
+              "default": 1024
+            },
+            "pending_per_station": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Open controls per Station",
+              "description": "Controls one Station may have open.",
+              "default": 64
+            },
+            "ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "An open control waits",
+              "description": "Seconds an open control waits for its Station before it expires.",
+              "default": 120.0
+            },
+            "poll_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A Station's poll waits",
+              "description": "Seconds a Station's poll waits for a control when it names no wait.",
+              "default": 1.0
+            },
+            "max_poll_wait": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest poll a Station may ask for",
+              "description": "The longest wait a Station's poll may ask for, in seconds.",
+              "default": 25.0
+            },
+            "idempotency_key_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest idempotency key",
+              "description": "Bytes of an idempotency key.",
+              "default": 128
+            },
+            "reason_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest operator reason",
+              "description": "Characters of an operator's reason; longer text is cut.",
+              "default": 512
+            }
+          },
+          "additionalProperties": false,
+          "title": "Operator controls",
+          "description": "`[controls]`: the operator controls waiting for a Station.",
+          "default": {
+            "controls": 1024,
+            "pending_per_station": 64,
+            "ttl": 120.0,
+            "poll_wait": 1.0,
+            "max_poll_wait": 25.0,
+            "idempotency_key_bytes": 128,
+            "reason_chars": 512
+          }
+        },
+        "timeline": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Items in a page",
+              "description": "Items in a page when the request names no limit, at least 1.",
+              "default": 50
+            },
+            "max_page": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Most items a page may ask for",
+              "description": "The most items a page may ask for.",
+              "default": 200
+            },
+            "text_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest item text",
+              "description": "Characters of one item's text; longer text is cut.",
+              "default": 256
+            },
+            "audit_page": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Audit records in a page",
+              "description": "Records in a page of the audit log when the request names no limit, at least 1.",
+              "default": 100
+            },
+            "max_audit_page": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Most audit records a page may ask for",
+              "description": "The most records a page of the audit log may ask for.",
+              "default": 500
+            }
+          },
+          "additionalProperties": false,
+          "title": "Timeline pages",
+          "description": "`[timeline]`: a Mission's timeline pages.",
+          "default": {
+            "page": 50,
+            "max_page": 200,
+            "text_chars": 256,
+            "audit_page": 100,
+            "max_audit_page": 500
+          }
+        },
+        "login": {
+          "type": "object",
+          "properties": {
+            "name_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest account name counted",
+              "description": "Bytes of an account name the tries are counted under; longer names are cut.",
+              "default": 64
+            },
+            "forget_every": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Tries between sweeps of old counters",
+              "description": "Tries between sweeps that forget old counters, at least 1.",
+              "default": 256
+            },
+            "address_window": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "One address's tries are counted over",
+              "description": "Seconds one client address's tries are counted over.",
+              "default": 60.0
+            },
+            "name_window": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "One account name's tries are counted over",
+              "description": "Seconds one account name's tries are counted over.",
+              "default": 600.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Counting sign-in tries",
+          "description": "`[login]`: how password and key tries are told apart and counted.",
+          "default": {
+            "name_bytes": 64,
+            "forget_every": 256,
+            "address_window": 60.0,
+            "name_window": 600.0
+          }
+        },
+        "text": {
+          "type": "object",
+          "properties": {
+            "agent_reason_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest reason for lowering a clearance",
+              "description": "Characters of the reason that lowers an Agent's clearance.",
+              "default": 512
+            },
+            "green_ink_max_grant": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest green ink grant or clearance",
+              "description": "The longest a green ink grant or a clearance may last, in seconds.",
+              "default": 31536000.0
+            },
+            "green_ink_note_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest green ink note",
+              "description": "Characters of a green ink note.",
+              "default": 1024
+            },
+            "green_ink_expired_window": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Expired green ink listed by default",
+              "description": "How far back the list of expired green ink requests reaches when it is not told.",
+              "default": 2592000.0
+            },
+            "held_reason_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest reason for a held brief's decision",
+              "description": "Characters of the reason for a held brief's decision.",
+              "default": 1024
+            },
+            "roster_target_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest roster target line",
+              "description": "Bytes of a roster record's target line; longer text is cut.",
+              "default": 512
+            },
+            "roster_key_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest roster key",
+              "description": "Bytes of a roster record's key.",
+              "default": 128
+            },
+            "access_name_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest role, Operation or account name",
+              "description": "Bytes of a role name, an Operation ID or an account name in the access and account routes.",
+              "default": 128
+            },
+            "mission_title_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest Mission title",
+              "description": "Characters of the title of a Mission a person starts.",
+              "default": 512
+            },
+            "mission_prompt_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest Mission instructions",
+              "description": "Bytes of the instructions of a Mission a person starts.",
+              "default": 65536
+            }
+          },
+          "additionalProperties": false,
+          "title": "Longest request fields",
+          "description": "`[text]`: the longest single request fields.",
+          "default": {
+            "agent_reason_chars": 512,
+            "green_ink_max_grant": 31536000.0,
+            "green_ink_note_chars": 1024,
+            "green_ink_expired_window": 2592000.0,
+            "held_reason_chars": 1024,
+            "roster_target_bytes": 512,
+            "roster_key_bytes": 128,
+            "access_name_bytes": 128,
+            "mission_title_chars": 512,
+            "mission_prompt_bytes": 65536
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "fields": {
+        "authenticators": {
+          "form": {}
+        }
+      }
+    },
+    "key": {
+      "title": "Universal Exports settings",
+      "description": "",
+      "fixed": "settings"
     }
   }
 }

@@ -1,0 +1,464 @@
+//! The forms of the configuration families that no other module declares a record type for:
+//! Theaters and the loadout families. Each type here describes the keys a record holds, for
+//! the schema and form Outer Office draws; the records themselves are read by their own parsers
+//! ([`Theaters`](crate::directorates::m::theaters::Theaters), the loadout catalog), which are
+//! still what accepts or refuses a write.
+
+use std::collections::BTreeMap;
+
+use guatiao::{FromValue, Schema, ToValue};
+use guatiao_intake::Form;
+
+use crate::directorates::q::SessionEnv;
+
+/// How a Station reaches a Theater: one of the groups below.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct TheaterAccessForm {
+    /// A host reached over SSH.
+    #[schema(title = "SSH", advanced)]
+    ssh: Option<SshForm>,
+    /// A host reached by any other transport, with that transport's own settings.
+    #[schema(title = "Transport")]
+    transport: Option<TransportForm>,
+    /// A template: each Mission gets a fresh Theater made from it.
+    #[schema(title = "Made for each Mission")]
+    ephemeral: Option<EphemeralForm>,
+}
+
+/// A transport provider and its settings.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct TransportForm {
+    /// The transport that reaches the Theater, from those the Stations report.
+    #[schema(title = "Transport", format = "provider:ai6_transport")]
+    provider: String,
+    /// That transport's settings.
+    #[schema(title = "Transport settings", format = "settings-of:provider")]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    config: serde_json::Map<String, serde_json::Value>,
+}
+
+/// SSH connection settings, as the `ssh` transport takes them.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct SshForm {
+    /// Host name or address.
+    #[schema(title = "Host")]
+    host: String,
+    /// Remote user; the Station's own user name when empty.
+    #[schema(title = "User")]
+    user: Option<String>,
+    /// Remote port; 22 when empty.
+    #[schema(title = "Port")]
+    port: Option<u16>,
+    /// Path of the private key file on the Station.
+    #[schema(title = "Identity file")]
+    identity: Option<String>,
+    /// The host's key as `sha256:HEX`; a connection whose key differs is refused.
+    #[schema(title = "Host key")]
+    host_key: Option<String>,
+    /// Accept the host's key at first contact when none is pinned. Weaker than pinning.
+    #[schema(title = "Trust the key at first contact")]
+    #[map(default)]
+    trust_on_first_use: bool,
+}
+
+/// A template for Theaters a Theater provider makes per Mission.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct EphemeralForm {
+    /// The Theater provider that makes them, from those the Stations report.
+    #[schema(title = "Theater provider", format = "provider:ai6_theater_provider")]
+    provider: String,
+    /// That provider's settings.
+    #[schema(title = "Provider settings", format = "settings-of:provider")]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    config: serde_json::Map<String, serde_json::Value>,
+    /// How many failed Missions' Theaters to keep.
+    #[schema(title = "Failed Theaters kept")]
+    keep_failed: Option<u64>,
+    /// How long a kept Theater stays, in hours.
+    #[schema(title = "Hours a kept Theater stays")]
+    keep_failed_hours: Option<u64>,
+}
+
+/// Where a Theater lets the agent harness run.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum AgentModeForm {
+    /// Field mode when the Theater can host the harness, remote-hands mode otherwise.
+    #[default]
+    #[map(rename = "auto")]
+    #[schema(label = "Auto: on the Theater when it can host the harness")]
+    Auto,
+    /// The harness runs on the Theater.
+    #[map(rename = "local")]
+    #[schema(label = "On the Theater: refused when it cannot host it")]
+    Local,
+    /// The harness runs on the Station and acts on the Theater through its transport.
+    #[map(rename = "remote-hands")]
+    #[schema(label = "On the Station, acting through the transport")]
+    RemoteHands,
+}
+
+/// Whether a Session on a Theater must reach its Cable endpoint.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum CableReachForm {
+    /// A way to the endpoint is part of what the Theater must offer.
+    #[default]
+    #[map(rename = "required")]
+    #[schema(label = "Required")]
+    Required,
+    /// A Session with no way to its endpoint starts without one, a reported weakening.
+    #[map(rename = "optional")]
+    #[schema(label = "Optional: a reported weakening")]
+    Optional,
+}
+
+/// The runner that supervises harnesses on a Theater.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct RunnerForm {
+    /// The `ai6` command on the Theater; `ai6` on its `PATH` when empty.
+    #[schema(title = "Command")]
+    command: Option<String>,
+    /// The runner's state directory on the Theater.
+    #[schema(title = "State directory")]
+    state_dir: Option<String>,
+    /// Directories or library files on the Theater that the runner loads providers from.
+    #[schema(title = "Provider paths")]
+    #[map(default)]
+    plugin_paths: Vec<String>,
+    /// The terminal provider the runner uses; one that suits the handler when empty.
+    #[schema(title = "Terminal", format = "provider:ai6_terminal")]
+    terminal: Option<String>,
+    /// Milliseconds a Station waits to connect to the runner.
+    #[schema(title = "Connect timeout (ms)", advanced)]
+    connect_timeout_ms: Option<u64>,
+    /// Milliseconds the runner may take to answer `initialize`.
+    #[schema(title = "Initialize timeout (ms)", advanced)]
+    initialize_timeout_ms: Option<u64>,
+    /// Milliseconds the runner may take to answer any other request.
+    #[schema(title = "Request timeout (ms)", advanced)]
+    request_timeout_ms: Option<u64>,
+}
+
+/// What a Theater must have before Sessions run there.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct RequiresForm {
+    /// The operating system: `linux`, `macos`, `freebsd` or `windows`.
+    #[schema(title = "Operating system")]
+    os: Option<String>,
+    /// Harness CLIs, as `claude>=2.1` or just `claude`.
+    #[schema(title = "Harnesses")]
+    #[map(default)]
+    harnesses: Vec<String>,
+    /// Other programs Sessions use there, as `git` or `cargo>=1.89`.
+    #[schema(title = "Tools")]
+    #[map(default)]
+    tools: Vec<String>,
+    /// Free space, in MiB, in the Theater's working directory.
+    #[schema(title = "Free disk (MiB)")]
+    disk_mb: Option<u64>,
+}
+
+/// How a Theater is provisioned with what it lacks.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct ProvisionForm {
+    /// The `ai6` build, a path on the Station, to install as the Theater's runner.
+    #[schema(title = "Runner build")]
+    runner: Option<String>,
+    /// Provider libraries, paths on the Station, copied for the runner.
+    #[schema(title = "Provider libraries")]
+    #[map(default)]
+    plugins: Vec<String>,
+    /// The shell command that installs each program, by name.
+    #[schema(title = "Install commands")]
+    #[map(default)]
+    install: BTreeMap<String, String>,
+    /// Seconds an install command may run.
+    #[schema(title = "Install timeout (seconds)")]
+    install_timeout_secs: Option<u64>,
+}
+
+/// A Theater: the keys of a `[theater.<id>]` table that a form draws.
+/// The egress key is kept as stored and edited as configuration.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct TheaterForm {
+    /// How the Station reaches it.
+    #[schema(title = "Reached by")]
+    access: TheaterAccessForm,
+    /// Labels an Operation's `station_labels` may match.
+    #[schema(title = "Labels")]
+    #[map(default)]
+    labels: BTreeMap<String, String>,
+    /// Where the harness may run.
+    #[schema(title = "Harness runs")]
+    #[map(default)]
+    agents: AgentModeForm,
+    /// Harnesses installed on the Theater.
+    #[schema(title = "Harnesses installed", format = "provider:ai6_agent_handler")]
+    #[map(default)]
+    harnesses: Vec<String>,
+    /// The directory a remote-hands Mission works in when its Operation names none.
+    #[schema(title = "Working directory")]
+    workdir: Option<String>,
+    /// The runner that supervises harnesses on the Theater.
+    #[schema(title = "Runner", advanced)]
+    runner: Option<RunnerForm>,
+    /// What the Theater must have before Sessions run there.
+    #[schema(title = "Requirements", advanced)]
+    requires: Option<RequiresForm>,
+    /// How to install what the Theater lacks.
+    #[schema(title = "Provisioning", advanced)]
+    provision: Option<ProvisionForm>,
+    /// Whether a Session here must reach its Cable endpoint.
+    #[schema(title = "Cable endpoint", advanced)]
+    #[map(default)]
+    cables: CableReachForm,
+}
+
+/// An Agent's loadout: the keys of a `[loadout.<agent>]` table.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct LoadoutForm {
+    /// The sandbox profile its Sessions run in.
+    #[schema(title = "Sandbox", format = "record:sandboxes")]
+    sandbox: Option<String>,
+    /// The MCP servers its Sessions get.
+    #[schema(title = "MCP servers", format = "record:mcps")]
+    #[map(default)]
+    mcp: Vec<String>,
+    /// The overlays its Sessions are issued.
+    #[schema(title = "Overlays", format = "record:overlays")]
+    #[map(default)]
+    overlays: Vec<String>,
+    /// The secrets its Sessions may be leased.
+    #[schema(title = "Secrets", format = "record:secrets")]
+    #[map(default)]
+    secrets: Vec<String>,
+    /// Values its Sessions get in their environment; no secret.
+    #[schema(title = "Environment", advanced)]
+    #[map(default)]
+    env: SessionEnv,
+}
+
+/// A sandbox profile: the keys of a `[sandbox.<name>]` table.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct SandboxForm {
+    /// The program that enforces the profile.
+    #[schema(title = "Backend")]
+    #[map(default = "bubblewrap".to_owned())]
+    backend: String,
+    /// Directories the Session may read and write.
+    #[schema(title = "Read and write")]
+    #[map(default)]
+    read_write: Vec<String>,
+    /// Directories the Session may only read.
+    #[schema(title = "Read only")]
+    #[map(default)]
+    read_only: Vec<String>,
+    /// Hosts the Session may reach.
+    #[schema(title = "Network")]
+    #[map(default)]
+    network: Vec<String>,
+}
+
+/// An MCP server a loadout names: the keys of an `[mcp.<name>]` table.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct McpForm {
+    /// The program and its arguments.
+    #[schema(title = "Command")]
+    command: Vec<String>,
+    /// Tools of the server the Session may not call.
+    #[schema(title = "Tools denied")]
+    #[map(default)]
+    deny: Vec<String>,
+}
+
+/// An overlay: the keys of an `[overlay.<name>]` table. Exactly one of the source and the path.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct OverlayForm {
+    /// Where the overlay is fetched from.
+    #[schema(title = "Source")]
+    source: Option<String>,
+    /// A directory on the Station, absolute or relative to the configuration directory.
+    #[schema(title = "Path")]
+    path: Option<String>,
+    /// The digest the overlay must have.
+    #[schema(title = "Pinned to")]
+    pin: Option<String>,
+    /// Secrets the overlay may use.
+    #[schema(title = "Secrets", format = "record:secrets")]
+    #[map(default)]
+    secrets: Vec<String>,
+}
+
+/// How a loadout secret reaches a Session, never its value: the keys of a `[secret.<name>]` table.
+/// The provider's own further fields are kept as stored and edited as configuration.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct SecretForm {
+    /// The variable the value is leased to.
+    #[schema(title = "Environment variable")]
+    env: Option<String>,
+    /// Whether a Mission's commits may carry it past the green ink gate.
+    #[schema(title = "Green ink", advanced)]
+    #[map(default)]
+    green_ink: bool,
+    /// The kinds of Mission that may be leased it.
+    #[schema(title = "Kinds of Mission")]
+    #[map(default)]
+    kinds: Vec<String>,
+    /// Where it may be delivered.
+    #[schema(title = "Delivered to")]
+    #[map(default)]
+    targets: Vec<String>,
+    /// The secret provider that holds it: a configured instance's name or a provider's ID.
+    #[schema(title = "Provider", format = "record:secret_providers")]
+    provider: Option<String>,
+    /// Its key at that provider.
+    #[schema(title = "Key")]
+    key: Option<String>,
+}
+
+/// A configured secret provider: the keys of a `[secret_provider.<name>]` table, the provider and
+/// then its settings beside it.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct SecretProviderForm {
+    /// The secret provider, from those the Stations report.
+    #[schema(title = "Provider", format = "provider:ai6_secret")]
+    provider: String,
+    /// That provider's settings, written beside the provider.
+    #[schema(title = "Provider settings", format = "flat-settings-of:provider")]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    settings: serde_json::Map<String, serde_json::Value>,
+}
+
+/// How a pool picks among its accounts.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum PoolStrategyForm {
+    /// The account with the most quota left.
+    #[default]
+    #[map(rename = "headroom")]
+    #[schema(label = "Headroom: the most quota left")]
+    Headroom,
+    /// Each in turn.
+    #[map(rename = "round_robin")]
+    #[schema(label = "Round robin")]
+    RoundRobin,
+    /// The highest priority that is free.
+    #[map(rename = "priority")]
+    #[schema(label = "Priority")]
+    Priority,
+}
+
+/// How a harness reads an account's credential.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum AccountKindForm {
+    /// A Claude Code token from `claude setup-token`.
+    #[default]
+    #[map(rename = "claude-oauth-token")]
+    #[schema(label = "Claude Code token")]
+    ClaudeOauthToken,
+    /// An Anthropic API key.
+    #[map(rename = "anthropic-api-key")]
+    #[schema(label = "Anthropic API key")]
+    AnthropicApiKey,
+    /// An Anthropic bearer token.
+    #[map(rename = "anthropic-auth-token")]
+    #[schema(label = "Anthropic bearer token")]
+    AnthropicAuthToken,
+    /// An OpenAI API key.
+    #[map(rename = "openai-api-key")]
+    #[schema(label = "OpenAI API key")]
+    OpenaiApiKey,
+    /// A Codex access token.
+    #[map(rename = "codex-access-token")]
+    #[schema(label = "Codex access token")]
+    CodexAccessToken,
+    /// The directory of an existing login.
+    #[map(rename = "config-dir")]
+    #[schema(label = "Directory of an existing login")]
+    ConfigDir,
+    /// The login the harness keeps for itself.
+    #[map(rename = "harness-login")]
+    #[schema(label = "The harness's own login")]
+    HarnessLogin,
+}
+
+/// One provider account of a pool: `[pool.<id>.account.<name>]`.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct AccountForm {
+    /// How the harness reads the credential.
+    #[schema(title = "Kind")]
+    kind: AccountKindForm,
+    /// The secret that holds the credential.
+    #[schema(title = "Secret", format = "record:secrets")]
+    secret: Option<String>,
+    /// The directory of the login, for the kinds that use one.
+    #[schema(title = "Directory")]
+    dir: Option<String>,
+    /// The variable the credential is delivered in, when not the kind's own.
+    #[schema(title = "Environment variable")]
+    env: Option<String>,
+    /// Higher is preferred.
+    #[schema(title = "Priority")]
+    #[map(default)]
+    priority: i64,
+    /// Sessions that may use it at once.
+    #[schema(title = "Most at once")]
+    max_concurrent: Option<u64>,
+    /// Labels a route or Operation may ask for.
+    #[schema(title = "Labels", advanced)]
+    #[map(default)]
+    labels: BTreeMap<String, String>,
+    /// Files of the login sealed in the Registry.
+    #[schema(title = "Login files", advanced)]
+    #[map(default)]
+    files: Vec<String>,
+    /// The command that renews the login.
+    #[schema(title = "Renew command", advanced)]
+    #[map(default)]
+    renew_command: Vec<String>,
+    /// Environment the renew command gets.
+    #[schema(title = "Renew environment", advanced)]
+    #[map(default)]
+    renew_env: BTreeMap<String, String>,
+}
+
+/// An account pool: the keys of a `[pool.<id>]` table.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct PoolForm {
+    /// The harness the pool's accounts are for, from those the Stations report.
+    #[schema(title = "Handler", format = "provider:ai6_agent_handler")]
+    handler: String,
+    /// The Operations that may draw from it; any when empty.
+    #[schema(title = "Operations", format = "record:operations")]
+    #[map(default)]
+    operations: Vec<String>,
+    /// How it picks among its accounts.
+    #[schema(title = "Strategy")]
+    strategy: Option<PoolStrategyForm>,
+    /// The command that logs an account in.
+    #[schema(title = "Login command", advanced)]
+    login_command: Option<Vec<String>>,
+    /// Only a route or Mission that names an account may draw from it.
+    #[schema(title = "Named accounts only")]
+    #[map(default)]
+    named_only: bool,
+    /// Its accounts, by name.
+    #[schema(title = "Accounts")]
+    #[map(default)]
+    #[form(form = AccountForm)]
+    account: BTreeMap<String, AccountForm>,
+}
