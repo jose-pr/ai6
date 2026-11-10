@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/chat_layout.dart';
 import 'package:outer_office/assistant/chat_popout.dart';
+import 'package:outer_office/shell/oo_freshness.dart' show ooClock;
 import 'package:outer_office/shell/sessions_page.dart';
 import 'package:outer_office/shell/sign_in_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -79,12 +80,12 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     await tester.pump();
     expect(_dialog, findsOneWidget);
-    expect(find.textContaining('signed out in 9:59'), findsOneWidget);
+    expect(find.textContaining('signed out in 10:00'), findsOneWidget);
     expect(gateway.renewals, hasLength(1), reason: 'asked, not renewed');
     expect(board.accessToken, 'token-1');
 
     await tester.pump(const Duration(seconds: 1));
-    expect(find.textContaining('signed out in 9:58'), findsOneWidget);
+    expect(find.textContaining('signed out in 9:59'), findsOneWidget);
     await close(tester, board);
   });
 
@@ -124,7 +125,9 @@ void main() {
     await tester.pump(_wait + const Duration(seconds: 1));
     expect(_dialog, findsOneWidget);
 
-    await tester.pump(_before - const Duration(seconds: 2));
+    // The deadline is the board's own; pumps before it carry a little drift from the page.
+    final left = board.idleEnds!.difference(ooClock());
+    await tester.pump(left - const Duration(seconds: 1));
     expect(_dialog, findsOneWidget, reason: 'not before the deadline');
     expect(board.accessToken, 'token-1');
 

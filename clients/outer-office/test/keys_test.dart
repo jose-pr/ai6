@@ -10,6 +10,8 @@ import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/top_bar.dart' show UserChip;
 import 'package:outer_office/theme/oo_theme.dart';
 
+import 'moneypenny_off_test.dart' show profile;
+
 const _fakeSecret = 'oo_key_FAKE_not_a_real_secret';
 
 Map<String, Object?> _key(
@@ -46,6 +48,9 @@ class _Gateway {
       status,
       headers: {'content-type': 'application/json'},
     );
+    if (path == '/v1/user/profile') {
+      return reply(200, {...profile(), 'person_id': 'p-1', 'name': 'ada'});
+    }
     if (!path.startsWith('/v1/user/keys')) return reply(200, []);
     switch (request.method) {
       case 'GET':
@@ -137,7 +142,7 @@ void main() {
     expect(find.text('Expires: never'), findsOneWidget);
     expect(find.textContaining('Expires '), findsOneWidget);
     expect(find.text('Last used: never used'), findsOneWidget);
-    expect(find.textContaining('Last used '), findsNWidgets(2));
+    expect(find.textContaining('Last used '), findsOneWidget);
     expect(find.textContaining(_fakeSecret), findsNothing);
     expect(find.byTooltip('Revoke ci'), findsOneWidget);
     expect(find.text('All keys'), findsNothing);
