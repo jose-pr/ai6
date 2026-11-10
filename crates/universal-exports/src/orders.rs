@@ -79,7 +79,7 @@ async fn set_disabled(
         registry,
         AuditRecord {
             id: Uuid::new_v4().to_string(),
-            actor: person.id,
+            actor: crate::actor_of(&person),
             action: format!("sleeper.{}", if disabled { "disable" } else { "enable" }),
             operation: operation.to_string(),
             resource: None,
@@ -173,7 +173,7 @@ pub(crate) async fn settle(
         registry,
         AuditRecord {
             id: Uuid::new_v4().to_string(),
-            actor: person.id,
+            actor: crate::actor_of(&person),
             action: "mission.settle".to_owned(),
             operation: operation.to_string(),
             resource: None,

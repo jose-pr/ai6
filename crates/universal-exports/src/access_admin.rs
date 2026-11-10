@@ -460,7 +460,7 @@ async fn audit(
         .ok_or_else(|| AdminError::Api(ApiError::unavailable()))?;
     let record = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: action.to_owned(),
         operation: operation.unwrap_or_default().to_owned(),
         resource: Some(resource.to_owned()),

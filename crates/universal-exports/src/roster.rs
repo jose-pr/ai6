@@ -282,7 +282,7 @@ async fn audit(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let record = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(resource.to_owned()),

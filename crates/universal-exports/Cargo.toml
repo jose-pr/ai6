@@ -29,6 +29,11 @@ name = "access"
 path = "tests/access.rs"
 required-features = ["cli"]
 
+[[test]]
+name = "keys"
+path = "tests/keys.rs"
+required-features = ["cli"]
+
 [dependencies]
 ai6 = { path = "../ai6" }
 coqui-access-kit = { workspace = true, optional = true }

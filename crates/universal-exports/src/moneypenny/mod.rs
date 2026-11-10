@@ -1993,7 +1993,7 @@ async fn audit(
         .ok_or("this gateway keeps no audit log, so it ran nothing")?;
     let record = ai6::AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: action.to_owned(),
         operation,
         resource,

@@ -531,7 +531,7 @@ async fn audit_clearance(
     let registry = registry_of(gateway)?;
     let record = ai6::AuditRecord {
         id: format!("clearance-{}", uuid::Uuid::new_v4().simple()),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(M_RESOURCE.to_owned()),

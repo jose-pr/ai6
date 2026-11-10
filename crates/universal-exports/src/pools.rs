@@ -218,7 +218,7 @@ pub(crate) async fn clear_limit(
     .map_err(|_| ApiError::internal())??;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: "pool.limit.clear".to_owned(),
         operation: operation.to_string(),
         resource: None,

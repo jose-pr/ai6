@@ -99,7 +99,7 @@ async fn record(
 ) -> Result<(), ApiError> {
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: format!("mission.brief.{action}"),
         operation: operation.to_string(),
         resource: None,
@@ -305,7 +305,7 @@ pub(crate) async fn withdraw_queued(
         .unwrap_or_else(|| format!("withdrawn by {}", person.id));
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: "mission.withdraw".to_owned(),
         operation: operation.to_string(),
         resource: None,

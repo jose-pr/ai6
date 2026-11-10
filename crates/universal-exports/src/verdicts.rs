@@ -89,7 +89,7 @@ pub(crate) async fn give(
     let verdict = MissionVerdict::new(word, person.id.clone(), at, request.note);
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: "mission.verdict".to_owned(),
         operation: operation.to_string(),
         resource: Some(format!("mission:{uid}")),
@@ -241,7 +241,7 @@ pub(crate) async fn probe(
     let at = unix_timestamp()?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: "mission.probe".to_owned(),
         operation: operation.to_string(),
         resource: Some(format!("mission:{uid}")),

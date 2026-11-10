@@ -255,7 +255,7 @@ pub(crate) async fn overrule(
     .map_err(registry_error)?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: "mission.review.overrule".to_owned(),
         operation: operation.to_string(),
         resource: None,

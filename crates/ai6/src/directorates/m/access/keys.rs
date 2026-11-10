@@ -7,6 +7,7 @@
 
 use core::fmt;
 use core::str::FromStr;
+use std::sync::Arc;
 
 use coqui_access::{
     AuthorizationDecision, AuthorizationRequest, Authorizer, Person,
@@ -140,18 +141,18 @@ pub fn permits(request: &AuthorizationRequest) -> bool {
 
 /// An authorizer that lets a request through only when `inner` allows it and the key it was
 /// made with, if any, covers it.
-pub struct KeyNarrowed<A: ?Sized> {
-    inner: A,
+pub struct KeyNarrowed {
+    inner: Arc<dyn Authorizer>,
 }
 
-impl<A> KeyNarrowed<A> {
+impl KeyNarrowed {
     /// Narrows `inner`.
-    pub fn new(inner: A) -> Self {
+    pub fn new(inner: Arc<dyn Authorizer>) -> Self {
         Self { inner }
     }
 }
 
-impl<A: Authorizer> Authorizer for KeyNarrowed<A> {
+impl Authorizer for KeyNarrowed {
     fn authorize(
         &self,
         request: AuthorizationRequest,

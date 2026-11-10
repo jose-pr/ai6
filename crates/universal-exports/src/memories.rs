@@ -244,7 +244,7 @@ impl MemoryCaller for PersonCaller {
         self.registry
             .record_audit(&ai6::AuditRecord {
                 id: Uuid::new_v4().to_string(),
-                actor: self.person.id.clone(),
+                actor: crate::actor_of(&self.person),
                 action: action.to_owned(),
                 operation,
                 resource,
@@ -309,7 +309,7 @@ pub(crate) async fn caller_of(
         })?;
         let record = ai6::AuditRecord {
             id: Uuid::new_v4().to_string(),
-            actor: person.id.clone(),
+            actor: crate::actor_of(&person),
             action: AUDIT_READ.to_owned(),
             operation: String::new(),
             resource: Some(PERSON_RESOURCE.to_owned()),

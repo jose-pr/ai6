@@ -13,6 +13,7 @@ mod follow_up_tests;
 mod green_ink;
 mod held;
 mod issues;
+mod keys;
 pub mod liaison;
 mod login_limit;
 mod memories;
@@ -83,6 +84,7 @@ use controls::ControlBook;
 pub use controls::ControlStatus;
 pub use held::{HeldBriefDecision, HeldBriefEntry};
 pub use issues::{EntryView, IssueView, IssueWrite, MissionIssues, QuestionView, ReplyCounts};
+pub use keys::KeyProvider;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
@@ -142,7 +144,10 @@ pub struct GatewayLimits {
 /// User identity providers used to authenticate and authorize Universal Exports requests.
 #[derive(Clone)]
 pub struct AccessProviders {
-    authenticator: Option<Arc<dyn Authenticator>>,
+    /// The people's sign-in providers, in the order they are asked a name and a password.
+    authenticators: Vec<Arc<dyn Authenticator>>,
+    /// The key provider, which answers bearer keys and nothing else.
+    keys: Option<KeyProvider>,
     directory: Arc<dyn Directory>,
     authorizer: Arc<dyn Authorizer>,
     proxy_identity: Option<ProxyIdentity>,
@@ -166,7 +171,7 @@ pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
 impl AccessProviders {
     /// The authorizer as configured, without compartments.
     fn authorizer(&self) -> Arc<dyn Authorizer> {
-        self.authorizer.clone()
+        Arc::new(ai6::KeyNarrowed::new(self.authorizer.clone()))
     }
 
     /// Combines the configured authentication, identity and authorization providers.
@@ -176,7 +181,38 @@ impl AccessProviders {
         authorizer: Arc<dyn Authorizer>,
     ) -> Self {
         Self {
-            authenticator: Some(authenticator),
+            authenticators: vec![authenticator],
+            keys: None,
+            directory,
+            authorizer,
+            proxy_identity: None,
+            page_authenticator: None,
+        }
+    }
+
+    /// Adds a sign-in provider for people, asked after those already added: a name and a
+    /// password go to each in turn until one claims them. The directory stays the one given to
+    /// [`new`](Self::new).
+    #[must_use]
+    pub fn with_authenticator(mut self, authenticator: Arc<dyn Authenticator>) -> Self {
+        self.authenticators.push(authenticator);
+        self
+    }
+
+    /// Takes bearer keys from `keys`. A key is presented as the bearer of a request, never as a
+    /// password: the sign-in routes do not ask this provider.
+    #[must_use]
+    pub fn with_keys(mut self, keys: KeyProvider) -> Self {
+        self.keys = Some(keys);
+        self
+    }
+
+    /// Access for bearer keys alone: nobody signs in with a password. Add the key provider with
+    /// [`with_keys`](Self::with_keys).
+    pub fn keys_only(directory: Arc<dyn Directory>, authorizer: Arc<dyn Authorizer>) -> Self {
+        Self {
+            authenticators: Vec::new(),
+            keys: None,
             directory,
             authorizer,
             proxy_identity: None,
@@ -197,7 +233,8 @@ impl AccessProviders {
         lookup_by: impl Into<String>,
     ) -> Self {
         Self {
-            authenticator: None,
+            authenticators: Vec::new(),
+            keys: None,
             directory,
             authorizer,
             proxy_identity: Some(ProxyIdentity {
@@ -1773,6 +1810,8 @@ impl Gateway {
                 axum::routing::put(compartments::put_read_in)
                     .delete(compartments::remove_read_in),
             )
+            .route("/v1/user/keys", get(keys::list).post(keys::create))
+            .route("/v1/user/keys/{id}", axum::routing::delete(keys::revoke))
             .route("/v1/user/accounts", get(accounts::list))
             .route("/v1/user/models", get(models::list))
             .route(
@@ -2602,7 +2641,7 @@ async fn create_with_issue(
     .await?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: "mission.create.requested".to_owned(),
         operation: operation_id.to_string(),
         resource: None,
@@ -2942,7 +2981,7 @@ async fn record_proposal_audit(
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let entry = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: action.to_owned(),
         operation: operation_id.to_string(),
         resource: None,
@@ -3098,7 +3137,7 @@ async fn rename_user_mission(
     let at = unix_timestamp()?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: "mission.rename".to_owned(),
         operation: operation_id.to_string(),
         resource: Some(format!("mission:{}", renamed.mission_id)),
@@ -3299,14 +3338,16 @@ struct AuthMethods {
 async fn auth_methods(State(gateway): State<Gateway>) -> Result<Json<AuthMethods>, ApiError> {
     let mut methods = Vec::new();
     if let Some(providers) = &gateway.access {
-        if let Some(authenticator) = providers.authenticator.clone() {
+        for authenticator in providers.authenticators.clone() {
             let described = tokio::task::spawn_blocking(move || authenticator.describe())
                 .await
                 .map_err(|_| ApiError::internal())?;
             // An authenticator that says nothing, or cannot, is still asked for a name and a
             // secret by `login`.
             let takes = described.ok().and_then(|description| description.takes);
-            if takes.as_deref() != Some(ai6::directorates::m::access::takes::REQUEST) {
+            if takes.as_deref() != Some(ai6::directorates::m::access::takes::REQUEST)
+                && !methods.contains(&"password")
+            {
                 methods.push("password");
             }
         }
@@ -3587,10 +3628,10 @@ async fn authenticate_password(
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     request: LoginRequest,
 ) -> Result<Person, ApiError> {
-    let authenticator = providers
-        .authenticator
-        .clone()
-        .ok_or_else(ApiError::unauthorized)?;
+    if providers.authenticators.is_empty() {
+        return Err(ApiError::unauthorized());
+    }
+    let authenticators = providers.authenticators.clone();
     let source = gateway.login_guard.source(
         headers,
         connection.map(|Extension(ConnectInfo(address))| address),
@@ -3605,10 +3646,20 @@ async fn authenticate_password(
         secure: Some(true),
         ..Attempt::default()
     };
-    let verdict = tokio::task::spawn_blocking(move || authenticator.authenticate(attempt))
-        .await
-        .map_err(|_| ApiError::internal())?
-        .map_err(|_| ApiError::internal())?;
+    // Each provider answers for what it claims: `Unknown` is "not mine", asked of the next, and
+    // `Invalid` is "mine, and refused".
+    let verdict = tokio::task::spawn_blocking(move || {
+        for authenticator in authenticators {
+            match authenticator.authenticate(attempt.clone())? {
+                Verdict::Unknown => {}
+                decided => return Ok(decided),
+            }
+        }
+        Ok(Verdict::Unknown)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_: ai6::guatiao::library::ProviderError| ApiError::internal())?;
     let Verdict::Valid(lookup) = verdict else {
         return Err(ApiError::unauthorized());
     };
@@ -3749,7 +3800,36 @@ async fn store_session_cookie(
 }
 
 async fn resolve_user(gateway: &Gateway, token: &str) -> Result<Person, ApiError> {
-    resolve_digest(gateway, access_token_digest(token)).await
+    match resolve_digest(gateway, access_token_digest(token)).await {
+        // Not a sign-in's token: a key provider may claim it as a key.
+        Err(error)
+            if error.status == StatusCode::UNAUTHORIZED
+                && gateway.access.as_ref().is_some_and(|access| access.keys.is_some()) =>
+        {
+            keys::resolve(gateway, token)
+                .await?
+                .ok_or_else(ApiError::unauthorized)
+        }
+        other => other,
+    }
+}
+
+/// [`resolve_user`] for what a key may not do for its person: it needs the person's own
+/// sign-in, not a key narrowed to some of their grants.
+async fn resolve_signed_in(gateway: &Gateway, token: &str) -> Result<Person, ApiError> {
+    let person = resolve_user(gateway, token).await?;
+    if ai6::is_key_narrowed(&person) || ai6::key_id(&person).is_some() {
+        return Err(ApiError::forbidden());
+    }
+    Ok(person)
+}
+
+/// Who an audit record names as acting: the person, and the key when they acted through one.
+pub(crate) fn actor_of(person: &Person) -> String {
+    match ai6::key_id(person) {
+        Some(key) => format!("{} via key {key}", person.id),
+        None => person.id.clone(),
+    }
 }
 
 /// The person whose access token, or live [`StandIn`], has the digest `digest`.
@@ -3784,7 +3864,7 @@ async fn person_by_id(gateway: &Gateway, person_id: String) -> Result<Person, Ap
         .ok_or_else(ApiError::unavailable)?
         .directory
         .clone();
-    tokio::task::spawn_blocking(move || {
+    let mut person = tokio::task::spawn_blocking(move || {
         directory.lookup(Lookup {
             by: "id".to_owned(),
             value: person_id,
@@ -3793,7 +3873,10 @@ async fn person_by_id(gateway: &Gateway, person_id: String) -> Result<Person, Ap
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(|_| ApiError::internal())?
-    .ok_or_else(ApiError::unauthorized)
+    .ok_or_else(ApiError::unauthorized)?;
+    // Only a key's own sign-in narrows a person; a directory's attribute of that name does not.
+    ai6::clear_key(&mut person);
+    Ok(person)
 }
 
 async fn issue_user_attach_token(
@@ -4283,7 +4366,7 @@ async fn put_user_station_settings(
     .map_err(|_| ApiError::bad_request())?;
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: "station.settings.update".to_owned(),
         operation: String::new(),
         resource: Some(format!("station:{station_id}")),
@@ -4403,7 +4486,7 @@ async fn put_user_agent_role(
     let operation = operation_id.to_string();
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: "agent.role.update".to_owned(),
         operation: operation.clone(),
         resource: None,
@@ -4452,7 +4535,7 @@ async fn delete_user_agent_role(
     }
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: "agent.role.remove".to_owned(),
         operation: operation_id.to_string(),
         resource: None,
@@ -4537,7 +4620,7 @@ async fn quarantine_user_agent(
     );
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: "agent.quarantine".to_owned(),
         operation: operation_id.to_string(),
         resource: None,
@@ -4580,7 +4663,7 @@ async fn release_user_quarantine(
     }
     let audit = AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id,
+        actor: crate::actor_of(&person),
         action: "agent.quarantine.release".to_owned(),
         operation: operation_id.to_string(),
         resource: None,
@@ -6015,7 +6098,7 @@ mod tests {
             "name",
         );
 
-        assert!(access.authenticator.is_none());
+        assert!(access.authenticators.is_empty());
         assert_eq!(
             access
                 .proxy_identity

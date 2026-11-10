@@ -14,6 +14,7 @@ use coqui_access_kit::CacheOptions;
 use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{
+    KeyProvider,
     AccessProviders, AssistantConfig, EitherAuthorizer, Gateway, GatewayConfig, GatewayLimits,
     LiveAccess, LoginLimits, ViewLimits,
 };
@@ -595,7 +596,7 @@ fn access_cache(record: &UnexRecord) -> Result<CacheOptions, String> {
 
 /// Whether the `unex` record asks for user sign-in and access.
 fn user_access_configured(record: &UnexRecord) -> bool {
-    record.authenticator.is_some()
+    !record.authenticators.is_empty()
         || record.proxy_user_header.is_some()
         || record.directory.is_some()
         || record.authorizer.is_some()
@@ -640,19 +641,9 @@ fn configured_access(
             })
             .transpose()
     };
-    let authenticator_config = config(&record.authenticator_config)?;
     let directory_config = config(&record.directory_config)?;
     let authorizer_config = config(&record.authorizer_config)?;
-    let authenticator: Option<Arc<dyn Authenticator>> = record
-        .authenticator
-        .as_deref()
-        .map(|authenticator_id| {
-            plugins
-                .authenticator(authenticator_id, authenticator_config.as_ref())
-                .map(Arc::from)
-                .map_err(|error| error.to_string())
-        })
-        .transpose()?;
+    let (people, keys, first_accounts) = sign_in_providers(&plugins, record, &config)?;
     let cache = access_cache(record)?;
     let directory: Arc<dyn Directory> = plugins
         .cached_directory(directory_id, directory_config.as_ref(), cache)
@@ -666,37 +657,28 @@ fn configured_access(
         }),
         None => live.clone(),
     };
-    let accounts_id = record.accounts.as_deref().or_else(|| {
-        let offered = plugins.account_managers();
-        record
-            .authenticator
-            .as_deref()
-            .filter(|id| offered.iter().any(|info| info.id == *id))
-    });
-    let accounts: Option<Arc<dyn ai6::Accounts>> = accounts_id
-        .map(|id| {
-            let wanted = if record.accounts.is_some() {
-                config(&record.accounts_config)?
-            } else {
-                authenticator_config.clone()
-            };
-            plugins
-                .accounts(id, wanted.as_ref())
-                .map(Arc::from)
-                .map_err(|error| error.to_string())
-        })
-        .transpose()?;
+    let accounts: Option<Arc<dyn ai6::Accounts>> = match record.accounts.as_deref() {
+        Some(id) => {
+            let wanted = config(&record.accounts_config)?;
+            Some(
+                plugins
+                    .accounts(id, wanted.as_ref())
+                    .map(Arc::from)
+                    .map_err(|error| error.to_string())?,
+            )
+        }
+        None => first_accounts,
+    };
     let header = |header: &str| {
         axum::http::HeaderName::from_bytes(header.as_bytes())
             .map_err(|_| "unex.proxy_user_header is not a valid HTTP header name".to_owned())
     };
-    let access = match (authenticator, record.proxy_user_header.as_deref()) {
-        (Some(authenticator), Some(name)) => {
-            AccessProviders::new(authenticator, directory, authorizer)
-                .with_proxy_identity(header(name)?, record.proxy_lookup_by.clone())
-                .with_proxy_secret(proxy_secret(settings)?, proxy_secret_min(settings))?
-        }
-        (Some(authenticator), None) => AccessProviders::new(authenticator, directory, authorizer),
+    let mut people = people.into_iter();
+    let access = match (people.next(), record.proxy_user_header.as_deref()) {
+        (Some(first), Some(name)) => AccessProviders::new(first, directory, authorizer)
+            .with_proxy_identity(header(name)?, record.proxy_lookup_by.clone())
+            .with_proxy_secret(proxy_secret(settings)?, proxy_secret_min(settings))?,
+        (Some(first), None) => AccessProviders::new(first, directory, authorizer),
         (None, Some(name)) => AccessProviders::from_reverse_proxy(
             directory,
             authorizer,
@@ -704,9 +686,15 @@ fn configured_access(
             record.proxy_lookup_by.clone(),
         )
         .with_proxy_secret(proxy_secret(settings)?, proxy_secret_min(settings))?,
+        (None, None) if keys.is_some() => AccessProviders::keys_only(directory, authorizer),
         (None, None) => {
-            return Err("configure unex.authenticator or unex.proxy_user_header".to_owned());
+            return Err("configure unex.authenticators or unex.proxy_user_header".to_owned());
         }
+    };
+    let access = people.fold(access, AccessProviders::with_authenticator);
+    let access = match keys {
+        Some(keys) => access.with_keys(keys),
+        None => access,
     };
     let access = match record.page_authenticator.as_deref() {
         Some(id) => {
@@ -719,6 +707,74 @@ fn configured_access(
         None => access,
     };
     Ok(Some((access, accounts)))
+}
+
+/// What the `unex` record's sign-in providers come to: the people's, in order, the key
+/// provider, and the accounts provider of the first that offers accounts.
+type SignIn = (
+    Vec<Arc<dyn Authenticator>>,
+    Option<KeyProvider>,
+    Option<Arc<dyn ai6::Accounts>>,
+);
+
+/// Builds each of `record.authenticators`, its configuration checked against the provider's own
+/// schema. A provider that takes keys is the key provider, and answers only bearer keys; the
+/// rest answer a name and a password.
+fn sign_in_providers(
+    plugins: &ai6::station::plugins::Plugins,
+    record: &UnexRecord,
+    config: &dyn Fn(&Option<ai6::ProviderConfig>) -> Result<Option<Value>, String>,
+) -> Result<SignIn, String> {
+    let offered = plugins.account_managers();
+    let mut people: Vec<Arc<dyn Authenticator>> = Vec::new();
+    let mut keys: Option<KeyProvider> = None;
+    let mut accounts: Option<Arc<dyn ai6::Accounts>> = None;
+    for (index, entry) in record.authenticators.iter().enumerate() {
+        let id = entry.provider.as_str();
+        let at = |reason: String| format!("unex.authenticators[{index}] ({id}): {reason}");
+        let value = config(&entry.config).map_err(&at)?;
+        if let Some(value) = &value {
+            plugins.check_settings(id, value).map_err(&at)?;
+        }
+        let authenticator: Arc<dyn Authenticator> = plugins
+            .authenticator(id, value.as_ref())
+            .map(Arc::from)
+            .map_err(|error| at(error.to_string()))?;
+        let takes = authenticator
+            .describe()
+            .ok()
+            .and_then(|description| description.takes);
+        let kept = if offered.iter().any(|info| info.id == id) {
+            Some(
+                plugins
+                    .accounts(id, value.as_ref())
+                    .map(Arc::<dyn ai6::Accounts>::from)
+                    .map_err(|error| at(error.to_string()))?,
+            )
+        } else {
+            None
+        };
+        if takes.as_deref() == Some(ai6::directorates::m::access::takes::KEY) {
+            if keys.is_some() {
+                return Err(at("only one key provider may be listed".to_owned()));
+            }
+            let directory: Arc<dyn Directory> = plugins
+                .directory(id, value.as_ref())
+                .map(Arc::from)
+                .map_err(|error| at(error.to_string()))?;
+            let kept = kept.ok_or_else(|| at("a key provider must offer accounts".to_owned()))?;
+            accounts = accounts.or_else(|| Some(kept.clone()));
+            keys = Some(
+                KeyProvider::new(authenticator, directory, kept)
+                    .with_lifetime(record.key_ttl)
+                    .with_use_precision(record.access_cache_ttl),
+            );
+        } else {
+            accounts = accounts.or(kept);
+            people.push(authenticator);
+        }
+    }
+    Ok((people, keys, accounts))
 }
 
 /// `[unex] proxy_secret_min_bytes`: the fewest bytes the proxy secret may hold.

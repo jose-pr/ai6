@@ -79,7 +79,7 @@ async fn audit(
         .ok_or_else(|| AdminError::Api(ApiError::unavailable()))?;
     let record = ai6::AuditRecord {
         id: Uuid::new_v4().to_string(),
-        actor: person.id.clone(),
+        actor: crate::actor_of(&person),
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(CONFIG_ACCOUNTS.to_owned()),
@@ -117,6 +117,8 @@ pub(crate) async fn list(
         listed(accounts)
             .await?
             .into_iter()
+            // A personal key's account is managed as a key, by its maker.
+            .filter(|info| !info.name.starts_with(crate::keys::PERSONAL_PREFIX))
             .map(AccountView::from)
             .collect(),
     ))
@@ -351,6 +353,12 @@ async fn changed_account(
 }
 
 fn checked_name(gateway: &Gateway, name: &str) -> Result<(), AdminError> {
+    if name.starts_with(crate::keys::PERSONAL_PREFIX) {
+        return Err(AdminError::Refused(format!(
+            "an account name may not start with {:?}, which is a personal key's",
+            crate::keys::PERSONAL_PREFIX
+        )));
+    }
     if name.trim().is_empty()
         || !gateway
             .config
