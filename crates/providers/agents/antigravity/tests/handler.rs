@@ -225,7 +225,8 @@ struct FakeSession {
 
 impl TerminalSession for FakeSession {
     fn pid(&self) -> i64 {
-        1
+        // The process whose loopback ports a quota read looks at: this test's own.
+        i64::from(std::process::id())
     }
 
     fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
@@ -1250,6 +1251,95 @@ fn a_model_calls_usage_is_counted_from_its_step_as_agy_reports_it() {
         events.last().unwrap().report.is_none(),
         "the result's total runs across launches, so it is not counted again"
     );
+}
+
+/// Serves agy's `GetUserStatus` on loopback, as agy's language server does, once per connection.
+fn stand_in_quota_server(remaining: f64) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let body = json!({"userStatus": {"cascadeModelConfigData": {"clientModelConfigs": [
+        {"label": "Gemini Stand-in", "modelId": "gemini-stand-in",
+         "quotaInfo": {"remainingFraction": remaining, "resetTime": "2099-01-01T00:00:00Z"}}
+    ]}}})
+    .to_string();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut seen = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        while !seen.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut chunk).unwrap();
+            if read == 0 {
+                break;
+            }
+            seen.extend_from_slice(&chunk[..read]);
+        }
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        // The request's body is read before the connection closes, or the close resets it.
+        stream
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        while stream.read(&mut chunk).is_ok_and(|read| read > 0) {}
+    });
+    (address, server)
+}
+
+#[test]
+fn the_quota_of_a_running_agy_is_read_with_no_turn_and_a_session_of_another_home_is_not_asked() {
+    use ai6::UsageSource;
+    let (_root, wd) = checkout();
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    let home = "/ai6-usage-test-home".to_owned();
+    let mut request = start_request(&wd, "field");
+    request.environment.insert("HOME".to_owned(), home.clone());
+    let session = handler("")
+        .start(request, fake.clone().into_object())
+        .unwrap();
+
+    let support = handler("").usage_support().unwrap();
+    assert_eq!(support.sources, [UsageSource::Reported]);
+    assert!(!support.needs_turn, "agy's quota is read with no turn");
+
+    let (_address, server) = stand_in_quota_server(0.25);
+    let environment = BTreeMap::from([("HOME".to_owned(), home)]);
+    let report = handler("").usage(environment).unwrap();
+    server.join().unwrap();
+    assert!(report.supported);
+    let bucket = report
+        .buckets
+        .iter()
+        .find(|bucket| bucket.id == "agy:gemini-stand-in")
+        .unwrap_or_else(|| panic!("a bucket for the model: {:?}", report.buckets));
+    assert_eq!(ai6::UsageReport::fraction_permille(bucket), Some(750));
+    assert!(
+        matches!(
+            bucket.refill,
+            ai6::Refill::FixedWindow {
+                resets_at: Some(4_070_908_800),
+                ..
+            }
+        ),
+        "{:?}",
+        bucket.refill
+    );
+
+    // Another account has no agy of its own running, so the read goes to a private `agy acp`,
+    // which is not there.
+    let elsewhere = BTreeMap::from([("HOME".to_owned(), "/ai6-usage-other-home".to_owned())]);
+    let missing = handler("executable = \"ai6-no-such-agy\"\n")
+        .usage(elsewhere)
+        .unwrap_err();
+    assert!(
+        missing.to_string().contains("could not be started"),
+        "{missing}"
+    );
+    session.close().unwrap();
 }
 
 #[test]

@@ -7,6 +7,7 @@ ai6::guatiao::providers!(AntigravityHandler);
 
 mod files;
 mod session;
+mod usage;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,6 +23,7 @@ use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_P
 use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
+use ai6::{UsageReport, UsageSource, UsageSupport};
 use serde_json::{Value, json};
 
 use files::SessionFiles;
@@ -65,6 +67,11 @@ pub struct AntigravityConfig {
     /// them off, and 0 leaves its own, 300 s to connect and 180 s for a call. Default 0.
     #[map(default = 0)]
     pub mcp_timeout_secs: i64,
+    /// Milliseconds a read of the account's quota with no Session running may take, counting the
+    /// private `agy acp` it starts: agy serves the quota a few seconds after a session opens.
+    /// Default 20000.
+    #[map(default = 20_000)]
+    pub usage_wait_ms: u64,
     /// agy permission rules (`command(git)`, `read_url(*)`) added to the allow list, or the names
     /// of tools added to what a Mission's Session is offered (`search_web`). Answer-only and
     /// assistant Sessions ignore them.
@@ -102,6 +109,7 @@ impl Default for AntigravityConfig {
             tail_line_bytes: 512,
             close_wait_ms: 2_000,
             exit_wait_ms: 1_000,
+            usage_wait_ms: 20_000,
             context_file_bytes: 1024 * 1024,
             gate_timeout_secs: 60,
             mcp_timeout_secs: 0,
@@ -321,6 +329,30 @@ impl AgentHandler for AntigravityHandler {
 
     fn program(&self) -> Result<Option<String>, ProviderError> {
         Ok(Some(self.config.executable.clone()))
+    }
+
+    /// agy reports the account's quota as figures it serves itself, with no turn. A turn's own
+    /// events carry the session's tokens.
+    fn usage_support(&self) -> Result<UsageSupport, ProviderError> {
+        Ok(UsageSupport::new(vec![UsageSource::Reported], true))
+    }
+
+    /// The quota of the account behind `environment`: from the agy of a running Session under the
+    /// same home when it serves it, else from a private `agy acp` with an empty session, started
+    /// under that home and ended after the read. No model turn is spent. A signed-out agy, or one
+    /// that serves no quota within `usage_wait_ms`, is an error.
+    fn usage(&self, environment: BTreeMap<String, String>) -> Result<UsageReport, ProviderError> {
+        let home = usage::home_of(&environment);
+        if let Some(buckets) = usage::through_session(&home) {
+            return Ok(usage::report_of(buckets));
+        }
+        usage::through_private_agent(
+            &self.config.executable,
+            &environment,
+            std::time::Duration::from_millis(self.config.usage_wait_ms),
+        )
+        .map(usage::report_of)
+        .map_err(|reason| refuse(Status::GUATIAO_ERR_INTERNAL, &reason))
     }
 
     /// agy keeps each conversation's transcript under its home directory.

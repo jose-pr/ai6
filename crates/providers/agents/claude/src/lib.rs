@@ -30,7 +30,7 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
-    LimitHit, Refill, Spend, UsageReport, infer_limit,
+    LimitHit, Refill, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -215,6 +215,13 @@ impl TryFrom<ClaudeConfig> for ClaudeHandler {
 }
 
 impl AgentHandler for ClaudeHandler {
+    /// Claude Code states its usage only in a turn's events: a `result` carries the process's
+    /// running spend and a `rate_limit_event` a window. Nothing reads it between turns, so a
+    /// Station keeps a timed retry for a limited account instead of polling.
+    fn usage_support(&self) -> Result<UsageSupport, ProviderError> {
+        Ok(UsageSupport::new(vec![UsageSource::Reported], true).needs_turn(true))
+    }
+
     /// Claude Code with `-p` and stream-json reads JSON lines from standard input, which must not
     /// be a terminal: on one it exits at once.
     fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
@@ -5854,6 +5861,16 @@ denied_tools = [\"Bash(rm *)\"]
         let event = decode_event(&value, b"{}".to_vec()).unwrap();
         assert_eq!(event.kind, LIMIT_EVENT);
         assert_eq!(event.report.unwrap().spend.unwrap().output, 345);
+    }
+
+    #[test]
+    fn claude_code_learns_its_usage_only_from_a_turn() {
+        let handler = ClaudeHandler::try_from(ClaudeConfig::default()).unwrap();
+        let support = handler.usage_support().unwrap();
+        assert!(support.needs_turn, "a Station never asks it to read one");
+        assert!(!support.needs_session);
+        assert!(support.spend);
+        assert_eq!(support.sources, [UsageSource::Reported]);
     }
 
     #[test]

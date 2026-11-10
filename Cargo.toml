@@ -114,6 +114,8 @@ coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "
 coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398" }
 # The Antigravity quota reader (`antigravity`) and the usage tracker that merges readings; same revision.
 coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398", default-features = false }
+# Codex's app-server driver: reads an account's rate limits with no thread and no turn.
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "981a64ad05a4039f674d9ca204bf4aaeb6db7398" }
 # A2A 1.0 over a proven coqui-agentic-peer link, for Liaison. The three move together: coqui-a2a
 # names the link crate and its channel crate at these revisions.
 coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "7b7adcd1e5638764e0e38b374e20b6dc9a04eaae" }

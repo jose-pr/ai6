@@ -16,6 +16,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 ai6 = { path = "../../../ai6", default-features = false, features = ["gate"] }
 ai6-process-tree = { path = "../../../process-tree" }
+coqui-acp-codex.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 

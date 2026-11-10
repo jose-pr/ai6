@@ -30,6 +30,7 @@ record.
 | `tail_line_bytes` | 512 | Bytes of each of those lines |
 | `close_wait_ms` | 2000 | How long `close` waits for agy to have exited |
 | `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
+| `usage_wait_ms` | 20000 | How long a read of the account's quota may take, counting the private `agy acp` it starts when no Session is running |
 | `context_file_bytes` | 1048576 | Bytes of an assistant's `context_file`; a larger one is refused |
 | `gate_timeout_secs` | 60 | agy's timeout for the green ink hook; past it the command does not run |
 | `mcp_timeout_secs` | 0 | agy's `timeoutSeconds` for AI6's MCP servers: positive replaces its limits, negative turns them off, 0 leaves 300 s to connect and 180 s a call (its documentation) |
@@ -59,6 +60,16 @@ Answer-only and assistant Sessions ignore `allowed_tools` and `denied_tools`.
 `allowed_tools adds RULE to what its desk Sessions may call` for `run_command` or a `command(…)`
 rule, whatever the Agent's clearance, since it can come to work at `desk`; nothing for a default
 tool; otherwise `… its field Sessions …`.
+
+## Usage
+
+`usage_support()` reports `reported` figures and a session's spend, readable with no turn. `usage(environment)`
+reads the account's quota without spending one: first from the agy of a running Session under the same `HOME` (or
+`USERPROFILE`), by asking the loopback ports of that process and its descendants (`coqui_acp_harness::antigravity::
+AgyQuota`); when none serves it, from a private `agy acp` with an empty session, started with `environment`, read
+once its ports appear and ended. One bucket per reset group, id `agy:<first model id>`, remaining permille. A
+signed-out agy, or one that serves nothing within `usage_wait_ms`, is an error. Each model call's tokens are summed
+into the Session's running spend.
 
 ## How a launch is made
 

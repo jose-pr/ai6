@@ -497,6 +497,12 @@ impl AcpHandler {
 }
 
 impl AgentHandler for AcpHandler {
+    /// An ACP agent's usage is what its failed turns say: a refusal read as a limit is the only
+    /// figure, and nothing reads it between turns.
+    fn usage_support(&self) -> Result<ai6::UsageSupport, ProviderError> {
+        Ok(ai6::UsageSupport::new(vec![ai6::UsageSource::Inferred], false).needs_turn(true))
+    }
+
     /// An ACP agent speaks JSON-RPC on plain pipes.
     fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
         Ok(HarnessStdio::Json)
@@ -602,6 +608,13 @@ mod route_tests {
         let table: toml::Table = toml::from_str(settings).unwrap();
         let value = ai6::provider_settings::table_value(&table).unwrap();
         AcpHandler::try_from(AcpSettings::from_value(&value).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn an_acp_agents_usage_is_what_its_failed_turns_say() {
+        let support = handler("command = \"x\"\n").usage_support().unwrap();
+        assert_eq!(support.sources, [ai6::UsageSource::Inferred]);
+        assert!(support.needs_turn, "a Station never asks it to read one");
     }
 
     #[test]

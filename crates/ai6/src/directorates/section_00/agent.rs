@@ -2,6 +2,7 @@
 //! events it reports, are `coqui_acp_provider`'s agent session kind, shared with every host of
 //! agent providers.
 
+use coqui_acp_api::{UsageReport, UsageSupport};
 use coqui_acp_provider::AgentSession;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
@@ -520,6 +521,23 @@ pub trait AgentHandler: Send + Sync {
     /// default: it cannot.
     fn image_input(&self) -> Result<Option<String>, ProviderError> {
         Ok(Some("this handler gives its harness no image".to_owned()))
+    }
+
+    /// What the harness can report of its account's usage, known before anything starts. A
+    /// handler whose `needs_turn` is set learns its usage only from a turn's events, and the
+    /// Station never asks it to [`read`](Self::usage) one; `needs_session` is for one that
+    /// learns it once a session is open. The default: it reports nothing.
+    fn usage_support(&self) -> Result<UsageSupport, ProviderError> {
+        Ok(UsageSupport::none())
+    }
+
+    /// The usage of the account behind `environment` (the variables a Session would start with),
+    /// read with no model turn. The report holds the account's buckets, each with the models it
+    /// covers, how much is used and when it refills; a handler never puts a credential from
+    /// `environment` in it. The default: this handler reports no usage.
+    fn usage(&self, environment: BTreeMap<String, String>) -> Result<UsageReport, ProviderError> {
+        let _ = environment;
+        Ok(UsageReport::unsupported("this handler reads no usage"))
     }
 }
 

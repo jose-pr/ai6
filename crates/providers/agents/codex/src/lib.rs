@@ -32,8 +32,10 @@ use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, Refill,
-    Spend, UsageReport, infer_limit,
+    Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
+use coqui_acp_codex::harness::PlainSpawn;
+use coqui_acp_codex::{CodexLaunch, CodexSession as AppServer, CodexSettings};
 use serde_json::{Value, json};
 
 /// The models in the app server's answer to `model/list`; unknown when it has none. A model the
@@ -249,6 +251,37 @@ impl AgentHandler for CodexHandler {
             Ok(answer) => models_of(&answer),
             Err(reason) => ModelListing::unknown(reason),
         })
+    }
+
+    /// Codex reports each request's tokens and the account's rate-limit windows as a turn goes,
+    /// and its app server answers `account/rateLimits/read` with no turn, so a Station may poll it.
+    fn usage_support(&self) -> Result<UsageSupport, ProviderError> {
+        Ok(UsageSupport::new(vec![UsageSource::Reported], true))
+    }
+
+    /// Starts an app server with `environment`, reads the account's rate limits and ends it: no
+    /// thread is opened and no model turn is spent. A Codex that is not signed in with an account
+    /// that has allowances is an error, not an empty report.
+    fn usage(
+        &self,
+        environment: std::collections::BTreeMap<String, String>,
+    ) -> Result<UsageReport, ProviderError> {
+        let mut launch = CodexLaunch::new(std::env::temp_dir());
+        launch.executable = self.config.executable.clone().into();
+        launch.env = environment
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        launch.clear_env = true;
+        let mut settings = CodexSettings::new();
+        settings.initialize_timeout = self.config.millis(self.config.start_timeout_ms);
+        settings.request_timeout = self.config.millis(self.config.request_timeout_ms);
+        let buckets = AppServer::read_account_usage(&launch, &PlainSpawn, settings)
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, &error.to_string()))?;
+        let mut report = UsageReport::new();
+        report.sources = vec![UsageSource::Reported];
+        report.buckets = buckets;
+        Ok(report)
     }
 
     /// Asks Codex to run a command in the sandbox an assistant's scripts would get (`codex
@@ -2044,6 +2077,20 @@ mod tests {
         assert_eq!(found.format, RECORD_FORMAT);
         assert!(codex_record(&query("other")).is_none());
         assert!(codex_record(&query("../0195-thread")).is_none());
+    }
+
+    #[test]
+    fn codexs_usage_is_read_with_no_turn_and_a_codex_that_cannot_run_is_an_error_not_an_empty_report()
+     {
+        let config = CodexConfig {
+            executable: "ai6-no-such-codex".to_owned(),
+            ..CodexConfig::default()
+        };
+        let handler = CodexHandler::try_from(config).unwrap();
+        let support = handler.usage_support().unwrap();
+        assert!(!support.needs_turn && !support.needs_session);
+        assert_eq!(support.sources, [UsageSource::Reported]);
+        assert!(handler.usage(Default::default()).is_err());
     }
 
     #[test]

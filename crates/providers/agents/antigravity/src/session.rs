@@ -54,6 +54,8 @@ pub(crate) struct AntigravitySession {
     /// What the model calls of this process have used: agy reports each call, and its own total
     /// runs across every launch of the conversation.
     spent: Mutex<Spend>,
+    /// This agy in the list a read of the account's quota looks through.
+    live: Mutex<Option<crate::usage::Live>>,
     /// Messages waiting for the `init` line that says which conversation this is.
     held: Mutex<Vec<String>>,
     /// Whether an `init` line has been read from the running agy.
@@ -101,6 +103,7 @@ impl AntigravitySession {
         files: SessionFiles,
         respawn: Respawn,
     ) -> Self {
+        let live = crate::usage::Live::new(&respawn.environment, terminal.pid());
         Self {
             terminal: Mutex::new(Arc::new(terminal)),
             output: Mutex::new(lines(config.json_line_bytes, config.csi_bytes)),
@@ -109,6 +112,7 @@ impl AntigravitySession {
             restricted,
             limit_phrases,
             spent: Mutex::new(Spend::new("")),
+            live: Mutex::new(live),
             held: Mutex::new(Vec::new()),
             initialized: AtomicBool::new(false),
             pending: Mutex::new(VecDeque::new()),
@@ -179,6 +183,7 @@ impl AntigravitySession {
             &self.respawn.working_directory,
             &self.respawn.environment,
         )?;
+        *lock(&self.live)? = crate::usage::Live::new(&self.respawn.environment, terminal.pid());
         *lock(&self.terminal)? = Arc::new(terminal);
         *lock(&self.output)? = lines(self.json_line_bytes, self.csi_bytes);
         *lock(&self.expected_session_id)? = Some(id);
