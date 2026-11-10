@@ -8933,6 +8933,27 @@ pub fn ai6::provider_settings::settings_from_text<T: guatiao::value::convert::Fr
 pub fn ai6::provider_settings::settings_of<T: guatiao::value::convert::FromValue>(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<T, alloc::string::String>
 pub fn ai6::provider_settings::settings_value(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<guatiao::value::value::Value, alloc::string::String>
 pub fn ai6::provider_settings::table_value(&toml::table::Table) -> core::result::Result<guatiao::value::value::Value, alloc::string::String>
+pub mod ai6::providers
+pub struct ai6::providers::ProviderEntry
+pub ai6::providers::ProviderEntry::digest: alloc::string::String
+pub ai6::providers::ProviderEntry::form: core::option::Option<serde_json::value::Value>
+pub ai6::providers::ProviderEntry::id: alloc::string::String
+pub ai6::providers::ProviderEntry::kinds: alloc::vec::Vec<alloc::string::String>
+pub ai6::providers::ProviderEntry::library: core::option::Option<alloc::string::String>
+pub ai6::providers::ProviderEntry::name: alloc::string::String
+pub ai6::providers::ProviderEntry::schema: core::option::Option<serde_json::value::Value>
+pub ai6::providers::ProviderEntry::schema_omitted: bool
+pub ai6::providers::ProviderEntry::unavailable: core::option::Option<alloc::string::String>
+pub ai6::providers::ProviderEntry::version: alloc::string::String
+impl ai6::providers::ProviderEntry
+pub fn ai6::providers::ProviderEntry::serves(&self, &str) -> bool
+pub fn ai6::providers::ProviderEntry::without_schema(self) -> Self
+pub const ai6::providers::FLAT_SETTINGS_FORMAT: &str
+pub const ai6::providers::PROVIDER_FORMAT: &str
+pub const ai6::providers::SETTINGS_FORMAT: &str
+pub fn ai6::providers::check_provider_settings(&serde_json::value::Value, &serde_json::value::Value, &ai6::providers::Reports) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::providers::settings_of(&str) -> core::option::Option<(&str, core::option::Option<&str>)>
+pub type ai6::providers::Reports = [(alloc::string::String, alloc::vec::Vec<ai6::providers::ProviderEntry>)]
 pub mod ai6::settings
 pub mod ai6::settings::reference
 pub const ai6::settings::reference::DOCS: [&str; 6]
@@ -9137,6 +9158,7 @@ pub ai6::station::limits::SchedulerLimits::check_in: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::event_queue: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::intake_attempts: u32
 pub ai6::station::limits::SchedulerLimits::interval: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::provider_catalog_bytes: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::retry_backoff: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::retry_backoff_max: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::role_catalog_bytes: ai6::bounds::Limit
@@ -9286,6 +9308,7 @@ pub fn ai6::station::plugins::Plugins::authorizer(&self, &str, core::option::Opt
 pub fn ai6::station::plugins::Plugins::authorizers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
 pub fn ai6::station::plugins::Plugins::cached_authorizer(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Authorizer>>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::cached_directory(&self, &str, core::option::Option<&guatiao::value::value::Value>, coqui_access_kit::cache::CacheOptions) -> core::result::Result<alloc::sync::Arc<coqui_access_kit::cache::Cached<dyn coqui_access::kind::Directory>>, ai6::station::plugins::PluginBuildError>
+pub fn ai6::station::plugins::Plugins::catalog(&self) -> alloc::vec::Vec<ai6::providers::ProviderEntry>
 pub fn ai6::station::plugins::Plugins::check_settings(&self, &str, &guatiao::value::value::Value) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::station::plugins::Plugins::choose_terminal(&self, ai6::directorates::q::terminal::HarnessStdio, core::option::Option<&str>) -> core::result::Result<alloc::string::String, ai6::directorates::q::terminal::TerminalRefusal>
 pub fn ai6::station::plugins::Plugins::config_schema(&self, &str) -> core::option::Option<serde_json::value::Value>

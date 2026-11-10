@@ -11,6 +11,7 @@ impl guatiao::library::kind::parts::ProviderDecl for ai6_safehouse_copy::Copier
 pub const ai6_safehouse_copy::Copier::KINDS: &'static [&'static str]
 pub fn ai6_safehouse_copy::Copier::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
 pub struct ai6_safehouse_copy::CopyConfig
+pub ai6_safehouse_copy::CopyConfig::isolate: bool
 pub ai6_safehouse_copy::CopyConfig::name_chars: u64
 impl core::convert::TryFrom<ai6_safehouse_copy::CopyConfig> for ai6_safehouse_copy::Copier
 pub type ai6_safehouse_copy::Copier::Error = guatiao::library::kind::ProviderError

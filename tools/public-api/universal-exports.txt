@@ -300,6 +300,7 @@ pub fn universal_exports::Gateway::with_accounts(self, alloc::sync::Arc<dyn coqu
 pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
 pub fn universal_exports::Gateway::with_job_poll_max_wait(self, core::time::Duration) -> Self
 pub fn universal_exports::Gateway::with_liaison(self, universal_exports::liaison::LiaisonConfig) -> Self
+pub fn universal_exports::Gateway::with_own_providers(self, alloc::vec::Vec<ai6::providers::ProviderEntry>) -> Self
 pub fn universal_exports::Gateway::with_pages(self, universal_exports::PagesConfig) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self

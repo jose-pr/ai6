@@ -11,7 +11,12 @@ impl guatiao::library::kind::parts::ProviderDecl for ai6_safehouse_git::Git
 pub const ai6_safehouse_git::Git::KINDS: &'static [&'static str]
 pub fn ai6_safehouse_git::Git::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
 pub struct ai6_safehouse_git::GitConfig
+pub ai6_safehouse_git::GitConfig::base: alloc::string::String
+pub ai6_safehouse_git::GitConfig::branch: alloc::string::String
+pub ai6_safehouse_git::GitConfig::checkpoint_remote: core::option::Option<alloc::string::String>
+pub ai6_safehouse_git::GitConfig::checkpoint_secs: u64
 pub ai6_safehouse_git::GitConfig::git_timeout_ms: u64
+pub ai6_safehouse_git::GitConfig::isolate: bool
 pub ai6_safehouse_git::GitConfig::measure_every_ms: u64
 impl core::convert::TryFrom<ai6_safehouse_git::GitConfig> for ai6_safehouse_git::Git
 pub type ai6_safehouse_git::Git::Error = guatiao::library::kind::ProviderError
