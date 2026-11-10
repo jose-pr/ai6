@@ -5372,7 +5372,7 @@ async fn pages_only_the_person_opens_a_page_and_deleting_it_ends_its_links() {
 
 #[tokio::test]
 async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
-    let roster = pages_roster(json!({"open_ttl": 0.5}));
+    let roster = pages_roster(json!({"open_ttl": 2.0}));
     let served = served_with(AssistantConfig::default(), Some(roster)).await;
     let (_app, job) = accepted(&served, &served.operator, "Links.").await;
     let id = published_id(
@@ -5386,7 +5386,7 @@ async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
     let url = page_url(&served, &served.operator, &id, None).await;
     let get = |url: String| async move { plain().get(url).send().await.unwrap().status() };
     assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::OK);
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
     assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::NOT_FOUND);
     // Sign-out ends a link made before it.
     let second = issue_access_token_record(
