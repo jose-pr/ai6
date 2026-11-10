@@ -9,11 +9,8 @@ unchanged from `vectors/` of
 and distributed under the MIT License, whose text is in [`LICENSE`](LICENSE) beside them; the
 rest of this repository is under its own license.
 
-`ai6`'s overlay tests read them as data (`directorates::q::overlays`): every case of
-`reading.json`, `validation.json`, `names.json`, `source.json`, `digest.json`, `compose.json`
-and `effective.json` must pass, except the cases `NOT_IMPLEMENTED` in `vectors.rs` names: the
-overlay code reads an earlier edition, and the test counts those as skipped. `catalog.json` and the `catalog` cases of `reading.json` test
-the Store class (catalogs and icons), which AI6 does not implement; the test skips them by name
-and counts them.
+`ai6`'s `tests/aos_vectors` reads them as data and runs every case of the eight files against the
+`coqui-aos` crate's types: `reading.json`, `validation.json`, `names.json`, `source.json`,
+`digest.json`, `compose.json`, `effective.json` and `catalog.json`. None is skipped.
 
 To take a newer edition, copy the files again and change the commits above in the same change.
