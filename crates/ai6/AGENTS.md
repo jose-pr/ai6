@@ -1121,6 +1121,8 @@ impl SecretRef {
 // every field Option or defaulted; #[non_exhaustive], ToValue, FromValue, Schema, deny_unknown_fields;
 // each field has a title and a default in its schema (Bootstrap::schema()); Seconds, Limit: crate::bounds
 pub struct ProviderSettings { location: Option<String>, password: Option<SecretRef>, poll: Option<Seconds>,
+    retry_first: Option<Seconds>, retry_factor: Option<f64>, retry_longest: Option<Seconds>,
+    retry_for: Option<Seconds>,   // start-up open retry; defaults 1 s, ×2, 60 s, no end
     loadout_bytes: Limit, loadout_value_chars: Limit, access_policy_bytes: Limit }   // ConfigLimits defaults
 pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds>,
     sqlite_busy_timeout: Option<Seconds>, limits: RegistryLimits }   // [registry.limits.*]
@@ -1145,7 +1147,12 @@ pub struct Bootstrap { provider: ProviderSettings, registry: RegistrySettings, u
     station: StationSettings, oo: serde_json::Map<String, serde_json::Value> }  // oo: unread here
 pub const DEFAULT_PAGES_LISTEN: SocketAddr;                              // 127.0.0.1:7083
 impl ProviderSettings { pub fn poll(&self) -> Duration;                    // DEFAULT_POLL; 0 turns reload off
-                        pub fn limits(&self) -> ConfigLimits; }
+                        pub fn limits(&self) -> ConfigLimits;
+                        pub fn start_retry(&self) -> Result<StartRetry, String>; }  // refuses a negative or non-finite factor
+// How `ai6 serve` waits when its provider or Registry is unreachable; only an unreachable server is
+// retried (a SQL open reports it as ErrorKind::ConnectionRefused), never a bad location, password or certificate.
+pub struct StartRetry;   // new(first, factor, longest, keep_trying_for: Option<Duration>) -> Result<Self, String>
+impl StartRetry { pub fn next_wait(&self, last: Option<Duration>, waited: Duration) -> Option<Duration>; }  // None when spent
 impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration;      // DEFAULT_LEASE
                         pub fn sqlite_busy_timeout(&self) -> Duration; }   // 30 s
 

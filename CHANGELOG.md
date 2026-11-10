@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `ai6 serve` no longer exits when its Registry or configuration provider cannot be reached at start
+  (a host name that does not resolve, a refused or dropped connection, a server still starting): it says
+  why, waits and tries again, with the waits and the time to give up set by `[provider] retry_first`,
+  `retry_factor`, `retry_longest` and `retry_for` (default: keep trying until it opens). A malformed
+  location, a certificate that does not verify and a wrong password still exit at once.
 - A Station checks a queued Mission against the Registry when it starts and before each retry: a brief
   filed, put back in the queue, held or claimed by another Station drops the entry (once, on the
   timeline). A working Mission found at restart is settled instead of resumed when its brief ended or

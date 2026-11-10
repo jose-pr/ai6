@@ -82,6 +82,8 @@ and sent at check-in as `bootstrap_weakened`, as is a limit looser than its defa
 location = "."                        # a directory, sqlite:PATH or postgres://...
 password = { provider = "file", key = "db-password" }   # when a SQL location gives none
 poll = 5                              # seconds between checks for changes; 0 turns reloading off
+retry_first = 1                       # seconds before opening again at start, and retry_factor,
+                                      # retry_longest, retry_for: see Opening at start below
 loadout_bytes = 1048576               # and the other limits under Limits below
 
 [registry]                            # shared: where the Registry is, and how much it keeps
@@ -221,11 +223,28 @@ records = "none"                      # keep every audit record; reported as a w
 | `location` | see meaning | **Where the configuration provider is.** A configuration directory, `sqlite:PATH` or a `postgres://` URL. Default: the directory holding the bootstrap file, else the user's configuration directory. |
 | `password` | none | **Database password.** The database password, when the location needs one and gives none. |
 | `poll` | 5 | **Between checks for changes.** Seconds between checks for changes; 0 turns reloading off. |
+| `retry_first` | 1 | **First wait before opening again.** Seconds before the first new attempt to open the configuration provider or the Registry at start, when one cannot be reached. 0 tries again at once. |
+| `retry_factor` | 2 | **Growth of the wait between attempts.** What each wait is multiplied by after a failed attempt. |
+| `retry_longest` | 60 | **Longest wait between attempts.** Seconds the wait stops growing at. |
+| `retry_for` | see meaning | **How long to keep trying to open.** Seconds to keep trying from the first failure before the Station exits with the last error; 0 exits at the first failure. Default: none, and it tries until it opens or is stopped. A refusal retrying cannot fix (a malformed location, a failed certificate check, a wrong password) exits at once whatever this says. |
 | `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together). |
 | `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
 | `access_policy_bytes` | 1 MiB | **Access policy.** Bytes of the access policy (the `access` record). |
 | `replace_retry` | 2 | **Wait for a reader of a family file.** Seconds a directory provider's replacement of a family file waits for a reader that has the file open. |
 <!-- schema:provider:end -->
+
+#### Opening at start
+
+`ai6 serve` opens the configuration provider and then the Registry. When a SQL one cannot be
+reached for now (its host name does not resolve, the connection is refused or dropped, the server is
+starting up or full), the Station says so on standard error with the reason and the wait, waits, and
+tries again: the first wait is `retry_first`, each is `retry_factor` times the one before, and none is
+longer than `retry_longest`. It tries until the database opens or the Station is stopped; `retry_for`
+sets how many seconds from the first failure it keeps trying before it exits with the last error, and
+`retry_for = 0` exits at the first. These are bootstrap settings because the database cannot hold the
+settings that reach it. A refusal that waiting cannot fix still exits at once with its reason: a
+malformed location, a certificate that does not verify, a wrong password or a missing database
+right.
 
 `[registry]`:
 
