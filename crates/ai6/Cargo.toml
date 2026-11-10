@@ -24,7 +24,7 @@ publisher = ["daemon", "tls-roots", "dep:ai6-diptel", "dep:base64", "dep:url"]
 # `ai6::tls`: HTTPS trust for a ureq client, the public roots and a deployment's own authorities.
 tls-roots = ["dep:ureq", "dep:webpki-root-certs"]
 cables-mcp = ["daemon", "dep:rmcp", "dep:schemars"]
-station-tls = ["dep:coqui-peer-tls", "dep:rustls", "dep:base64"]
+station-tls = ["dep:coqui-peer-tls", "dep:coqui-builder", "dep:rustls", "dep:base64"]
 # A Registry and roster kept in a SQLite database file.
 sqlite = ["dep:rusqlite"]
 # A Registry and roster kept in PostgreSQL, shared by every Station of an HA deployment.
@@ -94,6 +94,7 @@ coqui-peer = { workspace = true, features = ["serde"] }
 ring = { version = "0.17.14", optional = true }
 base64 = { workspace = true, optional = true }
 coqui-peer-tls = { workspace = true, optional = true }
+coqui-builder = { workspace = true, optional = true }
 crypto_box = { workspace = true, optional = true }
 time = { workspace = true }
 rustls = { workspace = true, optional = true }
@@ -133,16 +134,16 @@ rcgen.workspace = true
 rustls.workspace = true
 # The access plugins are libraries to load, never to link: depending on them has Cargo build
 # each one beside the test binaries, where the plugin tests scan for them.
-coqui-access-key-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
-coqui-access-ldap-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
-coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
-coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
-coqui-roles-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
+coqui-access-key-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access-ldap-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-roles-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
 # Built beside the test binaries for the same reason: the assistant desk's tests load it to
 # clone and commit real repositories.
 ai6-safehouse-git = { path = "../providers/safehouses/git" }
 
 # Windows only: on Unix it links the system's libpam, which a test machine need not have.
 [target.'cfg(windows)'.dev-dependencies]
-coqui-access-system-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "253add5b09384ee73a89e7ea2880e430e3976fbd" }
+coqui-access-system-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
