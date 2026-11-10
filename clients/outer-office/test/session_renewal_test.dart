@@ -50,9 +50,18 @@ class FakeGateway {
   FakeGateway({
     this.session = const Duration(hours: 12),
     this.clockAhead = Duration.zero,
+    this.idle,
+    this.cut = true,
   });
 
   final Duration session;
+
+  /// The gateway's idle limit: a token lasts no longer than this, and says when it ends as
+  /// `idle_ends_at`. Without one the answer carries `null`.
+  final Duration? idle;
+
+  /// Whether the answer carries a fixed `ends_at`; the gateway's default has none.
+  final bool cut;
 
   /// How far the gateway's clock is ahead of the app's.
   final Duration clockAhead;
@@ -79,12 +88,15 @@ class FakeGateway {
 
   Map<String, Object?> _times() {
     final cap = _signedInAt.add(session);
-    final wanted = ooClock().add(_hour);
-    final until = wanted.isAfter(cap) ? cap : wanted;
+    final wanted = ooClock().add(idle != null && idle! < _hour ? idle! : _hour);
+    final until = cut && wanted.isAfter(cap) ? cap : wanted;
     return {
       'expires_at': _unix(until.add(clockAhead)),
       'expires_in': until.difference(ooClock()).inMilliseconds / 1000,
-      'ends_at': _unix(cap.add(clockAhead)),
+      'ends_at': cut ? _unix(cap.add(clockAhead)) : null,
+      'idle_ends_at': idle == null
+          ? null
+          : _unix(ooClock().add(idle!).add(clockAhead)),
     };
   }
 
@@ -220,6 +232,7 @@ void main() {
     expect(board.accessToken, 'token-1');
     expect(find.byType(SignInPage), findsNothing);
 
+    board.markActive();
     await tester.pump(_hour - _renewBefore);
     await settle(tester);
     expect(gateway.renewals, hasLength(2), reason: 'each answer sets the next');

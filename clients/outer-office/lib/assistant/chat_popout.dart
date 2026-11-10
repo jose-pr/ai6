@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:material_ui/material_ui.dart';
 
 import '../shell/app_window.dart';
@@ -74,11 +75,14 @@ String _channelName(String? person) => 'oo.chat.${person ?? ''}';
 /// same conversation (the pop-out resumes it by its ID) and to the same composer draft (a
 /// `BroadcastChannel`), and gives back a window the chat can close.
 ///
-/// [appearance] is told whenever it changes so the pop-out follows the page's theme.
+/// [appearance] is told whenever it changes so the pop-out follows the page's theme. Input in
+/// the pop-out calls [onActivity], and it may report again after each change of [renewals].
 ChatWindowOpener popupChatWindowOpener(
   PopupPlatform platform, {
   Listenable? appearance,
   Map<String, Object?> Function()? appearanceNow,
+  VoidCallback? onActivity,
+  ValueListenable<int>? renewals,
 }) => (context, chat, onClosed) {
   final link = platform.link(_channelName(chat.person));
   final handle = platform.open(
@@ -98,6 +102,8 @@ ChatWindowOpener popupChatWindowOpener(
     onClosed: onClosed,
     appearance: appearance,
     appearanceNow: appearanceNow,
+    onActivity: onActivity,
+    renewals: renewals,
   );
 };
 
@@ -110,6 +116,8 @@ class _Popup implements AppWindow {
     required this.onClosed,
     required this.appearance,
     required this.appearanceNow,
+    required this.onActivity,
+    required this.renewals,
   }) {
     _subscriptions
       ..add(link.messages.listen(_heard))
@@ -122,7 +130,13 @@ class _Popup implements AppWindow {
       );
     chat.message.addListener(_draft);
     appearance?.addListener(_look);
+    renewals?.addListener(_renewed);
   }
+
+  final VoidCallback? onActivity;
+  final ValueListenable<int>? renewals;
+
+  void _renewed() => link.post({'t': 'renewed'});
 
   final PopupPlatform platform;
   final PopupHandle handle;
@@ -174,6 +188,8 @@ class _Popup implements AppWindow {
             selection: TextSelection.collapsed(offset: text.length),
           );
         }
+      case 'active':
+        onActivity?.call();
       case 'link':
         final target = message['link'];
         if (target is String) chat.onLink?.call(target);
@@ -194,6 +210,7 @@ class _Popup implements AppWindow {
   void _release() {
     chat.message.removeListener(_draft);
     appearance?.removeListener(_look);
+    renewals?.removeListener(_renewed);
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }
@@ -250,6 +267,15 @@ class PopoutSession {
   MoneypennyChat? _chat;
   String _sent = '';
   bool _ended = false;
+  bool _reported = false;
+
+  /// Tells the opener there was input here, so its sign-in is not asked about; once per
+  /// renewal, as it says when one happens.
+  void activity() {
+    if (_reported || _ended) return;
+    _reported = true;
+    link.post({'t': 'active'});
+  }
 
   /// The opener's conversation and draft; never completes when the opener is gone.
   Future<PopoutState> get state => _state.future;
@@ -306,6 +332,8 @@ class PopoutSession {
           'theme': message['theme'],
           'backdrop': message['backdrop'],
         });
+      case 'renewed':
+        _reported = false;
       case 'gone':
         _gone();
     }

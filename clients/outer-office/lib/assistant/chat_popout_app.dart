@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../settings/oo_config.dart' show ChatSettings;
+import '../shell/stay_signed_in.dart' show OoActivity;
 import '../theme/oo_theme.dart';
 import 'chat_popout.dart';
 import 'chat_layout.dart';
@@ -130,7 +131,15 @@ class _PopoutChatState extends State<_PopoutChat> {
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
+  Widget build(BuildContext context) => OoActivity(
+    onActivity: () {
+      widget.board.markActive();
+      _session.activity();
+    },
+    child: _body(),
+  );
+
+  Widget _body() => ValueListenableBuilder(
     valueListenable: _session.openerClosed,
     builder: (context, gone, _) {
       if (gone) {

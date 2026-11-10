@@ -81,3 +81,15 @@ A Mission is shown by its handle (`MissionBoard.handleOf`) and routed and linked
 board matches the current one without case, and the Missions page asks `GET
 /v1/missions?mission=` for any other and moves the route to the UID. Renaming is
 `lib/shell/mission_rename.dart`.
+
+`lib/keys/keys_section.dart` is the Keys section of the operator account dialog: the signed-in
+person's API keys through `/v1/user/keys` (`?all=true` for an administrator with `account.manage`).
+A new key's secret is shown once in a dialog and held nowhere else; a revoke asks first.
+
+A sign-in lasts while it is used. `MissionBoard` renews the token `renew_before` ahead of its end
+when input (a key, pointer or scroll, seen by `OoActivity` at the app root and reported by a
+pop-out over its `BroadcastChannel`) came since the last renewal. With none it asks "Stay signed
+in?" (`lib/shell/stay_signed_in.dart`), counting down to the answer's `idle_ends_at` (the token's
+end when null), and signs out when the countdown ends, keeping the route. Every time comes from
+the gateway's `expires_in` and `idle_ends_at` on `ooClock`, never the device clock. A non-null
+`ends_at` keeps the old "Your sign-in ends at" strip. A pop-out never asks (`idlePrompts`).

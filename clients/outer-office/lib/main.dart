@@ -36,6 +36,7 @@ import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
 import 'issues/linked_issues.dart';
+import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
 import 'roster/record_editor.dart';
@@ -49,6 +50,7 @@ import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
 import 'shell/app_window.dart';
 import 'shell/board_reads.dart';
+import 'shell/stay_signed_in.dart';
 import 'shell/oo_shell.dart';
 import 'operations/operation_tree.dart';
 import 'shell/operations_page.dart';
@@ -138,6 +140,7 @@ Future<void> _startWeb() async {
 
   final popups = browserPopups();
   if (popups != null && startedAsPopout(Uri.base)) {
+    board.idlePrompts = false;
     runApp(
       ChatPopoutApp(board: board, chatSettings: config.chat, popups: popups),
     );
@@ -541,6 +544,72 @@ class MissionBoard extends ChangeNotifier
 
   /// When the sign-in ends, from the moment the person is told until they dismiss it.
   DateTime? signInEnding;
+
+  /// Whether any input reached the app since the token was last renewed. A renewal due with
+  /// none asks the person first ([idleEnds]); signing in counts as input.
+  bool _active = false;
+
+  /// Whether a renewal due with no input asks the person; a pop-out never does, since the page
+  /// that opened it asks.
+  bool idlePrompts = true;
+
+  /// While the "Stay signed in?" question is up: when the sign-in ends if nobody answers.
+  DateTime? idleEnds;
+
+  /// Signs out at [idleEnds].
+  Timer? _idleTimer;
+
+  /// When the gateway's idle limit ends the token, or the token's end when it has none.
+  DateTime? _idleDeadline;
+
+  /// Counts renewals, so a pop-out is told it may report input again.
+  final renewals = ValueNotifier<int>(0);
+
+  /// Notes input: a key, a pointer or a scroll, in this page or in a pop-out of it.
+  void markActive() => _active = true;
+
+  /// The person answered "Stay signed in": renews at once and closes the question.
+  Future<void> staySignedIn() async {
+    _endIdleQuestion();
+    notifyListeners();
+    await _renewToken();
+    _active = false;
+  }
+
+  void _endIdleQuestion() {
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    idleEnds = null;
+  }
+
+  /// The renewal is due: silently when there was input, else the question.
+  void _renewDue() {
+    final deadline = _idleDeadline;
+    if (_active || !idlePrompts || deadline == null) {
+      _active = false;
+      unawaited(_renewToken());
+      return;
+    }
+    idleEnds = deadline;
+    _idleTimer = Timer(deadline.difference(ooClock()), _idledOut);
+    notifyListeners();
+  }
+
+  /// Nobody answered: signs out, telling the gateway so far as it can be reached.
+  void _idledOut() {
+    final token = accessToken;
+    _signedOut('You were signed out because you were idle. Sign in again.');
+    if (token != null) {
+      unawaited(
+        _client
+            .post(
+              apiOrigin.resolve('/v1/auth/logout'),
+              headers: {'authorization': 'Bearer $token'},
+            )
+            .then<void>((_) {}, onError: (Object _) {}),
+      );
+    }
+  }
 
   /// The person has read it; it does not come back in this sign-in.
   void dismissSignInEnding() {
@@ -2804,6 +2873,9 @@ class MissionBoard extends ChangeNotifier
     _tokenExpiresAt = null;
     _tokenEndsAt = null;
     signInEnding = null;
+    _endIdleQuestion();
+    _idleDeadline = null;
+    _active = false;
     _cadence?.forget();
     sessions = const [];
     missionBriefs = const [];
@@ -3138,6 +3210,7 @@ class MissionBoard extends ChangeNotifier
   /// Takes the token of a gateway's answer and reads the board with it.
   Future<void> _signedIn(Map<String, dynamic> body) async {
     accessToken = body['token'] as String;
+    _active = true;
     _tokenTimes(body);
     loading = true;
     await refresh();
@@ -3149,10 +3222,19 @@ class MissionBoard extends ChangeNotifier
     _tokenEndsAt = (body['ends_at'] as num?)?.toDouble();
     _tokenTimer?.cancel();
     _tokenTimer = null;
+    _endIdleQuestion();
+    _idleDeadline = null;
     final before = limits.refresh.renewBefore;
     final expiresAt = _tokenExpiresAt;
     final seconds = (body['expires_in'] as num?)?.toDouble();
     if (before == null || expiresAt == null || seconds == null) return;
+    // The idle limit is read off the gateway's own timeline, like `expires_in`, never off this
+    // machine's clock.
+    final idleAt = (body['idle_ends_at'] as num?)?.toDouble();
+    final idleLeft = idleAt == null ? seconds : seconds + (idleAt - expiresAt);
+    _idleDeadline = ooClock().add(
+      Duration(milliseconds: (idleLeft * 1000).round()),
+    );
     // From what the gateway says is left, not `expires_at`: this machine's clock may be hours
     // out, which would renew too late or ask again as soon as each answer came.
     final left = Duration(milliseconds: (seconds * 1000).round());
@@ -3172,7 +3254,7 @@ class MissionBoard extends ChangeNotifier
       left > Duration.zero
           ? (wait > Duration.zero ? wait : left ~/ 2)
           : limits.refresh.sessions ?? limits.refresh.renewRetry,
-      _renewToken,
+      left > Duration.zero ? _renewDue : _renewToken,
     );
   }
 
@@ -3199,6 +3281,7 @@ class MissionBoard extends ChangeNotifier
     if (response?.statusCode == 200) {
       try {
         _tokenTimes(jsonDecode(response!.body) as Map<String, dynamic>);
+        renewals.value++;
         return;
       } on Object {
         // An unreadable answer counts as a failed one.
@@ -3328,6 +3411,8 @@ class MissionBoard extends ChangeNotifier
   void dispose() {
     _poll?.cancel();
     _tokenTimer?.cancel();
+    _idleTimer?.cancel();
+    renewals.dispose();
     _client.close();
     super.dispose();
   }
@@ -4690,6 +4775,7 @@ class _OuterOfficeAppState extends State<OuterOfficeApp>
       backdrop: widget.board.backdrop,
       title: 'Outer Office | AI6',
       routerConfig: _config,
+      around: (child) => StaySignedIn(board: widget.board, child: child),
     ),
   );
 }
@@ -4747,6 +4833,8 @@ class _AccessGateState extends State<_AccessGate> {
                 'theme': board.themeId,
                 'backdrop': board.backdrop,
               },
+              onActivity: board.markActive,
+              renewals: board.renewals,
             ),
       windowOutlivesPage: widget.desktopWindows,
     );
@@ -4855,6 +4943,7 @@ Widget boardThemedApp(
   MissionBoard board, {
   required String title,
   required Widget home,
+  Widget Function(Widget child)? around,
 }) => AnimatedBuilder(
   animation: board,
   builder: (context, _) => OoMaterialApp(
@@ -4862,6 +4951,7 @@ Widget boardThemedApp(
     backdrop: board.backdrop,
     title: title,
     home: home,
+    around: around,
   ),
 );
 
@@ -6631,6 +6721,10 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                         );
                       },
                     ),
+                  if (!board.demo) ...[
+                    const SizedBox(height: 18),
+                    KeysSection(board: board),
+                  ],
                   const SizedBox(height: 18),
                   _ThemeChooser(board: board),
                   if (!kIsWeb && !board.demo) ...[

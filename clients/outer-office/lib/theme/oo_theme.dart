@@ -259,6 +259,7 @@ class OoMaterialApp extends StatelessWidget {
     required this.title,
     this.home,
     this.routerConfig,
+    this.around,
     super.key,
   }) : assert((home == null) != (routerConfig == null));
 
@@ -267,6 +268,15 @@ class OoMaterialApp extends StatelessWidget {
   final String title;
   final Widget? home;
   final RouterConfig<Object>? routerConfig;
+
+  /// Wraps what the app shows, below its theme and above its Navigator: the place for what
+  /// watches the whole window.
+  final Widget Function(Widget child)? around;
+
+  Widget _builder(BuildContext context, Widget? child) {
+    final inner = _selectable(context, child);
+    return around?.call(inner) ?? inner;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +301,7 @@ class OoMaterialApp extends StatelessWidget {
         themeAnimationDuration: animation,
         localizationsDelegates: const [flutterMaterialLocalizations],
         routerConfig: routerConfig,
-        builder: _selectable,
+        builder: _builder,
       );
     }
     return MaterialApp(
@@ -303,7 +313,7 @@ class OoMaterialApp extends StatelessWidget {
       themeAnimationDuration: animation,
       localizationsDelegates: const [flutterMaterialLocalizations],
       home: home,
-      builder: _selectable,
+      builder: _builder,
     );
   }
 
