@@ -55,15 +55,17 @@ carries a `codexErrorInfo` naming a usage or rate limit. The reset time is the e
 last reported as used up (`account/rateLimits/updated` with `usedPercent` of 100 or more;
 a 300-minute window is `five_hour`, a 10,080-minute one `weekly`). These shapes come from
 recorded protocol fixtures, not from a live account.
-Every `account/rateLimits/updated` notification also sets `AgentEvent::quota` to one
-`QuotaReport` per window present (`primary`, `secondary`): `window` named as above, else
-by its position; `used_permille` from `usedPercent` (times ten, clamped to 0-1000);
-`resets_at` from `resetsAt`; no `status`.
-A `thread/tokenUsage/updated` notification carries `AgentEvent::usage` from
+Every `account/rateLimits/updated` notification also sets `AgentEvent::report` to one
+`Bucket` per window present (`primary`, `secondary`): its id named as above, else
+by its position; used thousandths of 1000 from `usedPercent` (times ten, clamped to 0-1000); a fixed
+window of `windowDurationMins` ending at `resetsAt`; exhausted at 100 percent. `usage(environment)` reads
+the account with no thread and no turn through `coqui_acp_codex::CodexSession::read_account_usage`
+(an app server started for the read and ended after it).
+A `thread/tokenUsage/updated` notification carries the report's `spend`, summed over the session's requests, from
 `params.tokenUsage.last` (the latest model request; the thread total survives a resume, so it
 is not used): `inputTokens` minus `cachedInputTokens` as input, the cached ones as cache reads,
-`outputTokens` as output, `cumulative` false. Codex reports no cost, so `cost_micro_usd` is
-0 and Codex Sessions are limited by tokens only. An `item/started` notification for a web
+`outputTokens` as output, added to the session's running spend. Codex reports no cost, so `cost_micro_usd` is
+unset and Codex Sessions are limited by tokens only. An `item/started` notification for a web
 search (`WebSearch`) or an MCP or dynamic tool call (the tool's name) sets
 `AgentEvent::tools`. These shapes follow the app-server protocol schema, not a live account.
 The end of the app server's output is the terminal's end-of-file, or its exit while the

@@ -245,12 +245,12 @@ model.`, `individual quota reached` and `MODEL_CAPACITY_EXHAUSTED`, and its chan
 individual quota is not retried. `limit_phrases` defaults to `RESOURCE_EXHAUSTED`, `Error 429`,
 `QUOTA_EXHAUSTED`, `exhausted your quota` and `individual quota reached`; `MODEL_CAPACITY_EXHAUSTED`,
 a server's capacity and not this account's quota, is left out. `limit` carries `resets_at` and `window`
-as `None`: the stream gives neither, and the windows the `/usage` panel shows are not in it. No event
-carries a `QuotaReport`.
+as `None`: the stream gives neither, and the windows the `/usage` panel shows are not in it. No turn event
+carries a bucket: the quota is read by `usage` (below).
 
 **Usage.** A response step's `DONE` update has `usage`, per model call: `input_tokens` without
-`cache_read_tokens`, `output_tokens` with `thinking_tokens`, so it is reported as is with `cumulative`
-false. `result.usage` is left alone: it runs across every launch of the conversation. agy reports no
+`cache_read_tokens`, `output_tokens` with `thinking_tokens`, so the session sums them into the running `spend` the report carries.
+`result.usage` is left alone: it runs across every launch of the conversation. agy reports no
 cost. `max_cost_micro_usd` has nowhere to go; AI6 enforces its budgets itself.
 
 **End of output.** After an `ERROR` result the exit adds nothing. Otherwise it is one `failed` event,

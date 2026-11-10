@@ -1117,6 +1117,28 @@ a model at all; an Agent that needs another model's behaviour is another Agent.
 
 [Moneypenny](assistant.md#routes-and-quota) takes routes too.
 
+### Reading usage again
+
+A handler says what its harness reports of an account's usage (`AgentHandler::usage_support`) and, when the
+harness can be asked between turns, reads it (`AgentHandler::usage`): the account's **buckets**, each with the
+models it covers, how much is used and when it refills, as `coqui-acp`'s usage model spells them.
+
+| Handler | Reports | Read |
+| --- | --- | --- |
+| `claude` | the running spend of a process and each window of a `rate_limit_event` | only from a turn's events (`needs_turn`) |
+| `codex` | each request's tokens and the account's rate-limit windows | `account/rateLimits/read` through an app server started for the read; no thread, no turn |
+| `antigravity` | each model call's tokens, and the quota agy serves on a loopback port | from the agy of a running Session of the same home, else through a private `agy acp` with an empty session, ended after the read (`usage_wait_ms`) |
+| `acp` | a refusal read as a limit (`limit_phrases`, default the shared words) | only from a turn (`needs_turn`) |
+
+A Station reads each pool account it declared that the Registry holds limited, on the `usage` table of the
+`roster` record (`[roster.usage]`, edited like the rest of it through Universal Exports, `ai6ctl` and Outer
+Office's Roster settings, applied at the next pass): every `refresh_every` seconds (300; 0 never reads), each
+read that finds the account still used up multiplying the wait by `backoff_factor` (2) up to `backoff_max`
+(3600). A read that finds no bucket covering the waiting Missions' models used up frees the account; one that
+shows the reset later keeps the account out and re-parks them to the new time. A handler that learns its usage
+only during a turn is never read: its account waits for the time the limit stated. The board shows each window
+with the models it covers and when it was read (`ai6ctl pools`, column `READ_UNIX`, and the Account Pools page).
+
 ### Models an account may use
 
 A route names a model by what its source calls it, so a person needs to know what a source offers.

@@ -112,10 +112,11 @@ local clock time ("resets 3pm") leaves `resets_at` as `None` rather than guessin
 Seconds and milliseconds are both accepted. Other `rate_limit_event` statuses pass through
 unchanged. These shapes come from recorded protocol fixtures, not from a live account.
 
-Every `rate_limit_event`, whatever its status, also sets `AgentEvent::quota` to one
-`QuotaReport`: `window` from `rateLimitType` (`unknown` when absent), `status`, `resets_at`
-from `resetsAt`, and `used_permille` from `utilization` only when it is a fraction between 0
-and 1. `utilization` is in the published `SDKRateLimitInfo` type of
+Every `rate_limit_event`, whatever its status, also sets `AgentEvent::report` to one
+`Bucket`: its id from `rateLimitType` (`unknown` when absent), `status` (`allowed`, `allowed_warning`,
+`rejected` as ok, warning, exhausted), a fixed window ending at `resetsAt`, and used thousandths of 1000
+from `utilization` only when it is a fraction between 0 and 1. `usage_support` is `needs_turn`: Claude Code's
+usage is read from turns alone. `utilization` is in the published `SDKRateLimitInfo` type of
 `@anthropic-ai/claude-agent-sdk` (0.3.310) without a documented scale and has not been seen
 from a live account, so another scale leaves `used_permille` as `None`. Other events carry
 no quota.
@@ -125,9 +126,9 @@ A `result` with `is_error` true or an `error_*` subtype is an event of kind `fai
 login reached a model (`subtype: success`) and when a turn was interrupted
 (`error_during_execution`), and stays running in both.
 
-A `result` event also carries `AgentEvent::usage`: its `usage` block (`input_tokens`,
+A `result` event also carries the report's `spend`: its `usage` block (`input_tokens`,
 `output_tokens`, `cache_creation_input_tokens` as cache writes, `cache_read_input_tokens`) and
-`total_cost_usd` in micro-dollars, marked `cumulative`. Whether `usage` is per turn or per
+`total_cost_usd` in micro-dollars, running totals. Whether `usage` is per turn or per
 process is not confirmed from a live account, so the daemon counts a decrease as a new
 counter. An `assistant` message with tool-call blocks (above) becomes kind `tool` with
 `AgentEvent::tools` set to their names. `AgentStart::max_cost_micro_usd` and

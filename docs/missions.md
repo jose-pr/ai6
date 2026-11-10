@@ -774,11 +774,18 @@ closes the harness and **parks** the Mission:
 ```
 
 `parked_until` is the reset time plus 15 seconds of grace, in Unix seconds. A Mission
-parked by a provider that gave no reset time, or a time already past, waits
-`limit_fallback_secs` (30 minutes by default) instead of retrying in a loop. The safe house
+parked by a provider that gave no reset time waits the wait the refusal states, when it states one (a 429's
+`retry-after`, or words such as "try again in 90 seconds"), as it is; a time already past, or none at all,
+waits `limit_fallback_secs` (30 minutes by default) instead of retrying in a loop. The reset time wins over the
+stated wait, and the stated wait over the fallback. The safe house
 stays in place. When the time comes the daemon resumes the **same provider Session** and
 tells it to carry on; the Mission returns to `working`. Parking survives a daemon restart,
 and an operator can resume a parked Mission early with the ordinary resume request.
+
+**A reset time only says when to look first.** A limit can lift early, or move later, so a Station reads
+the usage of a limited pool account again, with no model turn, [on its own interval](agents.md#reading-usage-again):
+room for the Mission's model frees the account and resumes the Missions parked on it at the next scheduler
+pass, hours before the time they were parked to; a reset the provider moved later parks them to the new time.
 
 An Operation chooses the response with `on_limit` ([settings](operations.md#provider-limits)):
 

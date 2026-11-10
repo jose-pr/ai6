@@ -508,7 +508,7 @@ docs. Everything here is plain data and decisions; the Station applies them.
 pub struct UsageTotals { pub input: u64, pub output: u64, pub cache_read: u64,
                          pub cache_write: u64, pub cost_micro_usd: u64 }   // serde, default 0
 impl UsageTotals { pub fn add(&mut self, other: &Self); pub fn tokens(&self) -> u64 /* input+output+cache_write */ }
-pub struct UsageTracker;   // default(); .observe(&TokenUsage) -> UsageTotals (the addition)
+pub struct UsageTracker;   // default(); .observe(&Spend) -> UsageTotals (the addition)
 pub struct MissionUsage { pub total: UsageTotals, pub sessions: BTreeMap<String, UsageTotals>,
                           pub daily_cost_micro_usd: BTreeMap<String /* UTC YYYY-MM-DD */, u64> }
 pub struct Budget { pub session_tokens: Option<u64>, pub mission_tokens: Option<u64>,
@@ -4817,8 +4817,9 @@ same way, in `ai6_cable_quotas`, with the same bounds.
 Guatiao kind `ai6_agent_handler`. The Session a handler returns is the shared agent session kind of
 [`coqui-acp-provider`](https://github.com/Boriken-Dev/coqui-acp) (object kind `agent_session`,
 pinned by revision with `coqui-acp`, on the same Guatiao revision): `AgentSession`, `AgentMessage`,
-`AgentEvent`, `UsageLimit`, `TokenUsage`, `QuotaReport`, `LIMIT_EVENT` and `DENIED_EVENT` are
-re-exported at the crate root as `ai6::AgentSession` and so on; the event kinds `cancelled`
+`AgentEvent`, `LIMIT_EVENT` and `DENIED_EVENT` are re-exported at the crate root, with the usage model of
+`coqui-acp-api` (`Bucket`, `Coverage`, `Refill`, `Spend`, `LimitHit`, `UsageReport`, `UsageSupport`,
+`BucketStatus`, `UsageSource`, `infer_limit`, `DEFAULT_LIMIT_PHRASES`); they are re-exported at the crate root as `ai6::AgentSession` and so on; the event kinds `cancelled`
 (`CANCELLED_EVENT`) and `TURN_CANCELLED` are that crate's alone. `AgentSession::session_id`
 answers `Result<Option<String>, ProviderError>`: the Station checks the ID as a `SessionId` where
 it records it, and an ID that is not one fails the Session (`the provider reported a Session ID AI6
@@ -4863,7 +4864,7 @@ Station prefixes each with `Agent "ID" is weakened: `, logs them at start and on
 and publishes them at check-in as `agents_weakened`, leaving out an Agent whose handler it cannot
 build; a field runner logs them at each launch.
 `AgentStart`, `AgentResume`, `AgentMessage`,
-`AgentEvent`, `UsageLimit` and `TokenUsage` are also serde `Serialize` and `Deserialize`
+`AgentEvent` is also serde `Serialize` and `Deserialize`
 (field names as declared): a runner's API carries them as JSON.
 
 ```rust
@@ -4875,16 +4876,18 @@ pub const DENIED_EVENT: &str = "denied";
 // one by itself leaves the Mission `Blocked`, and Moneypenny's answer ends with a notice.
 // coqui_acp_provider::TURN_CANCELLED = "the agent cancelled the turn": the text of a `blocked`
 // event that means `cancelled`, read the same way.
-pub struct UsageLimit { pub resets_at: Option<i64> /* Unix seconds */, pub window: Option<String> }
-pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64,
-                        pub cost_micro_usd: u64, pub cumulative: bool }
-pub struct QuotaReport { pub window: String /* five_hour, weekly, … or primary/secondary */,
-                         pub used_permille: Option<u16>, pub resets_at: Option<i64>,
-                         pub status: Option<String> /* allowed, allowed_warning, rejected */ }
+// coqui_acp_api::usage: a limit that stopped the turn, and what an event tells of the account.
+pub struct LimitHit { pub bucket: Option<String>, pub resets_at: Option<i64> /* Unix seconds */,
+                      pub retry_after: Option<Duration> /* a 429's wait: parks ahead of the fallback */,
+                      pub source: Source, pub text: Option<String>, pub observed_at: i64 }
+pub struct UsageReport { pub supported: bool, pub buckets: Vec<Bucket>, pub spend: Option<Spend>, /* … */ }
+// Spend is a session's RUNNING totals, so a handler whose harness reports each request (codex,
+// antigravity) sums them; `UsageTracker::observe(&Spend)` turns a total into an addition.
 pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Option<Vec<u8>>,
-                        pub limit: Option<UsageLimit>, pub usage: Option<TokenUsage>,
-                        pub tools: Vec<String>,
-                        pub quota: Vec<QuotaReport> /* serde default: empty */ }
+                        pub limit: Option<LimitHit>, pub tools: Vec<String>,
+                        pub report: Option<UsageReport> }
+// AgentHandler::usage_support() -> UsageSupport  (default: none; needs_turn / needs_session say it is
+//   not read between turns) and usage(environment) -> UsageReport (default: unsupported), read with no turn.
 // AgentStart and AgentResume carry `overlays: SessionOverlays` (default empty), what a Session's
 // overlays hand its harness beside their environment and `initial_context`:
 pub struct SessionOverlays { pub roots: Vec<String>, pub skills: Vec<OverlaySkill>, pub plugin_dir: Option<String> }
@@ -5186,10 +5189,10 @@ A handler reports calls its harness refused by its permission rules in a turn as
 `permission-denied`, and gives them to a source Mission's outcome (`denied_tools`), which the CX
 report quotes unless the disclosure is `Hidden`. The Mission's state is whatever the turn ended in.
 
-`usage` is what the provider reported with the event (Claude Code on `result`, Codex on its
-token-usage notification); `cumulative` says whether the figures are running totals for the
-provider process (`true`) or only what the last step added. `UsageTracker` turns either into
-additions, so a resumed process is never counted twice. `tools` names the tools an event
+`report` is what the provider reported with the event (Claude Code on `result`, Codex on its
+token-usage notification): the session's `spend` is running totals for the provider process, which a
+handler whose harness reports each request sums itself. `UsageTracker` turns a total into additions, so a
+resumed process is never counted twice. `tools` names the tools an event
 calls (kind `tool` for Claude Code), which is how a call to a listed tool exposes a Session.
 The daemon also queues `budget` (warning or limit), `exposed` (text: the source) and
 `quarantined` events for the Mission.

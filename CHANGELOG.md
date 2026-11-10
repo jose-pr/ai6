@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   default) and a recorded last use, is shown once, and is in no log or audit record. Service accounts
   stay available under `account.manage`.
 
+- Limited pool accounts are read again. Handlers report their usage (`AgentHandler::usage_support` and `usage`,
+  with the buckets of `coqui-acp`'s usage model): Codex through `account/rateLimits/read`, Antigravity through
+  agy's loopback quota (a running Session's, else a private `agy acp` with an empty session), Claude Code and
+  the `acp` handler from turns only. A Station reads each limited account every `[roster.usage] refresh_every`
+  seconds with no model turn, backing off while it stays used up, and frees the account and resumes the Missions
+  parked on it when the buckets covering their models have room, or re-parks them when the reset moved later.
+  A refusal's stated `retry-after` parks a Mission ahead of the Operation's fallback. The Account Pools page and
+  `ai6ctl pools` show the models a window covers and when it was read.
+
 ### Changed
 
 - A sign-in lasts while it is used: `[gateway] session_idle` (thirty minutes) ends one that is not renewed, each
