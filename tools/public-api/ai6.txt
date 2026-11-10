@@ -10,28 +10,37 @@ pub use ai6::Authenticator
 pub use ai6::AuthorizationDecision
 pub use ai6::AuthorizationRequest
 pub use ai6::Authorizer
+pub use ai6::Bucket
+pub use ai6::BucketStatus
+pub use ai6::Coverage
+pub use ai6::DEFAULT_LIMIT_PHRASES
 pub use ai6::DENIED_EVENT
 pub use ai6::Description
 pub use ai6::Directory
 pub use ai6::KIND_PREFIX
 pub use ai6::LIMIT_EVENT
+pub use ai6::LimitHit
 pub use ai6::Lookup
 pub use ai6::Person
 pub use ai6::PutOutcome
-pub use ai6::QuotaReport
+pub use ai6::Refill
 pub use ai6::Role
 pub use ai6::RoleAuthorizer
 pub use ai6::RoleAuthorizerBuilder
 pub use ai6::RolePolicy
 pub use ai6::RolePolicyError
 pub use ai6::Rule
+pub use ai6::Spend
 pub use ai6::Subject
-pub use ai6::TokenUsage
-pub use ai6::UsageLimit
+pub use ai6::Unit
+pub use ai6::UsageReport
+pub use ai6::UsageSource
+pub use ai6::UsageSupport
 pub use ai6::Verdict
 pub use ai6::Waiting
 pub use ai6::guatiao
 pub use ai6::guatiao_serde
+pub use ai6::infer_limit
 pub mod ai6::bootstrap
 pub mod ai6::bootstrap::format
 #[non_exhaustive] pub enum ai6::bootstrap::format::Format
@@ -1514,7 +1523,8 @@ pub ai6::directorates::m::limits::OnLimit::Wait
 impl ai6::directorates::m::limits::OnLimit
 pub fn ai6::directorates::m::limits::OnLimit::as_str(self) -> &'static str
 pub const ai6::directorates::m::limits::DEFAULT_LIMIT_FALLBACK_SECS: u64
-pub fn ai6::directorates::m::limits::parked_until(i64, core::option::Option<i64>, u64, i64) -> i64
+pub fn ai6::directorates::m::limits::lifts_at(i64, &coqui_acp_api::usage::LimitHit) -> core::option::Option<i64>
+pub fn ai6::directorates::m::limits::parked_until(i64, core::option::Option<i64>, core::option::Option<u64>, u64, i64) -> i64
 pub mod ai6::directorates::m::memories
 pub enum ai6::directorates::m::memories::MemoryForgotten
 pub ai6::directorates::m::memories::MemoryForgotten::Forgotten(ai6::directorates::registry::memories::MemoryEntry)
@@ -2273,6 +2283,7 @@ pub fn ai6::directorates::m::roster::RosterError::fmt(&self, &mut core::fmt::For
 pub ai6::directorates::m::roster::RosterSettings::max_compartment_rules: ai6::bounds::Limit
 pub ai6::directorates::m::roster::RosterSettings::max_operation_depth: ai6::bounds::Limit
 pub ai6::directorates::m::roster::RosterSettings::reports: ai6::directorates::m::reports::ReportSettings
+pub ai6::directorates::m::roster::RosterSettings::usage: ai6::directorates::m::roster::UsageSettings
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
@@ -2290,6 +2301,12 @@ impl ai6::directorates::m::roster::RouteRef
 pub fn ai6::directorates::m::roster::RouteRef::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
 impl core::fmt::Display for ai6::directorates::m::roster::RouteRef
 pub fn ai6::directorates::m::roster::RouteRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::roster::UsageSettings
+pub ai6::directorates::m::roster::UsageSettings::backoff_factor: u32
+pub ai6::directorates::m::roster::UsageSettings::backoff_max: ai6::bounds::Seconds
+pub ai6::directorates::m::roster::UsageSettings::refresh_every: ai6::bounds::Seconds
+impl core::default::Default for ai6::directorates::m::roster::UsageSettings
+pub fn ai6::directorates::m::roster::UsageSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::roster::Workspace
 pub ai6::directorates::m::roster::Workspace::base: alloc::string::String
 pub ai6::directorates::m::roster::Workspace::branch: alloc::string::String
@@ -2901,13 +2918,15 @@ pub fn ai6::directorates::medical::usage::UsageTotals::is_empty(&self) -> bool
 pub fn ai6::directorates::medical::usage::UsageTotals::tokens(&self) -> u64
 pub struct ai6::directorates::medical::usage::UsageTracker
 impl ai6::directorates::medical::usage::UsageTracker
-pub fn ai6::directorates::medical::usage::UsageTracker::observe(&mut self, &coqui_acp_provider::kind::TokenUsage) -> ai6::directorates::medical::usage::UsageTotals
+pub fn ai6::directorates::medical::usage::UsageTracker::observe(&mut self, &coqui_acp_api::usage::Spend) -> ai6::directorates::medical::usage::UsageTotals
 pub const ai6::directorates::medical::usage::DEFAULT_WARN_AT_PERMILLE: u16
 pub const ai6::directorates::medical::usage::STRICT_MISSION_COST_USD: f64
 pub const ai6::directorates::medical::usage::STRICT_MISSION_TOKENS: u64
 pub const ai6::directorates::medical::usage::STRICT_OPERATION_COST_USD_PER_DAY: f64
 pub const ai6::directorates::medical::usage::STRICT_SESSION_TOKENS: u64
+pub fn ai6::directorates::medical::usage::buckets_of(&coqui_acp_provider::kind::AgentEvent) -> &[coqui_acp_api::usage::Bucket]
 pub fn ai6::directorates::medical::usage::micro_usd(f64) -> u64
+pub fn ai6::directorates::medical::usage::spend_of(&coqui_acp_provider::kind::AgentEvent) -> core::option::Option<&coqui_acp_api::usage::Spend>
 pub fn ai6::directorates::medical::usage::utc_day(i64) -> alloc::string::String
 pub mod ai6::directorates::medical::watchdog
 pub struct ai6::directorates::medical::watchdog::Watchdog
@@ -4515,12 +4534,14 @@ impl ai6::directorates::registry::accounts::LoginState
 pub fn ai6::directorates::registry::accounts::LoginState::leased_at(&self, f64) -> core::option::Option<&ai6::directorates::registry::accounts::RenewalLease>
 pub fn ai6::directorates::registry::accounts::LoginState::usable_by(&self, &str) -> bool
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::QuotaWindow
+pub ai6::directorates::registry::accounts::QuotaWindow::models: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::accounts::QuotaWindow::name: alloc::string::String
 pub ai6::directorates::registry::accounts::QuotaWindow::observed_at: f64
 pub ai6::directorates::registry::accounts::QuotaWindow::resets_at: core::option::Option<f64>
 pub ai6::directorates::registry::accounts::QuotaWindow::status: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::accounts::QuotaWindow::used_permille: core::option::Option<u16>
 impl ai6::directorates::registry::accounts::QuotaWindow
+pub fn ai6::directorates::registry::accounts::QuotaWindow::models(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::new(impl core::convert::Into<alloc::string::String>, f64) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::resets_at(self, f64) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::status(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -8866,6 +8887,8 @@ pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::di
 pub fn ai6::directorates::section_00::agent::AgentHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -8879,6 +8902,8 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -8892,6 +8917,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::clearance_reads_only(&str) -> bool
 pub fn ai6::directorates::section_00::agent::clearance_runs_commands(&str) -> bool
@@ -12784,12 +12811,14 @@ pub fn ai6::directorates::medical::quarantine::QuarantinePolicy::reason(&self, &
 impl core::default::Default for ai6::directorates::medical::quarantine::QuarantinePolicy
 pub fn ai6::directorates::medical::quarantine::QuarantinePolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::QuotaWindow
+pub ai6::QuotaWindow::models: alloc::vec::Vec<alloc::string::String>
 pub ai6::QuotaWindow::name: alloc::string::String
 pub ai6::QuotaWindow::observed_at: f64
 pub ai6::QuotaWindow::resets_at: core::option::Option<f64>
 pub ai6::QuotaWindow::status: core::option::Option<alloc::string::String>
 pub ai6::QuotaWindow::used_permille: core::option::Option<u16>
 impl ai6::directorates::registry::accounts::QuotaWindow
+pub fn ai6::directorates::registry::accounts::QuotaWindow::models(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::new(impl core::convert::Into<alloc::string::String>, f64) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::resets_at(self, f64) -> Self
 pub fn ai6::directorates::registry::accounts::QuotaWindow::status(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -13041,6 +13070,7 @@ pub fn ai6::directorates::registry::holds::RosterHold::validate(&self, &ai6::dir
 pub ai6::RosterSettings::max_compartment_rules: ai6::bounds::Limit
 pub ai6::RosterSettings::max_operation_depth: ai6::bounds::Limit
 pub ai6::RosterSettings::reports: ai6::directorates::m::reports::ReportSettings
+pub ai6::RosterSettings::usage: ai6::directorates::m::roster::UsageSettings
 impl ai6::directorates::m::roster::RosterSettings
 pub fn ai6::directorates::m::roster::RosterSettings::new() -> Self
 pub fn ai6::directorates::m::roster::RosterSettings::validate(&self) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
@@ -14322,7 +14352,7 @@ pub fn ai6::directorates::medical::usage::UsageTotals::is_empty(&self) -> bool
 pub fn ai6::directorates::medical::usage::UsageTotals::tokens(&self) -> u64
 pub struct ai6::UsageTracker
 impl ai6::directorates::medical::usage::UsageTracker
-pub fn ai6::directorates::medical::usage::UsageTracker::observe(&mut self, &coqui_acp_provider::kind::TokenUsage) -> ai6::directorates::medical::usage::UsageTotals
+pub fn ai6::directorates::medical::usage::UsageTracker::observe(&mut self, &coqui_acp_api::usage::Spend) -> ai6::directorates::medical::usage::UsageTotals
 #[non_exhaustive] pub struct ai6::Vetting
 pub ai6::Vetting::findings: alloc::vec::Vec<ai6::directorates::m::vetting::Finding>
 pub ai6::Vetting::verdict: ai6::directorates::m::vetting::VettingVerdict
@@ -14626,6 +14656,8 @@ pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::Ag
 pub fn ai6::AgentHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -14639,6 +14671,8 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::section_00::agent::AgentHandler for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::assistant_scripts(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
@@ -14652,6 +14686,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub trait ai6::AgentRecordStore
 pub fn ai6::AgentRecordStore::agent_record(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::agent_records::AgentRecord>>

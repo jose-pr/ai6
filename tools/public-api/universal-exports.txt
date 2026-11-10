@@ -224,7 +224,9 @@ pub universal_exports::BoardTheater::unavailable: core::option::Option<alloc::st
 pub universal_exports::BoardTheater::weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardTheater::workdir: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardWindow
+pub universal_exports::BoardWindow::models: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardWindow::name: alloc::string::String
+pub universal_exports::BoardWindow::observed_at: f64
 pub universal_exports::BoardWindow::resets_at: core::option::Option<f64>
 pub universal_exports::BoardWindow::status: core::option::Option<alloc::string::String>
 pub universal_exports::BoardWindow::used_permille: core::option::Option<u16>

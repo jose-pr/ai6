@@ -15,6 +15,7 @@ pub ai6_agent_antigravity::AntigravityConfig::mcp_timeout_secs: i64
 pub ai6_agent_antigravity::AntigravityConfig::settings: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub ai6_agent_antigravity::AntigravityConfig::tail_line_bytes: u64
 pub ai6_agent_antigravity::AntigravityConfig::tail_lines: u64
+pub ai6_agent_antigravity::AntigravityConfig::usage_wait_ms: u64
 impl core::convert::TryFrom<ai6_agent_antigravity::AntigravityConfig> for ai6_agent_antigravity::AntigravityHandler
 pub type ai6_agent_antigravity::AntigravityHandler::Error = guatiao::library::kind::ProviderError
 pub fn ai6_agent_antigravity::AntigravityHandler::try_from(ai6_agent_antigravity::AntigravityConfig) -> core::result::Result<Self, Self::Error>
@@ -27,6 +28,8 @@ pub fn ai6_agent_antigravity::AntigravityHandler::resume(&self, ai6::directorate
 pub fn ai6_agent_antigravity::AntigravityHandler::session_record(&self, ai6::directorates::section_00::agent::SessionRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::SessionRecordFile>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_antigravity::AntigravityHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_antigravity::AntigravityHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_antigravity::AntigravityHandler::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
+pub fn ai6_agent_antigravity::AntigravityHandler::usage_support(&self) -> core::result::Result<coqui_acp_api::usage::UsageSupport, guatiao::library::kind::ProviderError>
 pub fn ai6_agent_antigravity::AntigravityHandler::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 impl core::convert::TryFrom<ai6_agent_antigravity::AntigravityConfig> for ai6_agent_antigravity::AntigravityHandler
 pub type ai6_agent_antigravity::AntigravityHandler::Error = guatiao::library::kind::ProviderError
