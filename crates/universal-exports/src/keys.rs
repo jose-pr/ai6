@@ -459,3 +459,9 @@ pub(crate) async fn revoke(
     .await?;
     Ok(Json(Revoked { revoked: true }))
 }
+
+impl std::fmt::Debug for KeyProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("KeyProvider([REDACTED])")
+    }
+}
