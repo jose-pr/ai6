@@ -52,6 +52,7 @@ mod stewardship;
 mod stream_tests;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
+mod usage_watch;
 mod verdicts;
 mod verification;
 mod vetting;
@@ -1013,6 +1014,7 @@ where
         clock: Clock::system(),
         vetting: Default::default(),
         models: Default::default(),
+        usage_watch: Default::default(),
         watches: Default::default(),
         #[cfg(feature = "publisher")]
         publisher,
@@ -1632,6 +1634,8 @@ struct DaemonState {
     vetting: Arc<vetting::VettingDesk>,
     /// The models each account and route may use, as their handlers last said.
     models: Arc<models::ModelBoard>,
+    /// What the Station knows of the limited accounts it re-reads and the Missions parked on them.
+    usage_watch: Arc<usage_watch::UsageWatch>,
     /// The watches this Station runs.
     watches: Arc<watches::WatchDesk>,
 }
@@ -1790,6 +1794,15 @@ async fn scheduler_loop(base: DaemonState) {
             tokio::task::spawn_blocking(move || {
                 logins::run_renewals(&renewing);
                 logins::end_renewals(&renewing);
+            });
+        }
+        // A re-read of limited accounts asks harnesses, which may take a while: it never holds up
+        // the beat either.
+        if usage_watch::begin(&state) {
+            let reading = state.clone();
+            tokio::task::spawn_blocking(move || {
+                usage_watch::run(&reading);
+                usage_watch::end(&reading);
             });
         }
         // A look asks harnesses, which may take minutes: it never holds up the beat.
@@ -8762,6 +8775,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
 
@@ -8929,6 +8943,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
 
@@ -9951,6 +9966,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         }
     }
@@ -10514,6 +10530,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
 
@@ -10642,6 +10659,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
 
@@ -10868,6 +10886,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
 
@@ -11013,6 +11032,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
 
@@ -11071,6 +11091,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         }
     }
@@ -11211,6 +11232,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
         let result = create_mission(
@@ -11327,6 +11349,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
@@ -11555,6 +11578,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
@@ -11661,6 +11685,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
         let monitor = Watchdog::with_limits(
@@ -11861,6 +11886,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
         state.sessions.lock().unwrap().insert(
@@ -12241,6 +12267,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
+            usage_watch: Default::default(),
             watches: Default::default(),
         };
         let spec = SafeHouseSpec {

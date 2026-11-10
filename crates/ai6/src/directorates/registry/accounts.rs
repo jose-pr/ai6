@@ -81,6 +81,10 @@ pub struct QuotaWindow {
     /// it reports one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// The models the window covers, when the provider names them; empty for every model, or
+    /// when it did not say.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
     /// When it was reported, as Unix seconds.
     pub observed_at: f64,
 }
@@ -93,8 +97,16 @@ impl QuotaWindow {
             used_permille: None,
             resets_at: None,
             status: None,
+            models: Vec::new(),
             observed_at,
         }
+    }
+
+    /// Sets the models the window covers.
+    #[must_use]
+    pub fn models(mut self, models: Vec<String>) -> Self {
+        self.models = models;
+        self
     }
 
     /// Sets the thousandths used.

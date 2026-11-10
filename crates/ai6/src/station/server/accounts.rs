@@ -25,7 +25,7 @@ use crate::directorates::registry::accounts::{
 };
 use crate::directorates::registry::sessions::SessionRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use coqui_acp_api::{Bucket, Refill, Status as BucketStatus, UsageReport};
+use coqui_acp_api::{Bucket, Coverage, Refill, Status as BucketStatus, UsageReport};
 
 use super::DaemonState;
 
@@ -931,6 +931,9 @@ pub(crate) fn window_of(bucket: &Bucket, now: f64) -> QuotaWindow {
     {
         window = window.resets_at(*at as f64);
     }
+    if let Coverage::Only { models } = &bucket.models {
+        window = window.models(models.clone());
+    }
     match &bucket.status {
         BucketStatus::Ok => window = window.status("allowed"),
         BucketStatus::Warning => window = window.status("allowed_warning"),
@@ -1018,6 +1021,16 @@ pub(super) fn on_limit(
         .roster
         .agent(operation, mission.agent_id.as_deref().unwrap_or_default())
         .ok();
+    // A Mission that waits out this limit is resumed early when a re-read of the account finds
+    // room for its model; a routed Agent's route is not known here, so any bucket may hold it.
+    state.usage_watch.hold(
+        &account,
+        mission_id,
+        agent
+            .as_ref()
+            .filter(|agent| !agent.is_routed())
+            .and_then(|agent| agent.model.clone()),
+    );
     let (any_room, carrying_room) = match agent.as_ref().filter(|agent| agent.is_routed()) {
         Some(agent) => {
             let handler = state

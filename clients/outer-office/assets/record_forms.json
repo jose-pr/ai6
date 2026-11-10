@@ -5075,6 +5075,43 @@
               "low"
             ]
           }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "refresh_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Re-read a limited account's usage every",
+              "description": "Seconds between this Station's re-reads of a limited account's usage, for a harness that can be read with no turn; a re-read that finds room frees the account and resumes the Missions parked on it. 0 never re-reads, and a limited account waits for its reset.",
+              "default": 300.0
+            },
+            "backoff_factor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Back off re-reads of a used-up account by",
+              "description": "What each re-read that finds the account still used up multiplies the wait to the next by; 0 and 1 keep it at `refresh_every`.",
+              "default": 2
+            },
+            "backoff_max": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wait between re-reads",
+              "description": "The longest wait between two re-reads of a used-up account, in seconds, however far the backoff has grown.",
+              "default": 3600.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Account usage",
+          "description": "`[roster.usage]`: how limited pool accounts are read again.",
+          "default": {
+            "refresh_every": 300.0,
+            "backoff_factor": 2,
+            "backoff_max": 3600.0
+          }
         }
       },
       "additionalProperties": false

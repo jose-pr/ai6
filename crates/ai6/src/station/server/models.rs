@@ -326,6 +326,31 @@ fn route_source(agent: &Agent, route: &AgentRoute) -> String {
     )
 }
 
+/// Runs `question` with the environment a Session on `account` would start with, its credential
+/// leased for the question alone and revoked after it. No account is claimed.
+pub(super) fn with_account<T>(
+    state: &DaemonState,
+    broker: &crate::directorates::q::SecretBroker,
+    pool: &AccountPool,
+    account: &Account,
+    holder: &str,
+    question: impl FnOnce(BTreeMap<String, String>) -> T,
+) -> Result<T, String> {
+    let mut environment = base(state);
+    let site = accounts::Site {
+        resuming: false,
+        on_station: true,
+    };
+    let lease = accounts::hand_over(state, broker, pool, account, holder, site, &mut environment)?;
+    let answer = question(environment);
+    if let Some(lease) = lease
+        && let Err(error) = lease.revoke()
+    {
+        eprintln!("ai6: a credential lease for {holder} was not revoked: {error}");
+    }
+    Ok(answer)
+}
+
 fn of_account(
     state: &DaemonState,
     broker: &crate::directorates::q::SecretBroker,
@@ -334,29 +359,10 @@ fn of_account(
     now: f64,
 ) -> Found {
     let holder = format!("models-{}-{}", pool.id(), account.name());
-    let mut environment = base(state);
-    let site = accounts::Site {
-        resuming: false,
-        on_station: true,
-    };
-    let listing = match accounts::hand_over(
-        state,
-        broker,
-        pool,
-        account,
-        &holder,
-        site,
-        &mut environment,
-    ) {
-        Ok(lease) => {
-            let listing = ask(state, pool.handler(), &serde_json::Map::new(), environment);
-            if let Some(lease) = lease
-                && let Err(error) = lease.revoke()
-            {
-                eprintln!("ai6: a credential lease for listing models was not revoked: {error}");
-            }
-            listing
-        }
+    let listing = match with_account(state, broker, pool, account, &holder, |environment| {
+        ask(state, pool.handler(), &serde_json::Map::new(), environment)
+    }) {
+        Ok(listing) => listing,
         Err(reason) => ModelListing::unknown(reason),
     };
     Found {

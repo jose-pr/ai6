@@ -14,7 +14,7 @@ use guatiao::{FromValue, Schema, ToValue};
 use guatiao_intake::Form;
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::Limit;
+use crate::bounds::{Limit, Seconds};
 use crate::directorates::m::approvals::{GreenInkDefinition, GreenInkPolicy};
 use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::cover::{Cover, CoverError, Covers};
@@ -865,6 +865,45 @@ pub struct RosterSettings {
     #[schema(title = "Reports")]
     #[map(default)]
     pub reports: ReportSettings,
+    /// `[roster.usage]`: how limited pool accounts are read again.
+    #[schema(title = "Account usage")]
+    #[map(default)]
+    pub usage: UsageSettings,
+}
+
+/// How often a Station reads a limited pool account's usage again, and how it backs off while
+/// the account stays used up: the `usage` table of the `roster` record. The reset time a
+/// provider states, or a 429's `retry-after`, only schedules the first read.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub struct UsageSettings {
+    /// Seconds between this Station's re-reads of a limited account's usage, for a harness that
+    /// can be read with no turn; a re-read that finds room frees the account and resumes the
+    /// Missions parked on it. 0 never re-reads, and a limited account waits for its reset.
+    #[schema(title = "Re-read a limited account's usage every")]
+    #[map(default = UsageSettings::default().refresh_every)]
+    pub refresh_every: Seconds,
+    /// What each re-read that finds the account still used up multiplies the wait to the next
+    /// by; 0 and 1 keep it at `refresh_every`.
+    #[schema(title = "Back off re-reads of a used-up account by")]
+    #[map(default = UsageSettings::default().backoff_factor)]
+    pub backoff_factor: u32,
+    /// The longest wait between two re-reads of a used-up account, in seconds, however far the
+    /// backoff has grown.
+    #[schema(title = "Longest wait between re-reads")]
+    #[map(default = UsageSettings::default().backoff_max)]
+    pub backoff_max: Seconds,
+}
+
+impl Default for UsageSettings {
+    fn default() -> Self {
+        Self {
+            refresh_every: Seconds::new(300),
+            backoff_factor: 2,
+            backoff_max: Seconds::new(3_600),
+        }
+    }
 }
 
 impl Default for RosterSettings {
@@ -874,6 +913,7 @@ impl Default for RosterSettings {
             max_operation_depth: Limit::at(DEFAULT_MAX_OPERATION_DEPTH as u64),
             max_compartment_rules: Limit::at(DEFAULT_MAX_COMPARTMENT_RULES as u64),
             reports: ReportSettings::default(),
+            usage: UsageSettings::default(),
         }
     }
 }
