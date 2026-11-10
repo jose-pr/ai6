@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 
 use guatiao::Bytes;
 
-use crate::directorates::q::overlays::{Digest, TreeLimits, tree_digest, valid_relative_path};
 use crate::directorates::q::transport::kit::{ProcessInput, run_process};
 use crate::directorates::q::transport::{Output, RunSpec, TransportClient, WriteSpec, describe};
 use crate::directorates::section_00::programs;
+use coqui_aos::{Digest, Settings, StdFs, tree_digest, valid_relative_path};
 
 #[cfg(windows)]
 use super::icacls;
@@ -295,7 +295,7 @@ impl Site {
     /// The operating system, as AOS names it.
     pub(super) fn os(&self) -> &str {
         match self {
-            Self::Here { .. } => crate::directorates::q::overlays::current_os(),
+            Self::Here { .. } => coqui_aos::current_os(),
             Self::Theater { os, .. } => os,
         }
     }
@@ -497,13 +497,16 @@ impl Site {
         digest: &Digest,
         source: &Path,
         files: &BTreeMap<String, Digest>,
-        limits: &TreeLimits,
+        limits: &Settings,
     ) -> Result<String, String> {
         let target = self.path(&format!("{kind}/{}", hex_of(digest)));
         let Self::Theater { client, id, .. } = self else {
             return Ok(target);
         };
-        let room = (limits.files.or_max() as u64)
+        let room = limits
+            .tree_files
+            .get()
+            .unwrap_or(u64::MAX)
             .saturating_mul(4096)
             .max(DEFAULT_LISTING_BYTES);
         let hashed = client
@@ -893,9 +896,9 @@ fn run_here(step: &Step<'_>) -> Result<Finished, String> {
 /// The files of a tree in the store, each with its digest.
 pub(super) fn store_tree_files(
     root: &Path,
-    limits: &TreeLimits,
+    limits: &Settings,
 ) -> Result<BTreeMap<String, Digest>, String> {
-    tree_digest(root, limits)
+    tree_digest(&StdFs, root, limits)
         .map(|digest| digest.files)
         .map_err(|why| why.to_string())
 }

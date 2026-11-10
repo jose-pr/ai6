@@ -741,18 +741,6 @@ fn a_change_between_digests_is_named_and_none_is_none() {
     assert!(change.contains("c: added at sha256:3"), "{change}");
 }
 
-#[test]
-fn front_matter_is_only_a_closed_block_at_the_start() {
-    assert_eq!(without_front_matter("---\na: b\n---\nbody"), "body");
-    assert_eq!(without_front_matter("---\r\na: b\r\n...\r\nbody"), "body");
-    assert_eq!(without_front_matter("\u{feff}---\nx\n---\nbody"), "body");
-    assert_eq!(without_front_matter("---\nno close"), "---\nno close");
-    assert_eq!(
-        without_front_matter("body\n---\nx\n---\n"),
-        "body\n---\nx\n---\n"
-    );
-}
-
 /// A `PATH` holding the host's Python, or `None` where it has none that runs.
 fn path_with_python() -> Option<String> {
     let path = std::env::var("PATH").ok()?;
@@ -1057,68 +1045,43 @@ fn in_a_container_a_helper_reaches_its_commands_and_code_with_no_python_waits() 
 }
 
 #[test]
-fn a_requirements_file_holds_requirements_and_comments_only() {
-    use crate::directorates::q::overlays::check_requirements;
-    assert_eq!(check_requirements("# only a comment\n\n", false), Ok(()));
-    assert_eq!(
-        check_requirements("six==1.16 ; python_version > '3'\nrich\n", false),
-        Ok(())
-    );
-    assert_eq!(
-        check_requirements(
-            "six==1.16 \\\n  --hash=sha256:aa \\\n  --hash=sha256:bb\n",
-            true
-        ),
-        Ok(())
-    );
-    for (text, locked, why) in [
-        ("-r other.txt\n", false, "option"),
-        ("--index-url https://example.org\n", false, "option"),
-        ("-e .\n", false, "option"),
-        (
-            "thing @ https://example.org/thing.zip\n",
-            false,
-            "direct URL",
-        ),
-        ("https://example.org/thing.zip\n", false, "direct URL"),
-        ("six==1.16 --no-binary six\n", false, "--hash"),
-        ("six>=1 --hash=sha256:aa\n", true, "pinned"),
-    ] {
-        let refusal = check_requirements(text, locked).err().unwrap();
-        assert!(refusal.contains(why), "{text:?}: {refusal}");
-    }
-}
-
-#[test]
-fn an_overlay_md_with_no_overlay_cfg_refuses_the_session_naming_the_file() {
+fn an_overlay_md_is_the_manifest_and_its_body_arrives_as_context() {
     let case = Case::new();
     let source = tempfile::tempdir().unwrap();
     let dir = overlay_dir(
         source.path(),
         "tools",
         &[
-            ("OVERLAY.md", "---\nname = \"tools\"\n---\nContext.\n"),
-            ("bin/helper", "x\n"),
+            (
+                "OVERLAY.md",
+                "---
+name: tools
+---
+Context body
+",
+            ),
+            (
+                "bin/helper",
+                "x
+",
+            ),
         ],
     );
-    // A pin as the tree's digest would be: the refusal is the manifest's, not the pin's.
-    let pin = crate::directorates::q::overlays::tree_digest(&dir, &OverlayLimits::default().tree())
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let text = case
+        .deliver(&prepared, &[], true, "codex")
         .unwrap()
-        .digest;
-    let list = records([OverlayRecord::new("tools", OverlayFrom::Path(dir)).pinned(pin)]);
-    let refusal = case.prepare(&["tools"], &[], &list).err().unwrap();
+        .context
+        .unwrap();
     assert!(
-        refusal.contains("does not read OVERLAY.md yet"),
-        "{refusal}"
+        text.contains(
+            "From `OVERLAY.md`:
+Context body"
+        ),
+        "{text}"
     );
-    assert!(
-        !case
-            .state
-            .path()
-            .join("overlays/trees")
-            .join(hex_of(&pin))
-            .exists()
-    );
+    assert!(!text.contains("name: tools"), "{text}");
 }
 
 #[test]
@@ -1130,9 +1093,13 @@ fn an_overlay_with_a_hook_refuses_the_session_naming_it() {
         "tools",
         &[("hook.sh", "#!/bin/sh\n"), ("kb/a.md", "a\n")],
     );
-    let pin = crate::directorates::q::overlays::tree_digest(&dir, &OverlayLimits::default().tree())
-        .unwrap()
-        .digest;
+    let pin = coqui_aos::tree_digest(
+        &coqui_aos::StdFs,
+        &dir,
+        &OverlayLimits::default().settings(),
+    )
+    .unwrap()
+    .digest;
     let list = records([OverlayRecord::new("tools", OverlayFrom::Path(dir)).pinned(pin)]);
     let refusal = case.prepare(&["tools"], &[], &list).err().unwrap();
     assert!(refusal.contains("ships hook.sh"), "{refusal}");

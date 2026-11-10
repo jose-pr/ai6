@@ -1676,10 +1676,10 @@ fn overlay_pin(dir: &std::path::Path) -> ExitCode {
     }
     let mut usable = true;
     for issue in &read.issues {
-        let blocks = !ai6::directorates::q::overlays::applies(std::slice::from_ref(issue));
+        let blocks = !coqui_aos::applies(std::slice::from_ref(issue));
         usable &= !blocks;
         eprintln!(
-            "ai6: {}: overlay.cfg {}: {}{}",
+            "ai6: {}: manifest {}: {}{}",
             dir.display(),
             issue.at,
             issue.code,

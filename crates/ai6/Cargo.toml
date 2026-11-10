@@ -80,6 +80,7 @@ guatiao = { workspace = true, features = ["provider"] }
 guatiao-intake.workspace = true
 guatiao-serde = { workspace = true, features = ["json", "toml", "yaml"] }
 anycfg.workspace = true
+coqui-aos.workspace = true
 fs2 = "0.4"
 futures-util = { workspace = true, optional = true }
 serde = { workspace = true, features = ["alloc"] }
@@ -111,7 +112,6 @@ sysinfo = { workspace = true, optional = true }
 tempfile.workspace = true
 toml.workspace = true
 serde-saphyr.workspace = true
-granit-parser.workspace = true
 tokio = { workspace = true, optional = true }
 ureq = { workspace = true, optional = true }
 url = { workspace = true, optional = true }

@@ -324,15 +324,17 @@ impl ProjectManifest {
     ///
     /// As [`read_tree`](Self::read_tree).
     pub fn read_tree_within(root: &Path, limits: &HarnessLimits) -> Result<Self, String> {
-        let tree = crate::directorates::q::overlays::tree_digest(
-            root,
-            &crate::directorates::q::overlays::TreeLimits {
-                files: limits.manifest_files,
-                bytes: limits.manifest_bytes,
-                file_bytes: limits.manifest_file_bytes,
-            },
-        )
-        .map_err(|error| error.to_string())?;
+        let bound = |limit: crate::bounds::Limit| {
+            limit
+                .get()
+                .map_or(coqui_aos::Limit::UNBOUNDED, coqui_aos::Limit::at)
+        };
+        let settings = coqui_aos::Settings::default()
+            .tree_files(bound(limits.manifest_files))
+            .tree_bytes(bound(limits.manifest_bytes))
+            .file_bytes(bound(limits.manifest_file_bytes));
+        let tree = coqui_aos::tree_digest(&coqui_aos::StdFs, root, &settings)
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             files: tree
                 .files

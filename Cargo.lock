@@ -121,6 +121,7 @@ dependencies = [
  "coqui-acp",
  "coqui-acp-api",
  "coqui-acp-provider",
+ "coqui-aos",
  "coqui-net-acl",
  "coqui-peer",
  "coqui-peer-tls",
@@ -131,7 +132,6 @@ dependencies = [
  "futures",
  "futures-util",
  "globset",
- "granit-parser 2.0.0",
  "guatiao",
  "guatiao-intake",
  "guatiao-serde",
@@ -1214,6 +1214,19 @@ dependencies = [
  "serde_json",
  "socket2",
  "url",
+]
+
+[[package]]
+name = "coqui-aos"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=c73cf23ace7dd43c6bd14e9f2f4cb74741aaa3a9#c73cf23ace7dd43c6bd14e9f2f4cb74741aaa3a9"
+dependencies = [
+ "granit-parser 2.0.0",
+ "guatiao",
+ "serde_json",
+ "sha2 0.10.9",
+ "toml 1.1.8+spec-1.1.0",
+ "unicode-general-category",
 ]
 
 [[package]]
@@ -5378,6 +5391,12 @@ name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"

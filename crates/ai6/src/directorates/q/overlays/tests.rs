@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use coqui_aos::{Settings, SourceKind, default_paths, read_document, rules_of};
+
 use super::*;
 use crate::directorates::q::LoadoutCatalog;
 
 fn manifest(text: &str) -> Document {
-    read_document(text.as_bytes(), &ReadLimits::default()).unwrap()
+    read_document(text.as_bytes(), &Settings::default()).unwrap()
 }
 
 fn record(name: &str, pinned: bool) -> (String, OverlayRecord) {
@@ -256,46 +258,15 @@ fn reading_an_overlay_gives_its_tree_digest_manifest_and_checked_skills() {
 }
 
 #[test]
-fn a_changed_file_changes_the_tree_digest() {
-    let root = tempfile::tempdir().unwrap();
-    write(root.path(), RUST);
-    let limits = OverlayLimits::default().tree();
-    let before = tree_digest(root.path(), &limits).unwrap().digest;
-    write(
-        root.path(),
-        &[("kb/RUST.md", "# Rust\n\nClippy with warnings denied!\n")],
-    );
-    let edited = tree_digest(root.path(), &limits).unwrap().digest;
-    assert_ne!(before, edited, "an edited file");
-    write(root.path(), &[("kb/NEW.md", "new\n")]);
-    let added = tree_digest(root.path(), &limits).unwrap().digest;
-    assert_ne!(edited, added, "an added file");
-    std::fs::rename(
-        root.path().join("kb/NEW.md"),
-        root.path().join("kb/OTHER.md"),
-    )
-    .unwrap();
-    assert_ne!(
-        added,
-        tree_digest(root.path(), &limits).unwrap().digest,
-        "a renamed file"
-    );
-    // An empty directory and an excluded one change nothing.
-    let now = tree_digest(root.path(), &limits).unwrap().digest;
-    std::fs::create_dir_all(root.path().join("empty/inner")).unwrap();
-    write(root.path(), &[("node_modules/x/index.js", "x\n")]);
-    assert_eq!(now, tree_digest(root.path(), &limits).unwrap().digest);
-}
-
-#[test]
 fn a_tree_past_a_limit_is_refused_naming_the_limit() {
     let root = tempfile::tempdir().unwrap();
     write(root.path(), RUST);
-    let mut limits = OverlayLimits::default().tree();
-    limits.files = crate::bounds::Limit::at(2);
-    let refused = tree_digest(root.path(), &limits).unwrap_err();
-    assert_eq!(refused.kind, DigestErrorKind::TooLarge);
-    assert!(refused.path.contains("more than 2 files"), "{refused}");
+    let limits = OverlayLimits {
+        files: crate::bounds::Limit::at(2),
+        ..OverlayLimits::default()
+    };
+    let refused = read_overlay(root.path(), &limits).unwrap_err();
+    assert!(refused.contains("more than 2 files"), "{refused}");
 }
 
 #[test]
@@ -393,25 +364,36 @@ fn an_operation_names_overlays_by_identity_once_each() {
 }
 
 #[test]
-fn an_overlay_md_with_no_overlay_cfg_is_refused_and_never_read_as_no_manifest() {
+fn an_overlay_md_is_the_manifest_and_both_manifests_are_refused() {
     let root = tempfile::tempdir().unwrap();
     let write = |path: &str, text: &str| {
         let file = root.path().join(path);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(file, text).unwrap();
     };
-    write("OVERLAY.md", "---\nrequires = [\"base\"]\n---\nContext.\n");
-    write("bin/helper", "#!/bin/sh\n");
-    let refusal = read_overlay(root.path(), &OverlayLimits::default()).unwrap_err();
-    assert!(refusal.contains("OVERLAY.md"), "{refusal}");
-    assert!(
-        refusal.contains("does not read OVERLAY.md yet"),
-        "{refusal}"
+    write(
+        "OVERLAY.md",
+        "---
+name: tools
+---
+Context.
+",
     );
-    // With an overlay.cfg beside it, the manifest is that file, as this edition reads it.
-    write("overlay.cfg", "name = \"tools\"\n");
+    write(
+        "bin/helper",
+        "#!/bin/sh
+",
+    );
     let read = read_overlay(root.path(), &OverlayLimits::default()).unwrap();
     assert_eq!(read.manifest["name"], "tools");
+    // An overlay with both files has no one manifest.
+    write(
+        "overlay.cfg",
+        "name = \"tools\"
+",
+    );
+    let refusal = read_overlay(root.path(), &OverlayLimits::default()).unwrap_err();
+    assert!(refusal.contains("two-manifests"), "{refusal}");
 }
 
 #[test]

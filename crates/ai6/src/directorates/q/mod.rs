@@ -669,7 +669,7 @@ impl LoadoutCatalog {
 
     /// The overlay `name` names, compared as an identity.
     pub fn overlay(&self, name: &str) -> Option<&overlays::OverlayRecord> {
-        self.overlays.get(&overlays::normalize_name(name))
+        self.overlays.get(&coqui_aos::normalize_name(name))
     }
 
     /// How the secret `name` reaches a Session: its `[secret.<name>]` table, or every default.
@@ -871,7 +871,7 @@ struct RawOverlay {
 impl RawOverlay {
     fn into_record(self, name: &str, chars: Limit) -> Result<overlays::OverlayRecord, String> {
         let key = format!("overlay {name:?}");
-        if !overlays::valid_overlay_name(name) {
+        if !coqui_aos::valid_overlay_name(name) {
             return Err(format!(
                 "{key}: a name is an ASCII letter, then letters, digits, '_', '.' or '-', ending \
                  in a letter or digit, and no scope label or device name"
@@ -879,7 +879,7 @@ impl RawOverlay {
         }
         let from = match (self.source, self.path) {
             (Some(source), None) => overlays::OverlayFrom::Source(
-                overlays::Source::parse(&source)
+                coqui_aos::Source::parse(&source)
                     .map_err(|error| format!("{key}.source: {error}"))?,
             ),
             (None, Some(path))
@@ -899,7 +899,7 @@ impl RawOverlay {
         let mut record = overlays::OverlayRecord::new(name, from);
         if let Some(pin) = self.pin {
             record = record.pinned(
-                overlays::Digest::parse(&pin).map_err(|reason| format!("{key}.pin: {reason}"))?,
+                coqui_aos::Digest::parse(&pin).map_err(|reason| format!("{key}.pin: {reason}"))?,
             );
         }
         for secret in &self.secrets {
@@ -1218,10 +1218,10 @@ pub(crate) fn check_overlay_list(
 ) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     for name in names {
-        if !overlays::valid_overlay_name(name) {
+        if !coqui_aos::valid_overlay_name(name) {
             return Err(format!("overlays: {name:?} is no overlay name"));
         }
-        let identity = overlays::normalize_name(name);
+        let identity = coqui_aos::normalize_name(name);
         if !seen.insert(identity.clone()) {
             return Err(format!("overlays: {name:?} is named twice"));
         }

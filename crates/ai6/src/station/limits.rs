@@ -735,7 +735,8 @@ pub struct OverlayLimits {
     #[schema(title = "Deepest overlay manifest")]
     #[map(default = OverlayLimits::default().manifest_depth)]
     pub manifest_depth: Limit,
-    /// Files in one overlay, the excluded names (`.git`, `node_modules`, ...) not counted.
+    /// Files and directories in one overlay, the excluded names (`.git`, `node_modules`, ...) not
+    /// counted.
     #[schema(title = "Files in an overlay")]
     #[map(default = OverlayLimits::default().files)]
     pub files: Limit,
@@ -800,21 +801,20 @@ impl Default for OverlayLimits {
 }
 
 impl OverlayLimits {
-    /// How much of an overlay's tree is read.
-    pub fn tree(&self) -> crate::directorates::q::overlays::TreeLimits {
-        crate::directorates::q::overlays::TreeLimits {
-            files: self.files,
-            bytes: self.bytes,
-            file_bytes: self.file_bytes,
-        }
-    }
-
-    /// How much of a manifest is read.
-    pub fn manifest(&self) -> crate::directorates::q::overlays::ReadLimits {
-        crate::directorates::q::overlays::ReadLimits {
-            bytes: self.manifest_bytes,
-            depth: self.manifest_depth,
-        }
+    /// The AOS reader's settings: the bounds on an overlay's tree and manifest. Every other bound is
+    /// the reader's default.
+    pub fn settings(&self) -> coqui_aos::Settings {
+        let bound = |limit: Limit| {
+            limit
+                .get()
+                .map_or(coqui_aos::Limit::UNBOUNDED, coqui_aos::Limit::at)
+        };
+        coqui_aos::Settings::default()
+            .manifest_bytes(bound(self.manifest_bytes))
+            .manifest_depth(bound(self.manifest_depth))
+            .tree_files(bound(self.files))
+            .tree_bytes(bound(self.bytes))
+            .file_bytes(bound(self.file_bytes))
     }
 
     /// One line per setting looser than its default: a larger limit, and `unpinned`.

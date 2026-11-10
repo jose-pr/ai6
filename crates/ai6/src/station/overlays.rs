@@ -16,14 +16,19 @@ use std::time::{Duration, Instant};
 use guatiao::Bytes;
 use serde_json::Value as Data;
 
+use coqui_aos::Step as PrepStep;
+use coqui_aos::{
+    Change, Dependency, Digest, Document, Environment, Facts, FailStep, OverlayTree, Phase,
+    Runtime, ScriptRun, SetupRecord, SetupRun, Source, SourceKind, StdFs, TreeEntry,
+    check_requirements, composed_environment, context_file_text, context_of, default_on,
+    digest_entries, effective, env_files_of, is_reserved_variable, is_sensitive_variable,
+    normalize_name, preparation, read_env_script_output, root_variable, rules_of, skills_of,
+    state_variable, tree_digest, valid_relative_path,
+};
+
 use crate::directorates::q::overlays::{
-    Change, Dependency, Digest, Document, Environment, Facts, IssuedDigest, IssuedOverlay,
-    MANIFEST, OverlayFrom, OverlayRecord, Phase, ReadOverlay, ScriptRun, SetupRecord, SetupRun,
-    Source, SourceKind, TreeEntry, Weakening, check_requirements, composed_environment, context_of,
-    default_on, digest_entries, effective, env_files_of, is_reserved_variable,
-    is_sensitive_variable, issue_overlays, normalize_name, preparation, read_env_script_output,
-    read_overlay, root_variable, rules_of, skill_description, skills_of, state_variable,
-    tree_digest,
+    IssuedDigest, IssuedOverlay, OverlayFrom, OverlayRecord, ReadOverlay, Weakening,
+    issue_overlays, read_overlay, skill_description,
 };
 use crate::directorates::q::provision::RequiredProgram;
 use crate::directorates::q::transport::kit::{ProcessInput, run_process};
@@ -202,6 +207,10 @@ impl Store {
                      Git repository or a directory",
                     source.shown()
                 )),
+                _ => Err(format!(
+                    "overlay {identity:?}: {} is a kind of source this Station does not fetch",
+                    source.shown()
+                )),
             },
         }
     }
@@ -330,7 +339,8 @@ impl Store {
             .map_err(|why| why.to_string())?;
         let target = self.dir.join("plugins").join(hex_of(&digest.digest));
         if target.is_dir() {
-            let found = tree_digest(&target, &self.limits.tree()).map_err(|why| why.to_string())?;
+            let found = tree_digest(&StdFs, &target, &self.limits.settings())
+                .map_err(|why| why.to_string())?;
             if found.digest != digest.digest {
                 return Err(format!(
                     "the plugin at {} changed after it was made. Delete that directory to make it \
@@ -365,7 +375,7 @@ fn collect_files(
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = format!("{prefix}/{name}");
-        if !crate::directorates::q::overlays::valid_relative_path(&path) {
+        if !valid_relative_path(&path) {
             continue;
         }
         if entry.file_type()?.is_dir() {
@@ -644,7 +654,7 @@ impl Git {
             let bytes = rest.get(start..end).ok_or("git's batch ended early")?;
             let file = target.join(&name);
             // A path git holds that leaves the tree is refused by the digest of what is left.
-            if !crate::directorates::q::overlays::valid_relative_path(&name) {
+            if !valid_relative_path(&name) {
                 rest = rest.get(end + 1..).unwrap_or_default();
                 continue;
             }
@@ -880,7 +890,7 @@ fn check_usable(identity: &str, read: &ReadOverlay) -> Result<(), String> {
             .find(|issue| !issue.at.starts_with("/about"))
         {
             return Err(format!(
-                "overlay {identity:?}: {MANIFEST} {}: {}",
+                "overlay {identity:?}: manifest {}: {}",
                 issue.at, issue.code
             ));
         }
@@ -988,7 +998,7 @@ impl Prepared {
                     &ready.stored.digest,
                     &ready.stored.root,
                     &ready.stored.read.digest.files,
-                    &self.limits.tree(),
+                    &self.limits.settings(),
                 )
                 .map_err(|why| format!("overlay {:?}: {why}", ready.issued.identity))?;
             check_outside(&root, session.working_directory)?;
@@ -1080,8 +1090,8 @@ impl Prepared {
             .collect();
         if !native.is_empty() {
             let (digest, here) = self.store.plugin(&native)?;
-            let files = store_tree_files(&here, &self.limits.tree())?;
-            let plugin = site.tree("plugins", &digest, &here, &files, &self.limits.tree())?;
+            let files = store_tree_files(&here, &self.limits.settings())?;
+            let plugin = site.tree("plugins", &digest, &here, &files, &self.limits.settings())?;
             check_outside(&plugin, session.working_directory)?;
             delivered.overlays.plugin_dir = Some(plugin);
         }
@@ -1139,39 +1149,42 @@ impl Prepared {
         for ready in &self.overlays {
             let identity = &ready.issued.identity;
             let state = site.path(&format!("state/{identity}"));
-            let facts = Facts {
-                os: os.to_owned(),
-                root: roots[identity].clone(),
-                identity: identity.clone(),
-                state: Some(state.clone()),
-                pinned: ready.issued.record.pin().is_some(),
-                base_env: start.clone(),
-                enforces_network: Some(false),
-                env_scripts_enabled: Some(fit.commands),
-                interpreters: Some(found.clone()),
-                packages: packages.get(identity).cloned().unwrap_or_default(),
-                tree: self.tree_of(ready)?,
-                read_limits: self.limits.manifest(),
-                ..Facts::default()
-            };
+            let mut facts = Facts::new(os);
+            facts.root = roots[identity].clone();
+            facts.identity = identity.clone();
+            facts.state = Some(state.clone());
+            facts.pinned = ready.issued.record.pin().is_some();
+            facts.base_env = start.clone();
+            facts.enforces_network = Some(false);
+            facts.env_scripts_enabled = Some(fit.commands);
+            facts.interpreters = Some(found.clone());
+            facts.packages = packages.get(identity).cloned().unwrap_or_default();
+            facts.tree = self.tree_of(ready)?;
+            facts.settings = self.limits.settings();
             let manifest = &ready.issued.manifest;
             let applied = effective(manifest, &facts)
                 .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
             weakenings.extend(
                 applied
-                    .weakenings
+                    .non_defaults
                     .iter()
-                    .filter(|weakening| {
-                        fit.commands || !RUN_WEAKENINGS.contains(&weakening.id.as_str())
+                    .filter(|setting| {
+                        fit.commands || !RUN_WEAKENINGS.contains(&setting.id.as_str())
                     })
-                    .map(|weakening| Reported {
+                    .map(|setting| Reported {
                         overlay: identity.clone(),
-                        weakening: weakening.clone(),
+                        weakening: Weakening::from(setting),
                     }),
             );
             let mut ignored = Vec::new();
-            env = composed_environment(&[(manifest, facts.clone())], env, &mut ignored)
-                .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
+            env = composed_environment(
+                &[(manifest, facts.clone())],
+                env,
+                &BTreeMap::new(),
+                &mut ignored,
+            )
+            .env
+            .map_err(|refusal| format!("overlay {identity:?}: {refusal}"))?;
             if fit.commands {
                 for script in &applied.env_scripts {
                     // The overlay's own process: the base, every root, its own declarations.
@@ -1334,10 +1347,7 @@ impl Prepared {
     }
 
     /// The overlay's files, with the text of what the environment reads.
-    fn tree_of(
-        &self,
-        ready: &Ready,
-    ) -> Result<crate::directorates::q::overlays::OverlayTree, String> {
+    fn tree_of(&self, ready: &Ready) -> Result<OverlayTree, String> {
         let mut tree = ready.stored.read.tree();
         let mut wanted: Vec<String> = env_files_of(&ready.issued.manifest, &tree)
             .iter()
@@ -1426,9 +1436,13 @@ impl Prepared {
                 }
             }
             for file in files {
-                let body = fs::read_to_string(ready.stored.root.join(&file))
+                let bytes = fs::read(ready.stored.root.join(&file))
                     .map_err(|why| format!("overlay {identity:?}: {file}: {why}"))?;
-                let _ = writeln!(text, "\nFrom `{file}`:\n{}", without_front_matter(&body));
+                let body = context_file_text(&bytes, &self.limits.settings())
+                    .map_err(|why| format!("overlay {identity:?}: {file}: {why}"))?;
+                let body = std::str::from_utf8(body)
+                    .map_err(|why| format!("overlay {identity:?}: {file}: {why}"))?;
+                let _ = writeln!(text, "\nFrom `{file}`:\n{body}");
             }
         }
         if !self.limits.context_bytes.allows(text.len() as u64) {
@@ -1747,18 +1761,16 @@ impl Prepared {
         os: &str,
         session: &BTreeMap<String, String>,
     ) -> Result<Facts, String> {
-        Ok(Facts {
-            os: os.to_owned(),
-            root: "/".to_owned(),
-            identity: ready.issued.identity.clone(),
-            state: Some("/".to_owned()),
-            pinned: ready.issued.record.pin().is_some(),
-            base_env: session.clone(),
-            enforces_network: Some(false),
-            tree: self.tree_of(ready)?,
-            read_limits: self.limits.manifest(),
-            ..Facts::default()
-        })
+        let mut facts = Facts::new(os);
+        facts.root = "/".to_owned();
+        facts.identity = ready.issued.identity.clone();
+        facts.state = Some("/".to_owned());
+        facts.pinned = ready.issued.record.pin().is_some();
+        facts.base_env = session.clone();
+        facts.enforces_network = Some(false);
+        facts.tree = self.tree_of(ready)?;
+        facts.settings = self.limits.settings();
+        Ok(facts)
     }
 
     /// Installs an overlay's dependencies and runs its setup where it is due, per AOS's phases, and
@@ -1805,13 +1817,13 @@ impl Prepared {
             .join(format!("{identity}.json"));
         let mut record: Option<SetupRecord> = fs::read(&record_path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+            .and_then(|bytes| setup_record_from(&bytes));
         // A Theater rebuilt since keeps no environment or state: its record says nothing of it.
-        let envs = |runtime: &str| site.path(&format!("envs/{hex}/{runtime}"));
+        let envs = |runtime: Runtime| site.path(&format!("envs/{hex}/{runtime}"));
         let mut gone = !site.exists(&state)?;
         for dependency in &applied.dependencies {
             if record.as_ref().is_some_and(|r| r.digest == digest) {
-                gone |= !site.exists(&envs(&dependency.runtime))?;
+                gone |= !site.exists(&envs(dependency.runtime))?;
             }
         }
         if gone {
@@ -1832,34 +1844,42 @@ impl Prepared {
         let environment = process_environment(&applied, session, base, (root, &state, identity));
         let mut packages = BTreeMap::new();
         for step in &plan.steps {
-            let done = match step.split(':').collect::<Vec<_>>().as_slice() {
-                ["empty-state"] => site.empty_dir(&state),
-                ["deps", "python"] => {
-                    let dependency = applied
-                        .dependencies
-                        .iter()
-                        .find(|dependency| dependency.runtime == "python");
-                    self.install_python(ready, fit, root, &envs("python"), dependency, &environment)
-                }
-                ["deps", "node"] => {
-                    let dependency = applied
-                        .dependencies
-                        .iter()
-                        .find(|dependency| dependency.runtime == "node");
-                    self.install_node(ready, fit, root, &envs("node"), dependency, &environment)
-                }
-                ["setup"] => applied.setup.as_ref().map_or(Ok(()), |setup| {
+            let dependency_of = |runtime: Runtime| {
+                applied
+                    .dependencies
+                    .iter()
+                    .find(|dependency| dependency.runtime == runtime)
+            };
+            let done = match step {
+                PrepStep::EmptyState => site.empty_dir(&state),
+                PrepStep::Deps(Runtime::Python) => self.install_python(
+                    ready,
+                    fit,
+                    root,
+                    &envs(Runtime::Python),
+                    dependency_of(Runtime::Python),
+                    &environment,
+                ),
+                PrepStep::Deps(Runtime::Node) => self.install_node(
+                    ready,
+                    fit,
+                    root,
+                    &envs(Runtime::Node),
+                    dependency_of(Runtime::Node),
+                    &environment,
+                ),
+                PrepStep::Setup => applied.setup.as_ref().map_or(Ok(()), |setup| {
                     let phase = plan.phase.map_or("sync", Phase::name);
                     self.run_setup(ready, fit, root, &state, setup, phase, &environment)
                 }),
-                ["record"] => {
+                PrepStep::Record => {
                     let write = || -> io::Result<()> {
                         if let Some(parent) = record_path.parent() {
                             fs::create_dir_all(parent)?;
                         }
                         fs::write(
                             &record_path,
-                            serde_json::to_vec_pretty(&plan.record).map_err(io::Error::other)?,
+                            setup_record_to(plan.record.as_ref()).map_err(io::Error::other)?,
                         )
                     };
                     write().map_err(|why| format!("its setup record: {why}"))
@@ -1867,14 +1887,18 @@ impl Prepared {
                 _ => Ok(()),
             };
             if let Err(why) = done {
-                let failed = step.split(':').next().unwrap_or_default();
+                let failed = match step {
+                    PrepStep::Deps(_) => Some(FailStep::Deps),
+                    PrepStep::Setup => Some(FailStep::Setup),
+                    _ => None,
+                };
                 let after = preparation(
                     Change::Activate,
                     record.as_ref(),
                     Some(&digest),
                     applied.setup.as_ref(),
                     &applied.dependencies,
-                    Some(failed),
+                    failed,
                 );
                 if !after.activates {
                     return Err(format!(
@@ -1886,11 +1910,11 @@ impl Prepared {
         }
         site.close_dir(&state)?;
         for dependency in &applied.dependencies {
-            let directory = envs(&dependency.runtime);
+            let directory = envs(dependency.runtime);
             packages.insert(
-                dependency.runtime.clone(),
-                match dependency.runtime.as_str() {
-                    "python" => self.python_packages(fit, &directory, base)?,
+                dependency.runtime.as_str().to_owned(),
+                match dependency.runtime {
+                    Runtime::Python => self.python_packages(fit, &directory, base)?,
                     _ => format!(
                         "{}{}node_modules",
                         directory,
@@ -2115,8 +2139,8 @@ impl Prepared {
         if !finished.succeeded() {
             return Err(refuse(finished.failure()));
         }
-        let values =
-            read_env_script_output(&finished.stdout).map_err(|why| refuse(why.to_string()))?;
+        let values = read_env_script_output(&finished.stdout, &self.limits.settings())
+            .map_err(|why| refuse(why.to_string()))?;
         for (name, value) in values {
             if is_reserved_variable(&name) {
                 return Err(refuse(format!("it sets {name}, which is reserved")));
@@ -2232,7 +2256,7 @@ fn process_base(session: &BTreeMap<String, String>, path: &str) -> BTreeMap<Stri
 /// What one overlay's process gets (`spec/v0/runtime.md#what-a-step-receives`): the base, this
 /// overlay's own declarations and the `AOS_` variables.
 fn process_environment(
-    applied: &crate::directorates::q::overlays::Effective,
+    applied: &coqui_aos::Effective,
     session: &BTreeMap<String, String>,
     base: &BTreeMap<String, String>,
     (root, state, identity): (&str, &str, &str),
@@ -2272,24 +2296,25 @@ fn path_of(environment: &BTreeMap<String, String>) -> Option<&str> {
         .map(|(_, value)| value.as_str())
 }
 
-/// The text after a leading front matter block: an optional byte-order mark, a first line that is
-/// `---`, up to the next that is `---` or `...`. Without that closing line there is none.
-fn without_front_matter(text: &str) -> &str {
-    let body = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let Some(rest) = body
-        .strip_prefix("---\r\n")
-        .or_else(|| body.strip_prefix("---\n"))
-    else {
-        return text;
+/// A setup record as the Station keeps it: `{"digest": ..., "phase": ...}`.
+fn setup_record_to(record: Option<&SetupRecord>) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec_pretty(
+        &record.map(
+            |record| serde_json::json!({"digest": record.digest, "phase": record.phase.name()}),
+        ),
+    )
+}
+
+/// The record `setup_record_to` wrote; `None` for anything else, which is no record.
+fn setup_record_from(bytes: &[u8]) -> Option<SetupRecord> {
+    let value: Data = serde_json::from_slice(bytes).ok()?;
+    let phase = match value.get("phase")?.as_str()? {
+        "install" => Phase::Install,
+        "sync" => Phase::Sync,
+        "remove" => Phase::Remove,
+        _ => return None,
     };
-    let mut at = 0;
-    for line in rest.split_inclusive('\n') {
-        at += line.len();
-        if matches!(line.trim_end_matches(['\r', '\n']), "---" | "...") {
-            return &rest[at..];
-        }
-    }
-    text
+    Some(SetupRecord::new(value.get("digest")?.as_str()?, phase))
 }
 
 /// Refuses a copy of an overlay inside the working directory, where a commit could hold it.

@@ -1,13 +1,10 @@
 //! Overlays: directories of skills, rules, context, programs and environment that a loadout
-//! and an Operation issue to an Agent's Sessions, in the Agent Overlay Spec's format (AOS
-//! edition `0.1.0-draft`, `Boriken-Dev/agent-overlay-spec`).
+//! and an Operation issue to an Agent's Sessions, in the Agent Overlay Spec's format. Reading,
+//! validating, composing and the tree digest are the `coqui-aos` crate's; this module is what is
+//! the host's: the `[overlay.<name>]` records, which overlays a Session is issued, the refusal
+//! of hooks until AI6 runs them, and the checks on the skills it delivers.
 //!
-//! This module is a consumer of the AOS classes Manifest reader, Validator, Environment,
-//! Integrity and Resolver, with the setup phases and dependency environments of Runtime and
-//! setup modelled as pure functions: nothing here runs a script, installs a package, starts a
-//! server or reads the network. Its reader takes TOML, JSON and YAML, through [`anycfg`] over
-//! guatiao's value. Catalogs, icons and `about` beyond validation (the Store class) are not
-//! read.
+//! Nothing here runs a script, installs a package, starts a server or reads the network.
 //!
 //! An operator names each overlay once, with where it comes from and the tree digest it must
 //! have:
@@ -30,77 +27,58 @@
 //! order, or a refusal. An Operation's list only adds: it cannot take away what the loadout
 //! issues.
 
-mod apply;
-mod codecs;
-mod compose;
-mod defaults;
-mod digest;
-mod names;
-mod read;
 mod skills;
-mod source;
-mod subst;
-mod validate;
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-pub use apply::{
-    Change, Effective, Environment, Facts, Needs, Phase, Preparation, Refusal, ScriptRun,
-    SetupRecord, SetupRun, Weakening, composed_environment, effective, preparation, read_dotenv,
-    setup_phase,
+use coqui_aos::{
+    Digest, Document, FileSystem, INTERPRETERS, Issue, NonDefaultSetting, OverlayTree, Source,
+    StdFs, TreeDigest, applies, composition_order, hooks_of, normalize_name,
+    read_overlay as read_aos, resolve, valid_overlay_name, validate,
 };
-pub use compose::{
-    Composition, Cycle, Environments, LeftEnvironment, PackageConflict, PackageEnvironment,
-    Resolution, compose, composition_order, environments, resolve,
-};
-pub use defaults::{
-    DEFAULT_KEYS, Dependency, INTERPRETERS, OverlayTree, PartialLock, check_requirements,
-    context_of, default_on, default_paths, dependencies_of, env_files_of, paths_of, rules_of,
-    skills_of,
-};
-pub use digest::{
-    Digest, DigestError, DigestErrorKind, TreeDigest, TreeEntry, TreeLimits, digest_entries,
-    tree_digest,
-};
-pub use names::{
-    EXCLUDED_COMPONENTS, current_os, is_reserved_variable, is_sensitive_variable, is_variable_name,
-    normalize_name, os_matches, root_variable, state_variable, valid_overlay_name,
-    valid_relative_path,
-};
-pub use read::{
-    Document, DotenvLine, ReadError, ReadLimits, ScriptOutput, parse_dotenv, read_document,
-    read_env_script_output,
-};
+
 pub use skills::{SKILL_INERT_KEYS, SkillSummary, check_skill, skill_description, skill_summary};
-pub use source::{Source, SourceError, SourceKind};
-pub use subst::{Lookup, SubstitutionError, substitute};
-pub use validate::{Issue, applies, named_files, valid_license, validate};
 
 use crate::station::limits::OverlayLimits;
 
-/// The manifest's file name at an overlay's root.
-pub const MANIFEST: &str = "overlay.cfg";
-
-/// The file a later AOS edition reads as the manifest when there is no `overlay.cfg`: its front
-/// matter the manifest, its body the context. This reader does not read it, so an overlay that has
-/// it and no `overlay.cfg` is refused rather than read as having no manifest.
-pub const LATER_MANIFEST: &str = "OVERLAY.md";
-
-/// Why an overlay asks for hooks, which a later AOS edition runs: a `hooks` table in its manifest,
-/// or a `hook.<ext>` script at its root, by the extensions a default script takes. A `pre-tool`
-/// hook can deny a call, so an overlay is refused rather than run without the guards its author
-/// wrote. `None` when it asks for none.
+/// Why an overlay asks for hooks, which AI6 does not run: a `hooks` table in its manifest, or a
+/// `hook.<ext>` script at its root. A `pre-tool` hook can deny a call, so an overlay is refused
+/// rather than run without the guards its author wrote. `None` when it asks for none.
 pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String> {
     if manifest.contains_key("hooks") {
-        return Some(format!("{MANIFEST} declares [hooks]"));
+        return Some("its manifest declares [hooks]".to_owned());
     }
-    defaults::DEFAULT_SCRIPTS
-        .iter()
-        .map(|(extension, _, _)| format!("hook{extension}"))
-        .find(|path| files.contains(path))
-        .map(|path| format!("it ships {path}"))
+    let interpreters: Vec<String> = INTERPRETERS.iter().map(|name| (*name).to_owned()).collect();
+    ["windows", "linux"].into_iter().find_map(|os| {
+        let (hooks, not_run) = hooks_of(manifest, files, os, &interpreters);
+        hooks
+            .into_iter()
+            .find_map(|hook| hook.path)
+            .or_else(|| not_run.into_iter().next())
+            .map(|path| format!("it ships {path}"))
+    })
+}
+
+/// A setting an overlay's delivery reports each time it is issued, weaker than the default or
+/// one the host found: an AOS non-default setting (`unpinned`, `env-script`, ...) or one of the
+/// host's own (`read-only-not-enforced`, `skill-collision`). Never a value.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Weakening {
+    /// The identifier.
+    pub id: String,
+    /// What it is about: a variable, a path, an overlay or a site; empty for `unpinned`.
+    pub subject: String,
+}
+
+impl From<&NonDefaultSetting> for Weakening {
+    fn from(setting: &NonDefaultSetting) -> Self {
+        Self {
+            id: setting.id.as_str().to_owned(),
+            subject: setting.subject.clone(),
+        }
+    }
 }
 
 /// Where an overlay comes from.
@@ -174,12 +152,13 @@ impl OverlayRecord {
     }
 }
 
-/// An overlay directory as read: its tree digest, its files, its manifest and what is wrong
-/// with it. Reading runs nothing.
+/// An overlay directory as read: its tree digest, its manifest and what is wrong with it.
+/// Reading runs nothing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadOverlay {
     /// The tree digest and each member's.
     pub digest: TreeDigest,
+    tree: OverlayTree,
     /// The manifest, empty when the overlay has none.
     pub manifest: Document,
     /// The problems with the manifest, sorted; those under `/about` do not stop it applying.
@@ -190,9 +169,9 @@ pub struct ReadOverlay {
 }
 
 impl ReadOverlay {
-    /// The overlay's files.
+    /// The overlay's files, with the text of its manifest.
     pub fn tree(&self) -> OverlayTree {
-        OverlayTree::from_paths(self.digest.files.keys().cloned())
+        self.tree.clone()
     }
 
     /// Whether it may be issued: its manifest applies and every skill passes.
@@ -201,29 +180,30 @@ impl ReadOverlay {
     }
 }
 
-/// Reads the overlay at `root` within `limits`: the tree digest of its files, its
-/// `overlay.cfg` validated against them, and the `SKILL.md` checks of each skill it offers.
+/// Reads the overlay at `root` within `limits`: the tree digest of its files, its manifest
+/// (`OVERLAY.md` or `overlay.cfg`) validated against them, and the `SKILL.md` checks of each
+/// skill it offers.
 ///
 /// # Errors
 ///
-/// Why the tree has no digest, why its manifest cannot be read, or that its manifest is an
-/// [`LATER_MANIFEST`] this reader does not read.
+/// Why the tree has no digest, why its manifest cannot be read, or that it asks for hooks.
 pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, String> {
-    let digest = tree_digest(root, &limits.tree()).map_err(|error| error.to_string())?;
-    if digest.files.contains_key(LATER_MANIFEST) && !digest.files.contains_key(MANIFEST) {
-        return Err(format!(
-            "{LATER_MANIFEST}: this AI6 does not read {LATER_MANIFEST} yet, and the overlay has no \
-             {MANIFEST}; it is refused rather than read as having no manifest"
-        ));
+    let settings = limits.settings();
+    let digest =
+        coqui_aos::tree_digest(&StdFs, root, &settings).map_err(|error| error.to_string())?;
+    let mut tree = OverlayTree::from_paths(digest.files.keys().cloned());
+    let largest = settings.file_bytes.get().unwrap_or(u64::MAX);
+    for name in ["OVERLAY.md", "overlay.cfg"] {
+        if tree.contains(name) {
+            let bytes = StdFs
+                .read(&root.join(name), largest)
+                .map_err(|error| format!("{name}: {error}"))?;
+            tree = tree.with_bytes(name, bytes);
+        }
     }
-    let manifest = if digest.files.contains_key(MANIFEST) {
-        let bytes =
-            std::fs::read(root.join(MANIFEST)).map_err(|error| format!("{MANIFEST}: {error}"))?;
-        read_document(&bytes, &limits.manifest()).map_err(|error| format!("{MANIFEST}: {error}"))?
-    } else {
-        Document::new()
-    };
-    let tree = OverlayTree::from_paths(digest.files.keys().cloned());
+    let manifest = read_aos(&tree, &settings)
+        .map_err(|error| error.to_string())?
+        .manifest;
     if let Some(why) = hooks_asked(&manifest, &tree) {
         return Err(format!(
             "{why}: this AI6 does not run overlay hooks yet, so the overlay is refused rather than \
@@ -231,7 +211,7 @@ pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, 
         ));
     }
     let issues = validate(&manifest, Some(&tree));
-    let skills = skills_of(&manifest, &tree)
+    let skills = coqui_aos::skills_of(&manifest, &tree)
         .into_iter()
         .map(|name| {
             let checked = check_skill(
@@ -246,6 +226,7 @@ pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, 
         .collect();
     Ok(ReadOverlay {
         digest,
+        tree,
         manifest,
         issues,
         skills,
@@ -454,5 +435,3 @@ pub fn issue_overlays(
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod vectors;

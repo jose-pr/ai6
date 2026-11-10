@@ -1,10 +1,26 @@
 //! The checks every `SKILL.md` AI6 delivers passes, whether Moneypenny's catalog or an
 //! overlay issues it.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
+use coqui_aos::{Document, Settings, read_front_matter};
+
 use crate::bounds::Limit;
+
+/// The `SKILL.md` front matter in `bytes`, read as AOS reads any front matter, its head bounded
+/// by `head_bytes`; `None` when the file has none.
+fn front_matter(bytes: &[u8], head_bytes: Limit) -> Result<Option<Document>, coqui_aos::Error> {
+    let bound = head_bytes
+        .get()
+        .map_or(coqui_aos::Limit::UNBOUNDED, coqui_aos::Limit::at);
+    let read = read_front_matter(bytes, &Settings::default().manifest_bytes(bound));
+    use coqui_aos::Case;
+    match (read.case, read.error) {
+        (Case::None | Case::Malformed | Case::Unterminated, _) => Ok(None),
+        (_, Some(error)) => Err(error),
+        (_, None) => Ok(read.data),
+    }
+}
 
 /// The `SKILL.md` front matter keys that grant nothing and run nothing
 /// (code.claude.com/docs/en/skills): any other key, such as `allowed-tools`, `hooks`,
@@ -59,17 +75,12 @@ pub fn check_skill(
             path.display()
         ));
     }
+    let bytes = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     let text =
-        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let (yaml, _) = front_matter(&text)
+        std::str::from_utf8(&bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    let keys = front_matter(&bytes, file_bytes)
+        .map_err(|error| format!("SKILL.md front matter is not a YAML mapping: {error}"))?
         .ok_or("SKILL.md does not open with front matter between two `---` lines")?;
-    let keys: BTreeMap<String, serde_json::Value> =
-        serde_saphyr::from_str(yaml).map_err(|error| {
-            format!(
-                "SKILL.md front matter is not a YAML mapping: {}",
-                error.to_string().lines().next().unwrap_or_default()
-            )
-        })?;
     if keys.get("name").and_then(serde_json::Value::as_str) != Some(name) {
         return Err(format!("SKILL.md front matter does not have name: {name}"));
     }
@@ -92,7 +103,7 @@ pub fn check_skill(
              the Session; only {tools_setting} = true lets it load"
         ));
     }
-    if injects_commands(&text) {
+    if injects_commands(text) {
         return Err(format!(
             "SKILL.md injects a command (!`…` or a ```! block), which runs before the Agent \
              reads it; only {tools_setting} = true lets it load"
@@ -103,9 +114,8 @@ pub fn check_skill(
 
 /// What the `SKILL.md` in `dir` says it is for: its front matter's `description`.
 pub fn skill_description(dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
-    let (yaml, _) = front_matter(&text)?;
-    let keys: BTreeMap<String, serde_json::Value> = serde_saphyr::from_str(yaml).ok()?;
+    let bytes = std::fs::read(dir.join("SKILL.md")).ok()?;
+    let keys = front_matter(&bytes, Limit::UNBOUNDED).ok()??;
     keys.get("description")?.as_str().map(str::to_owned)
 }
 
@@ -124,9 +134,8 @@ pub struct SkillSummary {
 /// The menu summary of the skill whose `SKILL.md` is in `dir`; `None` when the file cannot be
 /// read or has no `description`.
 pub fn skill_summary(dir: &Path) -> Option<SkillSummary> {
-    let text = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
-    let (yaml, _) = front_matter(&text)?;
-    let keys: BTreeMap<String, serde_json::Value> = serde_saphyr::from_str(yaml).ok()?;
+    let bytes = std::fs::read(dir.join("SKILL.md")).ok()?;
+    let keys = front_matter(&bytes, Limit::UNBOUNDED).ok()??;
     Some(SkillSummary {
         description: keys.get("description")?.as_str()?.to_owned(),
         argument_hint: keys
@@ -138,22 +147,6 @@ pub fn skill_summary(dir: &Path) -> Option<SkillSummary> {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(true),
     })
-}
-
-/// The YAML between the opening `---` line and the next `---` line, and the text after it.
-fn front_matter(text: &str) -> Option<(&str, &str)> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let rest = text
-        .strip_prefix("---\r\n")
-        .or_else(|| text.strip_prefix("---\n"))?;
-    let mut at = 0;
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            return Some((&rest[..at], &rest[at + line.len()..]));
-        }
-        at += line.len();
-    }
-    None
 }
 
 /// Whether `text` holds a command Claude Code runs when the skill loads: `!` then a backtick
