@@ -35,7 +35,7 @@ pub(super) enum Read {
     /// The handler was asked and failed.
     Failed(String),
     /// What the account's buckets are.
-    Report(UsageReport),
+    Report(Box<UsageReport>),
 }
 
 /// A Mission parked on an account, and the model it needs room for.
@@ -148,7 +148,7 @@ pub(super) fn read_through(
         );
     }
     match handler.usage(environment) {
-        Ok(report) if report.supported => Read::Report(report),
+        Ok(report) if report.supported => Read::Report(Box::new(report)),
         Ok(report) => Read::NotPolled(
             report
                 .unsupported_because
@@ -325,7 +325,7 @@ pub(super) fn pass(state: &DaemonState, now: i64, read: &dyn Fn(&AccountState) -
                 back_off(state, &key, now, (every, factor, longest));
                 continue;
             }
-            Read::Report(report) => report,
+            Read::Report(report) => *report,
         };
         let observed = now as f64;
         let windows: Vec<_> = report
@@ -463,6 +463,10 @@ mod tests {
         report
     }
 
+    fn boxed(buckets: Vec<Bucket>) -> Box<UsageReport> {
+        Box::new(reported(buckets))
+    }
+
     /// A state at `START` with one account of a pool, declared by this Station and limited until
     /// `STATED_RESET`, and a Mission parked on it until `STATED_RESET`.
     fn limited_account(
@@ -563,7 +567,7 @@ mod tests {
         let reads = Cell::new(0);
         let read = |_: &AccountState| {
             reads.set(reads.get() + 1);
-            Read::Report(reported(vec![
+            Read::Report(boxed(vec![
                 bucket(
                     "other",
                     1000,
@@ -655,7 +659,7 @@ mod tests {
         let (state, _now, account) = limited_account(root.path(), "");
         let moved = STATED_RESET + 7_200;
         let read = |_: &AccountState| {
-            Read::Report(reported(vec![bucket("mine", 1000, moved, Coverage::All)]))
+            Read::Report(boxed(vec![bucket("mine", 1000, moved, Coverage::All)]))
         };
         pass(&state, START, &read);
         pass(&state, START + 300, &read);
@@ -687,7 +691,7 @@ mod tests {
         let reads = Cell::new(0);
         let read = |_: &AccountState| {
             reads.set(reads.get() + 1);
-            Read::Report(reported(vec![bucket(
+            Read::Report(boxed(vec![bucket(
                 "mine",
                 1000,
                 STATED_RESET,
@@ -810,7 +814,7 @@ mod tests {
         let reads = Cell::new(0);
         let read = |_: &AccountState| {
             reads.set(reads.get() + 1);
-            Read::Report(reported(vec![bucket(
+            Read::Report(boxed(vec![bucket(
                 "mine",
                 1000,
                 STATED_RESET,

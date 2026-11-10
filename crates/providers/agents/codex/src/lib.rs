@@ -277,7 +277,7 @@ impl AgentHandler for CodexHandler {
         settings.initialize_timeout = self.config.millis(self.config.start_timeout_ms);
         settings.request_timeout = self.config.millis(self.config.request_timeout_ms);
         let buckets = AppServer::read_account_usage(&launch, &PlainSpawn, settings)
-            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, &error.to_string()))?;
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error.to_string()))?;
         let mut report = UsageReport::new();
         report.sources = vec![UsageSource::Reported];
         report.buckets = buckets;
