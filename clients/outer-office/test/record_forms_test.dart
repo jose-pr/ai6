@@ -48,6 +48,9 @@ class FakeRoster {
   /// Refuses a save with this reason, once.
   String? refuse;
 
+  /// Holds a save back with these weakenings until it is sent with `confirm=true`.
+  List<String>? hold;
+
   String _token(String id) => jsonEncode(records[id]).hashCode.toString();
 
   http.Response answer(http.Request request) {
@@ -79,6 +82,11 @@ class FakeRoster {
     if (expected != null && expected != now) {
       return _json({'changed': now}, 409);
     }
+    if (hold case final weakened? when request.method == 'PUT') {
+      if (request.url.queryParameters['confirm'] != 'true') {
+        return _json({'applied': false, 'weakened': weakened});
+      }
+    }
     if (refuse case final reason?) {
       refuse = null;
       return _json({'refused': reason}, 422);
@@ -96,12 +104,122 @@ class FakeRoster {
       requests.lastWhere((request) => request.method != 'GET');
 }
 
+/// What the Stations report they have loaded, as `GET /v1/user/providers` merges it.
+const _reported = <String, Object?>{
+  'hosts': ['station-a', 'station-b'],
+  'differs': <String>[],
+  'providers': [
+    {
+      'id': 'claude',
+      'name': 'Claude Code',
+      'kinds': ['ai6_agent_handler'],
+      'hosts': ['station-a', 'station-b'],
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'allowed_tools': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'title': 'Allowed tools',
+            'description': 'Tools the Agent may call.',
+            'x-section': 'agent',
+          },
+          'program': {
+            'type': 'string',
+            'title': 'Program',
+            'description': 'The command that starts it.',
+            'x-section': 'station',
+          },
+        },
+      },
+    },
+    {
+      'id': 'codex',
+      'name': 'Codex',
+      'kinds': ['ai6_agent_handler'],
+      'hosts': ['station-a'],
+    },
+    {
+      'id': 'ssh',
+      'name': 'SSH',
+      'kinds': ['ai6_transport'],
+      'hosts': ['station-a'],
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'keepalive_secs': {
+            'type': 'integer',
+            'title': 'Keepalive',
+            'description': 'Seconds between probes.',
+          },
+        },
+      },
+    },
+    {
+      'id': 'qemu',
+      'name': 'QEMU',
+      'kinds': ['ai6_transport'],
+      'hosts': ['station-a'],
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'image': {
+            'type': 'string',
+            'title': 'Disk image',
+            'description': 'The image the machine boots.',
+          },
+        },
+      },
+    },
+    {
+      'id': 'file',
+      'name': 'File',
+      'kinds': ['ai6_secret'],
+      'hosts': ['station-a'],
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'root': {
+            'type': 'string',
+            'title': 'Root directory',
+            'description': 'Where the secret files are.',
+          },
+        },
+      },
+    },
+    {
+      'id': 'git',
+      'name': 'git',
+      'kinds': ['ai6_safehouse'],
+      'hosts': ['station-a'],
+    },
+    {
+      'id': 'copy',
+      'name': 'copy',
+      'kinds': ['ai6_safehouse'],
+      'hosts': ['station-a'],
+    },
+  ],
+};
+
+const _allFamilies = <String, List<String>>{
+  'watches': ['config.read', 'config.manage'],
+  'theaters': ['config.read', 'config.manage'],
+  'loadouts': ['config.read', 'config.manage'],
+  'sandboxes': ['config.read', 'config.manage'],
+  'mcps': ['config.read', 'config.manage'],
+  'overlays': ['config.read', 'config.manage'],
+  'secrets': ['config.read', 'config.manage'],
+  'secret_providers': ['config.read', 'config.manage'],
+  'pools': ['config.read', 'config.manage'],
+  'unex': ['config.read', 'config.manage'],
+};
+
 MissionBoard _signedIn(
   FakeRoster roster, {
   List<String> actions = const ['roster.read', 'roster.manage'],
-  Map<String, List<String>> config = const {
-    'watches': ['config.read', 'config.manage'],
-  },
+  Map<String, List<String>> config = _allFamilies,
+  Map<String, Object?> providers = _reported,
 }) {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -110,6 +228,7 @@ MissionBoard _signedIn(
       if (request.url.path.startsWith('/v1/user/roster/')) {
         return roster.answer(request);
       }
+      if (request.url.path == '/v1/user/providers') return _json(providers);
       if (request.url.path.endsWith('/agents')) return _json(const []);
       return http.Response('[]', 200);
     }),
@@ -199,6 +318,9 @@ Finder _box(String path) => find.descendant(
   matchRoot: true,
 );
 
+/// The menu of a closed choice at [path].
+Finder _menu(String path) => _field(path);
+
 Future<void> _type(WidgetTester tester, String path, String text) async {
   await tester.ensureVisible(_field(path));
   await tester.pumpAndSettle();
@@ -213,6 +335,10 @@ const _kinds = {
   'covers': ('Cover policies', 'description', 'Named'),
   'assistant': ("Moneypenny's settings", 'personal_repo', '/srv/{person}.git'),
   'watches': ('Watches', 'agent', 'M-00'),
+  'theaters': ('Theaters', 'workdir', '/work'),
+  'sandboxes': ('Sandbox profiles', 'backend', 'bubblewrap'),
+  'overlays': ('Overlays', 'path', '/overlays/house'),
+  'secrets': ('Secrets', 'env', 'TOKEN'),
 };
 
 void main() {
@@ -234,7 +360,9 @@ void main() {
         'station_labels': {'os': 'linux', 'a.b': 'dotted'},
         'pools': <String>[],
         'limit_fallback_secs': 60,
-        'workspace': {'branch': '{id}', 'isolate': false},
+        'workspace': {
+          'settings': {'branch': '{id}', 'isolate': false},
+        },
         'budget': {'session_tokens': 10, 'mission_cost_usd': 1.5},
         'cover_identity': {'name': 'Field', 'email': 'f@example.invalid'},
         'green_ink': {
@@ -358,8 +486,8 @@ void main() {
       final model = _model('operations');
       addTearDown(model.dispose);
       expect(
-        model.fieldNamedIn('Operation "x": workspace.checkpoint_secs must be'),
-        'workspace.checkpoint_secs',
+        model.fieldNamedIn('Operation "x": workspace.source must be'),
+        'workspace.source',
       );
       expect(
         model.fieldNamedIn('roster revision 3: clearance is not one of'),
@@ -529,6 +657,248 @@ void main() {
       await tester.pumpAndSettle();
       expect(_field('allowed_hosts'), findsNothing);
       expect(_field('denied_networks'), findsOneWidget);
+    });
+  });
+
+  group('a field that picks a provider', () {
+    Future<void> choose(WidgetTester tester, String path, String label) async {
+      await tester.ensureVisible(_field(path));
+      await tester.tap(_menu(path));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('offers the providers the Stations report and draws the '
+        'chosen one\'s own settings', (tester) async {
+      final roster = FakeRoster();
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('record-form-key')), '007');
+
+      await tester.ensureVisible(_field('handler'));
+      await tester.tap(_menu('handler'));
+      await tester.pumpAndSettle();
+      expect(find.text('Claude Code (claude)'), findsOneWidget);
+      expect(find.text('Codex (codex)'), findsOneWidget);
+      expect(find.text('git (git)'), findsNothing, reason: 'another kind');
+      await tester.tap(find.text('Claude Code (claude)'));
+      await tester.pumpAndSettle();
+
+      // Claude's form: only what an Agent may set, not the Station's program.
+      final settings = find.byKey(
+        const Key('provider-settings-handler_settings'),
+      );
+      await tester.ensureVisible(settings);
+      expect(
+        find.descendant(of: settings, matching: find.text('Allowed tools')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: settings, matching: find.text('Program')),
+        findsNothing,
+      );
+
+      // Another handler draws its own form: codex takes none.
+      await choose(tester, 'handler', 'Codex (codex)');
+      expect(
+        find.descendant(of: settings, matching: find.text('Allowed tools')),
+        findsNothing,
+      );
+      expect(find.text('codex takes no settings.'), findsOneWidget);
+
+      await choose(tester, 'handler', 'Claude Code (claude)');
+      await tester.enterText(
+        find.descendant(
+          of: find.descendant(
+            of: settings,
+            matching: find.byKey(const Key('form-field-allowed_tools')),
+          ),
+          matching: find.byType(EditableText),
+        ),
+        'Read',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      final saved = roster.records['agents/007']!;
+      expect(saved['handler'], 'claude');
+      expect(saved.keys, isNot(contains('program')));
+    });
+
+    testWidgets('a Theater reached by a transport draws that transport\'s '
+        'settings, and keeps what the form does not draw', (tester) async {
+      final roster = FakeRoster(
+        records: {
+          'theaters/box': {
+            'access': {
+              'transport': {
+                'provider': 'ssh',
+                'config': {'keepalive_secs': 45},
+              },
+            },
+            'runner': {'address': 'keep-me'},
+          },
+        },
+      );
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Theaters');
+      await tester.tap(find.byTooltip('Edit box'));
+      await tester.pumpAndSettle();
+      final settings = find.byKey(
+        const Key('provider-settings-access.transport.config'),
+      );
+      await tester.ensureVisible(settings);
+      expect(
+        find.descendant(of: settings, matching: find.text('Keepalive')),
+        findsOneWidget,
+      );
+      await choose(tester, 'access.transport.provider', 'QEMU (qemu)');
+      expect(
+        find.descendant(of: settings, matching: find.text('Keepalive')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: settings, matching: find.text('Disk image')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      final saved = roster.records['theaters/box']!;
+      expect((saved['access'] as Map)['transport'], {
+        'provider': 'qemu',
+      }, reason: 'ssh\'s settings are not qemu\'s');
+      expect(saved['runner'], {'address': 'keep-me'});
+    });
+
+    testWidgets('a route inside a list draws its own handler\'s settings', (
+      tester,
+    ) async {
+      final roster = FakeRoster(
+        records: {
+          'agents/007': {
+            'route': [
+              {
+                'handler': 'claude',
+                'handler_settings': {
+                  'allowed_tools': ['Read'],
+                },
+              },
+              {'handler': 'codex'},
+            ],
+          },
+        },
+      );
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.byTooltip('Edit 007'));
+      await tester.pumpAndSettle();
+      final first = find.byKey(
+        const Key('provider-settings-route.0.handler_settings'),
+      );
+      await tester.ensureVisible(first);
+      expect(
+        find.descendant(of: first, matching: find.text('Allowed tools')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('provider-settings-route.1.handler_settings')),
+        findsOneWidget,
+      );
+      expect(find.text('codex takes no settings.'), findsOneWidget);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      final saved = roster.records['agents/007']!;
+      expect(((saved['route'] as List).first as Map)['handler_settings'], {
+        'allowed_tools': ['Read'],
+      });
+    });
+
+    testWidgets('a trust-root family shows what a change loosens and saves it '
+        'when confirmed', (tester) async {
+      final roster = FakeRoster()
+        ..hold = ['an inline credential in a provider'];
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Universal Exports settings');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      await _type(tester, 'directory', 'people');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('record-form-held')), findsOneWidget);
+      expect(find.textContaining('an inline credential'), findsOneWidget);
+      expect(roster.records.containsKey('unex/settings'), isFalse);
+      await tester.ensureVisible(find.byKey(const Key('record-form-confirm')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('record-form-confirm')));
+      await tester.pumpAndSettle();
+      expect(roster.records['unex/settings']!['directory'], 'people');
+      expect(roster.lastWrite.url.queryParameters['confirm'], 'true');
+    });
+
+    testWidgets('lets the ID be typed when no host reports a catalog', (
+      tester,
+    ) async {
+      final roster = FakeRoster();
+      final board = _signedIn(
+        roster,
+        providers: const {'providers': <Object?>[], 'hosts': <String>[]},
+      );
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('record-form-key')), '007');
+      await _type(tester, 'handler', 'claude');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['agents/007'], {'handler': 'claude'});
+    });
+
+    testWidgets('a secret provider\'s settings sit beside its name', (
+      tester,
+    ) async {
+      final roster = FakeRoster(
+        records: {
+          'secret_providers/vault': {
+            'provider': 'file',
+            'root': '/run/secrets',
+            'other': 'kept',
+          },
+        },
+      );
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Secret providers');
+      await tester.tap(find.byTooltip('Edit vault'));
+      await tester.pumpAndSettle();
+      final settings = find.byKey(const Key('provider-settings-settings'));
+      await tester.ensureVisible(settings);
+      expect(
+        find.descendant(of: settings, matching: find.text('Root directory')),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.descendant(
+          of: find.descendant(
+            of: settings,
+            matching: find.byKey(const Key('form-field-root')),
+          ),
+          matching: find.byType(EditableText),
+        ),
+        '/run/other',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['secret_providers/vault'], {
+        'provider': 'file',
+        'root': '/run/other',
+        'other': 'kept',
+      });
     });
   });
 
@@ -736,10 +1106,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(_box('handler'));
+      await tester.tap(_menu('handler'));
       await tester.pumpAndSettle();
-      expect(find.text('codex'), findsOneWidget);
-      await tester.tap(find.text('codex'));
+      expect(find.text('Codex (codex)'), findsOneWidget);
+      await tester.tap(find.text('Codex (codex)'));
       await tester.pumpAndSettle();
       await _type(tester, 'model', 'a-model-nobody-listed');
       await tester.tap(find.text('Save'));

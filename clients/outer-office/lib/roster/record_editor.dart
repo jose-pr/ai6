@@ -7,6 +7,8 @@ import 'package:toml/toml.dart';
 import '../forms/form_host.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
+import 'provider_settings.dart';
+import 'reported_providers.dart';
 import 'roster_page.dart';
 
 /// What the gateway's roster route says about one kind of record, for a form and a summary.
@@ -55,6 +57,15 @@ const _tables = {
   'covers': 'cover',
   'reviews': 'review',
   'watches': 'watch',
+  'theaters': 'theater',
+  'loadouts': 'loadout',
+  'sandboxes': 'sandbox',
+  'mcps': 'mcp',
+  'overlays': 'overlay',
+  'secrets': 'secret',
+  'secret_providers': 'secret_provider',
+  'pools': 'pool',
+  'unex': 'unex',
 };
 
 /// The kinds of record a form may name, and a person's word for one of each.
@@ -66,6 +77,15 @@ const _recordNames = {
   'reviews': 'Review policy',
   'assistant': "Moneypenny's settings",
   'watches': 'Watch',
+  'theaters': 'Theater',
+  'loadouts': 'Loadout',
+  'sandboxes': 'Sandbox profile',
+  'mcps': 'MCP server',
+  'overlays': 'Overlay',
+  'secrets': 'Secret',
+  'secret_providers': 'Secret provider',
+  'pools': 'Account pool',
+  'unex': 'Universal Exports settings',
 };
 
 const _recordFormat = 'record:';
@@ -78,6 +98,7 @@ Future<ChoicesFor> _choicesFor(
   String kind,
   String? editing,
   RecordFormSpec spec,
+  ProvidersReport providers,
 ) async {
   final kinds = <String>{};
   void walk(FieldSchema at) {
@@ -127,6 +148,8 @@ Future<ChoicesFor> _choicesFor(
           if (named != kind || key != editing) key,
       ]);
     }
+    final offered = providerChoices(providers, format);
+    if (offered != null) return offered;
     if (format.startsWith(_reportedFormat)) {
       final found = switch (format.substring(_reportedFormat.length)) {
         'handlers' => {for (final station in stations) ...station.handlers},
@@ -203,6 +226,18 @@ class _RecordEditorState extends State<_RecordEditor> {
   RecordFormSpec? _spec;
   FormModel? _model;
   ChoicesFor? _choices;
+  ProvidersReport _providers = const ProvidersReport();
+
+  /// The record as stored: what the form does not draw is kept as it is.
+  Map<String, Object?> _original = const {};
+
+  /// Where the settings of a chosen provider go, and the form drawn for each.
+  List<SettingsSlot> _slots = const [];
+  Map<String, Object?> _mainSchema = const {};
+  final _subs = <String, _SlotForm>{};
+
+  /// The slots as they stand for the items and entries the record holds now.
+  final _instances = <String, SettingsSlot>{};
 
   /// The revision of the record read, sent with a save: `0` for a record that must be new.
   String _revision = '0';
@@ -210,6 +245,9 @@ class _RecordEditorState extends State<_RecordEditor> {
   String? _problem;
   Map<String, String> _problems = const {};
   bool _saving = false;
+
+  /// What the gateway held the change back for: it loosens these, and saving again confirms it.
+  List<String>? _held;
   bool _changed = false;
 
   bool get _isNew => widget.recordKey == null;
@@ -223,7 +261,9 @@ class _RecordEditorState extends State<_RecordEditor> {
   @override
   void dispose() {
     _key.dispose();
+    _model?.removeListener(_syncSlots);
     _model?.dispose();
+    _disposeSubs();
     super.dispose();
   }
 
@@ -241,29 +281,46 @@ class _RecordEditorState extends State<_RecordEditor> {
         definition = record.single.definition;
         revision = record.single.revision;
       }
+      final ProvidersReport providers;
+      try {
+        providers = await widget.board.loadProviders();
+      } on Object {
+        return _fail('The providers the hosts report could not be read.');
+      }
       final choices = await _choicesFor(
         widget.board,
         widget.kind,
         widget.recordKey,
         spec,
+        providers,
       );
       if (!mounted) return;
       final previous = _model;
+      previous?.removeListener(_syncSlots);
+      final slots = settingsSlots(spec.schema);
+      final mainSchema = withoutSettings(spec.schema, slots);
+      final shown = _drawn(mainSchema, slots, definition);
+      _disposeSubs();
       setState(() {
         _spec = spec;
         _choices = choices;
+        _providers = providers;
+        _original = definition;
+        _slots = slots;
+        _mainSchema = mainSchema;
         _revision = revision;
         _model = ooFormModel(
-          schema: spec.schema,
-          form: spec.form,
-          value: definition,
-        );
+          schema: mainSchema,
+          form: formFor(mainSchema, spec.form),
+          value: shown,
+        )..addListener(_syncSlots);
         _changed = false;
         _problem = null;
         _problems = const {};
         _failure = null;
       });
       previous?.dispose();
+      _syncSlots(stored: true);
     } on StateError catch (error) {
       if (mounted) setState(() => _failure = error.message);
     } on Object catch (error) {
@@ -273,7 +330,194 @@ class _RecordEditorState extends State<_RecordEditor> {
     }
   }
 
-  Future<void> _save() async {
+  void _fail(String message) {
+    if (mounted) setState(() => _failure = message);
+  }
+
+  void _disposeSubs() {
+    for (final sub in _subs.values) {
+      sub.model?.dispose();
+    }
+    _subs.clear();
+    _instances.clear();
+  }
+
+  /// The stored record as the main form draws it: without the settings fields, which are drawn
+  /// from the chosen provider's own schema, and with a group that holds a bare word emptied.
+  Map<String, Object?> _drawn(
+    Map<String, Object?> schema,
+    List<SettingsSlot> slots,
+    Map<String, Object?> stored,
+  ) {
+    final copy =
+        shaped(schema, _deepCopy(stored)) as Map<String, Object?>? ??
+        <String, Object?>{};
+    for (final template in slots) {
+      for (final slot in expandSlot(template, copy)) {
+        final parent = objectAt(copy, slot.parent);
+        if (parent == null) continue;
+        if (slot.flat) {
+          final known = declaredAt(schema, slot.parent);
+          parent.removeWhere((key, _) => !known.contains(key));
+        } else {
+          parent.remove(slot.field);
+        }
+      }
+    }
+    return copy;
+  }
+
+  static Object? _deepCopy(Object? value) => switch (value) {
+    Map() => {
+      for (final MapEntry(:key, :value) in value.entries)
+        key as String: _deepCopy(value),
+    },
+    List() => [for (final item in value) _deepCopy(item)],
+    _ => value,
+  };
+
+  /// Draws the settings form of each slot's chosen provider again when the choice changed.
+  void _syncSlots({bool stored = false}) {
+    final model = _model;
+    if (model == null || !mounted) return;
+    final value = model.value();
+    var changed = false;
+    final present = <String>{};
+    for (final template in _slots) {
+      for (final slot in expandSlot(template, value)) {
+        present.add(slot.id);
+        _instances[slot.id] = slot;
+        final chosen = switch (objectAt(value, slot.parent)?[slot.sibling]) {
+          final String name when name.isNotEmpty => name,
+          _ => null,
+        };
+        final held = _subs[slot.id];
+        if (held != null && held.provider == chosen) continue;
+        held?.model?.dispose();
+        _subs[slot.id] = _slotForm(slot, chosen);
+        changed = true;
+      }
+    }
+    for (final id in _subs.keys.where((id) => !present.contains(id)).toList()) {
+      _subs.remove(id)?.model?.dispose();
+      _instances.remove(id);
+      changed = true;
+    }
+    if (changed || stored) setState(() {});
+  }
+
+  /// The stored settings of a slot: its field's object, or for flat settings the keys beside the
+  /// provider's name that the record's own form does not declare.
+  Map<String, Object?> _storedSettings(SettingsSlot slot) {
+    final parent = objectAt(_original, slot.parent);
+    if (parent == null) return {};
+    if (slot.flat) {
+      final known = declaredAt(_mainSchema, slot.parent);
+      return {
+        for (final MapEntry(:key, :value) in parent.entries)
+          if (!known.contains(key)) key: value,
+      };
+    }
+    return objectAt(parent, [slot.field]) ?? {};
+  }
+
+  _SlotForm _slotForm(SettingsSlot slot, String? chosen) {
+    if (chosen == null) return const _SlotForm(null);
+    final provider = _providers.find(slot.kind, chosen);
+    final storedFor = objectAt(_original, slot.parent)?[slot.sibling];
+    final stored = storedFor == chosen ? _storedSettings(slot) : {};
+    if (provider == null) return _SlotForm(chosen, unreported: true);
+    final schema = provider.schema;
+    if (schema == null) {
+      return _SlotForm(chosen, omitted: provider.schemaOmitted);
+    }
+    final limited = forSection(schema, slot.section);
+    final known = declaredAt(limited, const []);
+    return _SlotForm(
+      chosen,
+      model: ooFormModel(
+        schema: limited,
+        form: formFor(limited, provider.form),
+        value: {
+          for (final MapEntry(:key, :value) in stored.entries)
+            if (known.contains(key)) key: value,
+        },
+      ),
+    );
+  }
+
+  /// What the form and the settings forms hold, as the record: keys the forms do not draw stay as
+  /// stored.
+  Map<String, Object?>? _assemble(Map<String, String> issues) {
+    final definition = _model!.value(issues: issues);
+    for (final slot in [
+      for (final template in _slots) ...expandSlot(template, definition),
+    ]) {
+      final parent = objectAt(definition, slot.parent);
+      if (parent == null) continue;
+      final sub = _subs[slot.id];
+      final stored = _storedSettings(slot);
+      Map<String, Object?> settings;
+      if (sub?.model != null) {
+        final subIssues = <String, String>{};
+        settings = sub!.model!.value(issues: subIssues);
+        for (final MapEntry(:key, :value) in subIssues.entries) {
+          issues['${slot.id}.$key'] = value;
+        }
+        final known = declaredAt(sub.model!.schema.node, const []);
+        for (final MapEntry(:key, :value) in stored.entries) {
+          if (!known.contains(key) && sub.provider == _storedProvider(slot)) {
+            settings[key] = value;
+          }
+        }
+      } else if (sub?.unreported == true || sub?.omitted == true) {
+        settings = _storedProvider(slot) == sub?.provider ? stored : {};
+      } else {
+        settings = {};
+      }
+      if (slot.flat) {
+        parent.addAll(settings);
+      } else if (settings.isNotEmpty) {
+        parent[slot.field] = settings;
+      }
+    }
+    _keepUndrawn(_original, definition, _mainSchema, const []);
+    return definition;
+  }
+
+  String? _storedProvider(SettingsSlot slot) =>
+      objectAt(_original, slot.parent)?[slot.sibling] as String?;
+
+  /// Copies the keys of `stored` the schema at `path` does not declare into `into`.
+  void _keepUndrawn(
+    Map<String, Object?> stored,
+    Map<String, Object?> into,
+    Map<String, Object?> schema,
+    List<String> path,
+  ) {
+    final here = objectAt(stored, path);
+    final there = objectAt(into, path);
+    if (here == null || there == null) return;
+    final known = declaredAt(schema, path);
+    for (final MapEntry(:key, :value) in here.entries) {
+      if (known.isEmpty) break;
+      final settingsField = _slots.any(
+        (slot) =>
+            _sameParent(slot.parent, path) && (slot.flat || slot.field == key),
+      );
+      if (!known.contains(key) && !settingsField) {
+        there.putIfAbsent(key, () => value);
+      } else if (known.contains(key) && value is Map && there[key] is Map) {
+        _keepUndrawn(stored, into, schema, [...path, key]);
+      }
+    }
+  }
+
+  static bool _sameParent(List<String> a, List<String> b) =>
+      a.length == b.length &&
+      [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((same) => same);
+
+  Future<void> _save({bool confirm = false}) async {
     final model = _model!;
     final spec = _spec!;
     final key = spec.fixedKey ?? widget.recordKey ?? _key.text.trim();
@@ -282,7 +526,7 @@ class _RecordEditorState extends State<_RecordEditor> {
       return;
     }
     final issues = <String, String>{};
-    final definition = model.value(issues: issues);
+    final definition = _assemble(issues)!;
     if (issues.isNotEmpty) {
       setState(() {
         _problems = issues;
@@ -295,6 +539,7 @@ class _RecordEditorState extends State<_RecordEditor> {
       _problem = null;
       _problems = const {};
       _changed = false;
+      _held = null;
     });
     try {
       final change = await widget.board.saveRosterRecord(
@@ -302,8 +547,11 @@ class _RecordEditorState extends State<_RecordEditor> {
         key,
         definition,
         revision: _revision,
+        confirm: confirm,
       );
       if (mounted) Navigator.of(context).pop(change);
+    } on RosterHeld catch (held) {
+      if (mounted) setState(() => _held = held.weakened);
     } on RosterRefused catch (refused) {
       if (!mounted) return;
       final field = model.fieldNamedIn(refused.reason);
@@ -386,6 +634,16 @@ class _RecordEditorState extends State<_RecordEditor> {
                             onReload: () => unawaited(_load()),
                           ),
                         ),
+                      if (_held case final held?)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _HeldNotice(
+                            weakened: held,
+                            onConfirm: _saving
+                                ? null
+                                : () => unawaited(_save(confirm: true)),
+                          ),
+                        ),
                       if (_problem case final problem?)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 12),
@@ -418,6 +676,14 @@ class _RecordEditorState extends State<_RecordEditor> {
                         problems: _problems,
                         enabled: !_saving,
                       ),
+                      for (final slot in _instances.values)
+                        if (_subs[slot.id] case final sub?)
+                          _SettingsSection(
+                            key: Key('provider-settings-${slot.id}'),
+                            slot: slot,
+                            form: sub,
+                            enabled: !_saving,
+                          ),
                     ],
                   ),
                 ),
@@ -448,6 +714,123 @@ class _RecordEditorState extends State<_RecordEditor> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The settings form of one provider choice: the provider it is drawn for, and the form.
+class _SlotForm {
+  const _SlotForm(
+    this.provider, {
+    this.model,
+    this.unreported = false,
+    this.omitted = false,
+  });
+
+  /// The ID chosen, or null while nothing is.
+  final String? provider;
+  final FormModel? model;
+
+  /// Whether no host reports the chosen provider, so nothing says what it takes.
+  final bool unreported;
+
+  /// Whether the host left the schema out of its report.
+  final bool omitted;
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({
+    required this.slot,
+    required this.form,
+    required this.enabled,
+    super.key,
+  });
+
+  final SettingsSlot slot;
+  final _SlotForm form;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = form.provider;
+    if (provider == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final small = theme.textTheme.bodySmall;
+    final model = form.model;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 8,
+        children: [
+          Semantics(
+            header: true,
+            child: Text(
+              slot.parent.isEmpty
+                  ? '${slot.title}: $provider'
+                  : '${slot.title} (${slot.parent.join(' ')}): $provider',
+              style: theme.textTheme.titleSmall,
+            ),
+          ),
+          if (model != null)
+            OoFormView(key: ObjectKey(model), model: model, enabled: enabled)
+          else if (form.unreported)
+            Text(
+              'No Station reports $provider, so what it takes is not known here. '
+              'Its settings stay as stored.',
+              style: small,
+            )
+          else if (form.omitted)
+            Text(
+              'A host left $provider\'s settings out of its report. They stay as stored.',
+              style: small,
+            )
+          else
+            Text('$provider takes no settings.', style: small),
+        ],
+      ),
+    );
+  }
+}
+
+/// A change the gateway held back because it loosens what is in force: what it loosens, and the
+/// button that saves it anyway.
+class _HeldNotice extends StatelessWidget {
+  const _HeldNotice({required this.weakened, required this.onConfirm});
+
+  final List<String> weakened;
+  final VoidCallback? onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      key: const Key('record-form-held'),
+      margin: EdgeInsets.zero,
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 4,
+          children: [
+            Text(
+              'Nothing was saved. This change loosens what is in force:',
+              style: TextStyle(color: colors.onErrorContainer),
+            ),
+            for (final line in weakened)
+              Text('• $line', style: TextStyle(color: colors.onErrorContainer)),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                key: const Key('record-form-confirm'),
+                onPressed: onConfirm,
+                child: const Text('Save anyway'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

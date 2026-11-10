@@ -40,6 +40,7 @@ import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
 import 'roster/record_editor.dart';
+import 'roster/reported_providers.dart';
 import 'roster/roster_page.dart';
 import 'routes/oo_filters.dart';
 import 'routes/oo_route.dart';
@@ -1760,6 +1761,22 @@ class MissionBoard extends ChangeNotifier
 
   final _recordForms = <String, RecordFormSpec>{};
 
+  /// Every provider the Stations and the gateway report, with the schema and form of each one's
+  /// configuration. A person who may read no host's providers gets an empty report, and a form
+  /// then lets provider choices be typed.
+  Future<ProvidersReport> loadProviders() async {
+    if (demo) return const ProvidersReport();
+    try {
+      final response = await _userRequest('GET', '/v1/user/providers');
+      if (response.statusCode != 200) return const ProvidersReport();
+      return ProvidersReport.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    } on Object {
+      return const ProvidersReport();
+    }
+  }
+
   /// One Operation as its Stations resolve it: its definition with its ancestors' keys and
   /// the Operation that wrote each. Needs `roster.read`.
   Future<EffectiveOperationSummary> effectiveOperation(
@@ -1789,12 +1806,13 @@ class MissionBoard extends ChangeNotifier
     String key,
     Map<String, dynamic> definition, {
     String? revision,
+    bool confirm = false,
   }) async {
     if (demo) throw StateError('Roster changes are unavailable in preview.');
     return _rosterChange(
       await _userRequest(
         'PUT',
-        '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}',
+        '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}${confirm ? '?confirm=true' : ''}',
         body: definition,
         headers: {if (revision != null) 'if-match': '"$revision"'},
       ),
@@ -1820,9 +1838,15 @@ class MissionBoard extends ChangeNotifier
   RosterChange _rosterChange(http.Response response) {
     switch (response.statusCode) {
       case 200:
-        return RosterChange.fromJson(
-          jsonDecode(response.body) as Map<String, dynamic>,
-        );
+        final answer = jsonDecode(response.body) as Map<String, dynamic>;
+        // A trust-root family holds back what loosens what is in force until it is sent again
+        // with the confirmation.
+        if (answer['applied'] == false) {
+          throw RosterHeld(
+            ((answer['weakened'] as List<dynamic>?) ?? const []).cast<String>(),
+          );
+        }
+        return RosterChange.fromJson(answer);
       case 422:
         throw RosterRefused(
           (jsonDecode(response.body) as Map<String, dynamic>)['refused']

@@ -124,6 +124,15 @@ class RosterRefused implements Exception {
   String toString() => reason;
 }
 
+/// The gateway held a change back: it loosens what is in force. Sending it again with the
+/// confirmation stores it.
+class RosterHeld implements Exception {
+  const RosterHeld(this.weakened);
+
+  /// Each setting the change loosens, in the gateway's words.
+  final List<String> weakened;
+}
+
 /// An accepted roster change: the revision it moved to, and each setting of the stored
 /// `assistant` record looser than its default.
 @immutable
@@ -149,11 +158,31 @@ const _kinds = {
   _assistantKind: "Moneypenny's settings",
   _rosterSettingsKind: 'Roster settings',
   'watches': 'Watches',
+  'theaters': 'Theaters',
+  'loadouts': 'Loadouts',
+  'sandboxes': 'Sandbox profiles',
+  'mcps': 'MCP servers',
+  'overlays': 'Overlays',
+  'secrets': 'Secrets',
+  'secret_providers': 'Secret providers',
+  'pools': 'Account pools',
+  'unex': 'Universal Exports settings',
 };
 
 /// The kinds the gateway gates by `config.read` and `config.manage` on `config:<family>`
 /// rather than by the roster's actions.
-const rosterConfigKinds = {'watches'};
+const rosterConfigKinds = {
+  'watches',
+  'theaters',
+  'loadouts',
+  'sandboxes',
+  'mcps',
+  'overlays',
+  'secrets',
+  'secret_providers',
+  'pools',
+  'unex',
+};
 
 /// The kind picker's value for every kind: a route without `kind`.
 const _allKinds = '\u0000all';
@@ -175,6 +204,15 @@ const _routeKinds = {
   'assistant': _assistantKind,
   'roster': _rosterSettingsKind,
   'watch': 'watches',
+  'theater': 'theaters',
+  'loadout': 'loadouts',
+  'sandbox': 'sandboxes',
+  'mcp': 'mcps',
+  'overlay': 'overlays',
+  'secret': 'secrets',
+  'secret_provider': 'secret_providers',
+  'pool': 'pools',
+  'unex': 'unex',
 };
 
 /// The roster every Station reads: Operations, Agents, roles, cover policies and Moneypenny's
