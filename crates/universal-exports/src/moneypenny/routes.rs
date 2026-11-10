@@ -69,6 +69,15 @@ const ROSTER_KINDS: &[&str] = &[
     "review",
     "assistant",
     "watch",
+    "theater",
+    "loadout",
+    "sandbox",
+    "mcp",
+    "overlay",
+    "secret",
+    "secret_provider",
+    "pool",
+    "unex",
 ];
 const MEMORY_SCOPES: &[&str] = &["global"];
 

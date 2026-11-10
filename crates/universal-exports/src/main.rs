@@ -243,9 +243,10 @@ async fn run(cli: Cli) -> Result<(), String> {
         );
     }
     let mut gateway = match access {
-        Some((access, accounts)) => {
-            let gateway =
-                Gateway::with_access(config, registry, access).with_access_admin(live.clone());
+        Some((access, accounts, catalog)) => {
+            let gateway = Gateway::with_access(config, registry, access)
+                .with_access_admin(live.clone())
+                .with_own_providers(catalog);
             match accounts {
                 Some(accounts) => gateway.with_accounts(accounts),
                 None => gateway,
@@ -602,7 +603,11 @@ fn user_access_configured(record: &UnexRecord) -> bool {
 }
 
 /// The user access providers and the accounts provider, when there is one.
-type Configured = (AccessProviders, Option<Arc<dyn ai6::Accounts>>);
+type Configured = (
+    AccessProviders,
+    Option<Arc<dyn ai6::Accounts>>,
+    Vec<ai6::providers::ProviderEntry>,
+);
 
 /// The user access providers `snapshot` configures, with the accounts provider when there is
 /// one; `None` without user access.
@@ -705,7 +710,7 @@ fn configured_access(
         }
         None => access,
     };
-    Ok(Some((access, accounts)))
+    Ok(Some((access, accounts, plugins.catalog())))
 }
 
 /// What the `unex` record's sign-in providers come to: the people's, in order, the key

@@ -24,6 +24,7 @@ mod page_access;
 mod pools;
 #[cfg(test)]
 mod profile_tests;
+mod providers;
 #[cfg(test)]
 mod rename_tests;
 mod reports;
@@ -594,6 +595,8 @@ pub struct Gateway {
     images: Option<Arc<moneypenny::images::ImageStore>>,
     /// The peers Liaison serves A2A to, on links and on `/v1/a2a`.
     liaison: Option<Arc<liaison::LiaisonConfig>>,
+    /// The providers this gateway process has loaded, reported beside each Station's.
+    own_providers: Arc<Vec<ai6::providers::ProviderEntry>>,
 }
 
 /// A bearer the gateway makes for itself to read, in this process, as a person who proved who
@@ -702,6 +705,7 @@ impl Gateway {
             source_reads: Arc::default(),
             images: None,
             liaison: None,
+            own_providers: Arc::default(),
         }
     }
 
@@ -794,6 +798,14 @@ impl Gateway {
     #[must_use]
     pub fn with_access_admin(mut self, access: Arc<access_admin::LiveAccess>) -> Self {
         self.access_admin = Some(access);
+        self
+    }
+
+    /// Reports the providers this gateway has loaded (its sign-in, directory and authorizer
+    /// providers) under the host name `gateway`.
+    #[must_use]
+    pub fn with_own_providers(mut self, providers: Vec<ai6::providers::ProviderEntry>) -> Self {
+        self.own_providers = Arc::new(providers);
         self
     }
 
@@ -1821,6 +1833,11 @@ impl Gateway {
             .route(
                 "/v1/user/accounts/{name}/secret",
                 post(accounts::reset_secret),
+            )
+            .route("/v1/user/providers", get(providers::all))
+            .route(
+                "/v1/user/stations/{station_id}/providers",
+                get(providers::of_host),
             )
             .route("/v1/user/resources", get(roster::resources))
             .route("/v1/user/resources/apply", post(roster::apply))

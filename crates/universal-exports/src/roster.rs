@@ -511,6 +511,20 @@ async fn settle(
     }
 }
 
+/// Why `definition` names settings that are not those of the provider it chose, against what the
+/// hosts report; `None` when it is fine, or when the family has no form to judge it by.
+async fn provider_refusal(
+    gateway: &Gateway,
+    record: ConfigRecord,
+    definition: &serde_json::Value,
+) -> Result<Option<String>, ApiError> {
+    let Ok(Some(form)) = record.form() else {
+        return Ok(None);
+    };
+    let reports = crate::providers::every_host(gateway).await?;
+    Ok(ai6::providers::check_provider_settings(&form.schema, definition, &reports).err())
+}
+
 /// `PUT /v1/user/roster/{kind}/{key}` with the record's definition as a JSON object: needs
 /// `roster.manage`. 200 with the new revision, and for the `assistant` record what it loosens
 /// or redirects against the settings in force (`weakened`);
@@ -534,6 +548,17 @@ pub(crate) async fn put_record(
     require(&gateway, &person, &family, family.manage).await?;
     let source = source(&gateway)?;
     let target = target_of(record, &scope, &key);
+    if let Some(refused) = provider_refusal(&gateway, record, &definition).await? {
+        audit(
+            &gateway,
+            &person,
+            &family.resource,
+            "roster.refused",
+            &format!("{target}: {refused}"),
+        )
+        .await?;
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(Refused { refused })).into_response());
+    }
     let expected = expected_revision(&headers);
     let confirm = scoped.confirm;
     let outcome = tokio::task::spawn_blocking(move || {
@@ -817,6 +842,26 @@ pub(crate) async fn apply(
                     family.record
                 ))
             })?;
+        }
+    }
+    for (family, key, definition) in &records {
+        if let Some(refused) = provider_refusal(&gateway, family.record, definition).await? {
+            let target = format!("{} {key}", family.record.name());
+            audit(
+                &gateway,
+                &person,
+                &family.resource,
+                "roster.refused",
+                &format!("{target}: {refused}"),
+            )
+            .await?;
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(Refused {
+                    refused: format!("{target}: {refused}"),
+                }),
+            )
+                .into_response());
         }
     }
     let scope = match scoped.station.as_deref() {
@@ -2161,5 +2206,198 @@ mod tests {
         )
         .await;
         assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    }
+
+    const PROVIDER_ROLES: &str = r#"
+        [role.roster-managers]
+        actions = ["roster.read", "roster.manage", "audit.read"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "config:roster"
+        role = "roster-managers"
+
+        [role.station-readers]
+        actions = ["station.read"]
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "station:worker"
+        role = "station-readers"
+
+        [role.roster-readers]
+        actions = ["roster.read"]
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "config:roster"
+        role = "roster-readers"
+    "#;
+
+    fn provider(id: &str, kind: &str, schema: Option<serde_json::Value>) -> serde_json::Value {
+        let mut entry = json!({
+            "id": id, "name": id, "version": "1", "kinds": [kind],
+            "digest": format!("sha256:{id}")
+        });
+        if let Some(schema) = schema {
+            entry["schema"] = schema;
+            entry["form"] = json!({"fields": {}});
+        }
+        entry
+    }
+
+    #[cfg(feature = "cli")]
+    #[tokio::test]
+    async fn a_hosts_providers_are_reported_and_a_record_holding_another_providers_settings_is_refused()
+     {
+        use ai6::{ConfigProvider, SqlProvider};
+
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
+        let served = served_with_roster(PROVIDER_ROLES, Some(source.clone())).await;
+        served
+            .registry
+            .check_in(
+                "worker",
+                std::collections::BTreeMap::from([(
+                    "providers".to_owned(),
+                    json!([
+                        provider(
+                            "claude",
+                            "ai6_agent_handler",
+                            Some(json!({"type": "object", "properties": {
+                                "allowed_tools": {"x-section": "agent"},
+                                "program": {"x-section": "station"}
+                            }}))
+                        ),
+                        provider(
+                            "git",
+                            "ai6_safehouse",
+                            Some(json!({"type": "object", "properties": {"base": {}}}))
+                        ),
+                        provider("copy", "ai6_safehouse", None),
+                    ]),
+                )]),
+            )
+            .unwrap();
+
+        // The Station's providers, with the schema and form of each one's configuration.
+        let reported: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "stations/worker/providers",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(reported["host"], "worker");
+        let ids: Vec<&str> = reported["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["claude", "git", "copy"]);
+        assert_eq!(
+            reported["providers"][1]["schema"]["properties"]["base"],
+            json!({})
+        );
+        assert_eq!(reported["providers"][1]["form"], json!({"fields": {}}));
+
+        // Merged across the hosts the person may read, narrowed to a kind.
+        let merged: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "providers?kind=ai6_safehouse",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        let ids: Vec<&str> = merged["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["copy", "git"]);
+        assert_eq!(merged["providers"][1]["hosts"], json!(["worker"]));
+
+        // A person who may not read the Station reads none of its providers.
+        let hidden = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "stations/worker/providers",
+            None,
+        )
+        .await;
+        assert_eq!(hidden.status(), StatusCode::FORBIDDEN);
+
+        // An Agent's settings must be the chosen handler's, and only those an Agent may set.
+        let put = |key: &'static str, body: serde_json::Value| {
+            let served = &served;
+            async move {
+                call(
+                    served,
+                    &served.operator,
+                    reqwest::Method::PUT,
+                    &format!("roster/agents/{key}"),
+                    Some(body),
+                )
+                .await
+            }
+        };
+        let ok = put(
+            "007",
+            json!({"handler": "claude", "handler_settings": {"allowed_tools": ["Read"]}}),
+        )
+        .await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        let refused = put(
+            "008",
+            json!({"handler": "claude", "handler_settings": {"program": "/bin/sh"}}),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let reason: serde_json::Value = refused.json().await.unwrap();
+        let reason = reason["refused"].as_str().unwrap();
+        assert!(
+            reason.contains("\"claude\"") && reason.contains("\"program\""),
+            "{reason}"
+        );
+        let unknown = put("009", json!({"handler": "codex-typo"})).await;
+        assert_eq!(unknown.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            unknown.text().await.unwrap().contains("codex-typo"),
+            "names the provider it does not find"
+        );
+
+        // An Operation's safe house is one the hosts report.
+        let copy = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/operations/G",
+            Some(json!({"roster": ["007"], "workspace": {"provider": "worktree"}})),
+        )
+        .await;
+        assert_eq!(copy.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(copy.text().await.unwrap().contains("worktree"));
+        assert_eq!(audits(&served, "roster.refused").len(), 3);
+        assert!(
+            source
+                .load("")
+                .unwrap()
+                .roster
+                .agent_ids()
+                .any(|id| id == "007")
+        );
     }
 }
