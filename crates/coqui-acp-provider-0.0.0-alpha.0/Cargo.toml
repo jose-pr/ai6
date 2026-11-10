@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-provider at 374534143b419d4f94f63d286db508642bdfdc1a, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-provider at 981a64ad05a4039f674d9ca204bf4aaeb6db7398, with what it inherits written out.
 example = [{ name = "echo_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-provider"
@@ -23,6 +23,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies.agent-client-protocol]
 version = "3.6"
 default-features = false
+[dependencies.coqui-acp-api]
+path = "../coqui-acp-api"
 [dependencies.futures]
 version = "0.3"
 [dependencies.guatiao]

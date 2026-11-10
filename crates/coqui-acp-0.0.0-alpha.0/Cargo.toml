@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp at 374534143b419d4f94f63d286db508642bdfdc1a, with what it inherits written out.
+# coqui-acp/crates/coqui-acp at 981a64ad05a4039f674d9ca204bf4aaeb6db7398, with what it inherits written out.
 [package]
 name = "coqui-acp"
 description = "Drive any Agent Client Protocol agent: the connect, resume and turn state machine, permission deciding and line transports above the protocol's own SDK"

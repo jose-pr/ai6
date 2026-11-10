@@ -122,7 +122,7 @@ Everything is at the crate root.
 | --- | --- |
 | `AgentProvider`, `AgentSession` | the kinds a provider serves |
 | `StartRequest`, `ResumeRequest`, `AgentMessage` | what goes in |
-| `AgentEvent`, `TokenUsage`, `UsageLimit`, `QuotaReport`, the `*_EVENT` constants, `TURN_CANCELLED` | what comes out |
+| `AgentEvent` (with `coqui-acp-api`'s `LimitHit` and `UsageReport`), the `*_EVENT` constants, `TURN_CANCELLED` | what comes out |
 | `AcpFacade`, `Settings`, `FacadeAuth`, `Credential`, `Error` | a provider as an ACP agent |
 | `StartOption`, `OptionValue`, `OptionTarget` | what a client may choose before a session starts |
 | `LAUNCH_META_KEY`, `EVENT_NOTIFICATION`, `EVENTS_CAPABILITY`, `SESSION_OPTIONS_METHOD`, `SESSION_OPTIONS_CAPABILITY` | what the facade adds to ACP |

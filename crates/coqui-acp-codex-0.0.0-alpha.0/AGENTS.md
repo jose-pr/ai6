@@ -1,0 +1,190 @@
+# `coqui-acp-codex` — API header
+
+Header-file-style reference for the `coqui-acp-codex` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/coqui-acp>.
+
+There are no Cargo features. MSRV Rust 1.89. A default build depends on `coqui-acp-harness`, `serde_json` and, for the command, `clap`. Version `0.0.0-alpha.0`, not published; the API may change in any release before 1.0. Tested with Codex 0.164.0 and 0.166.0 (`TESTED_VERSIONS`).
+
+Imports: everything is at the crate root, and `parse` is public. `coqui_acp_codex::harness` is `coqui-acp-harness`, for its events, processes and ACP server; `Launch`, `PlainSpawn`, `Spawn` and `Spawned` are re-exported from it.
+
+No `unsafe` code (`#![forbid(unsafe_code)]`). No process-wide state.
+
+## Launch (`CodexLaunch`)
+
+```rust
+#[non_exhaustive]                                       // Clone, PartialEq; Debug shows env names only
+pub struct CodexLaunch {
+    pub executable: OsString,                  // "codex"
+    pub cwd: PathBuf,
+    pub thread: ThreadStart,                   // New | Resume(id) | Load(id)
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub developer_instructions: Option<String>,
+    pub mcp_servers: Vec<McpServer>,
+    pub additional_directories: Vec<PathBuf>,
+    pub working_roots: Vec<PathBuf>,           // a resumed thread's own directory must lie in one; empty takes any
+    pub approval_policy: Option<String>,       // untrusted, on-failure, on-request, never
+    pub sandbox: Option<String>,               // read-only, workspace-write, danger-full-access
+    pub allow_bypass: bool,                    // false: the Bypass mode is not offered
+    pub modes: Option<Vec<Mode>>,              // those named widen the host's mode and stricter ones (Bypass still needs allow_bypass)
+    pub thread_config: Map<String, Value>,     // merged into the thread's config, as given
+    pub config_overrides: Vec<(String, Value)>,
+    pub extra_args: Vec<OsString>,             // the caller's own, after the overrides, unchecked
+    pub client_info: ClientInfo,               // how it names itself in initialize; this crate by default
+    pub env: BTreeMap<OsString, OsString>,
+    pub clear_env: bool,
+}
+pub fn CodexLaunch::new(cwd: impl Into<PathBuf>) -> CodexLaunch
+pub fn launch(&self) -> Launch                 // app-server and one --config=key=value per override
+pub fn config(&self) -> Map<String, Value>     // mcp_servers, sandbox_workspace_write.writable_roots, thread_config
+pub fn skill_roots(&self) -> Vec<String>       // the Agent Skills directory of each
+pub fn has_server(&self, name: &str) -> bool   // in mcp_servers or thread_config
+pub fn thread_params(&self) -> Value           // thread/start's, or thread/resume's with threadId and excludeTurns
+#[non_exhaustive] pub enum ThreadStart { New, Resume(String), Load(String) }
+#[non_exhaustive] pub struct ClientInfo { pub name: String, pub title: String, pub version: String }
+pub fn ClientInfo::new(name, version) -> ClientInfo
+pub fn valid_config_key(key: &str) -> bool;  pub fn toml_value(value: &Value) -> String
+pub fn valid_thread_id(id: &str) -> bool       // letters, digits and dashes, 1 to 128
+```
+
+The command line holds only `app-server` and the overrides, each one argument `--config=<key>=<value>`: a key part that is not letters, digits, `_` and `-` is a quoted TOML string, and every value is TOML written here (strings with quotes, backslashes and control characters escaped, arrays, objects as inline tables, `null` as `""`), so no value can end its own or start another. MCP servers are `config.mcp_servers.<name>`: `{command, args, env}` for stdio, `{url, http_headers}` for HTTP; Codex has no SSE.
+
+## Session (`CodexSession`)
+
+```rust
+pub fn CodexSession::start(launch: &CodexLaunch, spawn: &dyn Spawn, settings: CodexSettings,
+    sink: impl Fn(Event) -> bool + Send + Sync + 'static) -> Result<CodexSession, Error>
+pub fn thread(&self) -> &str
+pub fn version(&self) -> Option<&str>
+pub fn models(&self) -> Option<&[Model]>                        // None: not listed or could not be
+pub fn choice(&self) -> (Option<String>, Option<String>)        // model and effort the next turn names
+pub fn set_model(&self, model: Option<&str>);  pub fn set_effort(&self, effort: Option<&str>)
+pub fn prompt(&self, content: &[Content]) -> Result<(), Error>
+pub fn interrupt(&self) -> Result<(), Error>
+pub fn steer(&self, turn: &str, content: &[Content]) -> Result<(), Error>   // turn/steer, its answer not awaited
+pub fn request(&self, method: &str, params: Value, limit: Duration) -> Result<Value, Error>
+pub fn read_usage(&self) -> Result<Vec<Bucket>, Error>      // account/rateLimits/read: needs no turn; the answer is the base later updates merge into
+pub fn CodexSession::read_account_usage(launch: &CodexLaunch, spawn: &dyn Spawn, settings: CodexSettings) -> Result<Vec<Bucket>, Error>   // starts app-server, initializes, reads, ends it: no thread, no turn
+pub fn close(&self)                                              // also on drop
+#[non_exhaustive] pub struct Model { pub id: String, pub name: String, pub description: Option<String>,
+    pub efforts: Vec<String>, pub default_effort: Option<String>, pub is_default: bool }
+pub fn models_of(result: &Value) -> Option<Vec<Model>>          // hidden models left out; None: no list at all
+pub fn version_of(answer: &Value) -> Option<String>             // from initialize's userAgent
+pub fn user_input(content: &[Content]) -> Result<Vec<Value>, Error>
+```
+
+`start` spawns the app server, sends `initialize` (as `coqui-acp-codex`) and `initialized`, lists `model/list` page by page, sends `skills/extraRoots/set` when there are directories, and `thread/start` or `thread/resume` with `thread_params`. A resumed thread other than the one asked for is `Error::Harness`, and the app server is ended. For `Load` the earlier turns of `thread/resume`'s answer go to `sink` as history, the person's messages included, the latest `max_history_turns` of them. A version not in `TESTED_VERSIONS` is an `Event::Notice`. Events reach `sink` from a thread of the session's own until it answers `false`; the output's end is one `Event::Exited`, saying how Codex ended and the last lines it wrote that were not protocol, standard error's included; none after `close`.
+
+A `turn/start` that goes unanswered within `request_timeout` fails the prompt, and that turn is interrupted whenever it shows itself: its answer, its start and its end touch no later turn. `prompt` sends `turn/start` with the input (text; an image as a data URL; a link as `[@name](uri)`; a text resource in `<context ref="uri">…</context>`; an image resource as an image; any other resource is `Error::Refused`) and the chosen model and effort, and returns once Codex has answered. The first prompt's first line, cut to 80 bytes, is the `Event::Title`. `interrupt` sends `turn/interrupt` with the running turn's id and does not wait; with no turn running it does nothing.
+
+`CodexSettings` (`new()`, `Default`; set its fields): `max_line` (64 MiB), `tail_lines` (8), `tail_line_bytes` (512), `initialize_timeout` (20 s), `request_timeout` (30 s), `exit_wait` (1 s), `max_tools` (4096 items kept), `max_model_pages` (10), `max_history_turns` (1000). Also: `parser` (`ParserLimits`: `max_title_bytes` 256, `max_told_bytes` 16 KiB, `max_streamed` 64), `list_models` (true; Codex's models failing to list stops nothing), `exit_poll` (100 ms), `close_wait` (2 s), `max_queued_writes` (1024), `title_bytes` (80), `version_wait` (10 s; 0 does not ask), `version_bytes` (4096), `on_line: Option<LineHook>`, `check_config: Option<AnswerCheck>` (asks `config/read` before the thread; a refusal fails the start), `check_thread: Option<AnswerCheck>` (the answer that opened the thread; the same). A resumed or loaded thread whose own directory lies outside `working_roots`, links followed, is refused.
+
+## Parser (`coqui_acp_codex::parse`)
+
+```rust
+pub type Writer = Arc<dyn Fn(&Value) -> io::Result<()> + Send + Sync>;
+pub type Answer = (String, Result<Value, String>);
+pub const ALLOW_ONCE: &str = "accept";  pub const ALLOW_SESSION: &str = "accept_for_session";
+pub const ALLOW_RULE: &str = "accept_with_rule";  pub const ALLOW_ALWAYS: &str = "accept_always";  pub const REJECT: &str = "decline";
+pub const ALLOW_NETWORK_RULE: &str = "allow_network_rule";  pub const REJECT_NETWORK_RULE: &str = "reject_network_rule";
+pub fn Parser::new(writer: Writer, max_tools: usize) -> Parser
+pub fn Parser::with_limits(writer: Writer, max_tools: usize, limits: ParserLimits) -> Parser
+pub fn kept_output(&self) -> usize
+pub fn line(&mut self, message: &Value) -> Vec<Event>
+pub fn history(&mut self, turn: &Value) -> Vec<Event>
+pub fn turn(&self) -> Option<&str>;  pub fn started(&mut self, turn: &str);  pub fn interrupting(&mut self)
+pub fn set_thread(&mut self, thread: &str);  pub fn prompting(&mut self);  pub fn abandon(&mut self, request: &str)
+pub fn answers(&mut self) -> Vec<Answer>
+pub fn id_text(id: &Value) -> String
+pub fn git_patch(path: &str, change: FileChange, hunks: &str) -> String
+```
+
+| Message | Events |
+| --- | --- |
+| `item/agentMessage/delta`, `item/completed` `agentMessage` | `MessageChunk` by item id, `MessageEnd`; text not streamed is told whole |
+| `item/reasoning/summaryTextDelta`, `textDelta`, `item/completed` `reasoning` | `ThoughtChunk`, `ThoughtEnd` |
+| `commandExecution` items, `item/commandExecution/outputDelta` | `Tool` (`exec_command`, execute, its terminal) and `Terminal`: the command, output, exit code; `declined` fails |
+| `fileChange` items | `Tool` (`apply_patch`, edit) with a diff per change, its `patch` a git patch of Codex's hunks |
+| `mcpToolCall`, `dynamicToolCall` | `Tool` named `mcp__<server>__<tool>`, its result or error text as a `ToolChunk` |
+| `webSearch`, `imageView` | `Tool` |
+| `turn/plan/updated` | `Plan` |
+| `thread/tokenUsage/updated` | `Usage` of `last`: cached input split out, not cumulative, no cost, context used and `modelContextWindow`; its `spend` is the thread's `total` (cached split out, reasoning kept, `cost_micro_usd` unset), which a resumed thread carries over from its earlier turns; another thread's has no `spend` |
+| `account/rateLimits/updated` | merged into the last `account/rateLimits/read` (a sparse update: an object merges key by key, a null clears nothing), then `Buckets` for that limit when its buckets changed, none when they did not; the exhausted window kept for the limit error that follows |
+| `account/rateLimits/read` answer | `Buckets` of every limit (`CodexSession::read_usage`, asked by the harness once the session has opened, after each turn and on each poll, through `Conversation::read_usage`; the answer is applied where it is read, so an update read after it is kept, and a used-up window in it names a later limit error): `rateLimitsByLimitId`, else `rateLimits`; each snapshot's window is `<limitId>:<five_hour|weekly|primary|secondary>` (300 min, 10080 min, else its position), `usedPercent` as permille of 1000, a fixed window with `windowDurationMins` as its length and `resetsAt`, `ok` below 100 and `exhausted` from 100; `limitName` the label; `normalModelSlug` makes the coverage `only {slug}`, else unknown; `individualLimit` is `<limitId>:spend_control` (permille `1000 - remainingPercent * 10`, exhausted when `spendControlReached` or none remains); `ordinaryUsageAllowed: false` holds every bucket exhausted until a later read says otherwise (Codex: recovery is not to be inferred from percentages); `credits.balance` is left unmapped, its unit being unknown |
+| `turn/completed`, `turn/failed` | `TurnEnd`: a limit (`codexErrorInfo` naming a usage or rate limit, or a failed connection with HTTP 429; reset from `resetsAt` else the exhausted window) is `Limited`; `interrupted`, or `failed` after `interrupting`, is `Stopped(Cancelled)`; `failed` is `Failed` with the error's message; else `Stopped(EndTurn)` |
+| `error` | kept for the running turn's end, unless Codex will retry or it names another turn |
+| `thread/compacted`, `contextCompaction` items | `Compaction` |
+| `warning`, `configWarning`, `deprecationNotice`, `guardianWarning`, an MCP server that failed to start | `Notice` |
+| `thread/name/updated` | `Title` |
+| an answer to our request | kept for `answers`, never an event |
+
+Approvals are `Event::Permission`; their responders answer the server request by its own id:
+
+| Request | Options | Answer |
+| --- | --- | --- |
+| `item/commandExecution/requestApproval` | `accept`, `accept_for_session`, `accept_with_rule` when Codex proposed a rule, `decline` | `accept`, `acceptForSession`, `{acceptWithExecpolicyAmendment}`, `decline`; nobody answered: `cancel` |
+| `item/fileChange/requestApproval` | `accept`, `accept_for_session`, `decline` | the same words |
+| `item/permissions/requestApproval` | `accept` (this turn), `accept_for_session`, `decline` | the permissions asked with `scope`, or none |
+| `mcpServer/elicitation/request` of an MCP tool | `accept`, `accept_for_session` and `accept_always` as Codex's `persist` allows, `decline` | `{action: "accept", _meta: {persist}}`, `decline`; nobody answered: `cancel` |
+| `execCommandApproval`, `applyPatchApproval` | `accept`, `accept_for_session`, `decline` | `approved`, `approved_for_session`, `{denied}`; nobody answered: `abort` |
+
+Any other server request is answered `-32601` at once.
+
+## ACP agent (`CodexAgent`)
+
+```rust
+pub fn CodexAgent::new() -> CodexAgent                    // also Default; codex from PATH, PlainSpawn
+pub fn defaults(self, defaults: CodexLaunch) -> Self
+pub fn spawn(self, spawn: Arc<dyn Spawn>) -> Self
+pub fn settings(self, settings: CodexSettings) -> Self
+pub fn cli_version(&self) -> Option<String>               // codex --version, once, within CodexSettings::version_wait
+impl Harness for CodexAgent
+pub const DEFAULT: &str = "default";
+```
+
+`agentInfo` is `coqui-acp-codex`, titled `Codex <version>`, at this crate's version. It takes images, embedded context, MCP servers over stdio and HTTP, load, more directories and an appended system prompt. A session's parts are added to `defaults`: its `cwd`, `systemPrompt` after the defaults' developer instructions, `mcpServers`, and `additionalDirectories`, each a skill root (the Agent Skills directory inside it) and writable in a `workspace-write` sandbox. An SSE server or a thread id `valid_thread_id` refuses is refused. The session's id is the thread's.
+
+The mode option (`mode`, category `mode`; ids from `coqui_acp_harness::mode`; `coqui_acp_codex::mode` holds the table), measured on Codex 0.166.0 from `app-server generate-json-schema` and a `thread/start` with no turn. Approval policy is `untrusted`, `on-request` or `never`; the sandbox `read-only`, `workspace-write` or `danger-full-access`; the approvals reviewer `user`, `auto_review` or `guardian_subagent`; the collaboration modes (`collaborationMode/list`) `plan` and `default`.
+
+| Mode | `approvalPolicy` | `sandboxPolicy.type` | `approvalsReviewer` | `collaborationMode.mode` |
+| --- | --- | --- | --- | --- |
+| `manual` | `untrusted` | `workspaceWrite` | `user` | `default` |
+| `accept_edits` | `on-request` | `workspaceWrite` | `user` | `default` |
+| `auto` | `on-request` | `workspaceWrite` | `auto_review` | `default` |
+| `plan` | `on-request` | `readOnly` | `user` | `plan` |
+| `bypass` | `never` | `dangerFullAccess` | `user` | `default` |
+
+What a client may choose is capped by the host: the mode the launch's `approval_policy` and `sandbox` amount to (`coqui_acp_codex::mode::configured`; the thread's real state when the launch sets neither) and every stricter one, in the order Plan, Manual, Accept edits, Auto, Bypass. `CodexLaunch::modes` names more; Bypass is offered only with `allow_bypass`, whatever is named. A host whose policy and sandbox amount to no mode offers Plan only.
+
+The current mode at the start is read from `thread/start`'s `approvalPolicy`, `approvalsReviewer` and `sandbox`, exactly: it is a mode only when all three are what the mode sets (Plan never reads back: a thread has no collaboration mode to report, so its `on-request`, `readOnly`, `user` is shown as it is (`custom`) until a client chooses Plan). Any other pair shows as `custom` with its real values (`Custom: untrusted, readOnly`), never as a mode, and cannot be chosen. Choosing the mode shown still applies it from the next turn. Until a client chooses a mode no turn names any of the four settings, and the thread's own configuration holds; once one has, each `turn/start` carries all four (`sandboxPolicy` keeps the thread's `sandbox_workspace_write` roots and network setting), so a switch holds from the next turn, not the one running. `collaborationMode.settings` names the model (the turn's, else the thread's, else Codex's default; with none the turn carries the approval and sandbox only and a warning), the session's effort (else the thread's `reasoningEffort`) and the launch's developer instructions, each only when there is one: Codex's schema says a collaboration mode takes precedence over the thread's model, effort and developer instructions, and that `null` instructions mean the mode's built-in ones, so nothing is sent as `null`. A session with developer instructions has them replace Plan's built-in ones in a Plan turn. A `workspace-write` sandbox falls back to `readOnly` in a directory the Codex home does not trust, as `thread/start` answers show.
+
+Config options: `model` (category `model`): `default` and the models Codex lists; `effort` (category `thought_level`): `default` and the current model's efforts. Setting one not offered is refused; a choice applies from the next turn.
+
+## Errors
+
+`Error` (`#[non_exhaustive]`): `Spawn(io::Error)`, `Refused(String)`, `Timeout { what, limit }`, `Harness(String)` in Codex's words or saying how it ended. Into `HarnessError`: `Refused` stays refused, the rest is `Failed`.
+
+## Command line
+
+`coqui-acp-codex` serves `CodexAgent` on standard input and output. Flags: `--executable` (`COQUI_ACP_CODEX_EXECUTABLE`, default `codex`), `--model`, `--effort`, `--approval-policy`, `--sandbox`, `--allow-bypass`, `--max-acp-version` (1 or 2, default 2), `--max-sessions` (8), `--working-root` (repeated; a session's `cwd` and more directories must lie in one), `--no-client-mcp-servers`, `--allow-network-paths`. Notices and exits go to standard error. Exit status 0 when the client closes, 1 when reading it failed, 2 for a wrong invocation.
+
+## Environment variables
+
+`COQUI_ACP_CODEX_EXECUTABLE`, as `--executable`. Codex reads its own (`CODEX_HOME`, `OPENAI_API_KEY` and others) from the environment the agent runs in, or `CodexLaunch::env`.
+
+## Gotchas
+
+- `turn/interrupt` needs the turn's id, which `turn/start`'s answer and `turn/started` give.
+- `availableDecisions` is what a command's approval offers; `decline` is always offered, since 0.164.0 and 0.166.0 take it where they list only `cancel`, mark the command `declined` and go on with the turn (each one's recording `turn`). A version after those is untested.
+- A tool call is named as ACP's clients expect, `web_search` and `mcp__<server>__<tool>`; the server and tool are in the name.
+- An `error` with `willRetry` is no limit: Codex may yet succeed. The turn's end decides, with the window an earlier report said was used up.
+- `describe` says `usage.needs_turn` false: with no session open, a poll starts an app server for the read (`CodexAgent` as a `Harness`), so how often is the host's cost; with one open it asks that session's. A login with no allowances answers the read with an error, and nothing is reported. Measured on Codex 0.166.0 with no turn: one `codex` limit with a five-hour and a weekly window, `credits` and reset credits (`rateLimitResetCredits`, unmapped); `tests/fixtures/codex-0.166.0/rate_limits_read.stdout` is that answer with its account id and credit ids replaced. Every recorded `updated` line has null windows: it changes nothing.
+- Another thread's usage comes as `Usage` with `elsewhere`, as spent and no part of this conversation's context; nothing else of it does.
+- `--config` keys are not TOML: Codex splits the argument at its first `=` and the key at each `.`, and a quote is part of a name. A key holding `=` cannot be written and is refused. A JSON `null` value is the empty string, which is not unset.
+- A login file needs `tokens.refresh_token` to be read, or Codex answers every turn `401`. Empty, a second client cannot rotate the person's login, and the access token goes on working until it expires.
+- With `additionalDirectories` from a client, `workspace-write` writes where the client says, `/` included, with no approval. A host that does not trust its client gives `--working-root`; `--no-client-mcp-servers` keeps a client from starting programs.
+- Whether Codex sends another thread's messages on this connection is not recorded. A notification of another thread is dropped, and a question of another thread says so.
+- A question Codex settles itself (`serverRequest/resolved`) stays open at the client until the turn ends; a late answer is harmless.
+- An MCP tool call asks through `mcpServer/elicitation/request` with `_meta.codex_approval_kind` `mcp_tool_call`, not a tool approval.
+- Codex merges a thread's `config.mcp_servers` with the person's own configuration; a server of the same name in it wins.
+- A fresh `CODEX_HOME` makes Codex set the machine up again; give it the login, or use the person's own.
+- Everything the app server writes is the model's or Codex's: untrusted.

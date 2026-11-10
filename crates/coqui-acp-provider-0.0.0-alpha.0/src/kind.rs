@@ -6,6 +6,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+use coqui_acp_api::{LimitHit, UsageReport};
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, Status, ToValue, Value};
 use serde::{Deserialize, Serialize};
@@ -53,59 +54,6 @@ pub struct AgentMessage {
     pub text: String,
 }
 
-/// A provider usage or rate limit that stopped the session.
-///
-/// A provider emits it as an [`AgentEvent`] of kind [`LIMIT_EVENT`] in place of the `completed` or `failed`
-/// event the same output would otherwise produce.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[map(crate = ::guatiao)]
-pub struct UsageLimit {
-    /// When the provider says the quota resets, as Unix seconds. `None` when it did not say.
-    pub resets_at: Option<i64>,
-    /// Which window was exhausted (`five_hour`, `weekly`, ...) when the provider names it.
-    pub window: Option<String>,
-}
-
-/// Tokens and cost a provider reported for a session, as the provider reports them.
-///
-/// Money is an integer count of millionths of a dollar so records never carry floats.
-#[derive(
-    ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
-)]
-#[map(crate = ::guatiao)]
-pub struct TokenUsage {
-    /// Prompt tokens that were not served from the cache.
-    pub input: u64,
-    /// Tokens the model generated.
-    pub output: u64,
-    /// Prompt tokens read from the provider's cache.
-    pub cache_read: u64,
-    /// Prompt tokens written to the provider's cache.
-    pub cache_write: u64,
-    /// Cost in millionths of a dollar; `0` when the provider reports no cost.
-    pub cost_micro_usd: u64,
-    /// Whether the figures are running totals since the provider process started (`true`) or only what
-    /// the last step added (`false`).
-    pub cumulative: bool,
-}
-
-/// How much of one provider quota window the session's account has used, as the provider reported it. A
-/// provider attaches one per window to the event that carried the report.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[map(crate = ::guatiao)]
-pub struct QuotaReport {
-    /// The window (`five_hour`, `weekly`, ...) as the provider names it, or its position (`primary`,
-    /// `secondary`) when it gives no name.
-    pub window: String,
-    /// Thousandths of the window used, when the provider reports a figure.
-    pub used_permille: Option<u16>,
-    /// When the window resets, as Unix seconds, when the provider says.
-    pub resets_at: Option<i64>,
-    /// The provider's verdict for the window (`allowed`, `allowed_warning`, `rejected`), when it reports
-    /// one.
-    pub status: Option<String>,
-}
-
 /// One thing that happened in a session.
 ///
 /// Consumers match [`kind`](Self::kind) as text, so it is an open vocabulary: the constants of this crate
@@ -120,16 +68,14 @@ pub struct AgentEvent {
     /// Provider data that has no text representation.
     pub data: Option<Vec<u8>>,
     /// The limit that stopped the session; set only on a `limit` event.
-    pub limit: Option<UsageLimit>,
-    /// Token usage and cost the provider reported with this event.
-    pub usage: Option<TokenUsage>,
+    pub limit: Option<LimitHit>,
     /// Names of the tools the event calls, as the harness names them (`WebFetch`).
     #[map(default)]
     pub tools: Vec<String>,
-    /// Quota windows the provider reported with this event.
-    #[map(default)]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub quota: Vec<QuotaReport>,
+    /// What the provider reported of the account's usage with this event: its buckets, and the
+    /// session's spend. A reader keeps the newest by `revision` and reads each bucket's `observed_at`.
+    #[serde(default)]
+    pub report: Option<UsageReport>,
 }
 
 impl AgentEvent {
@@ -141,9 +87,8 @@ impl AgentEvent {
             text,
             data: None,
             limit: None,
-            usage: None,
             tools: Vec::new(),
-            quota: Vec::new(),
+            report: None,
         }
     }
 }

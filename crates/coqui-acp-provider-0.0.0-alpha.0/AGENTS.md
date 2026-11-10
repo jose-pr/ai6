@@ -80,18 +80,16 @@ pub struct AgentEvent {
     pub kind: String,
     pub text: Option<String>,
     pub data: Option<Vec<u8>>,
-    pub limit: Option<UsageLimit>,
-    pub usage: Option<TokenUsage>,
+    pub limit: Option<LimitHit>,          // coqui_acp_api::LimitHit; set only on a `limit` event
     pub tools: Vec<String>,
-    pub quota: Vec<QuotaReport>,     // JSON: absent when empty
+    pub report: Option<UsageReport>,      // coqui_acp_api::UsageReport: the buckets and the session's spend this event carries
 }
 pub fn AgentEvent::new(kind: impl Into<String>, text: Option<String>) -> AgentEvent
-pub struct UsageLimit { pub resets_at: Option<i64>, pub window: Option<String> }
-pub struct TokenUsage { pub input: u64, pub output: u64, pub cache_read: u64, pub cache_write: u64, pub cost_micro_usd: u64, pub cumulative: bool }  // Default, Copy
-pub struct QuotaReport { pub window: String, pub used_permille: Option<u16>, pub resets_at: Option<i64>, pub status: Option<String> }
 ```
 
-All derive `ToValue`, `FromValue`, `Schema`, `Serialize`, `Deserialize`. In JSON `kind` and `tools` are required; the others read as absent when left out, and are written as `null` (`quota` is left out when empty). As a Guatiao value only `kind` is required. Their fields are public and the structs are not `non_exhaustive`, so a literal names every field.
+`LimitHit` and `UsageReport` are `coqui-acp-api`'s usage model (its header says what a bucket, a refill and a hit mean); this crate depends on it for them.
+
+All derive `ToValue`, `FromValue`, `Schema`, `Serialize`, `Deserialize`. In JSON `kind` and `tools` are required; the others read as absent when left out, and are written as `null`. As a Guatiao value only `kind` is required. Their fields are public and the structs are not `non_exhaustive`, so a literal names every field.
 
 Consumers match `kind` as text, so these strings are the contract:
 
@@ -150,7 +148,7 @@ pub const SESSION_OPTIONS_METHOD: &str = "_coqui_acp/session_options";
 | `limit` | stop reason `refusal` |
 | `cancelled`, `blocked` with `TURN_CANCELLED` | stop reason `cancelled` |
 | `failed` | the prompt fails: code `-32603`, the text in `data` |
-| any other kind; any `limit`, `usage` or `quota` | `EVENT_NOTIFICATION` |
+| any other kind; any `limit` or `report` | `EVENT_NOTIFICATION` |
 
 A failure with no prompt waiting goes as `EVENT_NOTIFICATION`, with kind `failed`.
 

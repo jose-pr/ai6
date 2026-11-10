@@ -1,0 +1,40 @@
+# guatiao/crates/guatiao-channel at 0350bae7fef4cef2aa46ce73f1ef6be15983d83b, with what it inherits written out.
+[package]
+name = "guatiao-channel"
+description = "A two-way stream of bytes between a host and a provider, as two guatiao object kinds with stated rules: back-pressure, ordering and closing"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+publish = true
+license = "MPL-2.0"
+readme = "README.md"
+exclude = [".*", "*.local.*", "public-api.txt"]
+build = "build.rs"
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[lib]
+name = "guatiao_channel"
+path = "src/lib.rs"
+[dependencies]
+[dependencies.guatiao]
+path = "../guatiao"
+version = "=0.0.0-alpha.1"
+features = ["provider"]
+[features]
+c-header = ["dep:cbindgen"]
+[build-dependencies]
+[build-dependencies.cbindgen]
+version = "0.29"
+optional = true
+[dev-dependencies]
+[dev-dependencies.guatiao-serde]
+path = "../guatiao-serde"
+features = ["json"]
+[lints]
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

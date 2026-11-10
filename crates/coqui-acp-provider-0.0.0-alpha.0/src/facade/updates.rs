@@ -156,10 +156,8 @@ fn message_chunks(session: &str, text: &str, limit: usize) -> Vec<Value> {
 
 /// The `usage_update` for an event reporting a cost. ACP has no field for tokens alone.
 fn usage(session: &str, event: &AgentEvent) -> Option<Value> {
-    let usage = event
-        .usage
-        .as_ref()
-        .filter(|usage| usage.cost_micro_usd > 0)?;
+    let usage = event.report.as_ref()?.spend.as_ref()?;
+    let cost = usage.cost_micro_usd.filter(|cost| *cost > 0)?;
     let used = usage
         .input
         .saturating_add(usage.output)
@@ -169,7 +167,7 @@ fn usage(session: &str, event: &AgentEvent) -> Option<Value> {
         clippy::cast_precision_loss,
         reason = "a cost is a display figure, and a dollar amount fits a double's exact range"
     )]
-    let amount = usage.cost_micro_usd as f64 / 1_000_000.0;
+    let amount = cost as f64 / 1_000_000.0;
     Some(update(
         session,
         &json!({
@@ -216,7 +214,7 @@ fn tools(event: &AgentEvent, limit: usize) -> Vec<(String, String)> {
 ///
 /// [`EVENT_NOTIFICATION`]: super::EVENT_NOTIFICATION
 fn needs_extension(event: &AgentEvent) -> bool {
-    if event.limit.is_some() || event.usage.is_some() || !event.quota.is_empty() {
+    if event.limit.is_some() || event.report.is_some() {
         return true;
     }
     match event.kind.as_str() {
@@ -247,16 +245,23 @@ fn bounded(event: &AgentEvent, limits: Limits) -> AgentEvent {
     for tool in &mut event.tools {
         *tool = title(tool, limits.label);
     }
-    for quota in &mut event.quota {
-        quota.window = title(&quota.window, limits.label);
-        if let Some(status) = &mut quota.status {
-            *status = title(status, limits.label);
+    if let Some(report) = &mut event.report {
+        for bucket in &mut report.buckets {
+            bucket.id = title(&bucket.id, limits.label);
+            bucket.label = bucket
+                .label
+                .as_deref()
+                .map(|label| title(label, limits.label));
+            bucket.evidence = bucket
+                .evidence
+                .as_deref()
+                .map(|text| title(text, limits.label));
         }
     }
     if let Some(limit) = &mut event.limit
-        && let Some(window) = &mut limit.window
+        && let Some(bucket) = &mut limit.bucket
     {
-        *window = title(window, limits.label);
+        *bucket = title(bucket, limits.label);
     }
     event
 }

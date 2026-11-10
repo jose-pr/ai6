@@ -1,0 +1,2036 @@
+{
+  "StartRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Variables for what the harness runs, over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
+        "default": {}
+      },
+      "working_roots": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The directories every session's `cwd` and additional directories must lie in, compared as [`WorkingRoots`](crate::WorkingRoots) says; empty adds none.",
+        "default": []
+      },
+      "requirements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "What is required: one of [`NAMES`], or a name a harness may not know."
+            },
+            "value": {
+              "description": "What it is held to, for a name that takes a value; absent for one that takes none."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ]
+        },
+        "description": "What the connection is held to. A name may come once.",
+        "default": []
+      },
+      "account": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The host's id for the account the connection runs on, echoed into every usage report of the connection and never interpreted. It picks no credentials: those stay in `environment`."
+      }
+    },
+    "additionalProperties": false
+  },
+  "Requirement": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "What is required: one of [`NAMES`], or a name a harness may not know."
+      },
+      "value": {
+        "description": "What it is held to, for a name that takes a value; absent for one that takes none."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name"
+    ]
+  },
+  "SessionQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "The session's id as the provider reported it: a UUID."
+      },
+      "working_directory": {
+        "type": "string",
+        "description": "The directory the session worked in."
+      },
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The variables its connection was started with.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "session_id",
+      "working_directory"
+    ]
+  },
+  "SessionImport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "The id the session is seeded at, created by the host: a UUID no session of the harness has."
+      },
+      "working_directory": {
+        "type": "string",
+        "description": "The directory the session will work in."
+      },
+      "history": {
+        "type": "string",
+        "description": "The history, as JSON lines in the standard session-history format, whose first line is a header carrying its version; empty seeds a session with no history.",
+        "default": ""
+      },
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The variables the session's connections will be started with.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "session_id",
+      "working_directory"
+    ]
+  },
+  "SessionExport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "The session's id as the provider reported it: a UUID."
+      },
+      "working_directory": {
+        "type": "string",
+        "description": "The directory the session worked in."
+      },
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The variables its connection was started with.",
+        "default": {}
+      },
+      "after": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Where to go on from: the `next` of the page before, as the provider gave it; absent for the first page."
+      },
+      "max_bytes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes a page holds: the caller's memory bound, never exceeded. A next line longer than it, line feed included, is refused, saying how long it is (see [`LINE_TOO_LARGE`](crate::LINE_TOO_LARGE)).",
+        "default": 1048576
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "session_id",
+      "working_directory"
+    ]
+  },
+  "ExportPage": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Whole JSON lines, each ended by a line feed. Only the first page starts with the header."
+      },
+      "next": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What to ask for the next page with ([`SessionExport::after`]); absent when the export is complete."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ]
+  },
+  "SpawnSpec": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "program": {
+        "type": "string",
+        "description": "The program: a path, or a name looked up on the `PATH` where it runs, the spec's own `PATH` when its environment sets one."
+      },
+      "args": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Its arguments, one element each, never re-split by a shell.",
+        "default": []
+      },
+      "cwd": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Its working directory, by the rules of where it runs; the spawner's choice when absent."
+      },
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Variables set over the spawner's own environment, or over none with `clear_environment`.",
+        "default": {}
+      },
+      "clear_environment": {
+        "type": "boolean",
+        "description": "Starts from no variables at all rather than the spawner's own.",
+        "default": false
+      },
+      "remove_environment": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Variables taken out of the spawner's own environment before `environment` is set.",
+        "default": []
+      },
+      "terminal": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "rows": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Rows."
+          },
+          "cols": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Columns."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "rows",
+          "cols"
+        ],
+        "description": "A terminal of this size for its input and output, standard error included; plain pipes when absent."
+      },
+      "error_output": {
+        "type": "string",
+        "enum": [
+          "separate",
+          "merged",
+          "discarded"
+        ],
+        "x-enum-labels": {
+          "separate": "Its own stream, read with [`SpawnedProcess::read_error`]: standard output then carries only what the program wrote there, as a JSON-lines harness needs.",
+          "merged": "Into standard output.",
+          "discarded": "Nowhere."
+        },
+        "description": "Where standard error goes, with pipes.",
+        "default": "separate"
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "program"
+    ]
+  },
+  "TerminalSize": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "rows": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535,
+        "description": "Rows."
+      },
+      "cols": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535,
+        "description": "Columns."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "rows",
+      "cols"
+    ]
+  },
+  "HarnessInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people, such as `Claude Code`."
+      },
+      "versions": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "description": "The ACP versions its `initialize` answers, lowest first."
+      },
+      "takes": {
+        "type": "object",
+        "properties": {
+          "images": {
+            "type": "boolean",
+            "description": "Images in a prompt.",
+            "default": false
+          },
+          "audio": {
+            "type": "boolean",
+            "description": "Audio in a prompt.",
+            "default": false
+          },
+          "embedded_context": {
+            "type": "boolean",
+            "description": "Resources' content in a prompt.",
+            "default": false
+          },
+          "mcp_http": {
+            "type": "boolean",
+            "description": "MCP servers reached over HTTP.",
+            "default": false
+          },
+          "mcp_sse": {
+            "type": "boolean",
+            "description": "MCP servers reached over server-sent events.",
+            "default": false
+          },
+          "load": {
+            "type": "boolean",
+            "description": "`session/load`: a session reopened with its history replayed.",
+            "default": false
+          },
+          "resume": {
+            "type": "boolean",
+            "description": "`session/resume`: a session reopened without its history replayed.",
+            "default": false
+          },
+          "additional_directories": {
+            "type": "boolean",
+            "description": "More directories than the working one.",
+            "default": false
+          },
+          "system_prompt": {
+            "type": "boolean",
+            "description": "A system prompt appended to the harness's own.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "What its `initialize` will advertise.",
+        "default": {
+          "images": false,
+          "audio": false,
+          "embedded_context": false,
+          "mcp_http": false,
+          "mcp_sse": false,
+          "load": false,
+          "resume": false,
+          "additional_directories": false,
+          "system_prompt": false
+        }
+      },
+      "resumes_wider": {
+        "type": "boolean",
+        "description": "Whether a session held to requirements can be reopened (`session/load` or `session/resume`) on a later connection started with fewer, and then have what that connection allows.",
+        "default": false
+      },
+      "usage": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "examples": [
+                "reported",
+                "inferred"
+              ],
+              "x-enum-labels": {
+                "reported": "The harness's own structured figure.",
+                "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+              }
+            },
+            "description": "Which kinds of figure it can give.",
+            "default": []
+          },
+          "spend": {
+            "type": "boolean",
+            "description": "Whether it reports a session's [`Spend`].",
+            "default": false
+          },
+          "needs_turn": {
+            "type": "boolean",
+            "description": "Whether it learns its usage only during a turn. Then a read with no turn answers what the connection last saw, and a host keeps a timed retry instead of polling for fresh figures. `false` means [`USAGE_METHOD`] re-reads the account each time, so a host may poll it.",
+            "default": false
+          },
+          "needs_session": {
+            "type": "boolean",
+            "description": "Whether it learns its usage only once a session is open, though no turn is needed (an agent that serves its figures from the process a session starts). With none open, a read answers what the connection last saw, and nothing is started for it.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "What usage it reports, and so whether its `initialize` advertises the usage extension.",
+        "default": {
+          "sources": [],
+          "spend": false,
+          "needs_turn": false,
+          "needs_session": false
+        }
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "versions"
+    ]
+  },
+  "Takes": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "images": {
+        "type": "boolean",
+        "description": "Images in a prompt.",
+        "default": false
+      },
+      "audio": {
+        "type": "boolean",
+        "description": "Audio in a prompt.",
+        "default": false
+      },
+      "embedded_context": {
+        "type": "boolean",
+        "description": "Resources' content in a prompt.",
+        "default": false
+      },
+      "mcp_http": {
+        "type": "boolean",
+        "description": "MCP servers reached over HTTP.",
+        "default": false
+      },
+      "mcp_sse": {
+        "type": "boolean",
+        "description": "MCP servers reached over server-sent events.",
+        "default": false
+      },
+      "load": {
+        "type": "boolean",
+        "description": "`session/load`: a session reopened with its history replayed.",
+        "default": false
+      },
+      "resume": {
+        "type": "boolean",
+        "description": "`session/resume`: a session reopened without its history replayed.",
+        "default": false
+      },
+      "additional_directories": {
+        "type": "boolean",
+        "description": "More directories than the working one.",
+        "default": false
+      },
+      "system_prompt": {
+        "type": "boolean",
+        "description": "A system prompt appended to the harness's own.",
+        "default": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "ModelListing": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "known": {
+        "type": "boolean",
+        "description": "Whether the harness listed them; when not, `models` is empty."
+      },
+      "unknown_because": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Why it could not, when `known` is false."
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The harness's own identifier or alias for it."
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What the harness shows a person, when it has a name apart from the identifier."
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The harness's one-line description, when it gives one."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "description": "The models, in the harness's order.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "known"
+    ]
+  },
+  "ModelInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The harness's own identifier or alias for it."
+      },
+      "name": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What the harness shows a person, when it has a name apart from the identifier."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The harness's one-line description, when it gives one."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ]
+  },
+  "SessionRecordFile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The file's absolute path, where the harness's agent runs."
+      },
+      "format": {
+        "type": "string",
+        "description": "What the file holds, as a short name a reader knows (`claude-code-jsonl`, `codex-rollout-jsonl`)."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "format"
+    ]
+  },
+  "NonDefault": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "setting": {
+        "type": "string",
+        "description": "The setting's name, as the provider spells it (`allowed_tools[2]`)."
+      },
+      "value": {
+        "type": "string",
+        "description": "Its value, as text; never a credential."
+      },
+      "default": {
+        "type": "string",
+        "description": "The default value, as text."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "setting",
+      "value",
+      "default"
+    ]
+  },
+  "ImportReport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "seeded_from": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "line": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Its line, counting the header as line 1."
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The digest the history gives that line, when it gives one."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "line"
+        ],
+        "description": "Where in the history the seed starts (a compaction boundary, or the first line after the header); absent for an empty history."
+      },
+      "losses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "What was lost, in the loss report's vocabulary: `thinking` (signed thinking or encrypted reasoning dropped), `tool_as_note` (a tool call with no equivalent, kept as a note), `attachment_by_digest` (an attachment carried by its digest only), `replayed_as_prompt` (the history given as context in a prompt rather than as the harness's own session)."
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How many times."
+            },
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "More, for people, when there is more to say."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "count"
+          ]
+        },
+        "description": "What could not be carried into the session.",
+        "default": []
+      },
+      "compacted": {
+        "type": "boolean",
+        "description": "Whether the harness compacted the history to fit its window.",
+        "default": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "SeedPoint": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "line": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Its line, counting the header as line 1."
+      },
+      "digest": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The digest the history gives that line, when it gives one."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "line"
+    ]
+  },
+  "HistoryLoss": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "What was lost, in the loss report's vocabulary: `thinking` (signed thinking or encrypted reasoning dropped), `tool_as_note` (a tool call with no equivalent, kept as a note), `attachment_by_digest` (an attachment carried by its digest only), `replayed_as_prompt` (the history given as context in a prompt rather than as the harness's own session)."
+      },
+      "count": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How many times."
+      },
+      "detail": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "More, for people, when there is more to say."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "count"
+    ]
+  },
+  "SpawnerInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "os": {
+        "type": "string",
+        "description": "The operating system they run on, spelled as Rust's `std::env::consts::OS` spells it (`windows`, `linux`, `macos`, `android`): which rules their paths follow."
+      },
+      "arch": {
+        "type": "string",
+        "description": "Their processor, spelled as `std::env::consts::ARCH` spells it."
+      },
+      "local": {
+        "type": "boolean",
+        "description": "Whether they run on the host's own machine, sharing its files and paths."
+      },
+      "terminal": {
+        "type": "boolean",
+        "description": "Whether a spec may ask for a terminal.",
+        "default": false
+      },
+      "separate_error": {
+        "type": "boolean",
+        "description": "Whether a spec may keep standard error apart from standard output.",
+        "default": false
+      },
+      "survives_link_loss": {
+        "type": "boolean",
+        "description": "Whether a process keeps running while the link to it is down, its output kept for when it comes back.",
+        "default": false
+      },
+      "kills_escaped": {
+        "type": "boolean",
+        "description": "Whether [`SpawnedProcess::kill`] also reaches the processes that left the program's process group or session; when not, those escape it.",
+        "default": false
+      },
+      "ends_with_host": {
+        "type": "boolean",
+        "description": "Whether a process's tree ends when the host dies without killing it (its group or job, at least); when not, it outlives the host.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "os",
+      "arch",
+      "local"
+    ]
+  },
+  "ProcessExit": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "running": {
+        "type": "boolean",
+        "description": "Whether it still runs; neither `code` nor `signal` is set while it does."
+      },
+      "code": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "Its exit code, when it exited by itself."
+      },
+      "signal": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "The signal that ended it, on Unix."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "running"
+    ]
+  },
+  "LinkState": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "up": {
+        "type": "boolean",
+        "description": "Whether it is up now. A local process's link is always up."
+      },
+      "drops": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How many times it has gone down since the process started: a reader that sees the count grow knows its output paused."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "up",
+      "drops"
+    ]
+  },
+  "ErrorOutput": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "separate",
+      "merged",
+      "discarded"
+    ],
+    "x-enum-labels": {
+      "separate": "Its own stream, read with [`SpawnedProcess::read_error`]: standard output then carries only what the program wrote there, as a JSON-lines harness needs.",
+      "merged": "Into standard output.",
+      "discarded": "Nowhere."
+    },
+    "properties": {}
+  },
+  "UsageQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Variables for what the harness runs to ask, over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
+        "default": {}
+      },
+      "account": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The host's id for the account, echoed into the report. It never picks credentials: those stay in `environment`."
+      }
+    },
+    "additionalProperties": false
+  },
+  "UsageReport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "supported": {
+        "type": "boolean",
+        "description": "Whether the harness reports usage at all."
+      },
+      "unsupported_because": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Why not, when `supported` is false."
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "examples": [
+            "reported",
+            "inferred"
+          ],
+          "x-enum-labels": {
+            "reported": "The harness's own structured figure.",
+            "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+          }
+        },
+        "description": "Which kinds of figure it can give at all, so a host knows an agent never reports figures.",
+        "default": []
+      },
+      "account": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The host's id for the account the connection runs on, echoed and never interpreted."
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Grows by one with each change on a connection (and per provider instance for the kind's answer), so a reader that polls keeps the newest and an unchanged account costs nothing."
+      },
+      "observed_at": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "The newest bucket's `observed_at`, in Unix seconds; `0` with no bucket."
+      },
+      "buckets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Stable per harness and account: `five_hour`, `seven_day`, `seven_day_opus`, `codex:primary`."
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What a person sees, when the harness has a name apart from the id."
+            },
+            "models": {
+              "type": "object",
+              "x-variant-tag": "kind",
+              "oneOf": [
+                {
+                  "description": "Every model of the account.",
+                  "properties": {
+                    "kind": {
+                      "const": "all"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "The harness did not say. A reader counts it as covering every model, so an exhausted bucket of unknown coverage stops the account for each of them.",
+                  "properties": {
+                    "kind": {
+                      "const": "unknown"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "These models only, by the ids or aliases `models()` lists.",
+                  "properties": {
+                    "kind": {
+                      "const": "only"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The ids."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "models"
+                  ]
+                },
+                {
+                  "description": "A coverage a newer writer named; a reader treats it as unknown.",
+                  "properties": {
+                    "kind": {
+                      "const": "other"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                }
+              ],
+              "description": "The models it covers."
+            },
+            "unit": {
+              "type": "string",
+              "examples": [
+                "tokens",
+                "requests",
+                "micro_usd",
+                "permille"
+              ],
+              "x-enum-labels": {
+                "tokens": "Tokens.",
+                "requests": "Requests.",
+                "micro_usd": "Millionths of a US dollar.",
+                "permille": "A percentage only, when the provider gives no absolute number: `limit` is 1000 and `used` thousandths, so the arithmetic is the same for every unit."
+              },
+              "description": "What it counts."
+            },
+            "used": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How much is used, when the harness said."
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How much the bucket holds, when the harness said."
+            },
+            "remaining": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How much is left, when the harness said."
+            },
+            "refill": {
+              "type": "object",
+              "x-variant-tag": "kind",
+              "oneOf": [
+                {
+                  "description": "All at once when the window ends, such as a five-hour or weekly allowance.",
+                  "properties": {
+                    "kind": {
+                      "const": "fixed_window"
+                    },
+                    "length": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 18446744073709551615
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 999999999
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "description": "How long the window is, when the harness says."
+                    },
+                    "resets_at": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807,
+                      "description": "When it ends, in Unix seconds, when the harness says."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "Continuously: `amount` units each `per`, up to `max`.",
+                  "properties": {
+                    "kind": {
+                      "const": "token_bucket"
+                    },
+                    "amount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 18446744073709551615,
+                      "description": "The units added each `per`."
+                    },
+                    "per": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 18446744073709551615
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 999999999
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "description": "The period."
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 18446744073709551615,
+                      "description": "The most it holds."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "amount",
+                    "per",
+                    "max"
+                  ]
+                },
+                {
+                  "description": "A balance that never refills.",
+                  "properties": {
+                    "kind": {
+                      "const": "none"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "The harness did not say.",
+                  "properties": {
+                    "kind": {
+                      "const": "unknown"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "A refill a newer writer named; a reader treats it as unknown.",
+                  "properties": {
+                    "kind": {
+                      "const": "other"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                }
+              ],
+              "description": "How it refills."
+            },
+            "status": {
+              "type": "string",
+              "examples": [
+                "ok",
+                "warning",
+                "exhausted",
+                "unknown"
+              ],
+              "x-enum-labels": {
+                "ok": "Room is left.",
+                "warning": "The harness said it is nearly used. Only when the harness said so: a host applies its own thresholds to the bucket's fraction.",
+                "exhausted": "Nothing is left until the bucket refills.",
+                "unknown": "The harness did not say."
+              },
+              "description": "What the harness says of it."
+            },
+            "observed_at": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "When these figures were read, in Unix seconds."
+            },
+            "source": {
+              "type": "string",
+              "examples": [
+                "reported",
+                "inferred"
+              ],
+              "x-enum-labels": {
+                "reported": "The harness's own structured figure.",
+                "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+              },
+              "description": "Where the figures came from."
+            },
+            "evidence": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The words an inferred bucket was read from, for logs; nothing parses them."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "models",
+            "unit",
+            "refill",
+            "status",
+            "observed_at",
+            "source"
+          ]
+        },
+        "description": "The allowances, each by its id.",
+        "default": []
+      },
+      "limit": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "bucket": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bucket it names, which is `exhausted` in the same report."
+          },
+          "resets_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "When the limit lifts, in Unix seconds, when the harness said."
+          },
+          "retry_after": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "prefixItems": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 999999999
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "How long to wait before trying again, when the refusal said (a 429's `retry-after`). It may move, which is why a host reads the report again rather than trusting it once."
+          },
+          "source": {
+            "type": "string",
+            "examples": [
+              "reported",
+              "inferred"
+            ],
+            "x-enum-labels": {
+              "reported": "The harness's own structured figure.",
+              "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+            },
+            "description": "Whether the harness said it or the words were read."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The harness's words, for people."
+          },
+          "observed_at": {
+            "type": "integer",
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "When it was seen, in Unix seconds."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "observed_at"
+        ],
+        "description": "The last refusal the report keeps, until its reset passes or a later report shows room."
+      },
+      "spend": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "The session, by the id ACP reports."
+          },
+          "input": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Input tokens not read from a cache."
+          },
+          "output": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Output tokens."
+          },
+          "cache_read": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Input tokens read from a cache."
+          },
+          "cache_write": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Input tokens written to a cache."
+          },
+          "reasoning": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The part of `output` spent reasoning, when the harness separates it."
+          },
+          "cost_micro_usd": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Millionths of a US dollar, when the harness reported a cost; `None` when it did not or the figure is partial, never `0` for unknown. A conversion from another unit rounds to the nearest, halves up."
+          },
+          "by_model": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The model, as the harness names it."
+                },
+                "input": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "Input tokens not read from a cache."
+                },
+                "output": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "Output tokens."
+                },
+                "cache_read": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "Input tokens read from a cache."
+                },
+                "cache_write": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "Input tokens written to a cache."
+                },
+                "cost_micro_usd": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "Millionths of a US dollar, when the harness reported a cost; never `0` for unknown."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "model",
+                "input",
+                "output",
+                "cache_read",
+                "cache_write"
+              ]
+            },
+            "description": "The same by model, when the harness separates them.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "input",
+          "output",
+          "cache_read",
+          "cache_write"
+        ],
+        "description": "What the session asked about has spent; absent without a session."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "supported",
+      "revision",
+      "observed_at"
+    ]
+  },
+  "Bucket": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Stable per harness and account: `five_hour`, `seven_day`, `seven_day_opus`, `codex:primary`."
+      },
+      "label": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What a person sees, when the harness has a name apart from the id."
+      },
+      "models": {
+        "type": "object",
+        "x-variant-tag": "kind",
+        "oneOf": [
+          {
+            "description": "Every model of the account.",
+            "properties": {
+              "kind": {
+                "const": "all"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The harness did not say. A reader counts it as covering every model, so an exhausted bucket of unknown coverage stops the account for each of them.",
+            "properties": {
+              "kind": {
+                "const": "unknown"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "These models only, by the ids or aliases `models()` lists.",
+            "properties": {
+              "kind": {
+                "const": "only"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The ids."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "models"
+            ]
+          },
+          {
+            "description": "A coverage a newer writer named; a reader treats it as unknown.",
+            "properties": {
+              "kind": {
+                "const": "other"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          }
+        ],
+        "description": "The models it covers."
+      },
+      "unit": {
+        "type": "string",
+        "examples": [
+          "tokens",
+          "requests",
+          "micro_usd",
+          "permille"
+        ],
+        "x-enum-labels": {
+          "tokens": "Tokens.",
+          "requests": "Requests.",
+          "micro_usd": "Millionths of a US dollar.",
+          "permille": "A percentage only, when the provider gives no absolute number: `limit` is 1000 and `used` thousandths, so the arithmetic is the same for every unit."
+        },
+        "description": "What it counts."
+      },
+      "used": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How much is used, when the harness said."
+      },
+      "limit": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How much the bucket holds, when the harness said."
+      },
+      "remaining": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How much is left, when the harness said."
+      },
+      "refill": {
+        "type": "object",
+        "x-variant-tag": "kind",
+        "oneOf": [
+          {
+            "description": "All at once when the window ends, such as a five-hour or weekly allowance.",
+            "properties": {
+              "kind": {
+                "const": "fixed_window"
+              },
+              "length": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 18446744073709551615
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 999999999
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "How long the window is, when the harness says."
+              },
+              "resets_at": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": -9223372036854775808,
+                "maximum": 9223372036854775807,
+                "description": "When it ends, in Unix seconds, when the harness says."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "Continuously: `amount` units each `per`, up to `max`.",
+            "properties": {
+              "kind": {
+                "const": "token_bucket"
+              },
+              "amount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615,
+                "description": "The units added each `per`."
+              },
+              "per": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 18446744073709551615
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 999999999
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "The period."
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615,
+                "description": "The most it holds."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "amount",
+              "per",
+              "max"
+            ]
+          },
+          {
+            "description": "A balance that never refills.",
+            "properties": {
+              "kind": {
+                "const": "none"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The harness did not say.",
+            "properties": {
+              "kind": {
+                "const": "unknown"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "A refill a newer writer named; a reader treats it as unknown.",
+            "properties": {
+              "kind": {
+                "const": "other"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ]
+          }
+        ],
+        "description": "How it refills."
+      },
+      "status": {
+        "type": "string",
+        "examples": [
+          "ok",
+          "warning",
+          "exhausted",
+          "unknown"
+        ],
+        "x-enum-labels": {
+          "ok": "Room is left.",
+          "warning": "The harness said it is nearly used. Only when the harness said so: a host applies its own thresholds to the bucket's fraction.",
+          "exhausted": "Nothing is left until the bucket refills.",
+          "unknown": "The harness did not say."
+        },
+        "description": "What the harness says of it."
+      },
+      "observed_at": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When these figures were read, in Unix seconds."
+      },
+      "source": {
+        "type": "string",
+        "examples": [
+          "reported",
+          "inferred"
+        ],
+        "x-enum-labels": {
+          "reported": "The harness's own structured figure.",
+          "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+        },
+        "description": "Where the figures came from."
+      },
+      "evidence": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The words an inferred bucket was read from, for logs; nothing parses them."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "models",
+      "unit",
+      "refill",
+      "status",
+      "observed_at",
+      "source"
+    ]
+  },
+  "LimitHit": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "bucket": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The bucket it names, which is `exhausted` in the same report."
+      },
+      "resets_at": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When the limit lifts, in Unix seconds, when the harness said."
+      },
+      "retry_after": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "prefixItems": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615
+          },
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 999999999
+          }
+        ],
+        "items": false,
+        "minItems": 2,
+        "maxItems": 2,
+        "description": "How long to wait before trying again, when the refusal said (a 429's `retry-after`). It may move, which is why a host reads the report again rather than trusting it once."
+      },
+      "source": {
+        "type": "string",
+        "examples": [
+          "reported",
+          "inferred"
+        ],
+        "x-enum-labels": {
+          "reported": "The harness's own structured figure.",
+          "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+        },
+        "description": "Whether the harness said it or the words were read."
+      },
+      "text": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The harness's words, for people."
+      },
+      "observed_at": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it was seen, in Unix seconds."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "source",
+      "observed_at"
+    ]
+  },
+  "Spend": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "The session, by the id ACP reports."
+      },
+      "input": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Input tokens not read from a cache."
+      },
+      "output": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Output tokens."
+      },
+      "cache_read": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Input tokens read from a cache."
+      },
+      "cache_write": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Input tokens written to a cache."
+      },
+      "reasoning": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The part of `output` spent reasoning, when the harness separates it."
+      },
+      "cost_micro_usd": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Millionths of a US dollar, when the harness reported a cost; `None` when it did not or the figure is partial, never `0` for unknown. A conversion from another unit rounds to the nearest, halves up."
+      },
+      "by_model": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "description": "The model, as the harness names it."
+            },
+            "input": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Input tokens not read from a cache."
+            },
+            "output": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Output tokens."
+            },
+            "cache_read": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Input tokens read from a cache."
+            },
+            "cache_write": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Input tokens written to a cache."
+            },
+            "cost_micro_usd": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Millionths of a US dollar, when the harness reported a cost; never `0` for unknown."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "model",
+            "input",
+            "output",
+            "cache_read",
+            "cache_write"
+          ]
+        },
+        "description": "The same by model, when the harness separates them.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "session_id",
+      "input",
+      "output",
+      "cache_read",
+      "cache_write"
+    ]
+  },
+  "ModelSpend": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "model": {
+        "type": "string",
+        "description": "The model, as the harness names it."
+      },
+      "input": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Input tokens not read from a cache."
+      },
+      "output": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Output tokens."
+      },
+      "cache_read": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Input tokens read from a cache."
+      },
+      "cache_write": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Input tokens written to a cache."
+      },
+      "cost_micro_usd": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Millionths of a US dollar, when the harness reported a cost; never `0` for unknown."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "model",
+      "input",
+      "output",
+      "cache_read",
+      "cache_write"
+    ]
+  },
+  "UsageSupport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "examples": [
+            "reported",
+            "inferred"
+          ],
+          "x-enum-labels": {
+            "reported": "The harness's own structured figure.",
+            "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+          }
+        },
+        "description": "Which kinds of figure it can give.",
+        "default": []
+      },
+      "spend": {
+        "type": "boolean",
+        "description": "Whether it reports a session's [`Spend`].",
+        "default": false
+      },
+      "needs_turn": {
+        "type": "boolean",
+        "description": "Whether it learns its usage only during a turn. Then a read with no turn answers what the connection last saw, and a host keeps a timed retry instead of polling for fresh figures. `false` means [`USAGE_METHOD`] re-reads the account each time, so a host may poll it.",
+        "default": false
+      },
+      "needs_session": {
+        "type": "boolean",
+        "description": "Whether it learns its usage only once a session is open, though no turn is needed (an agent that serves its figures from the process a session starts). With none open, a read answers what the connection last saw, and nothing is started for it.",
+        "default": false
+      }
+    },
+    "additionalProperties": false
+  }
+}
