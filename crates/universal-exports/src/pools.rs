@@ -31,6 +31,10 @@ pub struct BoardWindow {
     pub resets_at: Option<f64>,
     /// The provider's status for it, when reported.
     pub status: Option<String>,
+    /// The models it covers, when the provider names them; empty for every model.
+    pub models: Vec<String>,
+    /// When it was last read, as Unix seconds.
+    pub observed_at: f64,
 }
 
 /// One Session using an account.
@@ -144,6 +148,8 @@ fn board_account(state: AccountState, operation: &str, now: f64) -> Option<Board
                 used_permille: window.used_permille,
                 resets_at: window.resets_at,
                 status: window.status.clone(),
+                models: window.models.clone(),
+                observed_at: window.observed_at,
             })
             .collect(),
         limited_until: state.limited_until.filter(|until| *until > now),
@@ -427,6 +433,8 @@ mod tests {
             "another Operation's Session is only counted"
         );
         assert_eq!(alpha["windows"][0]["used_permille"], 640);
+        assert_eq!(alpha["windows"][0]["observed_at"], now);
+        assert_eq!(alpha["windows"][0]["models"], serde_json::json!([]));
         assert_eq!(alpha["limited_until"], now + 600.0);
         assert_eq!(alpha["tokens_today"], 1_234);
         // Sorted: the ACP crates turn on serde_json's `preserve_order`.

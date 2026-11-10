@@ -78,7 +78,7 @@ origin leaves the public roots alone.
   `.../public` and prints `ID: public at URL` or `ID: no public link`; `pages rm <ID>` deletes. The ID is encoded as one path segment; 404 reads "no such page of yours" (another
   person's page too); a refusal with a reason prints the gateway's reason.
 - `ai6ctl pools --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/pools`
-  as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS LIMITED_UNTIL_UNIX TOKENS_TODAY`:
+  as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS READ_UNIX LIMITED_UNTIL_UNIX TOKENS_TODAY` (`READ_UNIX`: when the newest window was last read):
   `SESSIONS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`
   `name=42.5%` per window (`name=?` without a figure) or `-`, `LIMITED_UNTIL_UNIX` `-`
   unless in the future; `SESSIONS` counts other Operations' Sessions too. A refusal names

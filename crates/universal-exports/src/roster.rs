@@ -1821,6 +1821,56 @@ mod tests {
     }
 
     #[cfg(feature = "cli")]
+    #[tokio::test]
+    async fn the_usage_settings_are_served_with_the_roster_record_and_apply_what_is_set() {
+        use ai6::{ConfigProvider, SqlProvider};
+
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
+        let station = SqlProvider::open(&location).unwrap();
+        let served = served_with_roster(ROLES, Some(source)).await;
+
+        let form = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "roster/roster/schema",
+            None,
+        )
+        .await;
+        assert_eq!(form.status(), StatusCode::OK);
+        let form: serde_json::Value = form.json().await.unwrap();
+        let usage = &form["schema"]["properties"]["usage"]["properties"]["refresh_every"];
+        assert_eq!(
+            usage["title"], "Re-read a limited account's usage every",
+            "{form}"
+        );
+
+        let set = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/roster/settings",
+            Some(json!({"usage": {"refresh_every": 45, "backoff_factor": 3}})),
+        )
+        .await;
+        assert_eq!(set.status(), StatusCode::OK);
+        let usage = station.load("").unwrap().roster.settings().usage.clone();
+        assert_eq!(usage.refresh_every.0.as_secs(), 45);
+        assert_eq!(usage.backoff_factor, 3);
+        let refused = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/roster/settings",
+            Some(json!({"usage": {"refresh_every": -1}})),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[cfg(feature = "cli")]
     fn sql_source(directory: &tempfile::TempDir) -> (Arc<ai6::SqlProvider>, String) {
         let location = format!("sqlite:{}", directory.path().join("roster.db").display());
         (

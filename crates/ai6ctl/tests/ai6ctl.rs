@@ -597,16 +597,16 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
     let printed = lines(&output);
     assert_eq!(
         printed[0],
-        "POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY"
+        "POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY"
     );
     assert_eq!(
         printed[1],
         format!(
-            "team\talpha\tclaude-oauth-token\t0/2\tfive_hour=42.5%\t{:.0}\t900",
+            "team\talpha\tclaude-oauth-token\t0/2\tfive_hour=42.5%\t{now:.0}\t{:.0}\t900",
             now + 600.0
         )
     );
-    assert_eq!(printed[2], "team\tbeta\tanthropic-api-key\t0\t-\t-\t0");
+    assert_eq!(printed[2], "team\tbeta\tanthropic-api-key\t0\t-\t-\t-\t0");
     let refused = ai6ctl(
         server.clone(),
         None,

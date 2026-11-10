@@ -3250,6 +3250,9 @@ struct PoolAccount {
 struct PoolWindow {
     name: String,
     used_permille: Option<u16>,
+    /// When the window was last read, as Unix seconds.
+    #[serde(default)]
+    observed_at: f64,
 }
 
 /// How an Agent's roster record says it reaches its model.
@@ -3614,7 +3617,7 @@ fn print_agents(agents: &[AgentView]) {
 }
 
 fn print_pools(board: &PoolBoard, now: f64) {
-    println!("POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
+    println!("POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
     for account in &board.accounts {
         let using = account.active.len() + account.other_sessions;
         let sessions = match account.max_concurrent {
@@ -3629,8 +3632,13 @@ fn print_pools(board: &PoolBoard, now: f64) {
                 None => format!("{}=?", plain(&window.name)),
             })
             .collect::<Vec<_>>();
+        let read = account
+            .windows
+            .iter()
+            .map(|window| window.observed_at)
+            .fold(0.0, f64::max);
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             plain(&account.pool),
             plain(&account.account),
             plain(&account.kind),
@@ -3639,6 +3647,11 @@ fn print_pools(board: &PoolBoard, now: f64) {
                 "-".to_owned()
             } else {
                 windows.join(",")
+            },
+            if read > 0.0 {
+                format!("{read:.0}")
+            } else {
+                "-".to_owned()
             },
             account
                 .limited_until
