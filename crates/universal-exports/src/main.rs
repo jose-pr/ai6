@@ -716,13 +716,16 @@ type SignIn = (
     Option<Arc<dyn ai6::Accounts>>,
 );
 
+/// Reads a provider's configuration from the record as a value.
+type ConfigReader = dyn Fn(&Option<ai6::ProviderConfig>) -> Result<Option<Value>, String>;
+
 /// Builds each of `record.authenticators`, its configuration checked against the provider's own
 /// schema. A provider that takes keys is the key provider, and answers only bearer keys; the
 /// rest answer a name and a password.
 fn sign_in_providers(
     plugins: &ai6::station::plugins::Plugins,
     record: &UnexRecord,
-    config: &dyn Fn(&Option<ai6::ProviderConfig>) -> Result<Option<Value>, String>,
+    config: &ConfigReader,
 ) -> Result<SignIn, String> {
     let offered = plugins.account_managers();
     let mut people: Vec<Arc<dyn Authenticator>> = Vec::new();
