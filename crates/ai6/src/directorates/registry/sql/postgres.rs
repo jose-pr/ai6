@@ -186,11 +186,59 @@ where
     T: MakeTlsConnect<tokio_postgres::Socket> + Send + 'static,
     T::Stream: Send + 'static,
 {
-    let (client, connection) = config.connect(tls).await.map_err(error)?;
+    let (client, connection) = config.connect(tls).await.map_err(connect_error)?;
     tokio::spawn(async move {
         let _ = connection.await;
     });
     Ok(client)
+}
+
+/// A failed connection, as [`error`] reports it; a server that cannot be reached for now
+/// (unresolvable or unroutable name, refused or dropped connection, a server still starting or
+/// full) is `ConnectionRefused`, so a caller can try again. A refusal retrying cannot fix (bad
+/// password, failed certificate check, malformed settings) keeps the kind [`error`] gives it.
+fn connect_error(failure: tokio_postgres::Error) -> io::Error {
+    use tokio_postgres::error::SqlState;
+    let transient = match failure.code() {
+        Some(code) => [
+            SqlState::CANNOT_CONNECT_NOW,
+            SqlState::TOO_MANY_CONNECTIONS,
+            SqlState::ADMIN_SHUTDOWN,
+            SqlState::CRASH_SHUTDOWN,
+        ]
+        .contains(code),
+        None => failed_in_the_network(&failure),
+    };
+    let failure = error(failure);
+    if transient {
+        io::Error::new(io::ErrorKind::ConnectionRefused, failure.to_string())
+    } else {
+        failure
+    }
+}
+
+/// Whether `failure` came from the network and not from TLS: an I/O error in its causes, none of
+/// them a certificate or protocol refusal.
+fn failed_in_the_network(failure: &tokio_postgres::Error) -> bool {
+    let mut network = false;
+    let mut source = std::error::Error::source(failure);
+    while let Some(cause) = source {
+        if cause.is::<rustls::Error>() {
+            return false;
+        }
+        if let Some(io) = cause.downcast_ref::<io::Error>() {
+            // An I/O error's own `source` skips the error it wraps.
+            if io
+                .get_ref()
+                .is_some_and(|inner| inner.is::<rustls::Error>())
+            {
+                return false;
+            }
+            network = true;
+        }
+        source = cause.source();
+    }
+    network
 }
 
 /// Runs `sql` on its own session at `url`; for tests that make and drop schemas.
@@ -710,5 +758,45 @@ mod tests {
         // disable: a server that takes TLS only refuses it.
         let plaintext = refusal(tls_location(&url, &[("sslmode", "disable")]));
         assert!(plaintext.contains("no encryption"), "{plaintext}");
+    }
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn opening(url: &str) -> io::ErrorKind {
+        match Connection::open(url, &SqlOptions::default()) {
+            Ok(_) => panic!("{url} opened"),
+            Err(failure) => failure.kind(),
+        }
+    }
+
+    #[test]
+    fn a_server_that_cannot_be_reached_is_reported_as_refused_so_start_can_try_again() {
+        let port = free_port();
+        assert_eq!(
+            opening(&format!("postgres://u@127.0.0.1:{port}/db?sslmode=disable")),
+            io::ErrorKind::ConnectionRefused
+        );
+        // A name that does not resolve ("invalid" is reserved, RFC 6761).
+        assert_eq!(
+            opening("postgres://u@no-such-host.invalid/db?sslmode=disable"),
+            io::ErrorKind::ConnectionRefused
+        );
+    }
+
+    #[test]
+    fn a_location_retrying_cannot_fix_is_not_reported_as_refused() {
+        assert_ne!(
+            opening("postgres://u@127.0.0.1:notaport/db"),
+            io::ErrorKind::ConnectionRefused
+        );
+        assert_ne!(
+            opening("postgres://u@127.0.0.1/db?sslmode=verify-full&sslrootcert=/no/such.pem"),
+            io::ErrorKind::ConnectionRefused
+        );
     }
 }
