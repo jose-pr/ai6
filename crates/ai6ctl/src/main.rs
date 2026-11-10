@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod access;
 mod compartments;
+mod keys;
 mod memories;
 mod reports;
 mod resources;
@@ -294,6 +295,12 @@ enum Command {
     Accounts {
         #[command(subcommand)]
         command: Option<access::AccountsCommand>,
+    },
+    /// Your own API keys: make one narrowed to some of what you may do, list yours, revoke
+    /// one. A key is for automation that should act as you for one purpose.
+    Keys {
+        #[command(subcommand)]
+        command: keys::KeysCommand,
     },
     /// List the pool accounts an Operation may draw from: Sessions using each, quota used,
     /// until when it is limited and tokens today (needs pool.read on the Operation).
@@ -1822,6 +1829,10 @@ async fn run() -> Result<(), String> {
         Command::Accounts { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             access::run_accounts(&client, &server, &token, command).await?;
+        }
+        Command::Keys { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            keys::run(&client, &server, &token, command).await?;
         }
         Command::Operations { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

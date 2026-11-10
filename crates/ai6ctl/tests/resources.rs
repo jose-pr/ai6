@@ -960,3 +960,56 @@ async fn a_trust_root_record_that_loosens_waits_for_the_person_to_confirm() {
     boss(&deployment, &["set", "plugin", "a.so", &sha1, "-y"]).await;
     assert_eq!(stored(ConfigRecord::Plugin).len(), 2);
 }
+
+#[tokio::test]
+async fn adding_a_sign_in_provider_is_stored_without_a_confirmation() {
+    let deployment = first_install().await;
+    let stored = || {
+        deployment
+            .station
+            .definitions(ConfigRecord::Unex, &ConfigScope::Global)
+            .unwrap()
+            .records
+    };
+    let one = "[unex]\nauthenticators = [{ provider = \"coqui_access_system\" }]\n";
+    let two = "[unex]\nauthenticators = [{ provider = \"coqui_access_system\" }, { provider = \"coqui_access_key\", config = { prefix = \"ck_\" } }]\n";
+    for document in [one, two] {
+        // No --yes: nothing is loosened, so nothing waits to be confirmed.
+        let applied = ai6ctl(
+            &deployment,
+            &deployment.boss,
+            &["apply", "-f", "-"],
+            Some(document),
+            &[],
+        )
+        .await;
+        assert!(applied.ok, "{}{}", applied.out, applied.err);
+        assert!(!applied.out.contains("weakening"), "{}", applied.out);
+    }
+    let records = stored();
+    assert_eq!(records.len(), 1);
+    let providers: Vec<&str> = records[0].1["authenticators"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["provider"].as_str().unwrap())
+        .collect();
+    assert_eq!(providers, ["coqui_access_system", "coqui_access_key"]);
+    assert_eq!(audits(&deployment, "roster.update").len(), 2);
+
+    // The old single field is not read.
+    let old = "[unex]\nauthenticator = \"coqui_access_system\"\n";
+    let refused = ai6ctl(
+        &deployment,
+        &deployment.boss,
+        &["apply", "-y", "-f", "-"],
+        Some(old),
+        &[],
+    )
+    .await;
+    assert!(
+        !refused.ok && refused.err.contains("authenticator"),
+        "{}",
+        refused.err
+    );
+}
