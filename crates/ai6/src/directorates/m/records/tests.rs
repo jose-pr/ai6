@@ -248,7 +248,8 @@ fn full_example(record: ConfigRecord) -> Value {
                 "classifications": ["open", "secret"],
                 "handlings": ["here"],
                 "priorities": ["now", "later"]
-            }
+            },
+            "usage": {"refresh_every": 60, "backoff_factor": 3, "backoff_max": 900}
         }),
         ConfigRecord::Review => json!({
             "panel": [

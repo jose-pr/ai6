@@ -549,7 +549,7 @@ mod tests {
     // shared kind's, whose header names the same value.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 2369958161);
+        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 3744660718);
         assert_eq!(
             coqui_acp_provider::AgentSessionVtable::FLOOR_HASH,
             1414216972
