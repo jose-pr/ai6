@@ -32,8 +32,81 @@ Universal Exports keeps what its Directory and Authorizer answer for a few secon
 bursts: a person found or an action granted 5 s, "no such person" or a denial 1 s, at most
 10 000 of each (the `unex` record's `access_cache_ttl`, `access_cache_negative_ttl` and
 `access_cache_entries`, [Configuration](configuration.md); `0` turns one off). A removed account or a withdrawn
-grant can pass for up to the first; passwords and keys are always checked at the provider.
+grant can pass for up to the first; passwords and keys are always checked at the provider (a personal key's scopes and its person's grants, at every use).
 A longer lifetime is reported at start.
+
+## Several sign-in providers
+
+The `unex` record's `authenticators` is an ordered list; each entry is a provider and its
+configuration, which is checked against that provider's own schema when the gateway starts:
+
+```toml
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_key", config = { source = { file = { path = "keys.toml", format = "toml" } } } },
+]
+```
+
+Each credential goes to the provider that claims it, not to all of them:
+
+- A **bearer key**, sent as `Authorization: Bearer ck_...`, goes to the key provider (the one that
+  takes keys). A key is never accepted on the sign-in page, and the page does not offer it.
+- A **name and a password** go to the other providers in list order. A provider answers
+  `Unknown` for a credential that is not its to judge, and the next is asked; `Invalid` means it
+  is its own and refused, and no later provider is asked.
+- A **proxy assertion** (`proxy_user_header`) is read by the gateway and resolved in the
+  directory, as before.
+
+A principal keeps its provider's namespace: `person:` and `group:` rules bind what the people's
+directory says, `account:` what the key provider's accounts say, so a rule names each explicitly.
+The `directory` and the authorizer stay one each. Several providers are ordinary configuration,
+not a loosening: each answers only for its own credentials and grants nothing, since the access
+policy decides what a principal may do. Adding one is stored without a confirmation. Take the
+key provider away and keys stop working at the next start, while people go on signing in.
+
+`accounts`, when unset, is the first listed provider that offers accounts, so the account
+routes work on the key provider when the people's provider (`coqui_access_system`) keeps none.
+
+## API keys
+
+A key lets automation act without a password and without the hour a sign-in lasts. Two kinds
+share the key provider:
+
+- A **service account** is an account of the key provider (`ai6ctl accounts create NAME`, which
+  needs `account.manage` at `config:accounts`) with a key of its own. It is the `account:NAME`
+  principal and has the grants rules give that name or its groups. Use it for work that should
+  not be tied to a person.
+- A **personal key** acts as the person who made it, narrowed to the scopes named at creation.
+  A person makes, lists and revokes their own, signed in with a token, not with another key.
+
+```bash
+ai6ctl keys create --scope config.manage@config:plugin --expires 30d --name deploy > ~/.ai6-key
+ai6ctl keys create --scope mission.read@operation:G --output key.txt   # a new file, mode 600
+ai6ctl keys list            # name, scopes, created, expires, last used; never a value
+ai6ctl keys revoke KEY_ID
+```
+
+The routes are `POST`, `GET` and `DELETE /v1/user/keys`. A key's value is shown once, in the
+answer that creates it (printed alone on standard output, or written to a file only its owner can
+read), and is in no log, audit record or error.
+
+What a personal key may do is the person's own grants **and** its scopes, each `ACTION@SCOPE`
+(`config.manage@config:plugin`; an Operation scope covers the Operations under it). A scope the
+person does not hold now is refused when the key is made, a key needs at least one scope, and
+the check is made again at every use: a grant the person loses the key loses too, and a person
+removed from the directory takes their keys with them. A key never changes the access policy or
+acts as a chief, and it cannot make keys or drive Moneypenny. A compartment adds nothing to it.
+
+A key lasts `key_ttl` seconds unless its maker says otherwise (`--expires`): the default is 90
+days, `never` (or `key_ttl = 0`, reported as a weakening) lasts until revoked. The listing shows
+when each key was last used, to the precision of the access cache's lifetime. Revoking removes the
+key at once: the next request with it is refused. An administrator holding `account.manage` at
+`config:accounts` lists everyone's keys (`ai6ctl keys list --all`) and revokes any; another person
+cannot see or revoke yours. Every use that changes something is audited under the person and the
+key (`ID via key KEYID`).
+
+Outer Office shows the person's keys in a **Keys** section of their profile (the operator
+account dialog), with the same make, list and revoke.
 
 ## The access policy
 

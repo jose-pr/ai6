@@ -84,13 +84,14 @@ the same configuration for both provider kinds:
 
 ```toml
 # unex.toml, the unex record of a configuration directory
-authenticator = "coqui_access_password"
+authenticators = [
+  { provider = "coqui_access_password", config = { source = { file = { path = "accounts.toml", format = "toml" } } } },
+]
 directory = "coqui_access_password"
-authenticator_config = { source = { file = { path = "accounts.toml", format = "toml" } } }
 directory_config = { source = { file = { path = "accounts.toml", format = "toml" } } }
 ```
 
-A configuration is limited to 64 nested values. A credential written inline in one is
+`authenticators` is ordered: a name and a password go to each people's provider in turn, and a bearer key to the key provider (`coqui_access_key`), which people can make their own keys with (`ai6ctl keys`). A configuration is limited to 64 nested values. A credential written inline in one is
 reported as a weakening: name a file instead.
 
 For an existing authenticated reverse proxy, configure the same identity header it already

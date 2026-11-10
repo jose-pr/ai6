@@ -103,8 +103,27 @@ pub struct AttachGrant {
     pub mode: AttachMode,
 }
 
-pub struct AccessProviders { /* optional Authenticator, Directory, Authorizer and proxy identity */ }
+/// The key provider as the gateway uses it: its authenticator, its directory (the accounts it
+/// keeps) and its `Accounts`.
+pub struct KeyProvider { /* private */ }
+impl KeyProvider {
+    pub fn new(authenticator: Arc<dyn ai6::Authenticator>, directory: Arc<dyn ai6::Directory>,
+        accounts: Arc<dyn ai6::Accounts>) -> Self;
+    // Seconds a personal key lives when its maker names none (`[unex] key_ttl`, 90 days; 0 never).
+    pub fn with_lifetime(self, seconds: Option<f64>) -> Self;
+    // Seconds within which a second use is not written down again (`access_cache_ttl`, 5).
+    pub fn with_use_precision(self, seconds: Option<f64>) -> Self;
+}
+
+pub struct AccessProviders { /* the people's Authenticators in order, an optional KeyProvider, one Directory, one Authorizer, an optional proxy identity */ }
 impl AccessProviders {
+    // Bearer keys alone: nobody signs in with a password.
+    pub fn keys_only(directory: Arc<dyn ai6::Directory>, authorizer: Arc<dyn ai6::Authorizer>) -> Self;
+    // Another people's sign-in provider, asked after those added: `Unknown` passes the
+    // credential on, `Invalid` ends the try.
+    pub fn with_authenticator(self, authenticator: Arc<dyn ai6::Authenticator>) -> Self;
+    // The key provider: it answers bearer keys and is never asked for a password.
+    pub fn with_keys(self, keys: KeyProvider) -> Self;
     pub fn new(
         authenticator: std::sync::Arc<dyn ai6::Authenticator>,
         directory: std::sync::Arc<dyn ai6::Directory>,
@@ -1038,14 +1057,15 @@ The optional `cli` feature builds the service command:
   [--public-origin <HTTPS_ORIGIN>] [--plugin-path <PATH>]... [--plugin-profile P]` starts the
   loopback gateway from `ai6.cfg` (below) with these flags over it. Its `[unex] station_token` is
   required and is never accepted as an argument. It opens the configuration provider and
-  reads its `unex` record (`ai6::UnexRecord`: `authenticator`, `directory`, `authorizer`, their
-  `*_config` JSON objects, `proxy_user_header`, `proxy_lookup_by` (default `name`),
+  reads its `unex` record (`ai6::UnexRecord`: `authenticators` (ordered `{provider, config}`, each
+  config checked against the provider's schema; the one that takes keys is the key provider),
+  `directory`, `authorizer`, their `*_config` JSON objects, `key_ttl`, `proxy_user_header`, `proxy_lookup_by` (default `name`),
   `login_tries_per_address`, `login_tries_per_name`, `client_address_header`,
   `access_cache_ttl`, `access_cache_negative_ttl`, `access_cache_entries`, `assistant`
   (default true), `assistant_agent` (default `moneypenny`) and `route_text_bytes` (default
 128, `AssistantConfig::with_route_text_bytes`)) and its `access` record, the
   role policy (`Settings::access_policy`; none denies every action until it is seeded). User access needs
-  `directory` and either `authenticator` or `proxy_user_header`; `access` and `authorizer`
+  `directory` and either `authenticators` (or only a key provider) or `proxy_user_header`; `access` and `authorizer`
   are exclusive. Provider configurations are limited to 64 nested values and validated by
   Guatiao; an inline credential in one is printed as a weakening. Provider libraries are
   checked against the provider's `plugin` records under `[unex.plugins] profile`. The Directory and
@@ -1087,12 +1107,20 @@ A revision is `0` for no stored record, else a digest of the stored record.
 | `GET /v1/user/accounts` | `account.manage` at `config:accounts` | accounts, never a secret |
 | `PUT /v1/user/accounts/{name}` | same | `{groups?, disabled?, expires_unix?}`; makes or changes; a new account's password is in `secret` once; a `groups` change also needs `access.manage` (`400`); an account that is, or would become, chief needs a chief (`400`) |
 | `POST /v1/user/accounts/{name}/secret` | same | a new password in `secret`, once, in no audit record or log |
+| `GET /v1/user/keys[?all=true]` | a signed-in person (not a key); `all` needs `account.manage` at `config:accounts` | `[{id, name, scopes: ["ACTION@SCOPE"], created_at, expires_at\|null, last_used_at\|null, owner_id, owner_name}]`, never a value |
+| `POST /v1/user/keys` | a signed-in person (not a key) | `{name, scopes: [..] (one at least, each held now, none for every resource), expires_in?: seconds (absent: `key_ttl`; 0 never)}` -> `201 {key, secret}`; the value is in `secret` once and in no audit record or log; `400` with the reason; `409` without a key provider |
+| `DELETE /v1/user/keys/{id}` | the owner, or `account.manage` at `config:accounts` | `{revoked: true}`; another person's key is `404`; refused from the next request on |
+
+Audit: `key.create`, `key.revoke` (actor, target `ID name (scopes)`); an action taken with a key
+names `PERSON via key ID` as its actor. A key without a Registry record is a service account's
+and acts with the account's grants; one whose account name starts `uk-` and has no record acts
+as nobody. Moneypenny's routes and the key routes refuse a key.
 
 Audit: `access.update`, `access.remove`, `access.refused`, `access.seeded`, `account.update`,
 `account.secret`, `account.refused` (`operation` set for an Operation record; never a secret).
 The profile gains `global_actions` (`access.read`, `access.manage`, `account.manage`) and each
 Operation's actions gain `access.read` and `access.manage`. The accounts provider is the `unex`
-record's `accounts` (`accounts_config`), else the authenticator when it offers accounts;
+record's `accounts` (`accounts_config`), else the first listed provider that offers accounts;
 without one the routes answer `409 no account provider`. Moneypenny reads with the `access`
 tool and proposes with `propose_access_change` and `propose_account_change`; a reset password
 goes to the app as a `reveal` event on the conversation, never into her transcript.

@@ -139,6 +139,7 @@ origin leaves the public roots alone.
   since. `access delegable set a,b`, `access chief set SUBJECT…` (chief only) and `access check
   SUBJECT ACTION RESOURCE` (prints `allowed|denied`, tier, rule and role). A refusal prints the
   gateway's reason and exits `1`.
+- `ai6ctl keys create --scope ACTION@SCOPE... [--expires 30d|never] [--name N] [--output FILE]`, `list [--all]` and `revoke ID` use `/v1/user/keys`; a created key's value is the only thing on standard output (or a new mode-600 file), shown once.
 - `ai6ctl accounts [list]`, `create NAME [--groups g,h]`, `disable NAME`, `enable NAME`, `groups
   NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
   once as `password\t…`, to stdout only. Accounts are never deleted through the API.

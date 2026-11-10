@@ -1242,7 +1242,17 @@ pub struct StationRuntime { max_concurrent_missions, stall_timeout, loop_timeout
 impl StationRuntime { pub fn validate(&self) -> Result<(), String>;   // includes StationLimits::validate
     pub fn limits(&self) -> StationLimits;                             // the tables and providers
     pub fn duration(seconds: Option<f64>) -> Option<Duration>; }
-pub struct UnexRecord { authenticator, authenticator_config, directory, directory_config,
+pub struct SignInProvider { provider: String, config: Option<ProviderConfig> }   // new(), config()
+/// Personal API keys. The Registry holds the record (`ApiKeyRecord`: id = the key provider's
+/// account ID, account, owner, owner_name, name, scopes `ACTION@SCOPE`, created_at, expires_at,
+/// last_used_at); the secret and its hash are the key provider's. `ApiKeyStore`: `put_api_key`,
+/// `api_key`, `api_keys(owner?)`, `remove_api_key`, `touch_api_key(id, at, within)`; limits at
+/// `[registry.limits.api_keys]` (`ApiKeyLimits`).
+/// `KeyScope` (`ACTION@SCOPE`: `FromStr`, `Display`, `covers`) narrows a person: `narrow_to_key`
+/// stamps `KEY_SCOPES_ATTRIBUTE`/`KEY_ID_ATTRIBUTE` on a `Person`, `key_permits` judges a request,
+/// `KeyNarrowed` wraps an `Authorizer` with it, `EffectiveAccess` applies it and is never chief for
+/// a narrowed person, `clear_key` removes it.
+pub struct UnexRecord { authenticators: Vec<SignInProvider> /* ordered; each answers the credentials it claims */, key_ttl /* None: 90 days; 0 never */, directory, directory_config,
     authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
     page_authenticator, page_authenticator_config /* the pages' request-taking authenticator */,
     login_tries_per_address, login_tries_per_name, client_address_header, access_cache_ttl,

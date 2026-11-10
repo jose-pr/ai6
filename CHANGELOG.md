@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- API keys beside people's sign-in. The `unex` record's `authenticators` is an ordered list of
+  `{provider, config}` in place of `authenticator` and `authenticator_config`; each credential goes to
+  the provider that claims it (a bearer key to the key provider, a name and a password to the others in
+  order), and adding a provider is stored without a confirmation. People make, list and revoke their own
+  keys (`POST`, `GET` and `DELETE /v1/user/keys`, `ai6ctl keys create|list|revoke`, the Keys section of
+  Outer Office's profile). A key acts as its person, narrowed to the `ACTION@SCOPE` pairs named at
+  creation, and is judged again at every use; it has an optional expiry (`[unex] key_ttl`, 90 days by
+  default) and a recorded last use, is shown once, and is in no log or audit record. Service accounts
+  stay available under `account.manage`.
+
 ### Changed
 
 - Records of the configuration provider are managed by `ai6ctl`, through Universal Exports, as `kubectl`
