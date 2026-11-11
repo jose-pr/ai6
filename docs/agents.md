@@ -1282,7 +1282,9 @@ tools or injected command.
   skill of one name, without regard to case: the later in composition order is delivered and
   `skill-collision` is reported. `[harness.<id>] skills = false` in the manifest makes the routing
   line the delivery for that harness, `context` adds files for it alone, and no other key of the table
-  applies.
+  applies. While an `OVERLAY.md` body is the context, a root `CONTEXT.md` is left out wherever it is
+  named (a harness's `context` included) and the delivery reports `context-ignored` naming it; the
+  overlay stays usable.
 - **A `desk` Session** gets the root and the text, and no `bin/`, `lib/` or anything run for it. The
   same goes for a Session held to reading until its plan passes.
 

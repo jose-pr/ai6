@@ -115,6 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- An overlay with an `OVERLAY.md` body and a root `CONTEXT.md` delivers the body only: a Session's
+  delivery reports `context-ignored` naming `CONTEXT.md`, and a `[harness.<id>] context` hint naming it
+  is dropped too instead of delivering it beside the body.
 - `ai6 serve` no longer exits when its Registry or configuration provider cannot be reached at start
   (a host name that does not resolve, a refused or dropped connection, a server still starting): it says
   why, waits and tries again, with the waits and the time to give up set by `[provider] retry_first`,
