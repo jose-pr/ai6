@@ -63,6 +63,8 @@ class LibraryApproval {
     this.changes = const [],
     this.weakened = const [],
     this.revision,
+    this.recordRevision,
+    this.publisher,
   });
 
   final bool applied;
@@ -76,6 +78,12 @@ class LibraryApproval {
   /// The configuration revision it was stored at.
   final String? revision;
 
+  /// The revision of the Station's own record the preview read; sent back with the confirmation.
+  final String? recordRevision;
+
+  /// For a publisher trust, the key the preview named; sent back with the confirmation.
+  final String? publisher;
+
   factory LibraryApproval.fromJson(
     Map<String, dynamic> json,
   ) => LibraryApproval(
@@ -83,6 +91,8 @@ class LibraryApproval {
     changes: ((json['changes'] as List<dynamic>?) ?? const []).cast<String>(),
     weakened: ((json['weakened'] as List<dynamic>?) ?? const []).cast<String>(),
     revision: json['revision'] as String?,
+    recordRevision: json['record_revision'] as String?,
+    publisher: json['publisher'] as String?,
   );
 }
 
@@ -164,6 +174,7 @@ class _FoundLibrariesPanelState extends State<FoundLibrariesPanel> {
         library,
         byPublisher: byPublisher,
         confirm: true,
+        previewed: held,
       );
     } on RosterRefused catch (refused) {
       _say('Refused: ${refused.reason}');
@@ -207,6 +218,11 @@ class _FoundLibrariesPanelState extends State<FoundLibrariesPanel> {
               Text(
                 'Libraries found and not loaded',
                 style: theme.textTheme.titleSmall,
+              ),
+              Text(
+                'This is what each Station claims about its own files; the digest is what it '
+                'computed, and the Station checks it again before it loads anything.',
+                style: theme.textTheme.bodySmall,
               ),
               Text(
                 canApprove
@@ -313,7 +329,8 @@ class _ApproveDialog extends StatelessWidget {
             children: [
               const Text(
                 'This changes what code the Station runs. It is audited with '
-                'your name, the file and its digest.',
+                'your name, the file and its digest. What is shown here is the '
+                'claim of the Station about the file.',
               ),
               Text('File: ${library.file}'),
               const Text('Digest:'),

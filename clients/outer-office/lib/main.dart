@@ -1717,13 +1717,15 @@ class MissionBoard extends ChangeNotifier
 
   /// Approves [library] for [stationId]: its `plugin` record pins these bytes, or with
   /// [byPublisher] trusts the key that signed them. Without [confirm] the gateway stores nothing
-  /// and says what would change; with it the record is stored. Throws [RosterRefused] with the
+  /// and says what would change; with it the record is stored, as [previewed] (the answer
+  /// without it) showed. Throws [RosterRefused] with the
   /// gateway's reason and [RosterChanged] when the record changed meanwhile.
   Future<LibraryApproval> approveLibrary(
     String stationId,
     FoundLibrary library, {
     bool byPublisher = false,
     bool confirm = false,
+    LibraryApproval? previewed,
   }) async {
     if (demo) {
       throw StateError('Approving a library is unavailable in preview.');
@@ -1736,6 +1738,9 @@ class MissionBoard extends ChangeNotifier
         'digest': library.digest,
         'trust': byPublisher ? 'publisher' : 'pin',
         'confirm': confirm,
+        // What the preview showed, so a confirmation is for exactly that.
+        'record_revision': ?previewed?.recordRevision,
+        if (byPublisher) 'publisher': ?previewed?.publisher,
       },
     );
     switch (response.statusCode) {

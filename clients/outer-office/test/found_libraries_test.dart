@@ -50,9 +50,9 @@ MissionBoard _board(
             approvalStatus,
           );
         }
-        final confirmed =
-            (jsonDecode(request.body) as Map<String, dynamic>)['confirm'] ==
-            true;
+        final asked = jsonDecode(request.body) as Map<String, dynamic>;
+        final confirmed = asked['confirm'] == true;
+        final trust = asked['trust'];
         return http.Response(
           jsonEncode(
             confirmed
@@ -66,6 +66,8 @@ MissionBoard _board(
                       'station-a will load ai6_extra.dll when its bytes are $_digest',
                     ],
                     'weakened': ['publisher $_key alone admits 1 library'],
+                    'record_revision': 'r1',
+                    if (trust == 'publisher') 'publisher': _key,
                   },
           ),
           200,
@@ -140,6 +142,7 @@ void main() {
     await _show(tester, _board(requests, globalActions: const []));
 
     expect(find.text('Libraries found and not loaded'), findsOneWidget);
+    expect(find.textContaining('claims about its own'), findsOneWidget);
     expect(find.text('Station station-a'), findsOneWidget);
     expect(find.text('ai6_extra.dll'), findsOneWidget);
     expect(find.textContaining(_digest), findsOneWidget);
@@ -200,6 +203,8 @@ void main() {
         'digest': _digest,
         'trust': 'pin',
         'confirm': true,
+        // The confirmation carries the revision the preview read.
+        'record_revision': 'r1',
       });
       expect(approved, 1);
     },
@@ -223,6 +228,9 @@ void main() {
       'publisher',
     ]);
     expect(_approvals(requests).last['confirm'], true);
+    // ... and, for a publisher, the key the preview named.
+    expect(_approvals(requests).last['publisher'], _key);
+    expect(_approvals(requests).last['record_revision'], 'r1');
   });
 
   testWidgets(
