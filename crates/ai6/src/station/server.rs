@@ -10608,7 +10608,11 @@ queue = 1
 
     #[tokio::test]
     async fn scheduler_starts_assigned_missions_within_global_capacity() {
-        let dir = std::env::temp_dir().join(format!("ai6-scheduler-{}", std::process::id()));
+        let scratch = tempfile::Builder::new()
+            .prefix("ai6-scheduler-")
+            .tempdir()
+            .unwrap();
+        let dir = scratch.path().to_path_buf();
         fs::create_dir_all(&dir).unwrap();
         let checkout = dir.join("checkout");
         fs::create_dir_all(&checkout).unwrap();
@@ -10733,12 +10737,15 @@ queue = 1
         for event_pump in event_pumps {
             let _ = event_pump.await;
         }
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn scheduler_leases_briefs_and_files_terminal_mission_outcomes() {
-        let dir = std::env::temp_dir().join(format!("ai6-intake-scheduler-{}", std::process::id()));
+        let scratch = tempfile::Builder::new()
+            .prefix("ai6-intake-scheduler-")
+            .tempdir()
+            .unwrap();
+        let dir = scratch.path().to_path_buf();
         let checkout = dir.join("checkout");
         let queued = dir.join("registry").join("new");
         fs::create_dir_all(&checkout).unwrap();
@@ -10963,7 +10970,6 @@ queue = 1
         for event_pump in event_pumps {
             let _ = event_pump.await;
         }
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
@@ -11327,7 +11333,11 @@ queue = 1
 
     #[tokio::test]
     async fn mission_creation_resolves_station_and_agent_names_before_storing() {
-        let dir = std::env::temp_dir().join(format!("ai6-server-roster-{}", std::process::id()));
+        let scratch = tempfile::Builder::new()
+            .prefix("ai6-server-roster-")
+            .tempdir()
+            .unwrap();
+        let dir = scratch.path().to_path_buf();
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("operations.toml"),
@@ -11419,12 +11429,15 @@ queue = 1
         )
         .await;
         assert!(rejected.is_err());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn mock_provider_lifecycle_keeps_runtime_responsive_and_reuses_session_id() {
-        let dir = std::env::temp_dir().join(format!("ai6-server-lifecycle-{}", std::process::id()));
+        let scratch = tempfile::Builder::new()
+            .prefix("ai6-server-lifecycle-")
+            .tempdir()
+            .unwrap();
+        let dir = scratch.path().to_path_buf();
         fs::create_dir_all(&dir).unwrap();
         let working_directory = dir.join("checkout");
         fs::create_dir_all(&working_directory).unwrap();
@@ -11659,7 +11672,6 @@ queue = 1
         );
         // The Session ended done; the Mission waits for someone to verify it.
         assert_eq!(event.mission.state, MissionState::Verifying);
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
