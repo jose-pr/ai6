@@ -1444,7 +1444,201 @@
         },
         "sources": {
           "type": "object",
-          "additionalProperties": {},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "provider:ai6_source",
+                "title": "Provider",
+                "description": "The Source provider, from those the Stations report; the instance's name when empty."
+              },
+              "intake": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "title": "Take items in",
+                "description": "Whether items are polled in; false keeps the instance for posting only."
+              },
+              "interval_secs": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 18446744073709551615,
+                "format": "seconds",
+                "title": "Poll every",
+                "description": "Seconds between polls, at least the Station's shortest interval."
+              },
+              "status_labels": {
+                "type": "object",
+                "properties": {
+                  "working": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "While working",
+                    "description": "While an Agent works."
+                  },
+                  "waiting": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "While waiting for an answer",
+                    "description": "While the Mission waits for an answer on the issue."
+                  },
+                  "paused": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "While paused",
+                    "description": "While the Mission is paused."
+                  },
+                  "done": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "When done",
+                    "description": "When the Mission ended successfully."
+                  },
+                  "failed": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "When failed",
+                    "description": "When the Mission ended without completing."
+                  }
+                },
+                "additionalProperties": false,
+                "title": "Status labels",
+                "description": "The labels a Mission's milestones write.",
+                "x-advanced": true,
+                "default": {}
+              },
+              "status_transitions": {
+                "type": "object",
+                "properties": {
+                  "working": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "While working",
+                    "description": "While an Agent works."
+                  },
+                  "waiting": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "While waiting for an answer",
+                    "description": "While the Mission waits for an answer on the issue."
+                  },
+                  "paused": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "While paused",
+                    "description": "While the Mission is paused."
+                  },
+                  "done": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "When done",
+                    "description": "When the Mission ended successfully."
+                  },
+                  "failed": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "title": "When failed",
+                    "description": "When the Mission ended without completing."
+                  }
+                },
+                "additionalProperties": false,
+                "title": "Status transitions",
+                "description": "The workflow transitions a Mission's milestones make.",
+                "x-advanced": true,
+                "default": {}
+              },
+              "agent_labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Labels Agents may touch",
+                "description": "The only labels an Agent may add or remove on a linked issue.",
+                "x-advanced": true,
+                "default": []
+              },
+              "agent_transitions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Transitions Agents may make",
+                "description": "The workflow transitions an Agent may make without green ink.",
+                "x-advanced": true,
+                "default": []
+              },
+              "priority_map": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Priority map",
+                "description": "The priority a mirrored issue takes here, by the priority it has where it comes from.",
+                "x-advanced": true,
+                "default": {}
+              },
+              "reopen": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "label",
+                      "comment",
+                      "never"
+                    ],
+                    "x-enum-labels": {
+                      "label": "A label added again",
+                      "comment": "A label or a comment",
+                      "never": "Never"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Reopen a settled item on",
+                "description": "What reopens an item whose Mission settled.",
+                "x-advanced": true
+              },
+              "settings": {
+                "type": "object",
+                "additionalProperties": {},
+                "format": "flat-settings-of:provider",
+                "title": "Provider settings",
+                "description": "The chosen provider's settings, written beside the provider's name.",
+                "default": {}
+              }
+            },
+            "additionalProperties": false
+          },
           "title": "Work sources",
           "description": "Trackers and CI this Operation takes briefs from; each source's settings are its own.",
           "x-section": "sources",
@@ -1678,6 +1872,9 @@
               }
             }
           }
+        },
+        "sources": {
+          "form": {}
         },
         "sleepers": {
           "form": {
@@ -7571,6 +7768,2980 @@
     },
     "key": {
       "title": "Universal Exports settings",
+      "description": "",
+      "fixed": "settings"
+    }
+  },
+  "station": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "max_concurrent_missions": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Sessions at once",
+          "description": "Agent Sessions it runs at once. Default: 4."
+        },
+        "stall_timeout": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Stall a silent Session after",
+          "description": "Seconds without provider or terminal activity before a Session stalls. Default: 300."
+        },
+        "loop_timeout": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Stall a repeating Session after",
+          "description": "Seconds without novel terminal output before repeated output stalls a Session. Default: 300."
+        },
+        "loop_min_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Repeated lines before a loop counts",
+          "description": "Repeated terminal lines required before loop detection applies. Default: 50."
+        },
+        "blocked_after": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Mark a Session blocked after",
+          "description": "Quiet seconds before a prompt-shaped terminal tail marks a Session blocked. Default: 10."
+        },
+        "max_runtime": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Longest a Session runs",
+          "description": "Longest a Session runs, in seconds. Default: none."
+        },
+        "history": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Lines remembered for loop detection",
+          "description": "Distinct terminal lines kept for repeated-output detection. Default: 4096."
+        },
+        "normalize_digits": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Ignore digits when comparing lines",
+          "description": "Whether digit runs are normalized when comparing terminal lines for loops. Default: false."
+        },
+        "roles": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "What this Station does",
+          "description": "`control` (elects Headquarters) and `execution` (runs assigned Missions). Default: both."
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Placement labels",
+          "description": "Placement labels.",
+          "default": {}
+        },
+        "terminal": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "provider:ai6_terminal",
+          "title": "Terminal provider",
+          "description": "The terminal provider harnesses run in. Default: one that suits the handler."
+        },
+        "resources_every": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Sample a Theater's resources every",
+          "description": "Seconds between samples of each remote Theater's resources; 0 leaves only the requirements probe. Default: 60."
+        },
+        "safe_house_caches": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Rebuildable cache directories",
+          "description": "Directory names the Head of Station may remove from a finished Mission's safe house. Default: `target`, `node_modules` and `.dart_tool`."
+        },
+        "safe_house_cache_age": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "seconds",
+          "title": "Leave a finished safe house alone for",
+          "description": "Seconds a finished Mission's safe house is left alone before its caches may go. Default: 604800."
+        },
+        "scheduler": {
+          "type": "object",
+          "properties": {
+            "event_queue": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Events queued per Session",
+              "description": "Events of one Session queued for its event pump; past it the oldest is dropped.",
+              "default": 256
+            },
+            "interval": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Between scheduler rounds",
+              "description": "Seconds between scheduler rounds.",
+              "default": 0.5
+            },
+            "retry_backoff": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry a failed Mission start after",
+              "description": "Seconds before a Mission whose start failed is tried again; each further failure in a row doubles the wait, up to `retry_backoff_max`. `0` retries on the next round.",
+              "default": 5.0
+            },
+            "retry_backoff_max": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wait between start retries",
+              "description": "Seconds the wait between tries of a Mission start grows to, at most.",
+              "default": 600.0
+            },
+            "check_in": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Between check-ins with the Registry",
+              "description": "Seconds between the Station's check-ins with the Registry.",
+              "default": 15.0
+            },
+            "intake_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Tries to place a brief",
+              "description": "Times a brief is placed before it is filed as failed.",
+              "default": 3
+            },
+            "role_catalog_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest role catalog and placement policies",
+              "description": "Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out.",
+              "default": 524288
+            },
+            "provider_catalog_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest provider catalog",
+              "description": "Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out.",
+              "default": 524288
+            },
+            "shutdown_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Wait for each loop when stopping",
+              "description": "Seconds the Station waits for each of its loops when it stops.",
+              "default": 2.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "The scheduler",
+          "description": "`[scheduler]`: the scheduler and its check-ins.",
+          "default": {
+            "event_queue": 256,
+            "interval": 0.5,
+            "retry_backoff": 5.0,
+            "retry_backoff_max": 600.0,
+            "check_in": 15.0,
+            "intake_attempts": 3,
+            "role_catalog_bytes": 524288,
+            "provider_catalog_bytes": 524288,
+            "shutdown_wait": 2.0
+          }
+        },
+        "publisher": {
+          "type": "object",
+          "properties": {
+            "request_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest request to Universal Exports",
+              "description": "Seconds one request to Universal Exports may take.",
+              "default": 2.0
+            },
+            "queue": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Events waiting to publish",
+              "description": "Events waiting for Universal Exports; past it output gives way, oldest first, and a Session's latest state is kept.",
+              "default": 64
+            },
+            "terminal_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Terminal output in one frame",
+              "description": "Bytes of terminal output in one published frame. Longer output goes as several, and what Universal Exports states at registration lowers it. With room for its header, the default is the gateway's default `frame_bytes`.",
+              "default": 196608
+            },
+            "pre_bind_terminal_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Terminal output kept before a Mission binds",
+              "description": "Bytes of terminal output kept for a Session not yet bound to its Mission; past it the oldest goes.",
+              "default": 1048576
+            },
+            "publish_retry_delay": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry a failed publication after",
+              "description": "Seconds before a failed publication is tried again; each try doubles it, up to `retry_max_delay`.",
+              "default": 0.5
+            },
+            "retry_max_delay": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest pause between tries",
+              "description": "The longest pause between tries, of a publication or of an input or control poll.",
+              "default": 30.0
+            },
+            "refresh_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Register live Sessions again every",
+              "description": "Seconds between registering every live Session again, which is how a gateway restarted during a quiet spell learns of them.",
+              "default": 15.0
+            },
+            "input_retry_delay": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry a failed input or control poll after",
+              "description": "Seconds before a failed input or control poll is tried again; each try doubles it, up to `retry_max_delay`.",
+              "default": 0.1
+            },
+            "control_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Control poll held open",
+              "description": "Seconds Universal Exports holds a control poll open; kept under `request_timeout`.",
+              "default": 1.0
+            },
+            "input_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Input poll held open",
+              "description": "Seconds Universal Exports holds an input poll open; a keystroke ends it at once, so a long wait costs no delay. The gateway's `max_poll_wait` bounds it.",
+              "default": 20.0
+            },
+            "control_queue": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Mission controls queued",
+              "description": "Mission controls queued for the scheduler.",
+              "default": 16
+            },
+            "control_report_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Tries to report a control's outcome",
+              "description": "Times the outcome of a control is reported.",
+              "default": 3
+            }
+          },
+          "additionalProperties": false,
+          "title": "Publishing to Universal Exports",
+          "description": "`[publisher]`: publication to Universal Exports.",
+          "default": {
+            "request_timeout": 2.0,
+            "queue": 64,
+            "terminal_bytes": 196608,
+            "pre_bind_terminal_bytes": 1048576,
+            "publish_retry_delay": 0.5,
+            "retry_max_delay": 30.0,
+            "refresh_every": 15.0,
+            "input_retry_delay": 0.1,
+            "control_wait": 1.0,
+            "input_wait": 20.0,
+            "control_queue": 16,
+            "control_report_attempts": 3
+          }
+        },
+        "sources": {
+          "type": "object",
+          "properties": {
+            "poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Between polls of a Source",
+              "description": "Seconds between polls of a Source whose `interval_secs` is not set.",
+              "default": 60.0
+            },
+            "min_poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Shortest poll of a Source",
+              "description": "The shortest interval a Source is polled at, in seconds; a smaller `interval_secs` is raised to it, and 0 takes the floor away.",
+              "default": 10.0
+            },
+            "report_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Report finished briefs every",
+              "description": "Seconds between rounds reporting finished briefs to their Sources.",
+              "default": 15.0
+            },
+            "sleeper_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Fire Sleepers every",
+              "description": "Seconds between rounds firing Sleepers.",
+              "default": 20.0
+            },
+            "outbox_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Send the tracker outbox every",
+              "description": "Seconds between rounds sending the outbox of tracker writes.",
+              "default": 5.0
+            },
+            "reply_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Read new issue comments every",
+              "description": "Seconds between rounds reading new comments on the issues Missions are linked to.",
+              "default": 60.0
+            },
+            "outbox_batch": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Outbox entries sent per round",
+              "description": "Outbox entries sent in one round.",
+              "default": 20
+            },
+            "send_attempts": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Tries to send an outbox entry",
+              "description": "Sends tried before an outbox entry fails.",
+              "default": 5
+            },
+            "retry_backoff": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Retry a failed send after",
+              "description": "Seconds before a failed send is tried again; each attempt doubles it.",
+              "default": 30.0
+            },
+            "replies_read": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Replies shown of a linked issue",
+              "description": "Stored replies `issue_read` shows of a linked issue, newest first.",
+              "default": 10
+            },
+            "reopen_watch_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Read settled items every",
+              "description": "Seconds between rounds reading the newest settled items again, so a label taken off one is seen and its return reopens it.",
+              "default": 300.0
+            },
+            "reopen_watch": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Settled items read per round",
+              "description": "Settled items read in each of those rounds, per tracker instance, newest first; each is one request to the tracker.",
+              "default": 20
+            },
+            "read_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Wait for a live tracker read",
+              "description": "Seconds one ask for a live tracker read waits at Universal Exports before asking again.",
+              "default": 20.0
+            },
+            "read_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest live tracker read asked for",
+              "description": "The most bytes of one live tracker read Universal Exports asks for.",
+              "default": 16384
+            }
+          },
+          "additionalProperties": false,
+          "title": "Sources and Sleepers",
+          "description": "`[sources]`: Source polling, Sleepers and the tracker outbox.",
+          "default": {
+            "poll": 60.0,
+            "min_poll": 10.0,
+            "report_every": 15.0,
+            "sleeper_every": 20.0,
+            "outbox_every": 5.0,
+            "reply_every": 60.0,
+            "outbox_batch": 20,
+            "send_attempts": 5,
+            "retry_backoff": 30.0,
+            "replies_read": 10,
+            "reopen_watch_every": 300.0,
+            "reopen_watch": 20,
+            "read_wait": 20.0,
+            "read_bytes": 16384
+          }
+        },
+        "transports": {
+          "type": "object",
+          "properties": {
+            "reprobe_after": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Probe a failed Theater again after",
+              "description": "Seconds before a Theater the Station could not reach is probed again.",
+              "default": 60.0
+            },
+            "report_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Look a Theater over every",
+              "description": "Seconds between looks over a Theater for its requirements and ambient credentials.",
+              "default": 300.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Looking over Theaters",
+          "description": "`[transports]`: how often Theaters are looked over.",
+          "default": {
+            "reprobe_after": 60.0,
+            "report_every": 300.0
+          }
+        },
+        "recovery": {
+          "type": "object",
+          "properties": {
+            "first_reattach_delay": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "First re-attach try after",
+              "description": "Seconds before the first try to re-attach to a Session; each failed try doubles it.",
+              "default": 5.0
+            },
+            "max_reattach_delay": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wait between re-attach tries",
+              "description": "The longest wait between tries, in seconds.",
+              "default": 60.0
+            },
+            "give_up_tries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Tries to give a lease up",
+              "description": "Tries at a Registry step a concurrent renewal can refuse, when the Station gives a lease up.",
+              "default": 10
+            },
+            "notes_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Write a Session's recent events every",
+              "description": "Seconds between writes of a Session's recent events to its record.",
+              "default": 15.0
+            },
+            "probe_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest look at a Theater",
+              "description": "Seconds the look at whether a Session's Theater still answers may take.",
+              "default": 30.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Re-attaching to Sessions",
+          "description": "`[recovery]`: re-attaching to Sessions after a restart.",
+          "default": {
+            "first_reattach_delay": 5.0,
+            "max_reattach_delay": 60.0,
+            "give_up_tries": 10,
+            "notes_every": 15.0,
+            "probe_timeout": 30.0
+          }
+        },
+        "vetting": {
+          "type": "object",
+          "properties": {
+            "findings": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Findings kept per verdict",
+              "description": "Findings kept per verdict.",
+              "default": 16
+            },
+            "review_work": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Other work a review brief lists",
+              "description": "Other work a review brief lists for the reviewer.",
+              "default": 50
+            },
+            "detail_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest finding detail",
+              "description": "Bytes of a finding's detail, of the lines a review brief quotes, and of a vetting timeline detail.",
+              "default": 256
+            },
+            "phrases": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Manipulation phrases per Operation",
+              "description": "Manipulation phrases an Operation may screen for; past it, or past `phrase_bytes`, screened briefs are held.",
+              "default": 256
+            },
+            "phrase_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest manipulation phrase",
+              "description": "Bytes of one such phrase.",
+              "default": 256
+            },
+            "rate_window": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Rates are counted over",
+              "description": "Seconds of the rolling window hourly rates are counted over.",
+              "default": 3600.0
+            },
+            "proposals": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Proposals looked at per round",
+              "description": "Pending Mission proposals looked at per Operation each round, within `[registry.limits.proposals] results`.",
+              "default": 500
+            },
+            "proposal_request_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A proposal's green ink request lasts",
+              "description": "Seconds the green ink request a class authorisation approves for a proposal lasts.",
+              "default": 3600.0
+            },
+            "proposal_settle": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A proposal waits before it is promoted",
+              "description": "Seconds a proposal waits before M promotes it on its own.",
+              "default": 30.0
+            },
+            "expiry_sweep": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Look at rate holds every",
+              "description": "Seconds between looks at rate holds for expiry.",
+              "default": 60.0
+            },
+            "answer_tail_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Review answer searched",
+              "description": "Bytes at the end of a review's answer searched for its verdict; the answer ends the message.",
+              "default": 16384
+            }
+          },
+          "additionalProperties": false,
+          "title": "Vetting",
+          "description": "`[vetting]`: vetting briefs and Mission proposals.",
+          "default": {
+            "findings": 16,
+            "review_work": 50,
+            "detail_bytes": 256,
+            "phrases": 256,
+            "phrase_bytes": 256,
+            "rate_window": 3600.0,
+            "proposals": 500,
+            "proposal_request_ttl": 3600.0,
+            "proposal_settle": 30.0,
+            "expiry_sweep": 60.0,
+            "answer_tail_bytes": 16384
+          }
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "goals_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Goals a reviewer reads",
+              "description": "Bytes of a Mission's brief a reviewer is given.",
+              "default": 32768
+            },
+            "submitted_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Report a reviewer reads",
+              "description": "Bytes of an Agent's plan or final message a reviewer is given.",
+              "default": 32768
+            },
+            "diff_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Change a reviewer reads",
+              "description": "Bytes of a Mission's change a reviewer is given; a change cut here says so.",
+              "default": 65536
+            },
+            "commits": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Commits a reviewer is shown",
+              "description": "Commits listed for a reviewer.",
+              "default": 100
+            },
+            "reasons": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Reasons kept per vote",
+              "description": "Reasons kept from one vote, and told to an author sent back.",
+              "default": 16
+            },
+            "reason_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest reason",
+              "description": "Bytes of one reason, and of a line a review records.",
+              "default": 1024
+            },
+            "answer_tail_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Reviewer's answer searched",
+              "description": "Bytes at the end of a reviewer's answer searched for its vote; the vote ends the message.",
+              "default": 16384
+            },
+            "write_tries": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Tries of a contested write",
+              "description": "Times a Station tries a write to a review another Station keeps writing first, before it logs that and leaves it for the next round.",
+              "default": 16
+            },
+            "station_window": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Handlers reported within",
+              "description": "How recent a Station's check-in must be for the handlers it reports to count when a panel is filled.",
+              "default": 300.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Reviews",
+          "description": "`[review]`: reviews of Missions' plans and output.",
+          "default": {
+            "goals_bytes": 32768,
+            "submitted_bytes": 32768,
+            "diff_bytes": 65536,
+            "commits": 100,
+            "reasons": 16,
+            "reason_bytes": 1024,
+            "answer_tail_bytes": 16384,
+            "write_tries": 16,
+            "station_window": 300.0
+          }
+        },
+        "accounts": {
+          "type": "object",
+          "properties": {
+            "reset_grace": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Wait past a reported reset",
+              "description": "Seconds past a reported reset before a Session parked on a limit resumes.",
+              "default": 15.0
+            },
+            "unknown_use_permille": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535,
+              "title": "Use assumed when none is reported",
+              "description": "Thousandths used an account whose provider reported nothing counts as, 0 to 1,000.",
+              "default": 500
+            },
+            "claim_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A claim on an account lasts",
+              "description": "Seconds a claim on an account lasts unless the Station renews it at check-in.",
+              "default": 60.0
+            },
+            "limit_horizon": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest a limited account stays out",
+              "description": "The longest a limited account is kept out, in seconds, whatever reset time its provider reports.",
+              "default": 691200.0
+            },
+            "login_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest account login",
+              "description": "Seconds a pool account's login command may take.",
+              "default": 60.0
+            },
+            "models_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Look at the models every",
+              "description": "Seconds between this Station's looks at the models each account and route may use; 0 never looks on its own.",
+              "default": 3600.0
+            },
+            "model_probes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Model listings at once",
+              "description": "Accounts and routes a look at the models asks at once; `null` asks every one at once, and 0 asks none, so a look changes nothing.",
+              "default": 4
+            },
+            "model_probe_timeout": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest model listing",
+              "description": "Seconds a look waits for one account's or route's model listing; one that takes longer keeps the list it had before, or is unknown.",
+              "default": 20.0
+            },
+            "renew_every": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Between login renewal rounds",
+              "description": "Seconds between the Headquarters Station's rounds over the logins kept in the Registry; 0 runs none.",
+              "default": 600.0
+            },
+            "renew_within": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Renew a login this long before it ends",
+              "description": "Seconds before a login's known end at which a round renews it: well before its harness's own threshold, so a Session's harness has no reason to.",
+              "default": 3600.0
+            },
+            "renew_after": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Renew a login of unknown end after",
+              "description": "Seconds since a login was last renewed at which a round renews it, where its end cannot be read.",
+              "default": 518400.0
+            },
+            "renew_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest login renewal",
+              "description": "Seconds a login's renewal command may take; never past its lease.",
+              "default": 120.0
+            },
+            "renew_lease": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A login's renewal lease lasts",
+              "description": "Seconds a Station holds a login's renewal lease; another may take it after that.",
+              "default": 300.0
+            },
+            "renew_backoff": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "First wait after a failed renewal",
+              "description": "Seconds before the first retry of a failed renewal; each failure doubles it.",
+              "default": 300.0
+            },
+            "renew_backoff_max": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wait after a failed renewal",
+              "description": "The longest wait between retries of a failed renewal, in seconds.",
+              "default": 21600.0
+            },
+            "renew_attempts": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Failed renewals before a person is needed",
+              "description": "Failed renewals in a row before an account is marked as needing a person; `null` never marks one.",
+              "default": 5
+            }
+          },
+          "additionalProperties": false,
+          "title": "Pool accounts",
+          "description": "`[accounts]`: pool accounts.",
+          "default": {
+            "reset_grace": 15.0,
+            "unknown_use_permille": 500,
+            "claim_ttl": 60.0,
+            "limit_horizon": 691200.0,
+            "login_timeout": 60.0,
+            "models_every": 3600.0,
+            "model_probes": 4,
+            "model_probe_timeout": 20.0,
+            "renew_every": 600.0,
+            "renew_within": 3600.0,
+            "renew_after": 518400.0,
+            "renew_timeout": 120.0,
+            "renew_lease": 300.0,
+            "renew_backoff": 300.0,
+            "renew_backoff_max": 21600.0,
+            "renew_attempts": 5
+          }
+        },
+        "approvals": {
+          "type": "object",
+          "properties": {
+            "kind_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest green ink step kind",
+              "description": "Bytes of the kind of a step an Agent asks about.",
+              "default": 32
+            },
+            "target_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest green ink step target",
+              "description": "Bytes of the target of a step an Agent asks about.",
+              "default": 256
+            },
+            "classify_nesting": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Nesting followed when classifying a command",
+              "description": "How deep nested shells (`sh -c \"sh -c ...\"`) and git aliases are followed when a command is read; the harness gate gets it in `AI6_GREEN_INK_NESTING`.",
+              "default": 4
+            },
+            "checked_steps": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Steps checked at once",
+              "description": "Steps one `check_approval` call may ask about.",
+              "default": 64
+            }
+          },
+          "additionalProperties": false,
+          "title": "Green ink steps",
+          "description": "`[approvals]`: green ink steps.",
+          "default": {
+            "kind_bytes": 32,
+            "target_bytes": 256,
+            "classify_nesting": 4,
+            "checked_steps": 64
+          }
+        },
+        "harness": {
+          "type": "object",
+          "properties": {
+            "manifest_file_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest harness configuration file",
+              "description": "Bytes of one file of a project's harness configuration.",
+              "default": 1048576
+            },
+            "manifest_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest harness configuration",
+              "description": "Bytes of the whole configuration.",
+              "default": 16777216
+            },
+            "manifest_files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files in a harness configuration",
+              "description": "Files in the configuration.",
+              "default": 4096
+            }
+          },
+          "additionalProperties": false,
+          "title": "Harness configuration",
+          "description": "`[harness]`: a working directory's harness configuration.",
+          "default": {
+            "manifest_file_bytes": 1048576,
+            "manifest_bytes": 16777216,
+            "manifest_files": 4096
+          }
+        },
+        "overlays": {
+          "type": "object",
+          "properties": {
+            "manifest_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest overlay manifest",
+              "description": "Bytes of an overlay's `overlay.cfg`, or of one of its `aos` env files.",
+              "default": 1048576
+            },
+            "manifest_depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Deepest overlay manifest",
+              "description": "Nesting of a manifest's arrays and tables, its top table being the first level.",
+              "default": 64
+            },
+            "files": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Files in an overlay",
+              "description": "Files and directories in one overlay, the excluded names (`.git`, `node_modules`, ...) not counted.",
+              "default": 4096
+            },
+            "bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest overlay",
+              "description": "Bytes of one overlay's files together.",
+              "default": 67108864
+            },
+            "file_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest overlay file",
+              "description": "Bytes of one file of an overlay.",
+              "default": 16777216
+            },
+            "unpinned": {
+              "type": "boolean",
+              "title": "Issue overlays without a pin",
+              "description": "Issue an overlay whose `[overlay.<name>]` has no pin, reporting it as `unpinned` each time; without this such an overlay is refused. A weakening.",
+              "default": false
+            },
+            "context_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest overlay context",
+              "description": "Bytes of the rules, routing and context a Session's overlays add to its initial context together. Past it the Session is refused, naming this setting, rather than its text cut.",
+              "default": 24576
+            },
+            "fetch_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest overlay fetch",
+              "description": "Seconds a fetch of one overlay's Git source may take.",
+              "default": 300.0
+            },
+            "deps_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest dependency install",
+              "description": "Seconds installing one overlay's dependency file may take.",
+              "default": 600.0
+            },
+            "output_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest output of an overlay's step",
+              "description": "Bytes of each output stream kept from an overlay's setup, env script or package manager.",
+              "default": 1048576
+            },
+            "dotagents_pyz": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "dotagents for overlay commands",
+              "description": "The `dotagents.pyz` on the Station that runs the `cmds/` of an overlay holding them. An overlay with `cmds/` is refused without it. Default: none."
+            },
+            "dotagents_pin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "title": "Pin of dotagents",
+              "description": "The SHA-256 `dotagents_pyz` must have, `sha256:<hex>`; a mismatch refuses. Without one it is refused unless `unpinned` allows it. Default: none."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Overlays",
+          "description": "`[overlays]`: reading the overlays loadouts and Operations issue.",
+          "default": {
+            "manifest_bytes": 1048576,
+            "manifest_depth": 64,
+            "files": 4096,
+            "bytes": 67108864,
+            "file_bytes": 16777216,
+            "unpinned": false,
+            "context_bytes": 24576,
+            "fetch_timeout": 300.0,
+            "deps_timeout": 600.0,
+            "output_bytes": 1048576
+          }
+        },
+        "provision": {
+          "type": "object",
+          "properties": {
+            "probe_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest requirements probe",
+              "description": "Seconds the requirements probe, and a resources sample, may take.",
+              "default": 60.0
+            },
+            "command_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest provisioning command",
+              "description": "Seconds one provisioning command may take.",
+              "default": 120.0
+            },
+            "name_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest required program name",
+              "description": "Bytes of a required program's name; a longer one fails the probe.",
+              "default": 64
+            },
+            "version_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest program version kept",
+              "description": "Characters of a program's version kept from the probe.",
+              "default": 200
+            }
+          },
+          "additionalProperties": false,
+          "title": "Probing and provisioning Theaters",
+          "description": "`[provision]`: probing and provisioning Theaters.",
+          "default": {
+            "probe_timeout": 60.0,
+            "command_timeout": 120.0,
+            "name_bytes": 64,
+            "version_chars": 200
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "properties": {
+            "lease_ttl": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A secret's lease lasts",
+              "description": "Seconds the leases of a Session's loadout and pool account secrets last.",
+              "default": 3600.0
+            },
+            "max_lease_ttl": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest secret lease",
+              "description": "The longest lease, in seconds; a green ink secret's lease lasts as long as its approval, up to it.",
+              "default": 3600.0
+            },
+            "min_matched_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "bytes",
+              "title": "Shortest secret looked for",
+              "description": "Secrets shorter than this are not looked for in what an Agent writes outward: a short one would refuse ordinary words. Smaller is looser.",
+              "default": 6
+            }
+          },
+          "additionalProperties": false,
+          "title": "Secret leases",
+          "description": "`[secrets]`: loadout secret leases.",
+          "default": {
+            "lease_ttl": 3600.0,
+            "max_lease_ttl": 3600.0,
+            "min_matched_bytes": 6
+          }
+        },
+        "terminal_output": {
+          "type": "object",
+          "properties": {
+            "json_line_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest line of JSON output",
+              "description": "Bytes of one line of a JSON harness's output held while the rest arrives.",
+              "default": 67108864
+            },
+            "csi_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest terminal control sequence",
+              "description": "Bytes of one terminal control sequence before it is read as text.",
+              "default": 64
+            }
+          },
+          "additionalProperties": false,
+          "title": "Harness output",
+          "description": "`[terminal_output]`: decoding harness output.",
+          "default": {
+            "json_line_bytes": 67108864,
+            "csi_bytes": 64
+          }
+        },
+        "green_ink": {
+          "type": "object",
+          "properties": {
+            "gate_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest harness gate exchange",
+              "description": "Seconds the harness gate's exchange with the Station may take; the gate gets it in `AI6_GREEN_INK_TIMEOUT`.",
+              "default": 30.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "The harness gate",
+          "description": "`[green_ink]`: the harness gate.",
+          "default": {
+            "gate_timeout": 30.0
+          }
+        },
+        "detached": {
+          "type": "object",
+          "properties": {
+            "poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Read a detached harness's output every",
+              "description": "Seconds between reads of a detached harness's output.",
+              "default": 0.2
+            },
+            "script_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wrapper script",
+              "description": "Seconds one of the wrapper's scripts may take over the transport.",
+              "default": 30.0
+            },
+            "name_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Session name in the wrapper's files",
+              "description": "Characters of the Session's name in the wrapper's file names.",
+              "default": 64
+            }
+          },
+          "additionalProperties": false,
+          "title": "Detached harnesses",
+          "description": "`[detached]`: harnesses run detached over a transport.",
+          "default": {
+            "poll": 0.2,
+            "script_timeout": 30.0,
+            "name_chars": 64
+          }
+        },
+        "runner": {
+          "type": "object",
+          "properties": {
+            "pump_poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Check whether to stop after waiting",
+              "description": "Seconds a runner waits for a harness's next event before it checks whether to stop.",
+              "default": 0.25
+            },
+            "feed_poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Look for spooled events every",
+              "description": "Seconds between a runner connection's looks for spooled events to send.",
+              "default": 0.05
+            },
+            "replay_batch": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Spooled events taken at once",
+              "description": "Spooled events a runner connection takes from the spool at once.",
+              "default": 256
+            },
+            "keep_ended": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Keep an ended Session for",
+              "description": "Seconds an ended Session is kept by its runner.",
+              "default": 604800.0
+            },
+            "cable_request_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest request through the Cable relay",
+              "description": "Bytes of one request through a runner's Cable relay.",
+              "default": 4194304
+            },
+            "cable_connect_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "The Station reaches its Cable endpoint within",
+              "description": "Seconds the Station may take to reach its own Cable endpoint for a request a runner relays.",
+              "default": 10.0
+            },
+            "cable_streams": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Cable relay requests open at once",
+              "description": "Requests through a runner's Cable relay the Station answers at once for one Session; past it a request is refused until one ends.",
+              "default": 64
+            },
+            "read_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "One read of a Session waits",
+              "description": "Seconds one read by the Station of a runner's Session waits for an event.",
+              "default": 1.0
+            },
+            "connect_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "`ai6 runner connect` reaches the runner within",
+              "description": "Seconds `ai6 runner connect` may take to reach the runner's loopback port.",
+              "default": 5.0
+            },
+            "answer_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A runner answers its authentication within",
+              "description": "Seconds a runner that accepted `ai6 runner connect` has to answer its authentication.",
+              "default": 10.0
+            },
+            "start_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A started runner answers within",
+              "description": "Seconds a started runner has to answer.",
+              "default": 30.0
+            },
+            "start_margin": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Extra time to start over a transport",
+              "description": "Seconds starting a runner over a transport may take past `start_wait`.",
+              "default": 30.0
+            },
+            "start_poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Look at whether a started runner serves every",
+              "description": "Seconds between looks at whether a runner started on this host serves yet.",
+              "default": 0.05
+            },
+            "terminal_poll": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "One read of the connect terminal waits",
+              "description": "Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to stop or give up.",
+              "default": 0.2
+            },
+            "superseded_close_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Keep a superseded connection open for",
+              "description": "Seconds a connection another one took a Session from stays open, so the notice saying so is written before the socket closes under it.",
+              "default": 0.2
+            },
+            "retry_pause": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Shortest pause between tries at a runner",
+              "description": "Seconds at least between the Station's tries at a runner it cannot reach.",
+              "default": 0.1
+            }
+          },
+          "additionalProperties": false,
+          "title": "Field runners",
+          "description": "`[runner]`: field runners, the Station's client of them and `ai6 runner serve`.",
+          "default": {
+            "pump_poll": 0.25,
+            "feed_poll": 0.05,
+            "replay_batch": 256,
+            "keep_ended": 604800.0,
+            "cable_request_bytes": 4194304,
+            "cable_connect_timeout": 10.0,
+            "cable_streams": 64,
+            "read_wait": 1.0,
+            "connect_timeout": 5.0,
+            "answer_wait": 10.0,
+            "start_wait": 30.0,
+            "start_margin": 30.0,
+            "start_poll": 0.05,
+            "terminal_poll": 0.2,
+            "superseded_close_wait": 0.2,
+            "retry_pause": 0.1
+          }
+        },
+        "api": {
+          "type": "object",
+          "properties": {
+            "refused_body_drain_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Refused request body read",
+              "description": "Bytes of a refused request's body the Station's own API reads before it answers.",
+              "default": 65536
+            }
+          },
+          "additionalProperties": false,
+          "title": "The Station's own API",
+          "description": "`[api]`: the Station's own HTTP API.",
+          "default": {
+            "refused_body_drain_bytes": 65536
+          }
+        },
+        "audit": {
+          "type": "object",
+          "properties": {
+            "names_detail_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Secret names a credential event lists",
+              "description": "Characters of the secret names a credential timeline event lists.",
+              "default": 240
+            },
+            "target_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest refused configuration target",
+              "description": "Bytes of a refused configuration's audit target.",
+              "default": 512
+            }
+          },
+          "additionalProperties": false,
+          "title": "Audit details",
+          "description": "`[audit]`: audit record details.",
+          "default": {
+            "names_detail_chars": 240,
+            "target_bytes": 512
+          }
+        },
+        "theaters": {
+          "type": "object",
+          "properties": {
+            "ephemeral_name_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest ephemeral Theater name",
+              "description": "Bytes of an ephemeral Theater's name; a longer one is cut and given a digest.",
+              "default": 100
+            }
+          },
+          "additionalProperties": false,
+          "title": "Ephemeral Theaters",
+          "description": "`[theaters]`: ephemeral Theaters.",
+          "default": {
+            "ephemeral_name_bytes": 100
+          }
+        },
+        "theater_tools": {
+          "type": "object",
+          "properties": {
+            "output_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Output `theater_run` returns",
+              "description": "Bytes of each stream of a command's output `theater_run` returns.",
+              "default": 262144
+            },
+            "read_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "What `theater_read` returns",
+              "description": "Bytes `theater_read` returns.",
+              "default": 262144
+            },
+            "timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A command may take",
+              "description": "Seconds a `theater_run` command may take unless it asks for another.",
+              "default": 120.0
+            },
+            "max_timeout": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Longest a command may ask for",
+              "description": "The longest a command may ask for, in seconds.",
+              "default": 3600.0
+            },
+            "git_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A git command may take",
+              "description": "Seconds each git command the tools run for green ink may take.",
+              "default": 30.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Remote-hands tools",
+          "description": "`[theater_tools]`: the `theater_*` tools of remote-hands Sessions.",
+          "default": {
+            "output_bytes": 262144,
+            "read_bytes": 262144,
+            "timeout": 120.0,
+            "max_timeout": 3600.0,
+            "git_timeout": 30.0
+          }
+        },
+        "head_of_station": {
+          "type": "object",
+          "properties": {
+            "listed_changes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Safe house changes in one report",
+              "description": "Changes of a kept safe house listed in one report.",
+              "default": 20
+            },
+            "survey_entries": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Directory entries one survey walks",
+              "description": "Directory entries one survey of a safe house walks before it reports a partial size.",
+              "default": 500000
+            },
+            "reason_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest reason for a safe house deletion",
+              "description": "Bytes of the reason a round gives when it asks to delete a safe house; longer is cut.",
+              "default": 2000
+            },
+            "audit_target_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest provisioning audit target",
+              "description": "Bytes of what a provisioning round's audit record names; longer is cut.",
+              "default": 500
+            }
+          },
+          "additionalProperties": false,
+          "title": "The Head of Station's rounds",
+          "description": "`[head_of_station]`: the Head of Station's rounds.",
+          "default": {
+            "listed_changes": 20,
+            "survey_entries": 500000,
+            "reason_bytes": 2000,
+            "audit_target_bytes": 500
+          }
+        },
+        "probes": {
+          "type": "object",
+          "properties": {
+            "git_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest git probe",
+              "description": "Seconds a `git` read of a remote may take before the branch or commit is reported unread.",
+              "default": 30.0
+            },
+            "http_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest HTTP probe",
+              "description": "Seconds an HTTP request for an artifact may take.",
+              "default": 20.0
+            },
+            "tracker_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest tracker probe",
+              "description": "Seconds a read of a tracker item and its comments may take.",
+              "default": 30.0
+            },
+            "file_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest file probe",
+              "description": "Seconds a look at a file in a Mission's working directory may take.",
+              "default": 5.0
+            },
+            "comments": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Comments a probe reads",
+              "description": "Comments of a tracker item a probe reads, the latest.",
+              "default": 100
+            }
+          },
+          "additionalProperties": false,
+          "title": "Deliverable probes",
+          "description": "`[probes]`: reading a Mission's deliverables back.",
+          "default": {
+            "git_timeout": 30.0,
+            "http_timeout": 20.0,
+            "tracker_timeout": 30.0,
+            "file_timeout": 5.0,
+            "comments": 100
+          }
+        },
+        "partial_line_bytes": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "format": "bytes",
+          "title": "Longest partial terminal line",
+          "description": "Bytes of a terminal line the watchdog holds before it counts as a line. Default: 4096."
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {},
+          "title": "Provider configurations",
+          "description": "`[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds it with none of its own (handlers, terminals and safe houses).",
+          "default": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Station settings",
+      "description": "",
+      "fixed": "settings"
+    }
+  },
+  "plugins": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Pinned to",
+          "description": "The digest its bytes must have, as `sha256:HEX`. A SHA-1 pin is a reported weakening."
+        },
+        "publisher": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Signed by",
+          "description": "The key whose signature it must carry, as `ed25519:HEX`; `FILE.sig` beside the library signs its SHA-256. A publisher alone admits anything it signed, a reported weakening."
+        },
+        "require": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "either",
+                "both"
+              ],
+              "x-enum-labels": {
+                "either": "Either the pin or the signature",
+                "both": "Both the pin and the signature"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Needs",
+          "description": "Whether the pin and the publisher are each enough, or both are needed."
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Library file",
+      "description": "The library's file name on the plugin path, such as ai6_claude.dll, not a path. It cannot be changed later."
+    }
+  },
+  "tls": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "tls_versions": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "1.2",
+              "1.3"
+            ],
+            "x-enum-labels": {
+              "1.2": "TLS 1.2",
+              "1.3": "TLS 1.3"
+            }
+          },
+          "title": "TLS versions",
+          "description": "TLS versions offered and accepted. Default: 1.2 and 1.3."
+        },
+        "cipher_suites": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Cipher suites",
+          "description": "An allow-list of cipher suites by IANA name; every suite the profiles give when empty."
+        },
+        "kx_groups": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Key-exchange groups",
+          "description": "An allow-list of key-exchange groups by name; every group the profiles give when empty."
+        },
+        "cipher_profiles": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "mozilla",
+              "fips-140-3-compliant",
+              "fips-140-2-compliant",
+              "fips-140-3-validated",
+              "cnsa-1.0",
+              "cnsa-2.0"
+            ],
+            "x-enum-labels": {
+              "mozilla": "Mozilla intermediate",
+              "fips-140-3-compliant": "FIPS 140-3 algorithms",
+              "fips-140-2-compliant": "FIPS 140-2 algorithms",
+              "fips-140-3-validated": "FIPS 140-3 validated module",
+              "cnsa-1.0": "CNSA 1.0",
+              "cnsa-2.0": "CNSA 2.0"
+            }
+          },
+          "title": "Algorithm profiles",
+          "description": "The algorithm profiles allowed. Default: Mozilla intermediate."
+        },
+        "crypto": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ring",
+                "aws-lc"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Crypto provider",
+          "description": "The crypto provider. Default: ring."
+        },
+        "pin_digests": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "sha256",
+              "sha384",
+              "sha512",
+              "sha1"
+            ],
+            "x-enum-labels": {
+              "sha256": "SHA-256",
+              "sha384": "SHA-384",
+              "sha512": "SHA-512",
+              "sha1": "SHA-1: legacy only"
+            }
+          },
+          "title": "Pin digests",
+          "description": "Digests a certificate pin may use. Default: SHA-256, SHA-384 and SHA-512."
+        },
+        "check_validity": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Check validity dates",
+          "description": "Whether a pinned certificate must be inside its validity dates. Default: yes."
+        },
+        "allow_chain_when_pinned": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Allow a chain from a pinned peer",
+          "description": "Whether a pinned peer may present a chain. Default: no."
+        },
+        "allow_resumption": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Allow session resumption",
+          "description": "Whether TLS sessions may be resumed, which skips the certificate checks for a peer that held a session. Default: no."
+        },
+        "require_ems": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Require the extended master secret",
+          "description": "Whether a TLS 1.2 connection must use the extended master secret. Default: yes."
+        },
+        "waiting": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "per_source": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Entries per source",
+              "description": "Entries one source may hold."
+            },
+            "total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Entries in all",
+              "description": "Entries the whole queue may hold."
+            },
+            "rerecord": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "seconds",
+              "title": "Record the same peer again after",
+              "description": "Seconds before the same peer from the same source is recorded again."
+            }
+          },
+          "additionalProperties": false,
+          "title": "Waiting queue",
+          "description": "The bounds of the waiting queue.",
+          "x-advanced": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "TLS policy",
+      "description": "",
+      "fixed": "settings"
+    }
+  },
+  "cables": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "grants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "string",
+                "title": "Agent",
+                "description": "The Agent the grant is for; `*` is every Agent."
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "send",
+                  "receive",
+                  "discover",
+                  "release"
+                ],
+                "x-enum-labels": {
+                  "send": "Send",
+                  "receive": "Receive",
+                  "discover": "Discover",
+                  "release": "Release held Cables"
+                },
+                "title": "May",
+                "description": "What it lets the Agent do."
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "agent",
+                  "station",
+                  "theater",
+                  "global",
+                  "channel",
+                  "operation",
+                  "compartment"
+                ],
+                "x-enum-labels": {
+                  "agent": "An Agent",
+                  "station": "A Station",
+                  "theater": "A Theater",
+                  "global": "Everyone",
+                  "channel": "A channel",
+                  "operation": "An Operation",
+                  "compartment": "A compartment"
+                },
+                "title": "Audience",
+                "description": "The kind of audience."
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "title": "Named",
+                "description": "Which one, for an audience that has a name: the Station, Theater, channel, Operation or compartment."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "action",
+              "scope"
+            ]
+          },
+          "title": "Grants",
+          "description": "Explicit grants; nothing is allowed without one.",
+          "default": []
+        },
+        "inbound": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "deliver",
+              "hold",
+              "refuse"
+            ],
+            "x-enum-labels": {
+              "deliver": "Deliver",
+              "hold": "Hold",
+              "refuse": "Refuse"
+            }
+          },
+          "title": "Inbound handling",
+          "description": "What each receiving Agent's relay does with a Cable addressed to it, by Agent; deliver when absent.",
+          "default": {}
+        },
+        "channels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": "Channels",
+          "description": "The members of each custom channel.",
+          "default": {}
+        },
+        "max_fanout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "title": "Most recipients of a Cable",
+          "description": "Recipients one Cable may reach."
+        },
+        "sender_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "title": "Cables per second from a sender",
+          "description": "Cables a sender may send each second, over time."
+        },
+        "sender_burst": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Burst from a sender",
+          "description": "Cables a sender may send at once."
+        },
+        "scope_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "title": "Cables per second to an audience",
+          "description": "Cables an audience may be sent each second, over time."
+        },
+        "scope_burst": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295,
+          "title": "Burst to an audience",
+          "description": "Cables an audience may be sent at once."
+        },
+        "body_bytes": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "format": "bytes",
+          "title": "Longest body",
+          "description": "The longest body of a Cable."
+        },
+        "max_ttl": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "format": "seconds",
+          "title": "Longest lifetime",
+          "description": "The longest lifetime a sender may ask for."
+        },
+        "default_ttl": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "format": "seconds",
+          "title": "Lifetime when none is asked",
+          "description": "The lifetime of a Cable that asks for none."
+        },
+        "cross_operation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "compartments",
+                "station_grants"
+              ],
+              "x-enum-labels": {
+                "compartments": "A compartment as well as a grant",
+                "station_grants": "A grant alone: a reported weakening"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Crossing Operations",
+          "description": "What it takes for a Cable to cross Operations."
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "fields": {
+        "grants": {
+          "form": {}
+        }
+      }
+    },
+    "key": {
+      "title": "Cable relay",
       "description": "",
       "fixed": "settings"
     }

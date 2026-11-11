@@ -462,3 +462,415 @@ pub(crate) struct PoolForm {
     #[form(form = AccountForm)]
     account: BTreeMap<String, AccountForm>,
 }
+
+/// What a provider library needs before it loads.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum PluginRequireForm {
+    /// The pin or the publisher's signature: either suffices.
+    #[default]
+    #[map(rename = "either")]
+    #[schema(label = "Either the pin or the signature")]
+    Either,
+    /// The pin and the publisher's signature.
+    #[map(rename = "both")]
+    #[schema(label = "Both the pin and the signature")]
+    Both,
+}
+
+/// One provider library a Station accepts: the keys of a `[[library]]` entry, filed under its
+/// `file` (the record's key). At least one of the pin and the publisher is needed.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct PluginForm {
+    /// The digest its bytes must have, as `sha256:HEX`. A SHA-1 pin is a reported weakening.
+    #[schema(title = "Pinned to")]
+    pin: Option<String>,
+    /// The key whose signature it must carry, as `ed25519:HEX`; `FILE.sig` beside the library
+    /// signs its SHA-256. A publisher alone admits anything it signed, a reported weakening.
+    #[schema(title = "Signed by")]
+    publisher: Option<String>,
+    /// Whether the pin and the publisher are each enough, or both are needed.
+    #[schema(title = "Needs")]
+    require: Option<PluginRequireForm>,
+}
+
+/// A TLS version the policy offers.
+#[derive(Debug, Clone, Copy, ToValue, FromValue, Schema)]
+pub(crate) enum TlsVersionForm {
+    /// TLS 1.2.
+    #[map(rename = "1.2")]
+    #[schema(label = "TLS 1.2")]
+    V12,
+    /// TLS 1.3.
+    #[map(rename = "1.3")]
+    #[schema(label = "TLS 1.3")]
+    V13,
+}
+
+/// A digest a certificate pin may use.
+#[derive(Debug, Clone, Copy, ToValue, FromValue, Schema)]
+pub(crate) enum TlsDigestForm {
+    /// SHA-256.
+    #[map(rename = "sha256")]
+    #[schema(label = "SHA-256")]
+    Sha256,
+    /// SHA-384.
+    #[map(rename = "sha384")]
+    #[schema(label = "SHA-384")]
+    Sha384,
+    /// SHA-512.
+    #[map(rename = "sha512")]
+    #[schema(label = "SHA-512")]
+    Sha512,
+    /// SHA-1, for legacy interoperability only.
+    #[map(rename = "sha1")]
+    #[schema(label = "SHA-1: legacy only")]
+    Sha1,
+}
+
+/// A named set of algorithms the policy allows.
+#[derive(Debug, Clone, Copy, ToValue, FromValue, Schema)]
+pub(crate) enum TlsProfileForm {
+    /// Mozilla's server-side guideline, intermediate.
+    #[map(rename = "mozilla")]
+    #[schema(label = "Mozilla intermediate")]
+    Mozilla,
+    /// FIPS 140-3 approved algorithms; algorithm selection only.
+    #[map(rename = "fips-140-3-compliant")]
+    #[schema(label = "FIPS 140-3 algorithms")]
+    Fips1403Compliant,
+    /// FIPS 140-2 approved algorithms; algorithm selection only.
+    #[map(rename = "fips-140-2-compliant")]
+    #[schema(label = "FIPS 140-2 algorithms")]
+    Fips1402Compliant,
+    /// AWS-LC's FIPS module; needs a build with it.
+    #[map(rename = "fips-140-3-validated")]
+    #[schema(label = "FIPS 140-3 validated module")]
+    Fips1403Validated,
+    /// NSA's CNSA 1.0.
+    #[map(rename = "cnsa-1.0")]
+    #[schema(label = "CNSA 1.0")]
+    Cnsa1,
+    /// NSA's CNSA 2.0; TLS 1.3 and the aws-lc provider.
+    #[map(rename = "cnsa-2.0")]
+    #[schema(label = "CNSA 2.0")]
+    Cnsa2,
+}
+
+/// The crypto provider.
+#[derive(Debug, Clone, Copy, ToValue, FromValue, Schema)]
+pub(crate) enum TlsCryptoForm {
+    /// rustls's ring provider.
+    #[map(rename = "ring")]
+    #[schema(label = "ring")]
+    Ring,
+    /// rustls's aws-lc-rs provider; needs a build with it.
+    #[map(rename = "aws-lc")]
+    #[schema(label = "aws-lc")]
+    AwsLc,
+}
+
+/// The bounds of the queue of peers waiting to be accepted.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct TlsWaitingForm {
+    /// Entries one source may hold.
+    #[schema(title = "Entries per source")]
+    per_source: Option<u64>,
+    /// Entries the whole queue may hold.
+    #[schema(title = "Entries in all")]
+    total: Option<u64>,
+    /// Seconds before the same peer from the same source is recorded again.
+    #[schema(title = "Record the same peer again after", format = "seconds")]
+    rerecord: Option<f64>,
+}
+
+/// The Station TLS policy: the keys of the whole `tls` file, each over the intermediate preset.
+/// The client access list (`acl`) is kept as stored and edited as configuration.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct TlsForm {
+    /// TLS versions offered and accepted. Default: 1.2 and 1.3.
+    #[schema(title = "TLS versions")]
+    tls_versions: Option<Vec<TlsVersionForm>>,
+    /// An allow-list of cipher suites by IANA name; every suite the profiles give when empty.
+    #[schema(title = "Cipher suites")]
+    cipher_suites: Option<Vec<String>>,
+    /// An allow-list of key-exchange groups by name; every group the profiles give when empty.
+    #[schema(title = "Key-exchange groups")]
+    kx_groups: Option<Vec<String>>,
+    /// The algorithm profiles allowed. Default: Mozilla intermediate.
+    #[schema(title = "Algorithm profiles")]
+    cipher_profiles: Option<Vec<TlsProfileForm>>,
+    /// The crypto provider. Default: ring.
+    #[schema(title = "Crypto provider")]
+    crypto: Option<TlsCryptoForm>,
+    /// Digests a certificate pin may use. Default: SHA-256, SHA-384 and SHA-512.
+    #[schema(title = "Pin digests")]
+    pin_digests: Option<Vec<TlsDigestForm>>,
+    /// Whether a pinned certificate must be inside its validity dates. Default: yes.
+    #[schema(title = "Check validity dates")]
+    check_validity: Option<bool>,
+    /// Whether a pinned peer may present a chain. Default: no.
+    #[schema(title = "Allow a chain from a pinned peer")]
+    allow_chain_when_pinned: Option<bool>,
+    /// Whether TLS sessions may be resumed, which skips the certificate checks for a peer that
+    /// held a session. Default: no.
+    #[schema(title = "Allow session resumption")]
+    allow_resumption: Option<bool>,
+    /// Whether a TLS 1.2 connection must use the extended master secret. Default: yes.
+    #[schema(title = "Require the extended master secret")]
+    require_ems: Option<bool>,
+    /// The bounds of the waiting queue.
+    #[schema(title = "Waiting queue", advanced)]
+    waiting: Option<TlsWaitingForm>,
+}
+
+/// What a Cable grant lets an Agent do.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum CableActionForm {
+    /// Send a Cable to the scope.
+    #[default]
+    #[map(rename = "send")]
+    #[schema(label = "Send")]
+    Send,
+    /// Receive a Cable addressed to the scope.
+    #[map(rename = "receive")]
+    #[schema(label = "Receive")]
+    Receive,
+    /// Discover peers in the scope.
+    #[map(rename = "discover")]
+    #[schema(label = "Discover")]
+    Discover,
+    /// List and release held Cables addressed to the scope.
+    #[map(rename = "release")]
+    #[schema(label = "Release held Cables")]
+    Release,
+}
+
+/// The audience a Cable grant names.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum CableScopeForm {
+    /// One named Agent.
+    #[default]
+    #[map(rename = "agent")]
+    #[schema(label = "An Agent")]
+    Agent,
+    /// Every eligible Agent at one Station.
+    #[map(rename = "station")]
+    #[schema(label = "A Station")]
+    Station,
+    /// Every eligible Agent in one Theater.
+    #[map(rename = "theater")]
+    #[schema(label = "A Theater")]
+    Theater,
+    /// Every eligible Agent the relay reaches.
+    #[map(rename = "global")]
+    #[schema(label = "Everyone")]
+    Global,
+    /// The subscribers of one channel.
+    #[map(rename = "channel")]
+    #[schema(label = "A channel")]
+    Channel,
+    /// An Operation and every Operation under it.
+    #[map(rename = "operation")]
+    #[schema(label = "An Operation")]
+    Operation,
+    /// What one compartment covers; only for releasing held Cables.
+    #[map(rename = "compartment")]
+    #[schema(label = "A compartment")]
+    Compartment,
+}
+
+/// One explicit grant of the Cable relay.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct CableGrantForm {
+    /// The Agent the grant is for; `*` is every Agent.
+    #[schema(title = "Agent")]
+    agent: String,
+    /// What it lets the Agent do.
+    #[schema(title = "May")]
+    action: CableActionForm,
+    /// The kind of audience.
+    #[schema(title = "Audience")]
+    scope: CableScopeForm,
+    /// Which one, for an audience that has a name: the Station, Theater, channel, Operation or
+    /// compartment.
+    #[schema(title = "Named")]
+    name: Option<String>,
+}
+
+/// What a receiving Agent's relay does with a Cable addressed to it.
+#[derive(Debug, Clone, Copy, ToValue, FromValue, Schema)]
+pub(crate) enum CableInboundForm {
+    /// Place it in the inbox.
+    #[map(rename = "deliver")]
+    #[schema(label = "Deliver")]
+    Deliver,
+    /// Hold it for an authorized release.
+    #[map(rename = "hold")]
+    #[schema(label = "Hold")]
+    Hold,
+    /// Refuse it without revealing the recipient's policy.
+    #[map(rename = "refuse")]
+    #[schema(label = "Refuse")]
+    Refuse,
+}
+
+/// What it takes for a Cable to reach an Agent of another Operation.
+#[derive(Debug, Clone, Copy, ToValue, FromValue, Schema)]
+pub(crate) enum CrossOperationForm {
+    /// A compartment giving the sender `cable.send` there, as well as a grant.
+    #[map(rename = "compartments")]
+    #[schema(label = "A compartment as well as a grant")]
+    Compartments,
+    /// A grant alone, so a Station grant crosses every Operation. A reported weakening.
+    #[map(rename = "station_grants")]
+    #[schema(label = "A grant alone: a reported weakening")]
+    StationGrants,
+}
+
+/// The Cable relay: the keys of the whole `cables` file.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct CablesForm {
+    /// Explicit grants; nothing is allowed without one.
+    #[schema(title = "Grants")]
+    #[map(default)]
+    #[form(form = CableGrantForm)]
+    grants: Vec<CableGrantForm>,
+    /// What each receiving Agent's relay does with a Cable addressed to it, by Agent; deliver
+    /// when absent.
+    #[schema(title = "Inbound handling")]
+    #[map(default)]
+    inbound: BTreeMap<String, CableInboundForm>,
+    /// The members of each custom channel.
+    #[schema(title = "Channels")]
+    #[map(default)]
+    channels: BTreeMap<String, Vec<String>>,
+    /// Recipients one Cable may reach.
+    #[schema(title = "Most recipients of a Cable")]
+    max_fanout: Option<u64>,
+    /// Cables a sender may send each second, over time.
+    #[schema(title = "Cables per second from a sender")]
+    sender_rate: Option<f64>,
+    /// Cables a sender may send at once.
+    #[schema(title = "Burst from a sender")]
+    sender_burst: Option<u32>,
+    /// Cables an audience may be sent each second, over time.
+    #[schema(title = "Cables per second to an audience")]
+    scope_rate: Option<f64>,
+    /// Cables an audience may be sent at once.
+    #[schema(title = "Burst to an audience")]
+    scope_burst: Option<u32>,
+    /// The longest body of a Cable.
+    #[schema(title = "Longest body", format = "bytes")]
+    body_bytes: Option<crate::bounds::Limit>,
+    /// The longest lifetime a sender may ask for.
+    #[schema(title = "Longest lifetime", format = "seconds")]
+    max_ttl: Option<crate::bounds::TimeLimit>,
+    /// The lifetime of a Cable that asks for none.
+    #[schema(title = "Lifetime when none is asked", format = "seconds")]
+    default_ttl: Option<crate::bounds::Seconds>,
+    /// What it takes for a Cable to cross Operations.
+    #[schema(title = "Crossing Operations")]
+    cross_operation: Option<CrossOperationForm>,
+}
+
+/// The words a Mission's progress is written in on a Source instance.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct SourceWordsForm {
+    /// While an Agent works.
+    #[schema(title = "While working")]
+    working: Option<String>,
+    /// While the Mission waits for an answer on the issue.
+    #[schema(title = "While waiting for an answer")]
+    waiting: Option<String>,
+    /// While the Mission is paused.
+    #[schema(title = "While paused")]
+    paused: Option<String>,
+    /// When the Mission ended successfully.
+    #[schema(title = "When done")]
+    done: Option<String>,
+    /// When the Mission ended without completing.
+    #[schema(title = "When failed")]
+    failed: Option<String>,
+}
+
+/// What reopens an item whose Mission settled.
+#[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
+pub(crate) enum SourceReopenForm {
+    /// A label added after the Mission settled.
+    #[default]
+    #[map(rename = "label")]
+    #[schema(label = "A label added again")]
+    Label,
+    /// A label, or a comment AI6 did not write. A reported weakening.
+    #[map(rename = "comment")]
+    #[schema(label = "A label or a comment")]
+    Comment,
+    /// Nothing: a settled item stays settled.
+    #[map(rename = "never")]
+    #[schema(label = "Never")]
+    Never,
+}
+
+/// One Source instance of an Operation, `[operation.<id>.sources.<name>]`: the keys the Station
+/// reads, then the chosen provider's own settings beside them. A bare string under `sources` is
+/// shorthand for the provider's `target`.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct SourceInstanceForm {
+    /// The Source provider, from those the Stations report; the instance's name when empty.
+    #[schema(title = "Provider", format = "provider:ai6_source")]
+    provider: Option<String>,
+    /// Whether items are polled in; false keeps the instance for posting only.
+    #[schema(title = "Take items in")]
+    intake: Option<bool>,
+    /// Seconds between polls, at least the Station's shortest interval.
+    #[schema(title = "Poll every", format = "seconds")]
+    interval_secs: Option<u64>,
+    /// The labels a Mission's milestones write.
+    #[schema(title = "Status labels", advanced)]
+    #[map(default)]
+    status_labels: SourceWordsForm,
+    /// The workflow transitions a Mission's milestones make.
+    #[schema(title = "Status transitions", advanced)]
+    #[map(default)]
+    status_transitions: SourceWordsForm,
+    /// The only labels an Agent may add or remove on a linked issue.
+    #[schema(title = "Labels Agents may touch", advanced)]
+    #[map(default)]
+    agent_labels: Vec<String>,
+    /// The workflow transitions an Agent may make without green ink.
+    #[schema(title = "Transitions Agents may make", advanced)]
+    #[map(default)]
+    agent_transitions: Vec<String>,
+    /// The priority a mirrored issue takes here, by the priority it has where it comes from.
+    #[schema(title = "Priority map", advanced)]
+    #[map(default)]
+    priority_map: BTreeMap<String, String>,
+    /// What reopens an item whose Mission settled.
+    #[schema(title = "Reopen a settled item on", advanced)]
+    reopen: Option<SourceReopenForm>,
+    /// The chosen provider's settings, written beside the provider's name.
+    #[schema(title = "Provider settings", format = "flat-settings-of:provider")]
+    #[map(with = guatiao_serde::adapt::object, default)]
+    settings: serde_json::Map<String, serde_json::Value>,
+}
+
+/// `#[map(with)]` for an Operation's `sources`: a table of any shape on the way in and out, drawn
+/// as a table of [`SourceInstanceForm`]s.
+pub(crate) mod source_instances {
+    pub use guatiao_serde::adapt::{from_value, to_value_in};
+
+    use super::SourceInstanceForm;
+
+    /// A table of Source instances.
+    pub fn kind(alloc: guatiao::Alloc) -> guatiao::schema::KindBuilder {
+        use guatiao::Schema;
+        guatiao::schema::KindBuilder::map_of_in(alloc, SourceInstanceForm::kind(alloc))
+    }
+}

@@ -2148,7 +2148,8 @@ pub(crate) struct OperationDefinition {
 
     /// Trackers and CI this Operation takes briefs from; each source's settings are its own.
     #[schema(title = "Work sources", section = "sources", advanced)]
-    #[map(with = guatiao_serde::adapt::object, default)]
+    #[map(with = crate::directorates::m::family_forms::source_instances, default)]
+    #[form(form = crate::directorates::m::family_forms::SourceInstanceForm)]
     sources: toml::Table,
     /// Whether Source items are reported to the watch, which decides what each becomes, or
     /// queued as briefs at once.

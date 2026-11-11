@@ -108,7 +108,8 @@ struct Family {
 
 /// The route kinds gated by `config.read` and `config.manage` on `config:<family>`, and the
 /// family each names.
-pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 13] = [
+pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 14] = [
+    ("station", ConfigRecord::Station),
     ("plugins", ConfigRecord::Plugin),
     ("tls", ConfigRecord::Tls),
     ("cables", ConfigRecord::Cables),
@@ -2152,6 +2153,10 @@ mod tests {
         assert_eq!(kind("watch")["allowed"], json!(["config.read"]));
         assert_eq!(kind("watch")["resource"], "config:watch");
         assert_eq!(kind("agent")["allowed"], json!(["roster.read"]));
+        // The Station record is served like the other station-scoped families.
+        assert_eq!(kind("station")["route"], "station");
+        assert_eq!(kind("station")["station_scoped"], true);
+        assert_eq!(kind("station")["singleton"], true);
 
         // The singular name routes like the plural.
         let by_name = call(

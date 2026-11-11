@@ -18,7 +18,10 @@ const KINDS: [ConfigRecord; 9] = [
 ];
 
 /// The families whose records their own parsers read; their forms are declared apart.
-const FAMILIES: [ConfigRecord; 8] = [
+const FAMILIES: [ConfigRecord; 11] = [
+    ConfigRecord::Plugin,
+    ConfigRecord::Tls,
+    ConfigRecord::Cables,
     ConfigRecord::Theater,
     ConfigRecord::Loadout,
     ConfigRecord::Sandbox,
@@ -135,7 +138,7 @@ fn full_example(record: ConfigRecord) -> Value {
                     },
                     "00": {"missions": 2}
                 },
-                "sources": {"tracker": {"kind": "github", "repository": "a/b", "every": 60}},
+                "sources": {"tracker": {"provider": "github", "intake": true, "interval_secs": 60}},
                 "sleepers": {
                     "round": {
                         "schedule": "0 6 * * 1",
@@ -343,7 +346,30 @@ fn every_kind_has_a_form_that_fits_its_schema() {
         let form = record.form().unwrap();
         assert!(form.is_some(), "{record:?}");
     }
-    assert_eq!(ConfigRecord::Plugin.form(), Ok(None));
+    // Every family a person edits has one; the access policies have pages of their own.
+    for record in ConfigRecord::ALL {
+        let form = record.form().unwrap();
+        let own_page = matches!(record, ConfigRecord::Access | ConfigRecord::OperationAccess);
+        assert_eq!(form.is_none(), own_page, "{record:?}");
+    }
+}
+
+#[test]
+fn the_station_form_draws_the_whole_record() {
+    let form = ConfigRecord::Station.form().unwrap().unwrap();
+    assert_eq!(form.key.fixed.as_deref(), Some(ConfigRecord::SINGLETON_KEY));
+    let properties = form.schema["properties"].as_object().unwrap();
+    for key in [
+        "max_concurrent_missions",
+        "terminal",
+        "scheduler",
+        "providers",
+        "partial_line_bytes",
+    ] {
+        assert!(properties.contains_key(key), "{key}");
+    }
+    assert_eq!(properties["terminal"]["format"], "provider:ai6_terminal");
+    assert_eq!(untitled(&form.schema), Vec::<String>::new());
 }
 
 #[test]
@@ -570,6 +596,38 @@ fn family_example(record: ConfigRecord) -> Value {
                 }
             }
         }),
+        ConfigRecord::Plugin => json!({
+            "pin": format!("sha256:{}", "ab".repeat(32)),
+            "publisher": format!("ed25519:{}", "cd".repeat(32)),
+            "require": "both"
+        }),
+        ConfigRecord::Tls => json!({
+            "tls_versions": ["1.3"],
+            "cipher_suites": ["TLS13_AES_256_GCM_SHA384"],
+            "kx_groups": ["X25519"],
+            "cipher_profiles": ["mozilla"],
+            "crypto": "ring",
+            "pin_digests": ["sha256"],
+            "check_validity": true,
+            "allow_chain_when_pinned": false,
+            "allow_resumption": false,
+            "require_ems": true,
+            "waiting": {"per_source": 8, "total": 100, "rerecord": 60}
+        }),
+        ConfigRecord::Cables => json!({
+            "grants": [{"agent": "007", "action": "send", "scope": "station", "name": "hq"}],
+            "inbound": {"007": "hold"},
+            "channels": {"ops": ["007"]},
+            "max_fanout": 8,
+            "sender_rate": 2.0,
+            "sender_burst": 4,
+            "scope_rate": 5.0,
+            "scope_burst": 10,
+            "body_bytes": 4096,
+            "max_ttl": 3600,
+            "default_ttl": 600,
+            "cross_operation": "compartments"
+        }),
         other => panic!("no example for {other:?}"),
     }
 }
@@ -636,6 +694,30 @@ fn a_family_record_fits_its_form_and_is_read_by_its_own_parser() {
             std::error::Error::source(&error)
         )
     });
+
+    // The library, TLS and Cable records, read by the parsers that accept or refuse them.
+    let library = json!({
+        "library": [{
+            "file": "ai6_claude.dll",
+            "pin": format!("sha256:{}", "ab".repeat(32)),
+            "publisher": format!("ed25519:{}", "cd".repeat(32)),
+            "require": "both"
+        }]
+    });
+    let library =
+        toml::to_string(&crate::directorates::m::config::json_to_toml(library).unwrap()).unwrap();
+    crate::directorates::registry::bona_fides::PinSet::from_toml(&library).unwrap();
+    #[cfg(feature = "station-tls")]
+    {
+        use serde::Deserialize as _;
+        coqui_peer_tls::Policy::deserialize(&family_example(ConfigRecord::Tls)).unwrap();
+    }
+    let cables = toml::to_string(
+        &crate::directorates::m::config::json_to_toml(family_example(ConfigRecord::Cables))
+            .unwrap(),
+    )
+    .unwrap();
+    crate::directorates::registry::cables::CableConfig::parse_toml(&cables).unwrap();
 
     let mut theater = family_example(ConfigRecord::Theater);
     theater["access"] = json!({"transport": {"provider": "qemu", "config": {}}});
@@ -965,6 +1047,10 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("secret_providers", ConfigRecord::SecretProvider),
         ("pools", ConfigRecord::Pool),
         ("unex", ConfigRecord::Unex),
+        ("station", ConfigRecord::Station),
+        ("plugins", ConfigRecord::Plugin),
+        ("tls", ConfigRecord::Tls),
+        ("cables", ConfigRecord::Cables),
     ]
     .into_iter()
     .map(|(kind, record)| {

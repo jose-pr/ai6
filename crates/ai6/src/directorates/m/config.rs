@@ -524,7 +524,14 @@ impl Settings {
 /// in place of its built-in default.
 #[non_exhaustive]
 #[derive(
-    Debug, Clone, Default, PartialEq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
 )]
 #[map(deny_unknown_fields)]
 pub struct StationRuntime {

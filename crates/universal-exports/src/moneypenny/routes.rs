@@ -77,6 +77,10 @@ const ROSTER_KINDS: &[&str] = &[
     "secret",
     "secret_provider",
     "pool",
+    "plugin",
+    "tls",
+    "cables",
+    "station",
     "unex",
 ];
 const MEMORY_SCOPES: &[&str] = &["global"];

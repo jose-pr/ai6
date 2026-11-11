@@ -14,8 +14,8 @@ use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::ConfigRecord;
 use crate::directorates::m::cover::CoverDefinition;
 use crate::directorates::m::family_forms::{
-    LoadoutForm, McpForm, OverlayForm, PoolForm, SandboxForm, SecretForm, SecretProviderForm,
-    TheaterForm,
+    CablesForm, LoadoutForm, McpForm, OverlayForm, PluginForm, PoolForm, SandboxForm, SecretForm,
+    SecretProviderForm, TheaterForm, TlsForm,
 };
 use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
@@ -211,7 +211,17 @@ impl ConfigRecord {
             Self::Unex => built::<crate::directorates::m::config::UnexRecord>(the_one(
                 "Universal Exports settings",
             )),
-            _ => return Ok(None),
+            Self::Station => built::<crate::directorates::m::config::StationRuntime>(the_one(
+                "Station settings",
+            )),
+            Self::Plugin => built::<PluginForm>(named(
+                "Library file",
+                "The library's file name on the plugin path, such as ai6_claude.dll, not a path. It cannot be changed later.",
+            )),
+            Self::Tls => built::<TlsForm>(the_one("TLS policy")),
+            Self::Cables => built::<CablesForm>(the_one("Cable relay")),
+            // The access policies have pages of their own.
+            Self::Access | Self::OperationAccess => return Ok(None),
         }
         .map(Some)
     }
