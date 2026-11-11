@@ -87,3 +87,6 @@ void trustCaFile(
   final path = caFilePath(caFile, configPath);
   (context ?? SecurityContext.defaultContext).setTrustedCertificates(path);
 }
+
+/// Only a web page has a bootstrap script that fetches its `ai6.cfg`.
+Future<({int status, String text})?> pageConfig() async => null;

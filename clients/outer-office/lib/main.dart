@@ -109,28 +109,23 @@ Stream<LicenseEntry> fontLicenses({required bool web}) async* {
 }
 
 Future<void> _startWeb() async {
-  String? terminalRuntimeError;
-  if (!_demoMode) {
-    try {
-      await guatiao.loadModule(Uri.base.resolve('ai6_guatiao.wasm'));
-    } on Object {
-      terminalRuntimeError = 'The terminal protocol could not be initialized.';
-    }
-  }
+  // The wasm is needed by the first terminal or form, which only a signed-in person reaches, so
+  // the page does not wait for it; the board holds the first sign-in until it is ready.
+  final runtime = _demoMode ? Future<String?>.value() : _loadTerminalRuntime();
+  final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final config = await loadWebConfig(Uri.base);
   OoRouteLimits.current = config.routeLimits;
   OoArtLimits.current = config.art;
-  final appearance = AppearancePreferences(SharedPreferences.getInstance());
   final board = MissionBoard(
     apiOrigin: _apiOrigin(config),
     demo: _demoMode,
     themeId: config.defaultTheme(warn: debugPrint),
-    terminalRuntimeError: terminalRuntimeError,
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
     pollInterval: config.limits.refresh.sessions,
     limits: config.limits,
   );
+  board.followRuntime(runtime);
   // Only here: the session cookie is a browser's, and the desktop app's sign-in stays in memory.
   unawaited(board.resumeSignIn());
   try {
@@ -154,6 +149,16 @@ Future<void> _startWeb() async {
       chatSettings: config.chat,
     ),
   );
+}
+
+/// Loads the guatiao module; the error to show where it is needed when it cannot be.
+Future<String?> _loadTerminalRuntime() async {
+  try {
+    await guatiao.loadModule(Uri.base.resolve('ai6_guatiao.wasm'));
+    return null;
+  } on Object {
+    return 'The terminal protocol could not be initialized.';
+  }
 }
 
 void _startDesktop() {
@@ -401,7 +406,21 @@ class MissionBoard extends ChangeNotifier
 
   /// `ai6.cfg`'s refresh, control, page, terminal and input settings.
   final OoLimits limits;
-  final String? terminalRuntimeError;
+  String? terminalRuntimeError;
+
+  /// Completes once the module the terminals and forms need has loaded or failed; a sign-in waits
+  /// for it so that nothing drawn after it finds the module missing.
+  Future<void> runtimeReady = Future<void>.value();
+
+  /// Follows the module's load: its error, if any, becomes [terminalRuntimeError].
+  void followRuntime(Future<String?> loading) {
+    runtimeReady = loading.then((error) {
+      if (error == null) return;
+      terminalRuntimeError = error;
+      notifyListeners();
+    });
+  }
+
   final Future<void> Function(String themeId)? onThemeChanged;
   final Future<void> Function(bool backdrop)? onBackdropChanged;
 
@@ -3233,6 +3252,7 @@ class MissionBoard extends ChangeNotifier
 
   /// Takes the token of a gateway's answer and reads the board with it.
   Future<void> _signedIn(Map<String, dynamic> body) async {
+    await runtimeReady;
     accessToken = body['token'] as String;
     _active = true;
     _tokenTimes(body);

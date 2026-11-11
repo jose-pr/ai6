@@ -49,7 +49,7 @@ void main() {
     // Every path that cannot read a valid value falls back to none.
     expect(
       RegExp(r"return 'none';").allMatches(bootstrap).length,
-      greaterThanOrEqualTo(3),
+      greaterThanOrEqualTo(2),
     );
     expect(bootstrap, contains('config: ooOrigins[cdn]'));
     // The engine takes the fallback font base only from initializeEngine.

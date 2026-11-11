@@ -55,23 +55,35 @@ void trustDesktopCa(OoConfig config) {
 String? webConfigText;
 
 /// The web page's `ai6.cfg`, beside `index.html` at [page]: a public one, read-only deployment
-/// defaults, that `ai6 config public` writes. [OoConfig.none] when it is missing or unreadable,
-/// which is logged.
+/// defaults, that `ai6 config public` writes. The page's bootstrap script has already asked for
+/// it, and its answer is used; only without one is it fetched here, so a load makes one request.
+/// [OoConfig.none] when it is missing or unreadable, which is logged.
 Future<OoConfig> loadWebConfig(Uri page, {http.Client? client}) async {
+  try {
+    final fetched = await platform.pageConfig();
+    if (fetched != null) return _webConfig(fetched.status, fetched.text);
+  } on Object catch (error) {
+    debugPrint('Outer Office: $configFileName: $error; using the defaults');
+    return OoConfig.none;
+  }
   final owned = client == null;
   final reader = client ?? http.Client();
   try {
     final response = await reader.get(page.resolve(configFileName));
-    if (response.statusCode == 404) return OoConfig.none;
-    if (response.statusCode != 200) {
-      throw FormatException('HTTP ${response.statusCode}');
-    }
-    webConfigText = response.body;
-    return OoConfig.parse(response.body);
+    return _webConfig(response.statusCode, response.body);
   } on Object catch (error) {
     debugPrint('Outer Office: $configFileName: $error; using the defaults');
     return OoConfig.none;
   } finally {
     if (owned) reader.close();
   }
+}
+
+OoConfig _webConfig(int status, String body) {
+  if (status == 404) return OoConfig.none;
+  if (status != 200) {
+    throw FormatException(status == 0 ? 'not reachable' : 'HTTP $status');
+  }
+  webConfigText = body;
+  return OoConfig.parse(body);
 }

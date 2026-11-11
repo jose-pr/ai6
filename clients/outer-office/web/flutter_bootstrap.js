@@ -1,3 +1,11 @@
+// The public ai6.cfg beside this page is asked for here, before anything else, and the app reads
+// the same answer from window.ooConfig instead of asking again: one request per load. It resolves
+// to the HTTP status (0 when unreachable) and the text, and never rejects.
+window.ooConfig = fetch('ai6.cfg', {cache: 'no-cache'}).then(
+  async (response) => ({status: response.status, text: response.ok ? await response.text() : ''}),
+  () => ({status: 0, text: ''}),
+);
+
 {{flutter_js}}
 {{flutter_build_config}}
 
@@ -16,14 +24,9 @@ const ooOrigins = {
 // The `cdn` value of `[oo.assets]`, in the formats ai6.cfg takes: JSON after a `#!json` line, YAML
 // after `#!yaml`, TOML otherwise. Anything unreadable is "none".
 async function ooCdn() {
-  let text;
-  try {
-    const response = await fetch('ai6.cfg', {cache: 'no-cache'});
-    if (!response.ok) return 'none';
-    text = await response.text();
-  } catch (_) {
-    return 'none';
-  }
+  const answer = await window.ooConfig;
+  if (answer.status !== 200) return 'none';
+  const text = answer.text;
   const lines = text.split(/\r?\n/);
   const first = lines[0].trim();
   let value = null;
