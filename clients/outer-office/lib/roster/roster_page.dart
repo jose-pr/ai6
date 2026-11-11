@@ -10,6 +10,7 @@ import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_link.dart';
+import 'found_libraries.dart';
 import 'record_editor.dart';
 
 /// The roster revision a Station runs, what it refused and which changed files wait for a
@@ -728,6 +729,11 @@ class _RosterPageState extends State<RosterPage> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(error),
+          ),
+        if (_kind == 'plugins')
+          FoundLibrariesPanel(
+            board: widget.board,
+            onApproved: () => unawaited(_load()),
           ),
         if (_weakened.isNotEmpty)
           Padding(

@@ -76,6 +76,7 @@ const _areas = <(String, Map<String, String>)>[
   ('Stations', {'station.read': 'see', 'station.configure': 'configure'}),
   ('Roster', {'roster.read': 'see', 'roster.manage': 'change'}),
   ('Configuration', {'config.read': 'see', 'config.manage': 'change'}),
+  ('Provider libraries', {'plugin.manage': 'approve'}),
 ];
 
 /// [actions] by area in plain words; an action this build has no words for goes under

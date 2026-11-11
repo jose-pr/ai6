@@ -40,6 +40,7 @@ import 'issues/linked_issues.dart';
 import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
+import 'roster/found_libraries.dart';
 import 'roster/record_editor.dart';
 import 'roster/reported_providers.dart';
 import 'roster/roster_page.dart';
@@ -1691,6 +1692,70 @@ class MissionBoard extends ChangeNotifier
   bool canManageRecords(String kind) => rosterConfigKinds.contains(kind)
       ? !demo && (userSession?.config[kind]?.contains('config.manage') ?? false)
       : canManageRoster;
+
+  /// Whether the person may approve a provider library a Station found: the `plugin.manage`
+  /// action, which only the chief holds until a role is given it.
+  bool get canManagePlugins => !demo && globalActions.contains('plugin.manage');
+
+  /// The provider libraries [stationId] found on its plugin paths and did not load. Needs
+  /// `station.read` on the Station.
+  Future<List<FoundLibrary>> loadFoundLibraries(String stationId) async {
+    if (demo) return const [];
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/stations/${Uri.encodeComponent(stationId)}/libraries',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('The gateway refused the libraries of $stationId.');
+    }
+    return (((jsonDecode(response.body) as Map<String, dynamic>)['libraries']
+                as List<dynamic>?) ??
+            const [])
+        .map((item) => FoundLibrary.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Approves [library] for [stationId]: its `plugin` record pins these bytes, or with
+  /// [byPublisher] trusts the key that signed them. Without [confirm] the gateway stores nothing
+  /// and says what would change; with it the record is stored. Throws [RosterRefused] with the
+  /// gateway's reason and [RosterChanged] when the record changed meanwhile.
+  Future<LibraryApproval> approveLibrary(
+    String stationId,
+    FoundLibrary library, {
+    bool byPublisher = false,
+    bool confirm = false,
+  }) async {
+    if (demo) {
+      throw StateError('Approving a library is unavailable in preview.');
+    }
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/stations/${Uri.encodeComponent(stationId)}/libraries/approve',
+      body: {
+        'file': library.file,
+        'digest': library.digest,
+        'trust': byPublisher ? 'publisher' : 'pin',
+        'confirm': confirm,
+      },
+    );
+    switch (response.statusCode) {
+      case 200:
+        return LibraryApproval.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
+      case 422:
+        throw RosterRefused(
+          (jsonDecode(response.body) as Map<String, dynamic>)['refused']
+              as String,
+        );
+      case 409:
+        throw const RosterChanged();
+      case 403:
+        throw StateError('Approving a library takes the plugin.manage action.');
+      default:
+        throw StateError('The gateway refused the approval.');
+    }
+  }
 
   /// Whether the person may list any record the Roster page shows.
   bool get canReadAnyRecords =>
