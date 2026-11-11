@@ -112,6 +112,27 @@ key (`ID via key KEYID`).
 Outer Office shows the person's keys in a **Keys** section of their profile (the operator
 account dialog), with the same make, list and revoke.
 
+## People by name
+
+An audit record, an access rule and a page name a person by the ID their directory gave them (a
+user ID, a directory SID), which is no way to tell who it is. The gateway keeps what the directory
+said of each person who signs in (the account name, the name to show and the groups) in the Registry,
+under `principals`, and names them where it shows an ID:
+
+- `GET /v1/user/audit` carries `actor_name` beside `actor` for a person it has seen sign in.
+- `POST /v1/user/principals` with `{"ids": [...]}` answers the people among the IDs it has seen. A
+  person is always named to themself; to name others it needs `access.read`, or `audit.read` on an
+  Operation.
+- `GET /v1/user/principals?q=` finds people and groups whose name, account name or ID holds every
+  word of `q`, for the rule picker; it needs `access.read`.
+- A page's classification bar says "for you" to its owner and names the owner to anyone it is shared
+  with.
+
+The name is for display only and decides nothing. A person never seen has no record: their ID is shown
+as it is. A record is written when the person is first seen, when their name or groups change, and
+otherwise at most once in `[registry.limits.principals] refresh` (300 s by default); the other limits of
+that table bound the people kept, a record and a name.
+
 ## The access policy
 
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,

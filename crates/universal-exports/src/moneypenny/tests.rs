@@ -5483,7 +5483,7 @@ async fn pages_responses_carry_the_sandbox_and_the_bar_frames_the_page() {
     assert!(frame.headers().get("access-control-allow-origin").is_none());
     let html = frame.text().await.unwrap();
     assert!(
-        html.contains("Made by Moneypenny for operator-007, not part of Outer Office"),
+        html.contains("Made by Moneypenny for you, not part of Outer Office"),
         "{html}"
     );
     assert!(html.contains("dashboard"));

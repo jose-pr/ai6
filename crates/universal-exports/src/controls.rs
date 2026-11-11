@@ -880,6 +880,8 @@ pub(crate) mod tests {
                 .contains(&lookup.value.as_str())
                 .then(|| Person {
                     id: lookup.value.clone(),
+                    display_name: (lookup.value == "operator-007")
+                        .then(|| "Ada Lovelace".to_owned()),
                     name: lookup.value,
                     ..Person::default()
                 }))

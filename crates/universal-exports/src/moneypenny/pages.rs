@@ -1525,8 +1525,13 @@ async fn frame(
     audit_opened(&gateway, &viewer, &page, network).await;
     let base = pages_base(&gateway);
     let src = format!("{token}/f/");
+    let owner = if viewer.id == page.person_id {
+        String::new()
+    } else {
+        crate::principals::label_of(&gateway, &page.person_id).await
+    };
     let mut response =
-        frame_html(&page, &Viewing::Person(&viewer.id), &src, &limits).into_response();
+        frame_html(&page, &Viewing::Person(&viewer.id), &owner, &src, &limits).into_response();
     *response.headers_mut() = frame_headers(&base);
     response
 }
@@ -1565,7 +1570,13 @@ enum Viewing<'a> {
 
 /// The frame: the classification bar above an iframe of the page's entry under `src`. A
 /// viewer's frame drops the bar with `[assistant.pages] frame = false`; a public one never does.
-fn frame_html(page: &Page, viewing: &Viewing, src: &str, limits: &AssistantPageLimits) -> String {
+fn frame_html(
+    page: &Page,
+    viewing: &Viewing,
+    owner: &str,
+    src: &str,
+    limits: &AssistantPageLimits,
+) -> String {
     let expiry = match page.expires_at {
         Some(end) => format!("Expires {}.", escape(&utc_text(end))),
         None => "Remembered.".to_owned(),
@@ -1577,12 +1588,17 @@ fn frame_html(page: &Page, viewing: &Viewing, src: &str, limits: &AssistantPageL
     );
     let (note, bar) = match viewing {
         Viewing::Person(viewer) => {
-            let mut note = format!(
-                "Made by Moneypenny for {}, not part of Outer Office. {what} {expiry}",
-                escape(&page.person_id),
-            );
+            // The owner's name (their ID when never seen), or "you" to the owner.
+            let mut note = if *viewer == page.person_id {
+                format!("Made by Moneypenny for you, not part of Outer Office. {what} {expiry}")
+            } else {
+                format!(
+                    "Made by Moneypenny for {}, not part of Outer Office. {what} {expiry}",
+                    escape(owner),
+                )
+            };
             if *viewer != page.person_id {
-                let _ = write!(note, " Shared by {}.", escape(&page.person_id));
+                let _ = write!(note, " Shared by {}.", escape(owner));
             }
             (note, limits.frame)
         }
@@ -1851,7 +1867,7 @@ async fn public_frame(State(gateway): State<Gateway>, UrlPath(token): UrlPath<St
     let Some((page, limits)) = public_page(&gateway, &token).await else {
         return gone();
     };
-    let mut response = frame_html(&page, &Viewing::Public, "f/", &limits).into_response();
+    let mut response = frame_html(&page, &Viewing::Public, "", "f/", &limits).into_response();
     *response.headers_mut() = frame_headers(&pages_base(&gateway));
     response
 }

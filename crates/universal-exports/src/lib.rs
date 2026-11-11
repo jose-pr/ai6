@@ -22,6 +22,9 @@ mod moneypenny;
 mod orders;
 mod page_access;
 mod pools;
+mod principals;
+#[cfg(test)]
+mod principals_tests;
 #[cfg(test)]
 mod profile_tests;
 mod providers;
@@ -597,6 +600,8 @@ pub struct Gateway {
     liaison: Option<Arc<liaison::LiaisonConfig>>,
     /// The providers this gateway process has loaded, reported beside each Station's.
     own_providers: Arc<Vec<ai6::providers::ProviderEntry>>,
+    /// What was last written for each person seen signing in.
+    sightings: Arc<principals::Sightings>,
 }
 
 /// A bearer the gateway makes for itself to read, in this process, as a person who proved who
@@ -706,6 +711,7 @@ impl Gateway {
             images: None,
             liaison: None,
             own_providers: Arc::default(),
+            sightings: Arc::default(),
         }
     }
 
@@ -1945,6 +1951,10 @@ impl Gateway {
             .route("/v1/auth/session", get(access_session))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
+            .route(
+                "/v1/user/principals",
+                get(principals::search).post(principals::lookup),
+            )
             .route(
                 "/v1/user/operations/{operation_id}/sessions/{session_id}/context",
                 get(transcripts::mission_context),
@@ -3900,6 +3910,12 @@ async fn store_session_cookie(
 }
 
 async fn resolve_user(gateway: &Gateway, token: &str) -> Result<Person, ApiError> {
+    let person = resolve_user_unnoted(gateway, token).await?;
+    principals::note(gateway, &person);
+    Ok(person)
+}
+
+async fn resolve_user_unnoted(gateway: &Gateway, token: &str) -> Result<Person, ApiError> {
     match resolve_digest(gateway, access_token_digest(token)).await {
         // Not a sign-in's token: a key provider may claim it as a key.
         Err(error)
@@ -4781,11 +4797,20 @@ async fn release_user_quarantine(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// An audit record with the name of the person who acted, when the gateway has seen them sign in.
+#[derive(Serialize)]
+struct AuditEntry {
+    #[serde(flatten)]
+    record: AuditRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_name: Option<String>,
+}
+
 async fn user_audit(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
     Query(query): Query<UserAuditQuery>,
-) -> Result<Json<Vec<AuditRecord>>, ApiError> {
+) -> Result<Json<Vec<AuditEntry>>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation_filter = query
         .operation_id
@@ -4897,7 +4922,25 @@ async fn user_audit(
     })
     .await
     .map_err(|_| ApiError::internal())??;
-    Ok(Json(entries))
+    let people = principals::named(
+        &gateway,
+        entries
+            .iter()
+            .map(|record| principals::actor_person(&record.actor).to_owned())
+            .collect(),
+    )
+    .await?;
+    Ok(Json(
+        entries
+            .into_iter()
+            .map(|record| AuditEntry {
+                actor_name: people
+                    .get(principals::actor_person(&record.actor))
+                    .map(|person| person.label().to_owned()),
+                record,
+            })
+            .collect(),
+    ))
 }
 
 /// `POST /v1/auth/logout`: ends the sign-in of the presented token, of the session cookie when
