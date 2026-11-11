@@ -83,6 +83,10 @@ pub struct RegistryLimits {
     #[schema(title = "Station logbooks")]
     #[map(default)]
     pub logbook: LogbookLimits,
+    /// `[registry.limits.principals]`: the people seen signing in.
+    #[schema(title = "People seen signing in")]
+    #[map(default)]
+    pub principals: PrincipalLimits,
     /// `[registry.limits.memories]`: memory entries, per scope.
     #[schema(title = "Memory entries")]
     #[map(default)]
@@ -577,6 +581,46 @@ impl Default for ApiKeyLimits {
             keys: Limit::at(100_000),
             scopes: Limit::at(256),
             text_bytes: Limit::at(512),
+        }
+    }
+}
+
+/// `[registry.limits.principals]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct PrincipalLimits {
+    /// Bytes of one person's record.
+    #[schema(title = "Largest person record", format = "bytes")]
+    #[map(default = PrincipalLimits::default().record_bytes)]
+    pub record_bytes: Limit,
+    /// People kept.
+    #[schema(title = "People kept")]
+    #[map(default = PrincipalLimits::default().principals)]
+    pub principals: Limit,
+    /// Groups kept on one person.
+    #[schema(title = "Groups on a person")]
+    #[map(default = PrincipalLimits::default().groups)]
+    pub groups: Limit,
+    /// Bytes of a person's ID, names and each group.
+    #[schema(title = "Longest ID, name or group", format = "bytes")]
+    #[map(default = PrincipalLimits::default().text_bytes)]
+    pub text_bytes: Limit,
+    /// How old a person's last sighting may be before another sign-in writes it again; a
+    /// changed name or group is written at once.
+    #[schema(title = "Sighting refresh")]
+    #[map(default = PrincipalLimits::default().refresh)]
+    pub refresh: TimeLimit,
+}
+
+impl Default for PrincipalLimits {
+    fn default() -> Self {
+        Self {
+            record_bytes: Limit::at(16 * KIB),
+            principals: Limit::at(1_000_000),
+            groups: Limit::at(1_024),
+            text_bytes: Limit::at(512),
+            refresh: TimeLimit::secs(300),
         }
     }
 }

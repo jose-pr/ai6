@@ -24,6 +24,7 @@ pub mod logbook;
 pub mod memories;
 pub mod mission_ids;
 pub mod mission_issues;
+pub mod principals;
 pub mod products;
 pub mod quarantine;
 pub mod reports;

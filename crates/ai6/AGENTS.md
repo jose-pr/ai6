@@ -1255,6 +1255,12 @@ pub struct SignInProvider { provider: String, config: Option<ProviderConfig> }  
 /// last_used_at); the secret and its hash are the key provider's. `ApiKeyStore`: `put_api_key`,
 /// `api_key`, `api_keys(owner?)`, `remove_api_key`, `touch_api_key(id, at, within)`; limits at
 /// `[registry.limits.api_keys]` (`ApiKeyLimits`).
+/// The people seen signing in, for display only. `PrincipalRecord` (id = the directory's person
+/// ID, name, display_name, groups, first_seen, last_seen; `label()` is the display name else the
+/// name). `PrincipalStore`: `note_principal(seen)` writes a new person, a changed name or groups,
+/// or a sighting older than `refresh` (true when it wrote; keeps the first sighting),
+/// `principal(id)`, `principals()` by label; limits at `[registry.limits.principals]`
+/// (`PrincipalLimits`: record_bytes, principals, groups, text_bytes, refresh 300 s).
 /// `KeyScope` (`ACTION@SCOPE`: `FromStr`, `Display`, `covers`) narrows a person: `narrow_to_key`
 /// stamps `KEY_SCOPES_ATTRIBUTE`/`KEY_ID_ATTRIBUTE` on a `Person`, `key_permits` judges a request,
 /// `KeyNarrowed` wraps an `Authorizer` with it, `EffectiveAccess` applies it and is never chief for

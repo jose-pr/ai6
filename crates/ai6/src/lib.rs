@@ -211,9 +211,9 @@ pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, 
 pub use directorates::registry::limits::{
     AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits,
     AuditLimits, BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits,
-    HoldLimits, LogbookLimits, MemoryLimits, ProposalLimits, QuarantineLimits, RegistryLimits,
-    SessionLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits, TokenLimits,
-    UsageLimits,
+    HoldLimits, LogbookLimits, MemoryLimits, PrincipalLimits, ProposalLimits, QuarantineLimits,
+    RegistryLimits, SessionLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits,
+    TokenLimits, UsageLimits,
 };
 pub use directorates::registry::logbook::{
     HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,
@@ -225,6 +225,7 @@ pub use directorates::registry::memories::{
 pub use directorates::registry::mission_ids::{
     MissionEntry, MissionHandle, is_uid, new_uid, run_handle, valid_handle,
 };
+pub use directorates::registry::principals::{PrincipalRecord, PrincipalStore};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::sessions::{
     Evidence, FinalReport, MissionVerdict, NewSession, OutcomeVerdict, ProbeResult, SessionError,

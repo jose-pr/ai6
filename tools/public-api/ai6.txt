@@ -5144,6 +5144,18 @@ impl ai6::directorates::registry::reviews::MissionReviewStore for ai6::directora
 pub fn ai6::directorates::registry::store::FileRegistry::mission_review(&self, &str, ai6::directorates::m::review::ReviewGate) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_reviews(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reviews::MissionReview>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_mission_review(&self, &ai6::directorates::registry::reviews::MissionReview) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::reviews::MissionReview>>
+pub trait ai6::directorates::registry::backend::PrincipalStore
+pub fn ai6::directorates::registry::backend::PrincipalStore::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::PrincipalStore::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::backend::PrincipalStore::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 pub trait ai6::directorates::registry::backend::QuarantineStore
 pub fn ai6::directorates::registry::backend::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -5162,8 +5174,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
 pub trait ai6::directorates::registry::backend::ReportStore
 pub fn ai6::directorates::registry::backend::ReportStore::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
 pub fn ai6::directorates::registry::backend::ReportStore::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
@@ -6024,6 +6036,14 @@ pub ai6::directorates::registry::limits::MemoryLimits::summary_bytes: ai6::bound
 pub ai6::directorates::registry::limits::MemoryLimits::versions: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::limits::MemoryLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::limits::PrincipalLimits
+pub ai6::directorates::registry::limits::PrincipalLimits::groups: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::PrincipalLimits::principals: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::PrincipalLimits::record_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::PrincipalLimits::refresh: ai6::bounds::TimeLimit
+pub ai6::directorates::registry::limits::PrincipalLimits::text_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::PrincipalLimits
+pub fn ai6::directorates::registry::limits::PrincipalLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::ProposalLimits
 pub ai6::directorates::registry::limits::ProposalLimits::idempotency_key_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ProposalLimits::record_bytes: ai6::bounds::Limit
@@ -6058,6 +6078,7 @@ pub ai6::directorates::registry::limits::RegistryLimits::holds: ai6::directorate
 pub ai6::directorates::registry::limits::RegistryLimits::issues: ai6::directorates::registry::limits::IssueLimits
 pub ai6::directorates::registry::limits::RegistryLimits::logbook: ai6::directorates::registry::limits::LogbookLimits
 pub ai6::directorates::registry::limits::RegistryLimits::memories: ai6::directorates::registry::limits::MemoryLimits
+pub ai6::directorates::registry::limits::RegistryLimits::principals: ai6::directorates::registry::limits::PrincipalLimits
 pub ai6::directorates::registry::limits::RegistryLimits::proposals: ai6::directorates::registry::limits::ProposalLimits
 pub ai6::directorates::registry::limits::RegistryLimits::quarantine: ai6::directorates::registry::limits::QuarantineLimits
 pub ai6::directorates::registry::limits::RegistryLimits::reports: ai6::directorates::registry::limits::ReportLimits
@@ -6567,6 +6588,34 @@ pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::mission_issues::outbox_counts(&[ai6::directorates::registry::mission_issues::OutboxEntry]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, usize>
+pub mod ai6::directorates::registry::principals
+#[non_exhaustive] pub struct ai6::directorates::registry::principals::PrincipalRecord
+pub ai6::directorates::registry::principals::PrincipalRecord::display_name: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::principals::PrincipalRecord::first_seen: f64
+pub ai6::directorates::registry::principals::PrincipalRecord::groups: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::principals::PrincipalRecord::id: alloc::string::String
+pub ai6::directorates::registry::principals::PrincipalRecord::last_seen: f64
+pub ai6::directorates::registry::principals::PrincipalRecord::name: alloc::string::String
+impl ai6::directorates::registry::principals::PrincipalRecord
+pub fn ai6::directorates::registry::principals::PrincipalRecord::displayed_as(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::principals::PrincipalRecord::in_groups(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::principals::PrincipalRecord::key(&str) -> alloc::string::String
+pub fn ai6::directorates::registry::principals::PrincipalRecord::label(&self) -> &str
+pub fn ai6::directorates::registry::principals::PrincipalRecord::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::principals::PrincipalRecord::outdated_by(&self, &Self, f64) -> bool
+pub fn ai6::directorates::registry::principals::PrincipalRecord::validate(&self, &ai6::directorates::registry::limits::PrincipalLimits) -> core::io::error::Result<()>
+pub trait ai6::directorates::registry::principals::PrincipalStore
+pub fn ai6::directorates::registry::principals::PrincipalStore::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::principals::PrincipalStore::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::principals::PrincipalStore::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 pub mod ai6::directorates::registry::products
 pub const ai6::directorates::registry::products::CUT_MARKER: &str
 pub fn ai6::directorates::registry::products::mission_product(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::store::FiledBrief, ai6::bounds::Limit) -> serde_json::value::Value
@@ -7430,6 +7479,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::settle_issue_question(&sel
 pub fn ai6::directorates::registry::sql::SqlRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -7724,6 +7777,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
 pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -11703,6 +11760,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::settle_issue_question(&
 pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
 pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -12447,6 +12508,29 @@ pub fn ai6::directorates::m::review::PolicyLookup<'a>::new(ai6::directorates::m:
 pub struct ai6::PostedComment
 pub ai6::PostedComment::id: alloc::string::String
 pub ai6::PostedComment::url: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::PrincipalLimits
+pub ai6::PrincipalLimits::groups: ai6::bounds::Limit
+pub ai6::PrincipalLimits::principals: ai6::bounds::Limit
+pub ai6::PrincipalLimits::record_bytes: ai6::bounds::Limit
+pub ai6::PrincipalLimits::refresh: ai6::bounds::TimeLimit
+pub ai6::PrincipalLimits::text_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::PrincipalLimits
+pub fn ai6::directorates::registry::limits::PrincipalLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::PrincipalRecord
+pub ai6::PrincipalRecord::display_name: core::option::Option<alloc::string::String>
+pub ai6::PrincipalRecord::first_seen: f64
+pub ai6::PrincipalRecord::groups: alloc::vec::Vec<alloc::string::String>
+pub ai6::PrincipalRecord::id: alloc::string::String
+pub ai6::PrincipalRecord::last_seen: f64
+pub ai6::PrincipalRecord::name: alloc::string::String
+impl ai6::directorates::registry::principals::PrincipalRecord
+pub fn ai6::directorates::registry::principals::PrincipalRecord::displayed_as(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::principals::PrincipalRecord::in_groups(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::principals::PrincipalRecord::key(&str) -> alloc::string::String
+pub fn ai6::directorates::registry::principals::PrincipalRecord::label(&self) -> &str
+pub fn ai6::directorates::registry::principals::PrincipalRecord::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
+pub fn ai6::directorates::registry::principals::PrincipalRecord::outdated_by(&self, &Self, f64) -> bool
+pub fn ai6::directorates::registry::principals::PrincipalRecord::validate(&self, &ai6::directorates::registry::limits::PrincipalLimits) -> core::io::error::Result<()>
 #[non_exhaustive] pub struct ai6::ProbeReport
 pub ai6::ProbeReport::ambient: alloc::vec::Vec<alloc::string::String>
 pub ai6::ProbeReport::checked_at: u64
@@ -12674,6 +12758,7 @@ pub ai6::RegistryLimits::holds: ai6::directorates::registry::limits::HoldLimits
 pub ai6::RegistryLimits::issues: ai6::directorates::registry::limits::IssueLimits
 pub ai6::RegistryLimits::logbook: ai6::directorates::registry::limits::LogbookLimits
 pub ai6::RegistryLimits::memories: ai6::directorates::registry::limits::MemoryLimits
+pub ai6::RegistryLimits::principals: ai6::directorates::registry::limits::PrincipalLimits
 pub ai6::RegistryLimits::proposals: ai6::directorates::registry::limits::ProposalLimits
 pub ai6::RegistryLimits::quarantine: ai6::directorates::registry::limits::QuarantineLimits
 pub ai6::RegistryLimits::reports: ai6::directorates::registry::limits::ReportLimits
@@ -13534,6 +13619,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::settle_issue_question(&sel
 pub fn ai6::directorates::registry::sql::SqlRegistry::settle_outbox(&self, &str, u64, ai6::directorates::registry::mission_issues::OutboxSettle) -> core::io::error::Result<ai6::directorates::registry::mission_issues::OutboxEntry>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 impl ai6::directorates::registry::quarantine::QuarantineStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -14852,6 +14941,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
 pub fn ai6::directorates::registry::store::FileRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub trait ai6::PrincipalStore
+pub fn ai6::PrincipalStore::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::PrincipalStore::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::PrincipalStore::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
+impl ai6::directorates::registry::principals::PrincipalStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::principals(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::principals::PrincipalRecord>>
 pub trait ai6::QuarantineStore
 pub fn ai6::QuarantineStore::is_quarantined(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
 pub fn ai6::QuarantineStore::quarantine_agent(&self, &ai6::directorates::registry::quarantine::Quarantine) -> core::io::error::Result<ai6::directorates::registry::quarantine::Quarantine>
@@ -14870,8 +14971,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::SessionContextStore + ai6::directorates::registry::sessions::SessionStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::watches::WatchStore + core::marker::Send + core::marker::Sync
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::SafeHouseProvider::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
 impl ai6::directorates::q::safehouse::SafeHouseProvider for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::q::safehouse::SafeHouseProvider>

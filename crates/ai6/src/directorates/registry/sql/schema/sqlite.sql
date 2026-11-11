@@ -672,3 +672,9 @@ CREATE TABLE IF NOT EXISTS ai6_session_contexts (
 );
 CREATE INDEX IF NOT EXISTS ai6_session_contexts_conversation ON ai6_session_contexts (conversation);
 CREATE INDEX IF NOT EXISTS ai6_session_contexts_order ON ai6_session_contexts (filed_micros, session);
+
+CREATE TABLE IF NOT EXISTS ai6_principals (
+    id TEXT PRIMARY KEY,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
