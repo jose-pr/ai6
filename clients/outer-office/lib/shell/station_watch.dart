@@ -174,6 +174,7 @@ class StationCard extends StatelessWidget {
                   ),
               ],
             ),
+            _StationStatus(station: station),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -319,6 +320,107 @@ class StationCard extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// What a Station says about its configuration and its posture: the roster revision it runs, a
+/// revision it refused (with the reason), files that wait for a restart, and the Theaters that
+/// report a setting looser than its default.
+class _StationStatus extends StatelessWidget {
+  const _StationStatus({required this.station});
+
+  final StationSummary station;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    final small = Theme.of(context).textTheme.bodySmall;
+    final config = station.config;
+    final weakened = [
+      for (final theater in station.theaters)
+        for (final setting in theater.weakened) '${theater.id}: $setting',
+    ];
+    final refused = config?.refused ?? const <String>[];
+    final restart = config?.needsRestart ?? const <String>[];
+    if (config == null && weakened.isEmpty) return const SizedBox.shrink();
+    Widget chip(
+      Key key,
+      IconData icon,
+      String label,
+      Color color,
+      String tip,
+    ) => Tooltip(
+      message: tip,
+      child: Chip(
+        key: key,
+        avatar: Icon(icon, size: 15, color: color),
+        label: Text(label),
+        visualDensity: VisualDensity.compact,
+        side: BorderSide(color: color),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              if (refused.isNotEmpty)
+                chip(
+                  Key('station-config-refused-${station.stationId}'),
+                  Icons.block,
+                  'Config refused',
+                  tokens.danger,
+                  refused.join('\n'),
+                )
+              else if (restart.isNotEmpty)
+                chip(
+                  Key('station-config-restart-${station.stationId}'),
+                  Icons.restart_alt,
+                  'Restart needed',
+                  tokens.warning,
+                  restart.join('\n'),
+                )
+              else if (config?.revision case final revision?)
+                chip(
+                  Key('station-config-${station.stationId}'),
+                  Icons.rule,
+                  'Config rev $revision',
+                  tokens.muted,
+                  'The roster revision this Station runs.',
+                ),
+              if (weakened.isNotEmpty)
+                chip(
+                  Key('station-posture-${station.stationId}'),
+                  Icons.warning_amber,
+                  'Weakened (${weakened.length})',
+                  tokens.warning,
+                  weakened.join('\n'),
+                ),
+            ],
+          ),
+          for (final reason in refused)
+            Text(
+              'Refused: $reason',
+              key: Key('station-refused-${station.stationId}'),
+              style: small?.copyWith(color: tokens.danger),
+            ),
+          for (final file in restart)
+            Text(
+              '$file changed; restart to apply',
+              style: small?.copyWith(color: tokens.warning),
+            ),
+          for (final line in weakened)
+            Text(
+              'Weakened: $line',
+              style: small?.copyWith(color: tokens.warning),
+            ),
+        ],
       ),
     );
   }

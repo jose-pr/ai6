@@ -5,8 +5,12 @@ import 'package:material_ui/material_ui.dart';
 import 'package:toml/toml.dart';
 
 import '../forms/form_host.dart';
+import '../forms/form_tools.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
+import 'changes_panel.dart';
+import 'config_status.dart';
+import 'form_toolbar.dart';
 import 'provider_settings.dart';
 import 'reported_providers.dart';
 import 'roster_page.dart';
@@ -65,6 +69,10 @@ const _tables = {
   'secrets': 'secret',
   'secret_providers': 'secret_provider',
   'pools': 'pool',
+  'plugins': 'plugin',
+  'tls': 'tls',
+  'cables': 'cables',
+  'station': 'station',
   'unex': 'unex',
 };
 
@@ -85,6 +93,10 @@ const _recordNames = {
   'secrets': 'Secret',
   'secret_providers': 'Secret provider',
   'pools': 'Account pool',
+  'plugins': 'Provider library',
+  'tls': 'TLS policy',
+  'cables': 'Cable relay',
+  'station': 'Station settings',
   'unex': 'Universal Exports settings',
 };
 
@@ -146,7 +158,7 @@ Future<ChoicesFor> _choicesFor(
       return FieldChoices([
         for (final key in keys)
           if (named != kind || key != editing) key,
-      ]);
+      ], open: true);
     }
     final offered = providerChoices(providers, format);
     if (offered != null) return offered;
@@ -181,6 +193,7 @@ Future<RosterChange?> showRecordEditor(
   required MissionBoard board,
   required String kind,
   String? recordKey,
+  String? station,
 }) {
   final narrow = MediaQuery.sizeOf(context).width < 600;
   return showDialog<RosterChange>(
@@ -190,6 +203,7 @@ Future<RosterChange?> showRecordEditor(
         board: board,
         kind: kind,
         recordKey: recordKey,
+        station: station,
         narrow: narrow,
       );
       return narrow
@@ -210,11 +224,15 @@ class _RecordEditor extends StatefulWidget {
     required this.kind,
     required this.recordKey,
     required this.narrow,
+    this.station,
   });
 
   final MissionBoard board;
   final String kind;
   final String? recordKey;
+
+  /// The Station whose own record this is; null for the global one.
+  final String? station;
   final bool narrow;
 
   @override
@@ -224,7 +242,7 @@ class _RecordEditor extends StatefulWidget {
 class _RecordEditorState extends State<_RecordEditor> {
   final _key = TextEditingController();
   RecordFormSpec? _spec;
-  FormModel? _model;
+  OoFormModel? _model;
   ChoicesFor? _choices;
   ProvidersReport _providers = const ProvidersReport();
 
@@ -273,7 +291,10 @@ class _RecordEditorState extends State<_RecordEditor> {
       var definition = const <String, Object?>{};
       var revision = '0';
       if (widget.recordKey case final key?) {
-        final records = await widget.board.loadRoster(widget.kind);
+        final records = await widget.board.loadRoster(
+          widget.kind,
+          station: widget.station,
+        );
         final record = records.records.where((record) => record.key == key);
         if (record.isEmpty) {
           throw StateError('$key is no longer in the roster.');
@@ -389,7 +410,7 @@ class _RecordEditorState extends State<_RecordEditor> {
         _instances[slot.id] = slot;
         final chosen = switch (objectAt(value, slot.parent)?[slot.sibling]) {
           final String name when name.isNotEmpty => name,
-          _ => null,
+          _ => _implied(slot),
         };
         final held = _subs[slot.id];
         if (held != null && held.provider == chosen) continue;
@@ -424,7 +445,8 @@ class _RecordEditorState extends State<_RecordEditor> {
   _SlotForm _slotForm(SettingsSlot slot, String? chosen) {
     if (chosen == null) return const _SlotForm(null);
     final provider = _providers.find(slot.kind, chosen);
-    final storedFor = objectAt(_original, slot.parent)?[slot.sibling];
+    final storedFor =
+        objectAt(_original, slot.parent)?[slot.sibling] ?? _implied(slot);
     final stored = storedFor == chosen ? _storedSettings(slot) : {};
     if (provider == null) return _SlotForm(chosen, unreported: true);
     final schema = provider.schema;
@@ -444,6 +466,23 @@ class _RecordEditorState extends State<_RecordEditor> {
         },
       ),
     );
+  }
+
+  /// Whether the settings form of a provider is drawn under the narrowing in force: only a
+  /// search that its words, the provider or a setting's name match keeps it.
+  bool _slotShown(OoFormModel model, SettingsSlot slot, _SlotForm sub) {
+    if (model.modifiedOnly) return false;
+    if (model.query.isEmpty) return true;
+    final words = [
+      slot.title,
+      slot.id,
+      sub.provider ?? '',
+      for (final key in sub.model?.schema.memberKeys ?? const <String>[]) ...[
+        key,
+        sub.model!.schema.member(key)?.title ?? '',
+      ],
+    ].join(' ').toLowerCase();
+    return words.contains(model.query);
   }
 
   /// What the form and the settings forms hold, as the record: keys the forms do not draw stay as
@@ -472,6 +511,10 @@ class _RecordEditorState extends State<_RecordEditor> {
         }
       } else if (sub?.unreported == true || sub?.omitted == true) {
         settings = _storedProvider(slot) == sub?.provider ? stored : {};
+      } else if (sub?.provider == null && _storedProvider(slot) == null) {
+        // No provider is chosen (a Source instance is then the provider its name says): what
+        // is stored beside it stays.
+        settings = stored;
       } else {
         settings = {};
       }
@@ -484,6 +527,12 @@ class _RecordEditorState extends State<_RecordEditor> {
     _keepUndrawn(_original, definition, _mainSchema, const []);
     return definition;
   }
+
+  /// The provider an instance without one chosen is: a Source is the provider its name says.
+  String? _implied(SettingsSlot slot) =>
+      slot.kind == 'ai6_source' && slot.parent.isNotEmpty
+      ? slot.parent.last
+      : null;
 
   String? _storedProvider(SettingsSlot slot) =>
       objectAt(_original, slot.parent)?[slot.sibling] as String?;
@@ -548,6 +597,7 @@ class _RecordEditorState extends State<_RecordEditor> {
         definition,
         revision: _revision,
         confirm: confirm,
+        station: widget.station,
       );
       if (mounted) Navigator.of(context).pop(change);
     } on RosterHeld catch (held) {
@@ -588,14 +638,53 @@ class _RecordEditorState extends State<_RecordEditor> {
         recordKey: key.isEmpty ? 'new' : key,
         definition: model.value(),
         schema: model.schema,
+        singleton: _spec?.fixedKey != null,
       ),
     );
   }
 
   String get _title {
     final name = _recordNames[widget.kind] ?? widget.kind;
-    if (_spec?.fixedKey != null) return name;
-    return _isNew ? 'Add $name' : 'Edit ${widget.recordKey}';
+    final where = widget.station == null ? '' : ' on ${widget.station}';
+    if (_spec?.fixedKey != null) return '$name$where';
+    return _isNew ? 'Add $name$where' : 'Edit ${widget.recordKey}$where';
+  }
+
+  /// The record as a save would store it, for the review of what changes; null while a field
+  /// holds text that does not read.
+  Map<String, Object?>? _pending() {
+    if (_model == null) return null;
+    final issues = <String, String>{};
+    final definition = _assemble(issues);
+    return issues.isEmpty ? definition : null;
+  }
+
+  bool _isSecret(String path) {
+    var at = FieldSchema(_spec!.schema);
+    for (final step in path.split('.')) {
+      final next = at.member(step) ?? at.values ?? at.items;
+      if (next == null) return false;
+      if (next.sensitive) return true;
+      at = next;
+    }
+    return false;
+  }
+
+  List<RecordChange> _changes() {
+    final pending = _pending();
+    if (pending == null || _spec == null) return const [];
+    return diffRecords(_original, pending, secret: _isSecret);
+  }
+
+  String _configurationText() {
+    final key = _spec?.fixedKey ?? widget.recordKey ?? _key.text.trim();
+    return recordConfigurationText(
+      kind: widget.kind,
+      recordKey: key.isEmpty ? 'new' : key,
+      definition: _pending() ?? const {},
+      schema: _model!.schema,
+      singleton: _spec?.fixedKey != null,
+    );
   }
 
   @override
@@ -653,6 +742,26 @@ class _RecordEditorState extends State<_RecordEditor> {
                             style: TextStyle(color: theme.colorScheme.error),
                           ),
                         ),
+                      if (widget.station != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Text(
+                            'This is the record Station ${widget.station} has of its own; '
+                            'it wins over the global one on that Station only.',
+                            key: const Key('record-form-scope'),
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      if (widget.station != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: ConfigStatusBanner(
+                            revision: _revision,
+                            writable: true,
+                            stations: widget.board.stationBoard.stations,
+                            station: widget.station,
+                          ),
+                        ),
                       if (spec.fixedKey == null && _isNew)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 16),
@@ -668,6 +777,7 @@ class _RecordEditorState extends State<_RecordEditor> {
                             ),
                           ),
                         ),
+                      FormToolbar(key: ValueKey(model), model: model),
                       OoFormView(
                         // A reloaded record starts its boxes over.
                         key: ObjectKey(model),
@@ -677,13 +787,25 @@ class _RecordEditorState extends State<_RecordEditor> {
                         enabled: !_saving,
                       ),
                       for (final slot in _instances.values)
-                        if (_subs[slot.id] case final sub?)
+                        if (_subs[slot.id] case final sub?
+                            when _slotShown(model, slot, sub))
                           _SettingsSection(
                             key: Key('provider-settings-${slot.id}'),
                             slot: slot,
                             form: sub,
                             enabled: !_saving,
                           ),
+                      ListenableBuilder(
+                        listenable: Listenable.merge([
+                          model,
+                          for (final sub in _subs.values)
+                            if (sub.model != null) sub.model!,
+                        ]),
+                        builder: (context, _) => ChangesPanel(
+                          changes: _changes(),
+                          configuration: _configurationText,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -961,23 +1083,15 @@ Future<void> showRecordConfiguration(
   required String recordKey,
   required Map<String, Object?> definition,
   required FieldSchema schema,
+  bool singleton = false,
 }) {
-  final shown = <String, Object?>{
-    for (final MapEntry(:key, :value) in definition.entries)
-      if (value != null && schema.member(key)?.sensitive != true) key: value,
-  };
-  final table = _tables[kind];
-  final file = table == null
-      ? {kind: shown}
-      : {
-          table: {recordKey: shown},
-        };
-  String text;
-  try {
-    text = TomlDocument.fromMap(file).toString();
-  } on Object {
-    text = const JsonEncoder.withIndent('  ').convert(file);
-  }
+  final text = recordConfigurationText(
+    kind: kind,
+    recordKey: recordKey,
+    definition: definition,
+    schema: schema,
+    singleton: singleton,
+  );
   return showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
@@ -994,6 +1108,43 @@ Future<void> showRecordConfiguration(
       ],
     ),
   );
+}
+
+/// The record as the configuration files hold it: the table of its family, a singleton's
+/// whole table, a provider library as a `[[library]]` entry.
+String recordConfigurationText({
+  required String kind,
+  required String recordKey,
+  required Map<String, Object?> definition,
+  required FieldSchema schema,
+  bool singleton = false,
+}) {
+  final shown = <String, Object?>{
+    for (final MapEntry(:key, :value) in definition.entries)
+      if (value != null && schema.member(key)?.sensitive != true) key: value,
+  };
+  final table = _tables[kind];
+  final Map<String, Object?> file;
+  if (kind == 'plugins') {
+    file = {
+      'library': [
+        {'file': recordKey, ...shown},
+      ],
+    };
+  } else if (table == null) {
+    file = {kind: shown};
+  } else if (singleton) {
+    file = {table: shown};
+  } else {
+    file = {
+      table: {recordKey: shown},
+    };
+  }
+  try {
+    return TomlDocument.fromMap(file).toString();
+  } on Object {
+    return const JsonEncoder.withIndent('  ').convert(file);
+  }
 }
 
 /// Every place another record names the record `key` of `kind`, in words.
@@ -1052,6 +1203,7 @@ Future<RosterChange?> confirmRemoveRecord(
   required String kind,
   required String recordKey,
   String? revision,
+  String? station,
 }) async {
   final dependents = await recordDependents(board, kind, recordKey);
   if (!context.mounted) return null;
@@ -1096,7 +1248,12 @@ Future<RosterChange?> confirmRemoveRecord(
     ),
   );
   if (confirmed != true) return null;
-  return board.deleteRosterRecord(kind, recordKey, revision: revision);
+  return board.deleteRosterRecord(
+    kind,
+    recordKey,
+    revision: revision,
+    station: station,
+  );
 }
 
 /// Where the Stations stand with a roster revision: which run it, which do not yet, and what

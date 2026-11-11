@@ -4,6 +4,10 @@ import 'package:flutter/material.dart' as flutter;
 import 'package:guatiao_flutter/guatiao_flutter.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'form_tools.dart';
+
+export 'form_tools.dart' show OoFormModel;
+
 export 'package:guatiao_flutter/guatiao_flutter.dart'
     show ChoicesFor, FieldChoices, FieldSchema, FormModel;
 
@@ -114,11 +118,11 @@ class OoFormView extends StatelessWidget {
 /// offers, so a save writes that word. A number whose schema `format` is `seconds` or `bytes`
 /// shows that unit: the gateway's schemas say it by format, and the shared form reads a unit
 /// only from the form.
-FormModel ooFormModel({
+OoFormModel ooFormModel({
   required Map<String, Object?> schema,
   Map<String, Object?>? form,
   Map<String, Object?> value = const {},
-}) => FormModel(
+}) => OoFormModel(
   schema: schema,
   form: form == null ? null : _withUnits(FieldSchema(schema), form),
   value: _liftedBounds(FieldSchema(schema), value) as Map<String, Object?>,

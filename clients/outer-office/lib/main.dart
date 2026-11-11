@@ -1736,13 +1736,30 @@ class MissionBoard extends ChangeNotifier
     headers: {if (revision != null) 'if-match': '"$revision"'},
   );
 
+  /// The path of a roster record or kind, with the Station whose own records are meant
+  /// (`station`; the global ones when null) and a confirmation of a loosening.
+  static String _rosterPath(
+    String kind, {
+    String? key,
+    String? station,
+    bool confirm = false,
+  }) {
+    final query = [
+      if (station != null) 'station=${Uri.encodeQueryComponent(station)}',
+      if (confirm) 'confirm=true',
+    ].join('&');
+    return '/v1/user/roster/${Uri.encodeComponent(kind)}'
+        '${key == null ? '' : '/${Uri.encodeComponent(key)}'}'
+        '${query.isEmpty ? '' : '?$query'}';
+  }
+
   /// The roster records of one kind (`operations`, `agents`, `roles`, `covers` or
-  /// `assistant`).
-  Future<RosterRecords> loadRoster(String kind) async {
+  /// `assistant`); with a [station], the records that Station has of its own.
+  Future<RosterRecords> loadRoster(String kind, {String? station}) async {
     if (demo) return RosterRecords.demo(kind);
     final response = await _userRequest(
       'GET',
-      '/v1/user/roster/${Uri.encodeComponent(kind)}',
+      _rosterPath(kind, station: station),
     );
     if (response.statusCode == 503) {
       throw StateError('Universal Exports serves no roster.');
@@ -1826,12 +1843,13 @@ class MissionBoard extends ChangeNotifier
     Map<String, dynamic> definition, {
     String? revision,
     bool confirm = false,
+    String? station,
   }) async {
     if (demo) throw StateError('Roster changes are unavailable in preview.');
     return _rosterChange(
       await _userRequest(
         'PUT',
-        '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}${confirm ? '?confirm=true' : ''}',
+        _rosterPath(kind, key: key, station: station, confirm: confirm),
         body: definition,
         headers: {if (revision != null) 'if-match': '"$revision"'},
       ),
@@ -1843,12 +1861,13 @@ class MissionBoard extends ChangeNotifier
     String kind,
     String key, {
     String? revision,
+    String? station,
   }) async {
     if (demo) throw StateError('Roster changes are unavailable in preview.');
     return _rosterChange(
       await _userRequest(
         'DELETE',
-        '/v1/user/roster/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(key)}',
+        _rosterPath(kind, key: key, station: station),
         headers: {if (revision != null) 'if-match': '"$revision"'},
       ),
     );
@@ -6184,6 +6203,44 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
                           label: Text(_saving ? 'Saving…' : 'Save settings'),
                         ),
                       ),
+                    if (!widget.board.demo &&
+                        widget.board.canReadRecords('station')) ...[
+                      const SizedBox(height: 28),
+                      Text(
+                        'All settings',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Every runtime setting of a Station: limits, timeouts, scheduling, '
+                        'vetting and the rest. Global defaults are read by every Station; '
+                        'a Station\'s own settings win for that Station only.',
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            key: const Key('station-record-own'),
+                            onPressed: () =>
+                                unawaited(_editRecord(settings.stationId)),
+                            icon: const Icon(Icons.tune),
+                            label: Text(
+                              widget.board.canManageRecords('station')
+                                  ? 'Edit ${settings.stationId}\'s settings'
+                                  : 'View ${settings.stationId}\'s settings',
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            key: const Key('station-record-global'),
+                            onPressed: () => unawaited(_editRecord(null)),
+                            icon: const Icon(Icons.public),
+                            label: const Text('Global defaults'),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (widget.board.demo) const DemoBanner(),
                   ],
                 );
@@ -6192,6 +6249,30 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Opens the `station` record: the Station's own, or the global one every Station reads.
+  Future<void> _editRecord(String? station) async {
+    final board = widget.board;
+    String? key;
+    try {
+      final records = await board.loadRoster('station', station: station);
+      if (records.records.isNotEmpty) key = records.records.first.key;
+    } on StateError catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+    if (!mounted) return;
+    await showRecordEditor(
+      context,
+      board: board,
+      kind: 'station',
+      recordKey: key,
+      station: station,
     );
   }
 }
@@ -6429,6 +6510,23 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
                                           onPressed: () => _editRole(role),
                                           icon: const Icon(Icons.edit_outlined),
                                         ),
+                                        if (!role.operationOverride &&
+                                            widget.board.canManageRecords(
+                                              'roles',
+                                            ))
+                                          IconButton(
+                                            tooltip:
+                                                'Edit every setting of ${role.id}',
+                                            onPressed: () => unawaited(
+                                              showRecordEditor(
+                                                context,
+                                                board: widget.board,
+                                                kind: 'roles',
+                                                recordKey: role.id,
+                                              ),
+                                            ),
+                                            icon: const Icon(Icons.tune),
+                                          ),
                                         if (role.operationOverride)
                                           IconButton(
                                             tooltip:

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../forms/form_host.dart';
+import 'config_status.dart';
 import 'record_summary.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
@@ -166,7 +167,28 @@ const _kinds = {
   'secrets': 'Secrets',
   'secret_providers': 'Secret providers',
   'pools': 'Account pools',
+  'plugins': 'Provider libraries',
+  'tls': 'TLS policy',
+  'cables': 'Cable relay',
+  'station': 'Station settings',
   'unex': 'Universal Exports settings',
+};
+
+/// The kinds a Station may have records of its own for, on top of the global ones every Station
+/// reads: a Station's own record wins for that Station.
+const stationScopedKinds = {
+  'theaters',
+  'loadouts',
+  'sandboxes',
+  'mcps',
+  'overlays',
+  'secrets',
+  'secret_providers',
+  'pools',
+  'plugins',
+  'tls',
+  'cables',
+  'station',
 };
 
 /// The kinds the gateway gates by `config.read` and `config.manage` on `config:<family>`
@@ -181,6 +203,10 @@ const rosterConfigKinds = {
   'secrets',
   'secret_providers',
   'pools',
+  'plugins',
+  'tls',
+  'cables',
+  'station',
   'unex',
 };
 
@@ -212,6 +238,10 @@ const _routeKinds = {
   'secret': 'secrets',
   'secret_provider': 'secret_providers',
   'pool': 'pools',
+  'plugin': 'plugins',
+  'tls': 'tls',
+  'cables': 'cables',
+  'station': 'station',
   'unex': 'unex',
 };
 
@@ -242,6 +272,12 @@ class _RosterPageState extends State<RosterPage> {
   RecordFormSpec? _spec;
   String? _error;
   bool _loading = false;
+
+  /// The Station whose own records are shown; null shows the global ones every Station reads.
+  String? _station;
+
+  /// How many records of this kind each Station has of its own, once read.
+  Map<String, int> _overrides = const {};
 
   /// What the last accepted edit weakens, as the gateway words it.
   List<String> _weakened = const [];
@@ -276,6 +312,8 @@ class _RosterPageState extends State<RosterPage> {
         _everything = const {};
         _spec = null;
         _weakened = const [];
+        _station = null;
+        _overrides = const {};
       });
       unawaited(_load());
     }
@@ -284,21 +322,83 @@ class _RosterPageState extends State<RosterPage> {
   Future<void> _load() async {
     if (_showAll) return _loadAll();
     final kind = _kind;
+    final station = _station;
     setState(() => _loading = true);
     try {
-      final records = await widget.board.loadRoster(kind);
-      if (!mounted || kind != _kind) return;
+      final records = await widget.board.loadRoster(kind, station: station);
+      if (!mounted || kind != _kind || station != _station) return;
       setState(() {
         _records = records;
         _error = null;
       });
       await _loadSpec(kind);
+      unawaited(_loadOverrides(kind));
     } on StateError catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  /// Whether this kind may be set for one Station.
+  bool get _scoped => stationScopedKinds.contains(_kind);
+
+  /// The Stations the scope can name: those that have checked in.
+  List<String> get _stationIds => [
+    for (final station in widget.board.stationBoard.stations) station.stationId,
+  ];
+
+  /// Reads how many records of the kind each Station has of its own.
+  Future<void> _loadOverrides(String kind) async {
+    if (!stationScopedKinds.contains(kind)) return;
+    final counts = <String, int>{};
+    await Future.wait([
+      for (final id in _stationIds)
+        widget.board
+            .loadRoster(kind, station: id)
+            .then<void>(
+              (records) => counts[id] = records.records.length,
+              onError: (_) {},
+            ),
+    ]);
+    if (mounted && kind == _kind) setState(() => _overrides = counts);
+  }
+
+  void _chooseScope(String? station) {
+    if (station == _station) return;
+    setState(() {
+      _station = station;
+      _records = null;
+    });
+    unawaited(_load());
+  }
+
+  /// The choice between the global records and one Station's own.
+  Widget _scopePicker() => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 280),
+    child: DropdownButton<String?>(
+      key: const Key('roster-scope'),
+      isExpanded: true,
+      value: _station,
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('Global defaults (all Stations)'),
+        ),
+        for (final id in _stationIds)
+          DropdownMenuItem<String?>(
+            value: id,
+            child: Text(
+              _overrides[id] == null
+                  ? 'Station $id'
+                  : 'Station $id (${_overrides[id]} '
+                        '${_overrides[id] == 1 ? 'override' : 'overrides'})',
+            ),
+          ),
+      ],
+      onChanged: _chooseScope,
+    ),
+  );
 
   Future<void> _loadAll() async {
     setState(() => _loading = true);
@@ -491,6 +591,7 @@ class _RosterPageState extends State<RosterPage> {
       board: widget.board,
       kind: _kind,
       recordKey: record?.key,
+      station: _station,
     );
     if (change == null || !mounted) return;
     setState(() => _weakened = change.weakened);
@@ -539,6 +640,7 @@ class _RosterPageState extends State<RosterPage> {
       recordKey: record.key,
       definition: record.definition,
       schema: FieldSchema(spec.schema),
+      singleton: spec.fixedKey != null,
     );
   }
 
@@ -550,6 +652,7 @@ class _RosterPageState extends State<RosterPage> {
         kind: _kind,
         recordKey: record.key,
         revision: record.revision,
+        station: _station,
       );
       if (change == null || !mounted) return;
       setState(() => _weakened = change.weakened);
@@ -595,6 +698,7 @@ class _RosterPageState extends State<RosterPage> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _picker(),
+              if (_scoped) _scopePicker(),
               IconButton(
                 tooltip: 'Refresh the roster',
                 onPressed: () => unawaited(_load()),
@@ -613,10 +717,11 @@ class _RosterPageState extends State<RosterPage> {
         if (records != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: _Reach(
+            child: ConfigStatusBanner(
               revision: records.revision,
               writable: records.writable,
               stations: widget.board.stationBoard.stations,
+              station: _station,
             ),
           ),
         if (_error case final error?)
@@ -636,8 +741,13 @@ class _RosterPageState extends State<RosterPage> {
                   ? const CircularProgressIndicator()
                   : const Text('The roster is unavailable.'),
             ),
-            RosterRecords(records: []) => const Center(
-              child: Text('No records of this kind.'),
+            RosterRecords(records: []) => Center(
+              child: Text(
+                _station == null
+                    ? 'No records of this kind.'
+                    : 'Station $_station has no records of its own of this kind; '
+                          'it reads the global ones.',
+              ),
             ),
             _ when shown.isEmpty => Center(
               child: Text(
@@ -691,50 +801,6 @@ class _RosterPageState extends State<RosterPage> {
             ),
           },
         ),
-      ],
-    );
-  }
-}
-
-/// Which Stations run this revision, and what each refused or waits to restart for.
-class _Reach extends StatelessWidget {
-  const _Reach({
-    required this.revision,
-    required this.writable,
-    required this.stations,
-  });
-
-  final String revision;
-  final bool writable;
-  final List<StationSummary> stations;
-
-  @override
-  Widget build(BuildContext context) {
-    final reporting = [
-      for (final station in stations)
-        if (station.config case final config?) (station.stationId, config),
-    ];
-    final current = reporting
-        .where((entry) => entry.$2.revision == revision)
-        .length;
-    final small = Theme.of(context).textTheme.bodySmall;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          [
-            'Roster revision $revision',
-            if (reporting.isNotEmpty)
-              'running on $current of ${reporting.length} Stations',
-            if (!writable) 'read-only: edit the configuration files',
-          ].join(' · '),
-        ),
-        for (final (station, config) in reporting) ...[
-          for (final reason in config.refused)
-            Text('$station refused: $reason', style: small),
-          for (final file in config.needsRestart)
-            Text('$station: $file changed; restart it to apply', style: small),
-        ],
       ],
     );
   }

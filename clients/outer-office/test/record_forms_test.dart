@@ -40,7 +40,7 @@ class FakeRoster {
 
   final bool writable;
 
-  /// `kind/key` to its definition.
+  /// `kind/key` to its definition; a Station's own record is `kind@station/key`.
   final Map<String, Map<String, dynamic>> records;
   final requests = <http.Request>[];
   int revision = 12;
@@ -57,6 +57,8 @@ class FakeRoster {
     requests.add(request);
     final parts = request.url.pathSegments;
     final kind = parts[3];
+    final station = request.url.queryParameters['station'];
+    final scope = station == null ? kind : '$kind@$station';
     if (parts.length == 5 && parts[4] == 'schema') {
       return _json(_forms[kind]);
     }
@@ -67,16 +69,16 @@ class FakeRoster {
         'writable': writable,
         'records': [
           for (final id in records.keys)
-            if (id.startsWith('$kind/'))
+            if (id.startsWith('$scope/'))
               {
-                'key': id.substring(kind.length + 1),
+                'key': id.substring(scope.length + 1),
                 'definition': records[id],
                 'revision': _token(id),
               },
         ],
       });
     }
-    final id = '$kind/${parts[4]}';
+    final id = '$scope/${parts[4]}';
     final expected = request.headers['if-match']?.replaceAll('"', '');
     final now = records.containsKey(id) ? _token(id) : '0';
     if (expected != null && expected != now) {
@@ -188,6 +190,22 @@ const _reported = <String, Object?>{
       },
     },
     {
+      'id': 'github',
+      'name': 'GitHub',
+      'kinds': ['ai6_source'],
+      'hosts': ['station-a'],
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'repo': {
+            'type': 'string',
+            'title': 'Repository',
+            'description': 'owner/name.',
+          },
+        },
+      },
+    },
+    {
       'id': 'git',
       'name': 'git',
       'kinds': ['ai6_safehouse'],
@@ -212,6 +230,10 @@ const _allFamilies = <String, List<String>>{
   'secrets': ['config.read', 'config.manage'],
   'secret_providers': ['config.read', 'config.manage'],
   'pools': ['config.read', 'config.manage'],
+  'plugins': ['config.read', 'config.manage'],
+  'tls': ['config.read', 'config.manage'],
+  'cables': ['config.read', 'config.manage'],
+  'station': ['config.read', 'config.manage'],
   'unex': ['config.read', 'config.manage'],
 };
 
@@ -1053,6 +1075,7 @@ void main() {
       );
       expect(roster.records['agents/007'], {'description': 'theirs'});
 
+      await tester.ensureVisible(find.text('Reload'));
       await tester.tap(find.text('Reload'));
       await tester.pumpAndSettle();
       expect(find.text('theirs'), findsOneWidget);
@@ -1155,14 +1178,363 @@ void main() {
       expect(tester.takeException(), isNull);
       for (final title in ['About', 'Limits and spending', 'Retirement']) {
         await tester.scrollUntilVisible(
-          find.text(title),
+          find.text(title).last,
           100,
           scrollable: find.byType(Scrollable).last,
         );
-        await tester.tap(find.text(title));
+        await tester.tap(find.text(title).last);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: title);
       }
+    });
+  });
+
+  group('the last families and the record editor', () {
+    testWidgets('the Station form saves the Station record', (tester) async {
+      final roster = FakeRoster();
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Station settings');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('record-form-key')), findsNothing);
+      await _type(tester, 'max_concurrent_missions', '8');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['station/settings'], {
+        'max_concurrent_missions': 8,
+      });
+    });
+
+    testWidgets('a provider library is pinned under its file name', (
+      tester,
+    ) async {
+      final roster = FakeRoster();
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Provider libraries');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('record-form-key')),
+        'ai6_claude.dll',
+      );
+      final pin = 'sha256:${'ab' * 32}';
+      await _type(tester, 'pin', pin);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['plugins/ai6_claude.dll'], {'pin': pin});
+    });
+
+    testWidgets('a TLS change that loosens is held, then confirmed', (
+      tester,
+    ) async {
+      final roster = FakeRoster()
+        ..hold = ['tls.allow_resumption = true (default false)'];
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'TLS policy');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_field('allow_resumption'));
+      await tester.pumpAndSettle();
+      await tester.tap(_field('allow_resumption'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('record-form-held')), findsOneWidget);
+      expect(find.textContaining('allow_resumption = true'), findsOneWidget);
+      expect(roster.records.containsKey('tls/settings'), isFalse);
+      await tester.ensureVisible(find.byKey(const Key('record-form-confirm')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('record-form-confirm')));
+      await tester.pumpAndSettle();
+      expect(roster.records['tls/settings']!['allow_resumption'], true);
+      expect(roster.lastWrite.url.queryParameters['confirm'], 'true');
+    });
+
+    testWidgets('a Source is drawn with its provider\'s own form', (
+      tester,
+    ) async {
+      final roster = FakeRoster(
+        records: {
+          'operations/alpha': {
+            'sources': {
+              'github': {'repo': 'a/b'},
+            },
+          },
+        },
+      );
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Operations');
+      await tester.tap(find.byTooltip('Edit alpha'));
+      await tester.pumpAndSettle();
+      final section = find.byKey(
+        const Key('provider-settings-sources.github.settings'),
+      );
+      await tester.ensureVisible(section);
+      await tester.pumpAndSettle();
+      expect(section, findsOneWidget);
+      expect(find.text('Repository'), findsOneWidget);
+      await _type(tester, 'repo', 'c/d');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['operations/alpha'], {
+        'sources': {
+          'github': {'repo': 'c/d'},
+        },
+      });
+    });
+
+    testWidgets('a Station\'s own records are listed, edited and removed', (
+      tester,
+    ) async {
+      final roster = FakeRoster(
+        records: {
+          'theaters/lab': {'workdir': '/global'},
+          'theaters@station-a/lab': {'workdir': '/own'},
+        },
+      );
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Theaters');
+      expect(find.textContaining('/global'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('roster-scope')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Station station-a (1 override)').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('/own'), findsOneWidget);
+      expect(find.textContaining('/global'), findsNothing);
+
+      await tester.tap(find.byTooltip('Edit lab'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('record-form-scope')), findsOneWidget);
+      await _type(tester, 'workdir', '/changed');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['theaters@station-a/lab'], {'workdir': '/changed'});
+      expect(roster.records['theaters/lab'], {'workdir': '/global'});
+      expect(roster.lastWrite.url.queryParameters['station'], 'station-a');
+
+      await tester.tap(find.byTooltip('Remove lab'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+      expect(roster.records.containsKey('theaters@station-a/lab'), isFalse);
+      expect(roster.records['theaters/lab'], {'workdir': '/global'});
+    });
+
+    testWidgets('a refused revision shows on the card and in the editor', (
+      tester,
+    ) async {
+      final roster = FakeRoster();
+      final board = _signedIn(roster);
+      board.stationBoard = StationBoardSummary.fromJson({
+        'headquarters_station': 'station-a',
+        'stations': [
+          {
+            'station_id': 'station-a',
+            'healthy': true,
+            'headquarters': true,
+            'seen': 1000,
+            'roles': ['control'],
+            'running': 0,
+            'capacity': 4,
+            'operations': <String>[],
+            'config': {
+              'revision': '12',
+              'refused': ['theaters: pool main names no account'],
+            },
+          },
+        ],
+      });
+      await _open(tester, board, 'Stations');
+      expect(
+        find.byKey(const Key('station-config-refused-station-a')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('pool main names no account'), findsWidgets);
+
+      await openPage(tester, 'Roster');
+      await tester.pumpAndSettle();
+      await _rosterKind(tester, 'Theaters');
+      await tester.tap(find.byKey(const Key('roster-scope')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Station station-a').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.textContaining('refused: theaters: pool main'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a weakened Theater shows on its Station\'s card', (
+      tester,
+    ) async {
+      final board = _signedIn(FakeRoster());
+      board.stationBoard = StationBoardSummary.fromJson({
+        'headquarters_station': 'station-a',
+        'stations': [
+          {
+            'station_id': 'station-a',
+            'healthy': true,
+            'headquarters': true,
+            'seen': 1000,
+            'roles': ['control'],
+            'running': 0,
+            'capacity': 4,
+            'operations': <String>[],
+            'theaters': [
+              {
+                'id': 'lab',
+                'access': 'ssh',
+                'weakened': ['trust_on_first_use = true'],
+              },
+            ],
+          },
+        ],
+      });
+      await _open(tester, board, 'Stations');
+      expect(
+        find.byKey(const Key('station-posture-station-a')),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('lab: trust_on_first_use = true'),
+        findsWidgets,
+      );
+    });
+
+    testWidgets('a search narrows the form to the settings it names', (
+      tester,
+    ) async {
+      final board = _signedIn(
+        FakeRoster(
+          records: {
+            'agents/007': {'handler': 'claude'},
+          },
+        ),
+      );
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.byTooltip('Edit 007'));
+      await tester.pumpAndSettle();
+      expect(_field('handler'), findsOneWidget);
+      expect(_field('description'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('form-filter')), 'xyzzy');
+      await tester.pumpAndSettle();
+      expect(_field('handler'), findsNothing);
+      expect(_field('description'), findsNothing);
+      await tester.enterText(find.byKey(const Key('form-filter')), 'handler');
+      await tester.pumpAndSettle();
+      expect(_field('handler'), findsOneWidget);
+      expect(_field('description'), findsNothing);
+    });
+
+    testWidgets('modified only counts, lists and resets to the default', (
+      tester,
+    ) async {
+      final board = _signedIn(
+        FakeRoster(
+          records: {
+            'agents/007': {'handler': 'claude'},
+          },
+        ),
+      );
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.byTooltip('Edit 007'));
+      await tester.pumpAndSettle();
+      expect(find.text('Modified only (1)'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('form-modified-only')));
+      await tester.pumpAndSettle();
+      expect(_field('handler'), findsOneWidget);
+      expect(_field('description'), findsNothing);
+      expect(find.byKey(const Key('form-modified-handler')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('form-reset-handler')));
+      await tester.pumpAndSettle();
+      expect(find.text('Modified only (0)'), findsOneWidget);
+      expect(find.text('Every setting is at its default.'), findsOneWidget);
+      expect(_field('handler'), findsNothing);
+    });
+
+    testWidgets('a section folds away and counts what it holds modified', (
+      tester,
+    ) async {
+      final board = _signedIn(
+        FakeRoster(
+          records: {
+            'agents/007': {'handler': 'claude'},
+          },
+        ),
+      );
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.byTooltip('Edit 007'));
+      await tester.pumpAndSettle();
+      final chip = find.byWidgetPredicate(
+        (widget) =>
+            widget is ActionChip &&
+            widget.key.toString().contains('form-section-chip-') &&
+            (widget.label as Text).data!.contains('1 modified'),
+      );
+      expect(chip, findsOneWidget);
+      expect(_field('handler'), findsOneWidget);
+      await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(_field('handler'), findsNothing);
+      await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(_field('handler'), findsOneWidget);
+    });
+
+    testWidgets('the changes are read key by key before saving', (
+      tester,
+    ) async {
+      final board = _signedIn(
+        FakeRoster(
+          records: {
+            'agents/007': {'handler': 'claude'},
+          },
+        ),
+      );
+      await _open(tester, board, 'Roster');
+      await tester.tap(find.byTooltip('Edit 007'));
+      await tester.pumpAndSettle();
+      await _type(tester, 'description', 'x');
+      await tester.ensureVisible(find.byKey(const Key('record-changes')));
+      await tester.tap(find.text('Review changes (1)'));
+      await tester.pumpAndSettle();
+      expect(find.text('+ description = "x"'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('record-changes-raw')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('description = "x"'), findsOneWidget);
+    });
+
+    testWidgets('a reference field is searched by what is typed', (
+      tester,
+    ) async {
+      final board = _signedIn(
+        FakeRoster(
+          records: {
+            'sandboxes/strict': {'backend': 'bubblewrap'},
+            'sandboxes/loose': {'backend': 'bubblewrap'},
+          },
+        ),
+      );
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Loadouts');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_field('sandbox'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_box('sandbox'), 'str');
+      await tester.pumpAndSettle();
+      expect(find.text('strict'), findsOneWidget);
+      expect(find.text('loose'), findsNothing);
     });
   });
 
