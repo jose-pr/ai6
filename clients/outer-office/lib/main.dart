@@ -5552,7 +5552,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 
   /// The board sources the page shows, whose staleness it says.
   static List<BoardSource> _sourcesOf(OoPage page) => switch (page) {
-    OoPage.overview || OoPage.memory || OoPage.pages => attentionSources,
+    OoPage.overview || OoPage.memory || OoPage.pages => const [
+      BoardSource.board,
+      BoardSource.stations,
+      ...attentionSources,
+    ],
     OoPage.missions => const [BoardSource.board, BoardSource.missions],
     OoPage.operations || OoPage.sessions => const [BoardSource.board],
     OoPage.stations => const [BoardSource.stations],
@@ -5565,7 +5569,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 
   Widget _pageBody(BuildContext context, OoRoute route, List<OoPage> pages) =>
       AnimatedBuilder(
-        animation: widget.board,
+        animation: Listenable.merge([widget.board, ?widget.chat]),
         builder: (context, _) {
           final board = widget.board;
           final onRoute = widget.onRoute;
@@ -5577,6 +5581,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               activityEvery: board.limits.refresh.overview,
               onRoute: _openRoute,
               assistant: widget.chat?.controller,
+              chatOpen: switch (widget.chat?.layout) {
+                ChatLayout.docked || ChatLayout.expanded => true,
+                _ => false,
+              },
+              onFocusChat: () => widget.chat?.focusComposer(),
               onAsk: (text) {
                 widget.chat?.open();
                 widget.chat?.controller.ask(
@@ -5820,6 +5829,12 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
       chat: chat,
       personId: widget.board.userSession?.personId,
       route: route,
+      operations: [
+        for (final operation
+            in widget.board.userSession?.operations ??
+                const <UserOperationAccess>[])
+          operation.operationId,
+      ],
       onLink: _openLink,
       onMemory: (context) => Navigator.of(context).push(
         MaterialPageRoute<void>(

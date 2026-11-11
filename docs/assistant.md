@@ -1141,6 +1141,28 @@ an `acp` agent) refuses the message and says why. Any image in the conversation,
 or one of her drawings, opens enlarged on a click, where it pans and zooms; the person's are
 read back with `GET /v1/user/moneypenny/images/{sha256}`, which answers only them.
 
+**Reading a turn.** A finished turn leads with her answer. The tools she called are one
+collapsed **Sources checked (N)** row after it, which opens to each tool's name and how many
+times it ran; while she is still answering the row reads **Checking sources… (N)** where the
+first call was. A refused tool, a question, a proposal and a view stay where they came, since
+they ask something of the person. Above the composer a **scope chip** says what the next
+message is about: by default the page the person is on (**Operation · guatiao**,
+**Mission · m-7**, **Station · gungnir**), which is the route sent with the message. The chip's
+button removes the scope (**All accessible Operations**, no route sent), its menu pins an
+Operation, and once the scope is pinned or removed a page the person moves to is offered as
+**Ask about … instead** and never taken by itself; **Follow the page** goes back. With the chat
+open beside or over the page there is one composer: Overview's own box becomes **Ask about
+this page**, which moves to the chat's. Switching between the side and expanded views keeps
+the draft, the scroll position and the focus.
+
+"What needs my attention?" is answered from her `attention` tool, the same summary Overview
+lists (`GET /v1/user/attention`): each item is **current**, **historical** (it happened and has
+since passed, such as a refusal a later revision replaced) or **unverified** (the Station that
+would say is dark), with its link, the scope checked and when, and the sources that could not
+be read or are not the person's to see. She never says everything is clear while one is missing.
+`[unex.timeline] attention_items` and `attention_history` bound the list and how far back a past
+condition is listed.
+
 ### Her own window on the web
 
 **Pop out** on the web opens a browser window at the app's own address with `?oo_window=chat`,

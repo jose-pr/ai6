@@ -612,6 +612,11 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    // The call is one folded row, not a row of its own.
+    expect(find.text('board'), findsNothing);
+    expect(find.text('Checking sources… (1)'), findsOneWidget);
+    await tester.tap(find.text('Checking sources… (1)'));
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('board'), findsOneWidget);
     expect(find.textContaining('is busy: 4 of 4.'), findsOneWidget);
     final copied = <String>[];

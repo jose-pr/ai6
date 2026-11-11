@@ -12,6 +12,7 @@ import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_panel.dart';
 import 'chat_layout.dart';
+import 'chat_scope.dart';
 import 'navigation_card.dart';
 
 /// How long [chat] takes to move, unless the platform asks for no animations.
@@ -30,6 +31,7 @@ class ChatShell extends StatefulWidget {
     required this.child,
     this.personId,
     this.route,
+    this.operations = const [],
     this.onLink,
     this.onMemory,
     super.key,
@@ -41,6 +43,9 @@ class ChatShell extends StatefulWidget {
 
   /// The route of the app page the person is on, sent with each message to her.
   final OoRoute? route;
+
+  /// The Operations the person may pick as the chat's scope.
+  final List<String> operations;
 
   /// Opens an app page one of her views, links or navigation cards points to.
   final void Function(String link)? onLink;
@@ -120,7 +125,8 @@ class _ChatShellState extends State<ChatShell> {
     if (chat == null) return;
     chat
       ..onLink = widget.onLink
-      ..onMemory = widget.onMemory;
+      ..onMemory = widget.onMemory
+      ..operations = widget.operations;
     final route = widget.route;
     final person = widget.personId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -353,9 +359,9 @@ class ChatPanel extends StatelessWidget {
       label: 'Moneypenny',
       child: Focus(
         focusNode: chat.region,
-        child: ValueListenableBuilder(
-          valueListenable: chat.route,
-          builder: (context, route, _) => AssistantPanel(
+        child: ListenableBuilder(
+          listenable: Listenable.merge([chat.route, chat]),
+          builder: (context, _) => AssistantPanel(
             // Keeps the scroll and the panel's state as it moves around the page. The
             // full-screen chat mounts its own: moving a keyed subtree out of it into the
             // page's just-onstage region fails Flutter's semantics geometry assertion.
@@ -363,7 +369,16 @@ class ChatPanel extends StatelessWidget {
                 ? null
                 : chat.panelKey,
             controller: chat.controller,
-            route: route,
+            route: chat.scope,
+            scopeBar: ChatScopeBar(
+              scope: chat.scope,
+              offered: chat.offeredScope,
+              operations: chat.operations,
+              following: chat.scopeMode == ChatScopeMode.followPage,
+              onPick: chat.pinScope,
+              onClear: chat.clearScope,
+              onFollow: chat.followPage,
+            ),
             onOpen: (link) => chat.onLink?.call(link),
             onMemory: chat.onMemory == null
                 ? null

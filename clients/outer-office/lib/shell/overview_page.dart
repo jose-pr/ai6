@@ -33,6 +33,8 @@ class OverviewPage extends StatelessWidget {
     required this.onRoute,
     this.assistant,
     this.onAsk,
+    this.chatOpen = false,
+    this.onFocusChat,
     this.activityEvery = RefreshSettings.defaultOverview,
     super.key,
   });
@@ -51,6 +53,12 @@ class OverviewPage extends StatelessWidget {
 
   /// Opens Moneypenny's chat and asks her the text.
   final ValueChanged<String>? onAsk;
+
+  /// Whether the chat is open beside this page, where its composer is the one to type in.
+  final bool chatOpen;
+
+  /// Moves to the open chat's composer.
+  final VoidCallback? onFocusChat;
 
   /// How often Recent Activity is fetched again while shown; `null` only once.
   final Duration? activityEvery;
@@ -206,6 +214,8 @@ class OverviewPage extends StatelessWidget {
         board: board,
         assistant: assistant,
         onAsk: onAsk,
+        chatOpen: chatOpen,
+        onFocusChat: onFocusChat,
         waiting: open.length,
         covered: gaps == null,
       ),
@@ -945,6 +955,8 @@ class _MoneypennyCard extends StatefulWidget {
     required this.board,
     required this.assistant,
     required this.onAsk,
+    required this.chatOpen,
+    required this.onFocusChat,
     required this.waiting,
     required this.covered,
   });
@@ -952,6 +964,9 @@ class _MoneypennyCard extends StatefulWidget {
   final MissionBoard board;
   final AssistantController assistant;
   final ValueChanged<String> onAsk;
+
+  final bool chatOpen;
+  final VoidCallback? onFocusChat;
 
   /// Whether every attention source was read: only then may she say nothing needs them.
   final bool covered;
@@ -1074,26 +1089,38 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _message,
-            enabled: enabled,
-            textInputAction: TextInputAction.send,
-            onSubmitted: _ask,
-            decoration: InputDecoration(
-              hintText: 'Ask Moneypenny…',
-              isDense: true,
-              filled: true,
-              fillColor: tokens.raised,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+          if (widget.chatOpen)
+            // The chat beside the page has the one composer: this only moves to it.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('ask-about-this-page'),
+                onPressed: enabled ? widget.onFocusChat : null,
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text('Ask about this page'),
               ),
-              suffixIcon: IconButton(
-                tooltip: 'Send to Moneypenny',
-                onPressed: enabled ? () => _ask(_message.text) : null,
-                icon: const Icon(Icons.send),
+            )
+          else
+            TextField(
+              controller: _message,
+              enabled: enabled,
+              textInputAction: TextInputAction.send,
+              onSubmitted: _ask,
+              decoration: InputDecoration(
+                hintText: 'Ask Moneypenny…',
+                isDense: true,
+                filled: true,
+                fillColor: tokens.raised,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                suffixIcon: IconButton(
+                  tooltip: 'Send to Moneypenny',
+                  onPressed: enabled ? () => _ask(_message.text) : null,
+                  icon: const Icon(Icons.send),
+                ),
               ),
             ),
-          ),
           if (!enabled && !assistant.connecting)
             Align(
               alignment: Alignment.centerRight,

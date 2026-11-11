@@ -14,6 +14,7 @@ import 'transcripts.dart' show TranscriptReads;
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
 import 'assistant_controller.dart';
+import 'chat_scope.dart';
 import 'chat_commands.dart' show ChatCommands;
 import 'chat_popout.dart' show ChatWindowBlocked;
 
@@ -271,6 +272,51 @@ class MoneypennyChat extends ChangeNotifier {
 
   /// The route of the app page the person is on, sent with each message.
   final route = ValueNotifier<OoRoute?>(null);
+
+  /// Where the context sent with a message comes from: the page, or a scope the person chose.
+  ChatScopeMode get scopeMode => _scopeMode;
+  ChatScopeMode _scopeMode = ChatScopeMode.followPage;
+  OoRoute? _pinned;
+
+  /// The Operations the person may pick as a scope.
+  List<String> operations = const [];
+
+  /// What messages are about: the page, the scope chosen, or nothing.
+  OoRoute? get scope => switch (_scopeMode) {
+    ChatScopeMode.followPage => route.value,
+    ChatScopeMode.pinned => _pinned,
+    ChatScopeMode.none => null,
+  };
+
+  /// The page the person moved to while a chosen scope (or none) stood, offered as the scope.
+  /// It never replaces the scope by itself.
+  OoRoute? get offeredScope {
+    final page = route.value;
+    if (_scopeMode == ChatScopeMode.followPage || page == null) return null;
+    if (page.page == OoPage.overview || page == scope) return null;
+    return page;
+  }
+
+  /// Asks about [about] from now on, whatever page the person is on.
+  void pinScope(OoRoute about) {
+    _scopeMode = ChatScopeMode.pinned;
+    _pinned = about;
+    notifyListeners();
+  }
+
+  /// Asks across everything the person may read.
+  void clearScope() {
+    _scopeMode = ChatScopeMode.none;
+    _pinned = null;
+    notifyListeners();
+  }
+
+  /// Asks about the page the person is on, as they move.
+  void followPage() {
+    _scopeMode = ChatScopeMode.followPage;
+    _pinned = null;
+    notifyListeners();
+  }
 
   /// Opens an app page one of her views, links or navigation cards points to.
   void Function(String link)? onLink;

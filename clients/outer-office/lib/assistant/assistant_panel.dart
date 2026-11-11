@@ -18,6 +18,7 @@ import 'images.dart';
 import 'export.dart' as exporting;
 import 'pages.dart';
 import 'transcripts.dart';
+import 'turns.dart';
 import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
@@ -29,6 +30,7 @@ class AssistantPanel extends StatefulWidget {
   const AssistantPanel({
     required this.controller,
     this.route,
+    this.scopeBar,
     this.onOpen,
     this.onMemory,
     this.followAtOnce = false,
@@ -53,6 +55,9 @@ class AssistantPanel extends StatefulWidget {
 
   final AssistantController controller;
   final OoRoute? route;
+
+  /// What the next message is about, above the composer: the scope and its controls.
+  final Widget? scopeBar;
 
   /// Opens an app page a view, a link or a navigation card points to
   /// (`app:/missions?operation_id=G`).
@@ -565,20 +570,26 @@ class _AssistantPanelState extends State<AssistantPanel> {
               reverse: true,
               children: [
                 // Reversed: the oldest last.
-                for (final entry in controller.entries.reversed)
+                for (final item in turnsOf(
+                  controller.entries,
+                  busy: controller.busy,
+                ).reversed)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: switch (_EntryView(
-                      entry: entry,
-                      controller: controller,
-                      onOpen: widget.onOpen,
-                      proposalWait: widget.proposalWait,
-                      pageActions: widget.pageActions,
-                      imageLoader: widget.imageLoader,
-                    )) {
-                      // Views are tables and charts: they take the whole width.
-                      final view when entry.role == 'view' => view,
-                      final other => _column(other),
+                    child: switch (item) {
+                      SourcesItem() => _column(SourcesChecked(item: item)),
+                      EntryItem(:final entry) => switch (_EntryView(
+                        entry: entry,
+                        controller: controller,
+                        onOpen: widget.onOpen,
+                        proposalWait: widget.proposalWait,
+                        pageActions: widget.pageActions,
+                        imageLoader: widget.imageLoader,
+                      )) {
+                        // Views are tables and charts: they take the whole width.
+                        final view when entry.role == 'view' => view,
+                        final other => _column(other),
+                      },
                     },
                   ),
                 if (controller.earlier > 0)
@@ -671,6 +682,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                 ),
               ),
             ),
+          if (widget.scopeBar case final bar?) _column(bar),
           KeyedSubtree(
             key: const ValueKey('composer'),
             child: _column(
@@ -826,16 +838,6 @@ class _EntryView extends StatelessWidget {
           ),
         ],
       ),
-      'tools' => Wrap(
-        spacing: 6,
-        children: [
-          for (final tool in entry.text.split(', '))
-            Chip(
-              avatar: const Icon(Icons.build_outlined, size: 16),
-              label: Text(_toolName(tool)),
-            ),
-        ],
-      ),
       'proposal' => ProposalCard(
         proposal: entry.data ?? const {},
         onConfirm: controller.confirm,
@@ -969,8 +971,6 @@ Object? revealStrings(Object? value) => switch (value) {
 };
 
 /// `mcp__moneypenny__board` as `board`.
-String _toolName(String tool) => tool.split('__').last;
-
 /// How a proposal stands, in the words the person reads: an icon and a word, never colour
 /// alone. A proposal left applying past [ProposalCard.confirmingAfter] reads as an outcome
 /// unknown.
