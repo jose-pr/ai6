@@ -11,7 +11,14 @@ import 'package:guatiao_flutter/guatiao_flutter.dart';
 /// Narrowing only decides which fields are drawn; every value stays in the model, so a saved
 /// record is the same whatever was showing.
 class OoFormModel extends FormModel {
-  OoFormModel({required super.schema, super.form, super.value});
+  // dart2js 3.15.0-72.0.dev crashes inlining FormModel's initializers into a constructor that
+  // forwards with super parameters; an explicit, never-inlined forward compiles.
+  @pragma('dart2js:noInline')
+  OoFormModel({
+    required Map<String, Object?> schema,
+    Map<String, Object?>? form,
+    Object? value,
+  }) : super(schema: schema, form: form, value: value);
 
   String _query = '';
   bool _modifiedOnly = false;
