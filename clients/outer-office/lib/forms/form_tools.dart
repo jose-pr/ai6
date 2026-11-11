@@ -14,6 +14,7 @@ class OoFormModel extends FormModel {
   // dart2js 3.15.0-72.0.dev crashes inlining FormModel's initializers into a constructor that
   // forwards with super parameters; an explicit, never-inlined forward compiles.
   @pragma('dart2js:noInline')
+  // ignore: use_super_parameters
   OoFormModel({
     required Map<String, Object?> schema,
     Map<String, Object?>? form,
