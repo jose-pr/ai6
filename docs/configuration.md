@@ -1051,6 +1051,8 @@ pending_per_station = 8
 | `text_chars` | 256 | **Longest item text.** Characters of one item's text; longer text is cut. |
 | `audit_page` | 100 | **Audit records in a page.** Records in a page of the audit log when the request names no limit, at least 1. |
 | `max_audit_page` | 500 | **Most audit records a page may ask for.** The most records a page of the audit log may ask for. |
+| `attention_items` | 100 | **Attention items listed.** Items the attention summary lists; past it the oldest go, and the summary says so. |
+| `attention_history` | 604,800 (7 days) | **Past conditions the attention summary shows.** How far back, in seconds, the attention summary looks for a condition that has since passed, such as a refused configuration a later revision replaced. `"none"` looks as far as the audit log goes. |
 <!-- schema:record.unex.timeline:end -->
 
 `[login]` (the tries allowed are the flat `login_tries_per_address` and `login_tries_per_name`)
