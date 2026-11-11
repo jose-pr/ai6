@@ -425,6 +425,35 @@ apply` does. A directory of family files takes no changes, so `--import` is refu
 there and writes nothing: add the printed entries to its `plugins.toml`. A Station applies
 `plugin` records at restart.
 
+### Approving a library from Outer Office
+
+Under `strict`, a library no record accepts does not load. A Station lists each one it found and
+did not load in its check-in (`found_libraries`: file name, digest, the kinds it declares, whether
+`FILE.sig` sits beside it, and the publisher key among those its records name that the signature
+verifies for), read as data without running it. A library declares its kinds, not its provider IDs,
+so the IDs are known only once it loads. At most `[scheduler] found_libraries` (64) are listed.
+
+`GET /v1/user/stations/{id}/libraries` answers them (`station.read`). A person who holds
+`plugin.manage` on `config:plugin` approves one on the Roster page, in the Provider library records:
+Outer Office shows the file name, digest, kinds and publisher, and what the gateway says will
+change, before anything is stored. `POST /v1/user/stations/{id}/libraries/approve` takes the file
+and digest the Station reported, `"trust": "pin"` or `"publisher"` and `confirm`; without `confirm`
+it stores nothing and answers `applied: false` with `changes` and `weakened`.
+
+- A pin stores `{pin = digest}` as that Station's own `plugin` record for the file, keeping a
+  publisher the record already named; the answer says which pin it replaces. A publisher trust
+  stores `{publisher = key}` and is offered only when the Station recognised the signer; it admits
+  anything that key signs for that file name, and the answer lists that as a weakening, as for any
+  publisher entry. A record requiring both a pin and a publisher is approved by pin.
+- The record is the Station's own, never the global one, so approving a library on one Station
+  changes what no other Station loads. Promote it by writing the global record.
+- Only a file and digest the Station reported can be approved. The gateway takes no library bytes:
+  the file reaches the host by deployment.
+- The Station reads `plugin` records at its next start. `plugin.manage` is in no built-in role but
+  `chief`; the write is audited `plugin.approve` on `config:plugin` with the person, the Station,
+  the file and the digest (a refusal is `plugin.refused`).
+- A rebuild signed by a key a record already names for that file needs no approval.
+
 ### What a publisher entry gives up
 
 **A publisher entry is weaker than a digest pin, and the compromise of its key matters more.**

@@ -15,6 +15,9 @@ mod held;
 mod issues;
 mod keys;
 pub mod liaison;
+mod libraries;
+#[cfg(all(test, feature = "cli"))]
+mod libraries_tests;
 mod login_limit;
 mod memories;
 mod models;
@@ -1845,6 +1848,14 @@ impl Gateway {
                 "/v1/user/stations/{station_id}/providers",
                 get(providers::of_host),
             )
+            .route(
+                "/v1/user/stations/{station_id}/libraries",
+                get(libraries::of_host),
+            )
+            .route(
+                "/v1/user/stations/{station_id}/libraries/approve",
+                post(libraries::approve),
+            )
             .route("/v1/user/resources", get(roster::resources))
             .route("/v1/user/resources/apply", post(roster::apply))
             .route("/v1/user/roster/{kind}", get(roster::records))
@@ -3296,7 +3307,7 @@ struct UserProfile {
     config: BTreeMap<String, Vec<String>>,
     /// The actions the person holds on the global access policy (`access.read`, `access.manage`),
     /// the accounts (`account.manage`), other people's memory (`assistant.memory.admin`) and the
-    /// global memory (`memory.write`).
+    /// global memory (`memory.write`), and approving a provider library (`plugin.manage`).
     global_actions: Vec<String>,
     /// Whether this gateway serves Moneypenny, whom Outer Office offers only when it does.
     moneypenny: bool,
@@ -4225,6 +4236,7 @@ async fn user_profile(
                 ("assistant.memory.admin", "config:assistant"),
                 ("compartment.manage", "compartment:*"),
                 ("memory.write", "config:memory"),
+                ("plugin.manage", "config:plugin"),
             ] {
                 let allowed = authorizer
                     .authorize(AuthorizationRequest {

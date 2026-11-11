@@ -85,13 +85,13 @@ pub struct RosterChange {
 
 /// Why the source refused an edit (HTTP 422).
 #[derive(Serialize)]
-struct Refused {
-    refused: String,
+pub(crate) struct Refused {
+    pub(crate) refused: String,
 }
 
 /// An edit named a revision the record no longer has (HTTP 409).
 #[derive(Serialize)]
-struct Changed {
+pub(crate) struct Changed {
     /// The record's revision now; `0` when it is gone.
     changed: String,
 }
@@ -212,7 +212,7 @@ fn scope_of(record: ConfigRecord, scoped: &Scoped) -> Result<ai6::ConfigScope, A
 
 /// What the changed records of a trust-root family give up that the family's stored records
 /// do not already give up.
-fn loosened(
+pub(crate) fn loosened(
     source: &dyn ai6::ConfigProvider,
     record: ConfigRecord,
     scope: &ai6::ConfigScope,
@@ -273,7 +273,7 @@ pub(crate) fn bounded(text: &str, bytes: ai6::Limit) -> String {
     line
 }
 
-async fn audit(
+pub(crate) async fn audit(
     gateway: &Gateway,
     person: &Person,
     resource: &str,
@@ -359,7 +359,7 @@ fn expected_revision(headers: &HeaderMap) -> Option<String> {
 
 /// Stores `definition` under `key`. With `expected`, only while the stored record has that
 /// revision (`0`: there is none); otherwise whatever is there is replaced.
-fn store(
+pub(crate) fn store(
     source: &dyn ai6::ConfigProvider,
     record: ConfigRecord,
     scope: &ai6::ConfigScope,
@@ -386,7 +386,7 @@ fn store(
     }
 }
 
-fn stored_record(
+pub(crate) fn stored_record(
     source: &dyn ai6::ConfigProvider,
     record: ConfigRecord,
     scope: &ai6::ConfigScope,
@@ -400,7 +400,7 @@ fn stored_record(
         .map(|(_, definition)| definition))
 }
 
-fn changed_response(changed: Changed) -> Response {
+pub(crate) fn changed_response(changed: Changed) -> Response {
     (StatusCode::CONFLICT, Json(changed)).into_response()
 }
 
@@ -470,7 +470,7 @@ pub(crate) async fn effective(
 
 /// What an edit came to: accepted at a revision, refused with a reason, or a failure.
 /// `weakened` is what an accepted edit loosens.
-async fn settle(
+pub(crate) async fn settle(
     gateway: &Gateway,
     person: &Person,
     resource: &str,

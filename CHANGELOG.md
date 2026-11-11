@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the providers the hosts report for its kind, with the chosen provider's settings drawn from its own
   schema and form beside it, in Outer Office's Agent and Theater forms; a write whose settings are not
   the chosen provider's is refused, naming the provider and the key.
+- A provider library a Station found and did not load can be approved from Outer Office. Under
+  `strict` a Station lists, at check-in, each library no `plugin` record accepts (`found_libraries`:
+  file, digest, declared kinds, signer; at most `[scheduler] found_libraries`, 64 by default), read
+  without running it. `GET /v1/user/stations/{id}/libraries` answers them and `POST
+  /v1/user/stations/{id}/libraries/approve` writes that Station's own `plugin` record, a pin of the
+  reported bytes or a trust of the publisher that signed them, held until sent with `confirm` and
+  audited `plugin.approve`. The new action `plugin.manage` on `config:plugin` is in no built-in role
+  but `chief`. The gateway takes no library bytes.
 - Outer Office edits Theaters, loadouts, sandbox profiles, MCP servers, overlays, secrets, secret
   providers and account pools in the schema-drawn record form, on the Roster page, under
   `config.read` and `config.manage` on each family.

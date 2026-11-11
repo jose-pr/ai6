@@ -146,7 +146,7 @@ are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.
 `cable.read`, `cable.send`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
 `memory.write`, `mission.control`, `mission.create`, `mission.read`,
 `mission.control`, `mission.create`, `mission.read`, `mission.review`, `mission.verify`,
-`config.manage`, `config.read`, `pool.manage`, `pool.read`,
+`config.manage`, `config.read`, `plugin.manage`, `pool.manage`, `pool.read`,
 `roster.manage`, `roster.read`, `session.context`, `session.input`, `session.read`,
 `station.configure` and `station.read`. `session.context` reads what an agent was given and did
 in a Session ([Session context](missions.md#session-context)): on an Operation its Missions'
@@ -169,7 +169,9 @@ outcome, which counts on its Agent's scorecard and settles a held Mission; it do
 the person: send and reply, and read what is sent to her. The Station's `cables.toml` still
 has to let her Agent do it. A person reads and changes [Moneypenny's memory of
 them](assistant.md#your-memory-in-the-app) with no action at all, and nobody else's;
-`assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
+`plugin.manage` on `config:plugin` approves a provider library a Station found and did not load
+(it decides what code that Station runs, so [it is held by the chief](stations.md#approving-a-library-from-outer-office)
+until a role is given it); `assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
 audited `memory.read`, and change none. `memory.write` on `operation:<id>` changes that
 Operation's [memory](memories.md) and decides its Agents' proposals, and on `config:memory` the
 global one; reading an Operation's memory takes `mission.read` there.

@@ -68,7 +68,9 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// `operation:<id>` (that Operation's); `account.manage` manages accounts at
 /// `config:accounts`. `config.read` and `config.manage` list and change one configuration
 /// family's records at `config:<family>` (`config:watch`). `compartment.read` and
-/// `compartment.manage` act on `compartment:<id>`;
+/// `compartment.manage` act on `compartment:<id>`; `plugin.manage` on `config:plugin` approves a
+/// provider library a Station found and did not load (held by the chief alone until a role is
+/// given it.
 /// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered. `memory.write`
 /// changes the memory of `operation:<id>`, or of everyone at `config:memory`.
 /// `session.context` reads what an agent was given and did in a Session: on `operation:<id>` a
@@ -102,6 +104,7 @@ pub const ACTIONS: &[&str] = &[
     "mission.review",
     "mission.status",
     "mission.verify",
+    "plugin.manage",
     "pool.manage",
     "pool.read",
     "product.read",

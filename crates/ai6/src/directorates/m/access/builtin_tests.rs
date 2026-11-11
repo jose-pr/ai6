@@ -138,6 +138,10 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
     assert!(seeded.rules.is_empty() && seeded.chief.is_empty() && seeded.delegable.is_none());
     for role in seeded.roles.values() {
         assert!(!role.actions.iter().any(|a| a == "assistant.memory.admin"));
+        assert!(
+            !role.actions.iter().any(|a| a == "plugin.manage"),
+            "approving a provider library is the chief's until a role is given it"
+        );
     }
     compile(&seeded, &[]).unwrap();
     assert_eq!(
@@ -172,6 +176,7 @@ fn the_chief_holds_an_action_added_after_its_rule_was_written() {
         "assistant.memory.admin",
         "config:assistant"
     ));
+    assert!(allowed(&now, &boss, "plugin.manage", "config:plugin"));
 }
 
 #[test]
@@ -274,6 +279,24 @@ fn a_controller_cannot_escalate_but_can_share_what_it_holds() {
         refused.reason.contains("assistant.memory.admin"),
         "{refused}"
     );
+
+    let mut plugins = before.clone();
+    plugins
+        .roles
+        .get_mut("controller")
+        .unwrap()
+        .actions
+        .push("plugin.manage".into());
+    let refused = check_change(&before, &plugins, &as_ctl, &access, &lineage).unwrap_err();
+    assert!(refused.reason.contains("plugin.manage"), "{refused}");
+    check_change(
+        &before,
+        &plugins,
+        &editor(&access, &boss),
+        &access,
+        &lineage,
+    )
+    .expect("the chief may give a role the action");
 
     let mut chief = before.clone();
     chief.chief.clear();
