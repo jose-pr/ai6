@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Outer Office edits Theaters, loadouts, sandbox profiles, MCP servers, overlays, secrets, secret
   providers and account pools in the schema-drawn record form, on the Roster page, under
   `config.read` and `config.manage` on each family.
+- Outer Office edits every other family in the same form: the Station's runtime settings (`station`,
+  route `station`, under `config.read` and `config.manage` on `config:station`), provider library pins
+  (`plugins`), the TLS policy (`tls`) and the Cable relay (`cables`); the trust-root ones keep their own
+  action and a confirmation of what a change loosens. An Operation's `sources` are drawn as one form
+  per Source instance, with the chosen provider's own settings beside the instance's keys. The Station
+  Settings tab links to the Station's own and the global `station` record.
+- Outer Office shows which records a Station has of its own: a station-scoped family on the Roster page
+  has a scope (global defaults, or one Station with how many records it holds of its own), a record
+  is added, edited and removed in that scope, and a banner says how many Stations run the revision, which
+  wait for a restart and which refused it, with the reason. A Station's card shows the same as a chip,
+  and an amber chip when one of its Theaters reports a setting looser than its default.
+- The record editor narrows a large form: a search over the names and help of settings, "modified
+  only" with a count and a way back to the default for each setting, a chip for each section that
+  folds it away and counts what it holds modified, a key-by-key review of what a save changes (and the
+  record as configuration), and searchable pickers for fields that name other records.
 
 - API keys beside people's sign-in. The `unex` record's `authenticators` is an ordered list of
   `{provider, config}` in place of `authenticator` and `authenticator_config`; each credential goes to

@@ -900,13 +900,13 @@ no-op is stored at once.
 | `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
 | `theater` | `theaters` | yes | no | restart | Roster page (Theaters), `ai6ctl`, route `theaters` | `[theater.<id>]` |
 | `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider`, `pool` | `loadouts` | yes | no | live | Roster page, `ai6ctl`, routes `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, each under `config.read` and `config.manage` on `config:<family>` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
-| `cables` | `cables` | yes | yes | restart | `ai6ctl`, own action and confirmation | the whole file: grants, inbound, channels, limits |
-| `plugin` | `plugins` | yes | no | restart | `ai6ctl`, own action and confirmation | `[[library]]` entries, keyed by their `file` |
-| `station` | `station` | yes | yes | restart | Outer Office Stations page | the whole file: the Station's runtime settings |
-| `tls` | `tls` | yes | yes | restart | `ai6ctl`, own action and confirmation | the whole file: the Station TLS policy |
+| `cables` | `cables` | yes | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: grants, inbound, channels, limits |
+| `plugin` | `plugins` | yes | no | restart | Roster page, `ai6ctl`, own action and confirmation | `[[library]]` entries, keyed by their `file` |
+| `station` | `station` | yes | yes | restart | Outer Office (Roster page, Stations > Settings), `ai6ctl`, route `station` | the whole file: the Station's runtime settings |
+| `tls` | `tls` | yes | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: the Station TLS policy |
 | `access` | `access` | no | yes | live, in Universal Exports | Outer Office Access page | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
 | `operation_access` | `operation_access` | no | no | live, in Universal Exports | Outer Office Access page | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
-| `unex` | `unex` | no | yes | restart | `ai6ctl`, own action and confirmation | the whole file: Universal Exports' sign-in, limits and assistant |
+| `unex` | `unex` | no | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: Universal Exports' sign-in, limits and assistant |
 | `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 | `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
 | `watch` | `watches` | no | no | live | Roster page (Watches), route `/v1/user/roster/watches` | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
