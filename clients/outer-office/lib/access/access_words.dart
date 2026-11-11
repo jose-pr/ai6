@@ -24,6 +24,7 @@ const _areas = <(String, Map<String, String>)>[
       'mission.control': 'cancel, retry, resume, interrupt',
       'mission.verify': 'give a verdict on',
       'mission.review': 'decide over a review of',
+      'mission.status': 'set the status of',
     },
   ),
   (
@@ -55,6 +56,26 @@ const _areas = <(String, Map<String, String>)>[
   ('Cables', {'cable.read': 'read', 'cable.send': 'send'}),
   ('Audit', {'audit.read': 'read'}),
   ('Access', {'access.read': 'see', 'access.manage': 'change'}),
+  ('Accounts', {'account.manage': 'manage'}),
+  (
+    'Compartments',
+    {
+      'compartment.read': 'see',
+      'compartment.cover': 'cover for',
+      'compartment.manage': 'manage',
+    },
+  ),
+  (
+    'Memory',
+    {
+      'memory.write': 'write the global memory',
+      'assistant.memory.admin': "administer other people's memory",
+    },
+  ),
+  ('Products', {'product.read': 'read the products of'}),
+  ('Stations', {'station.read': 'see', 'station.configure': 'configure'}),
+  ('Roster', {'roster.read': 'see', 'roster.manage': 'change'}),
+  ('Configuration', {'config.read': 'see', 'config.manage': 'change'}),
 ];
 
 /// [actions] by area in plain words; an action this build has no words for goes under
