@@ -699,7 +699,15 @@ async fn restarted(
     operation: &str,
 ) -> DaemonState {
     stop(old);
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Joined, not slept for: a pump that stops late writes the book after it was put back.
+    let pumps = std::mem::take(&mut *old.event_pumps.lock().unwrap());
+    tokio::time::timeout(Duration::from_secs(60), async {
+        for pump in pumps {
+            pump.await.unwrap();
+        }
+    })
+    .await
+    .expect("the old Station's pumps stop once it is stopping");
     fs::write(root.join("missions.json"), book).unwrap();
     let mut state = test_state(root, operation, agents);
     let mut book = MissionStore::open(root.join("missions.json")).unwrap();
@@ -723,27 +731,33 @@ async fn a_restart_mid_review_carries_on_from_the_record_and_counts_no_vote_twic
     let settings = "[operation.G.review]\noutput = \"three\"\n";
     let state = station(root.path(), reviews, settings, &roster);
     submit(&state, "rv-restart", "the goals");
-    // r1 has voted, r2's harness never named a Session, r3's named one and hangs.
+    // r1 has voted, r2's harness never named a Session, r3's named one and hangs. The book is
+    // written on each change, under the lock, so what is read there with the check is what a
+    // Station that died then leaves.
+    let before = std::cell::RefCell::new(Vec::new());
     until(&state, "the panel is in flight", |state| {
-        votes(state, "rv-restart").len() == 1
-            && state
-                .missions
-                .lock()
-                .unwrap()
-                .list()
-                .iter()
-                .filter(|turn| is_panel_mission(turn) && turn.state == MissionState::Working)
-                .count()
-                == 2
-            && state.missions.lock().unwrap().list().iter().any(|turn| {
+        if votes(state, "rv-restart").len() != 1 {
+            return false;
+        }
+        let missions = state.missions.lock().unwrap();
+        let turns = missions.list();
+        let reached = turns
+            .iter()
+            .filter(|turn| is_panel_mission(turn) && turn.state == MissionState::Working)
+            .count()
+            == 2
+            && turns.iter().any(|turn| {
                 is_panel_mission(turn)
                     && !turn.session_ids.is_empty()
                     && turn.state == MissionState::Working
-            })
+            });
+        if reached {
+            *before.borrow_mut() = fs::read(root.path().join("missions.json")).unwrap();
+        }
+        reached
     })
     .await;
-    // Its book is written on each change, so this is what a Station that died leaves.
-    let before = fs::read(root.path().join("missions.json")).unwrap();
+    let before = before.into_inner();
     let state = restarted(root.path(), &state, &before, &roster, settings).await;
     assert!(
         state.startup_recovery.lock().unwrap().len() >= 2,
