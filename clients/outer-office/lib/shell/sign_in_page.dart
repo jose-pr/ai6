@@ -26,6 +26,7 @@ class _SignInPageState extends State<SignInPage> {
   final _name = TextEditingController();
   final _secret = TextEditingController();
   bool _submitting = false;
+  bool _reveal = false;
 
   /// What the gateway accepts; the form until it says otherwise.
   SignInMethods _methods = SignInMethods.unknown;
@@ -182,28 +183,63 @@ class _SignInPageState extends State<SignInPage> {
 
   /// No field takes focus by itself: Flutter's web engine leaves a screen reader's click on an
   /// already focused field unconnected, and what is typed there is lost. Tab reaches the first.
-  List<Widget> _form() => [
-    TextField(
-      controller: _name,
-      autocorrect: false,
-      enableSuggestions: false,
-      autofillHints: const [AutofillHints.username],
-      textInputAction: TextInputAction.next,
-      onChanged: (_) => setState(() {}),
-      decoration: const InputDecoration(labelText: 'Account'),
-    ),
-    const SizedBox(height: 12),
-    TextField(
-      controller: _secret,
-      obscureText: true,
-      autocorrect: false,
-      enableSuggestions: false,
-      autofillHints: const [AutofillHints.password],
-      onChanged: (_) => setState(() {}),
-      onSubmitted: (_) => _signIn(),
-      decoration: const InputDecoration(labelText: 'Password'),
-    ),
-  ];
+  List<Widget> _form() {
+    final tokens = OoTokens.of(context);
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: tokens.border),
+    );
+    InputDecoration field(String label, {Widget? suffix}) => InputDecoration(
+      labelText: label,
+      filled: true,
+      fillColor: tokens.raised,
+      border: border,
+      enabledBorder: border,
+      focusedBorder: border.copyWith(
+        borderSide: BorderSide(color: tokens.accent, width: 2),
+      ),
+      suffixIcon: suffix,
+    );
+    return [
+      Text(
+        'Use your directory account or an AI6 access key.',
+        key: const ValueKey('sign-in-help'),
+        style: TextStyle(color: tokens.muted),
+      ),
+      const SizedBox(height: 16),
+      TextField(
+        controller: _name,
+        autocorrect: false,
+        enableSuggestions: false,
+        autofillHints: const [AutofillHints.username],
+        textInputAction: TextInputAction.next,
+        onChanged: (_) => setState(() {}),
+        decoration: field('Account'),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _secret,
+        obscureText: !_reveal,
+        autocorrect: false,
+        enableSuggestions: false,
+        autofillHints: const [AutofillHints.password],
+        onChanged: (_) => setState(() {}),
+        onSubmitted: (_) => _signIn(),
+        decoration: field(
+          'Password',
+          suffix: IconButton(
+            tooltip: _reveal ? 'Hide password' : 'Show password',
+            icon: Icon(
+              _reveal
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+            ),
+            onPressed: () => setState(() => _reveal = !_reveal),
+          ),
+        ),
+      ),
+    ];
+  }
 
   Widget _proxyButton() {
     final enabled = !_submitting && !_holding;

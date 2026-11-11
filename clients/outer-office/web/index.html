@@ -17,12 +17,43 @@
     <link rel="preload" href="ai6_guatiao.wasm" as="fetch" crossorigin="anonymous">
     <style>
       html, body { width: 100%; min-width: 320px; height: 100%; margin: 0; }
-      body { background: #0a1114; color: #e5eeec; font: 15px system-ui, sans-serif; }
-      #startup { min-height: 100%; display: grid; place-items: center; color: #b9eee1; }
+      body { background: #07111b; color: #f1e9d8; font: 15px system-ui, sans-serif; }
+      /* The sign-in page's look, in its default theme, until the app draws over it. */
+      #startup {
+        min-height: 100%; display: grid; place-content: center; justify-items: center; gap: 28px;
+        padding: 28px; box-sizing: border-box; text-align: center;
+        background: radial-gradient(circle at 50% 40%, #0b2230, #091b29 55%, #06121d);
+      }
+      #startup .mark { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
+      #startup .oo {
+        font: 700 40px/1 Cinzel, "Trajan Pro", Georgia, serif; color: #d6a958;
+        background: linear-gradient(#f0cf8a, #c9973f); -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      #startup .name {
+        font: 20px/1 Cinzel, "Trajan Pro", Georgia, serif; letter-spacing: 0.14em; color: #f1e9d8;
+      }
+      #startup .bar {
+        position: relative; overflow: hidden; width: min(240px, 60vw); height: 3px;
+        border-radius: 2px; background: #24404e;
+      }
+      #startup .bar::after {
+        content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 2px;
+        background: #d6a958; animation: oo-slide 1.4s ease-in-out infinite;
+      }
+      @keyframes oo-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) {
+        #startup .bar::after { animation: none; width: 100%; opacity: 0.5; }
+      }
+      #startup button { font: inherit; }
     </style>
   </head>
   <body>
-    <main id="startup" role="status" aria-live="polite">Loading Outer Office…</main>
+    <main id="startup" role="status" aria-live="polite">
+      <div class="mark" aria-hidden="true"><span class="oo">OO</span><span class="name">OUTER OFFICE</span></div>
+      <div class="bar" aria-hidden="true"></div>
+      <span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Loading Outer Office…</span>
+    </main>
     <script src="flutter_bootstrap.js" async></script>
   </body>
 </html>

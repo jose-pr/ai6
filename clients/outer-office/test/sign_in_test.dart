@@ -240,6 +240,38 @@ void main() {
     expect(board.accessToken, 'user-token');
   });
 
+  testWidgets(
+    'the password is hidden until the person shows it, and hidden again',
+    (tester) async {
+      await open(tester, Api(), desktop);
+      bool obscured() =>
+          tester.widget<TextField>(find.byType(TextField).at(1)).obscureText;
+      expect(obscured(), isTrue);
+      await tester.tap(find.byTooltip('Show password'));
+      await tester.pump();
+      expect(obscured(), isFalse);
+      expect(find.byTooltip('Hide password'), findsOneWidget);
+      await tester.tap(find.byTooltip('Hide password'));
+      await tester.pump();
+      expect(obscured(), isTrue);
+    },
+  );
+
+  testWidgets('the form says a directory account and an access key both work', (
+    tester,
+  ) async {
+    await open(tester, Api(), phone);
+    expect(
+      find.text('Use your directory account or an AI6 access key.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a proxy alone has no form to explain', (tester) async {
+    await open(tester, Api(methods: const ['proxy']), phone);
+    expect(find.byKey(const ValueKey('sign-in-help')), findsNothing);
+  });
+
   testWidgets('a 429 with no Retry-After still says what happened', (
     tester,
   ) async {
