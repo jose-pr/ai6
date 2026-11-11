@@ -41,6 +41,9 @@ mod timeline;
 mod tls;
 mod transcripts;
 mod tree;
+mod unstarted;
+#[cfg(test)]
+mod unstarted_tests;
 mod verdicts;
 
 use core::future::Future;
@@ -99,6 +102,7 @@ pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{TimelineItem, TimelinePage};
 pub use tls::tls_server_config;
+pub use unstarted::BoardPending;
 
 /// Bytes a frame's length field can grow by past an empty frame's.
 const LENGTH_GROWTH: usize = 10;
@@ -2298,9 +2302,18 @@ async fn missions(
     Query(query): Query<MissionsQuery>,
 ) -> Result<Json<Vec<BoardMission>>, ApiError> {
     let mut sessions = authorized_board_sessions(&gateway, &headers).await?;
+    // Missions no Session has been recorded for are listed beside the others, unless a
+    // compartment narrows the list: it covers Missions by what they are, which these are not yet.
+    let mut unstarted = if query.compartment.is_some() {
+        Vec::new()
+    } else {
+        let person = resolve_user(&gateway, bearer(&headers)?).await?;
+        unstarted::unstarted_missions(&gateway, person).await?
+    };
     if let Some(mission) = &query.mission {
         let uid = mission_key(&gateway, mission).await?;
         sessions.retain(|session| session.mission_id == uid);
+        unstarted.retain(|pending| pending.mission_id == uid);
     }
     if let Some(operation) = &query.operation {
         let tree = if query.subtree {
@@ -2309,6 +2322,7 @@ async fn missions(
             OperationTree::default()
         };
         sessions.retain(|session| tree.in_subtree(&session.operation_id, operation));
+        unstarted.retain(|pending| tree.in_subtree(&pending.operation_id, operation));
     }
     if let Some(compartment) = query.compartment {
         let person = resolve_user(&gateway, bearer(&headers)?).await?;
@@ -2343,9 +2357,15 @@ async fn missions(
         .await
         .map_err(|_| ApiError::internal())?;
     }
-    Ok(Json(
-        gateway.enrich_missions(group_missions(sessions)).await,
-    ))
+    let mut missions = group_missions(sessions);
+    let started: BTreeSet<_> = missions
+        .iter()
+        .map(|mission| (mission.operation_id.clone(), mission.mission_id.clone()))
+        .collect();
+    missions.extend(unstarted.into_iter().filter(|pending| {
+        !started.contains(&(pending.operation_id.clone(), pending.mission_id.clone()))
+    }));
+    Ok(Json(gateway.enrich_missions(missions).await))
 }
 
 async fn mission_detail(
@@ -2364,10 +2384,21 @@ async fn mission_detail(
                 && session.mission_id == mission_id.as_str()
         })
         .collect::<Vec<_>>();
-    let mut mission = group_missions(sessions)
-        .into_iter()
-        .next()
-        .ok_or_else(ApiError::not_found)?;
+    let mut mission = match group_missions(sessions).into_iter().next() {
+        Some(mission) => mission,
+        // A Mission nobody has started has no Session to find it by.
+        None => {
+            let person = resolve_user(&gateway, bearer(&headers)?).await?;
+            unstarted::unstarted_missions(&gateway, person)
+                .await?
+                .into_iter()
+                .find(|pending| {
+                    pending.operation_id == operation_id.as_str()
+                        && pending.mission_id == mission_id.as_str()
+                })
+                .ok_or_else(ApiError::not_found)?
+        }
+    };
     mission.handle = named.handle;
     mission.brief = gateway
         .inner
@@ -3106,6 +3137,7 @@ fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {
             brief: None,
             usage: None,
             attempts: Vec::new(),
+            pending: None,
         })
         .collect()
 }
@@ -5248,6 +5280,10 @@ pub struct BoardMission {
     /// Every attempt at the Mission, first first, from the shared Session records; empty
     /// when no Session was recorded.
     pub attempts: Vec<MissionAttempt>,
+    /// Where a Mission with no Session stands: queued, waiting, retrying a start or failed
+    /// before one; absent once it has a Session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<unstarted::BoardPending>,
 }
 
 /// One attempt at a Mission: which Station ran it on which Theater, and how it stands.
@@ -9701,10 +9737,20 @@ mod tests {
             .unwrap();
         assert_eq!(viewer_missions.status(), StatusCode::OK);
         let viewer_missions: serde_json::Value = viewer_missions.json().await.unwrap();
-        assert_eq!(viewer_missions.as_array().unwrap().len(), 1);
-        assert_eq!(viewer_missions[0]["operation_id"], "G");
-        assert_eq!(viewer_missions[0]["mission_id"], "mission-g");
-        assert_eq!(viewer_missions[0]["sessions"][0]["session_id"], "session-g");
+        // The briefs the operator queued above are listed too, each with its `pending`.
+        let (started, queued): (Vec<_>, Vec<_>) = viewer_missions
+            .as_array()
+            .unwrap()
+            .iter()
+            .partition(|mission| !mission["sessions"].as_array().unwrap().is_empty());
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0]["operation_id"], "G");
+        assert_eq!(started[0]["mission_id"], "mission-g");
+        assert_eq!(started[0]["sessions"][0]["session_id"], "session-g");
+        assert!(
+            queued.iter().all(|mission| mission["operation_id"] == "G"
+                && mission["pending"]["kind"] == "unplaced")
+        );
 
         let viewer_read = client
             .post(format!("{base}/v1/user/attach-grants"))

@@ -165,11 +165,22 @@ pub universal_exports::BoardMission::brief: core::option::Option<universal_expor
 pub universal_exports::BoardMission::handle: alloc::string::String
 pub universal_exports::BoardMission::mission_id: alloc::string::String
 pub universal_exports::BoardMission::operation_id: alloc::string::String
+pub universal_exports::BoardMission::pending: core::option::Option<universal_exports::BoardPending>
 pub universal_exports::BoardMission::sessions: alloc::vec::Vec<universal_exports::BoardSession>
 pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorates::medical::usage::MissionUsage>
 #[non_exhaustive] pub struct universal_exports::BoardOperation
 pub universal_exports::BoardOperation::operation_id: alloc::string::String
 pub universal_exports::BoardOperation::parent: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::BoardPending
+pub universal_exports::BoardPending::agent: core::option::Option<alloc::string::String>
+pub universal_exports::BoardPending::at: core::option::Option<f64>
+pub universal_exports::BoardPending::failures: u32
+pub universal_exports::BoardPending::kind: alloc::string::String
+pub universal_exports::BoardPending::name: core::option::Option<alloc::string::String>
+pub universal_exports::BoardPending::reason: core::option::Option<alloc::string::String>
+pub universal_exports::BoardPending::retry_at: core::option::Option<f64>
+pub universal_exports::BoardPending::state: alloc::string::String
+pub universal_exports::BoardPending::station: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardQueueEntry
 pub universal_exports::BoardQueueEntry::agent: core::option::Option<alloc::string::String>
 pub universal_exports::BoardQueueEntry::failures: u32

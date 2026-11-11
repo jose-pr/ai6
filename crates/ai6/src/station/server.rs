@@ -2648,6 +2648,10 @@ fn publish_station_check_in(state: &DaemonState) {
     if !queue.is_empty() {
         info.insert("queue".to_owned(), serde_json::json!(queue));
     }
+    let failed_starts = failed_start_entries(state);
+    if !failed_starts.is_empty() {
+        info.insert("failed_starts".to_owned(), serde_json::json!(failed_starts));
+    }
     head_of_station::check_in(state, &mut info);
     if let Err(error) = state.intake.check_in(&state.station_id, info) {
         eprintln!("ai6: Station check-in failed: {error}");
@@ -4051,6 +4055,10 @@ async fn schedule_queued_once(state: &DaemonState) {
                     wait.as_secs(),
                     error.error
                 );
+                START_REASONS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert((daemon_key(state), mission_id.clone()), error.error);
                 if let Ok(mut retries) = state.retry_after.lock() {
                     retries.insert(mission_id, Instant::now() + wait);
                 }
@@ -4061,6 +4069,10 @@ async fn schedule_queued_once(state: &DaemonState) {
 
 /// Start tries that failed in a row, by daemon (the address of its retry book) and Mission.
 static START_FAILURES: Mutex<BTreeMap<(usize, String), u32>> = Mutex::new(BTreeMap::new());
+
+/// What the last failed start of each Mission said, by daemon and Mission, until it starts or
+/// leaves the queue; the check-in lists it as the entry's reason for waiting.
+static START_REASONS: Mutex<BTreeMap<(usize, String), String>> = Mutex::new(BTreeMap::new());
 
 /// What names this daemon's entries in [`START_FAILURES`].
 fn daemon_key(state: &DaemonState) -> usize {
@@ -4101,6 +4113,7 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
         return Vec::new();
     };
     let tries = START_FAILURES.lock().unwrap_or_else(|e| e.into_inner());
+    let reasons = START_REASONS.lock().unwrap_or_else(|e| e.into_inner());
     missions
         .list()
         .into_iter()
@@ -4125,9 +4138,40 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
                 "state": if recovering { "recovering" } else { "queued" },
                 "failures": tries.get(&(daemon_key(state), id.clone())).copied().unwrap_or(0),
                 "retry_in_secs": retry_in,
-                "waiting": mission.waiting,
+                "waiting": mission.waiting.or_else(|| {
+                    reasons.get(&(daemon_key(state), id.clone())).cloned()
+                }),
             }))
         })
+        .collect()
+}
+
+/// The Missions of this Station's book that failed before any harness started, as its check-in
+/// lists them, at most as many as `[registry.limits.briefs] records` allows: the Registry's
+/// brief for each is filed failed and the app has no Session to show them by.
+fn failed_start_entries(state: &DaemonState) -> Vec<serde_json::Value> {
+    let Ok(missions) = state.missions.lock() else {
+        return Vec::new();
+    };
+    let room = state.intake.limits().briefs.records.or_max();
+    missions
+        .list()
+        .into_iter()
+        .rev()
+        .filter(|mission| {
+            mission.state == MissionState::Failed
+                && mission.session_ids.is_empty()
+                && mission.failure.is_some()
+        })
+        .filter_map(|mission| {
+            Some(serde_json::json!({
+                "mission_id": mission.mission_id.as_str(),
+                "operation_id": mission.operation_id.clone()?,
+                "agent": mission.agent_id,
+                "reason": mission.failure,
+            }))
+        })
+        .take(room)
         .collect()
 }
 
@@ -4135,6 +4179,9 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
 fn forget_start_failures(state: &DaemonState, gone: impl Fn(&str) -> bool) {
     if let Ok(mut tries) = START_FAILURES.lock() {
         tries.retain(|(daemon, mission), _| *daemon != daemon_key(state) || !gone(mission));
+    }
+    if let Ok(mut reasons) = START_REASONS.lock() {
+        reasons.retain(|(daemon, mission), _| *daemon != daemon_key(state) || !gone(mission));
     }
 }
 

@@ -136,7 +136,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/board` | Return Sessions for Operations permitted by the user's `mission.read` policy. |
 | `GET` | `/v1/stations` | Return authorized Station health, hosted Operations, the Theaters each Station reaches (with the transport's capabilities and the Theater's declared facts), and the current Headquarters Station. |
 | `GET` | `/v1/user/operations/{operation_id}/placement-preview` | Require `mission.read`; return where a Mission for the Operation would run (Station, Theater, Agent, best first) and a reason for every place ruled out. Optional `agent`, `role`, `stations` and `tags` narrow it. |
-| `GET` | `/v1/missions` | Group registered provider Sessions by Mission and apply `mission.read` to each Operation. |
+| `GET` | `/v1/missions` | Group registered provider Sessions by Mission and apply `mission.read` to each Operation; Missions queued, waiting, retrying or failed before a start are listed with `pending`. |
 | `GET` | `/v1/operations/{operation_id}/missions/{mission_id}` | Return one authorized Mission and its AI6-published brief and sanitized launch manifest. |
 | `GET` | `/v1/auth/session` | Validate the bearer access token against the shared Registry and return its person and expiry. |
 | `POST` | `/v1/station/access-tokens` | Issue a person-bound access token after M authenticates the user; the raw token is returned once. Body: `{"person_id":"…","ttl_seconds":600}`. |

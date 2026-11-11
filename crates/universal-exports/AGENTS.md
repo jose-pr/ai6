@@ -309,7 +309,15 @@ earlier attempt keeps the state it last reported (often `queued` after a retry),
 Mission's current state is the one of its Session with the latest `updated_at`. `reason` is the
 lifecycle event's reason, if any, and clears with the next state. `exposure` lists where the Session read untrusted input (`brief:source`,
 `cable:SENDER`, `tool:NAME`, `review`) and is empty for a clean Session. `BoardMission` groups registered Sessions by Station and
-Mission ID; queued Missions without a registered provider Session are not present.
+Mission ID. A Mission with no registered Session is listed too, with `sessions: []` and
+`pending` (`BoardPending`): `state` (`queued` or `failed`), `kind` (`unplaced` = a brief no Station
+has taken, `waiting`, `retrying`, `recovering`, `queued`, `failed`), `reason`, `failures`, `retry_at`
+(Unix seconds), `agent`, `station`, `name`, `at`. They come from the Registry: a Station's check-in
+`queue` (the entry's `waiting` is why it waits or why its last start failed) and `failed_starts` (a
+Mission that failed before a harness started, newest first within `[registry.limits.briefs] records`),
+and the queued briefs with the latest `waiting` timeline reason for each. Only an Operation the person
+may read with `mission.read` is listed; a compartment filter leaves them out. A Mission that has a
+Session is never listed twice, and has no `pending`.
 `brief` is present when AI6 published the exact Mission prompt and sanitized launch
 manifest during Session registration. It contains environment variable names only;
 values and initial context are never returned. The detail is scoped by the same
@@ -916,7 +924,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`, each with the `station_id` of its Registry record and the `agent` of its Mission's brief (`null` when unknown). |
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
-| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`. `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. `?mission=ID` keeps the one Mission `ID` names. |
+| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`, and lists Missions with no Session yet (`pending`, above). `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. `?mission=ID` keeps the one Mission `ID` names. |
 | Any route with `{mission_id}` (and `held-briefs/{key}`, `missions/{id}/products`, the timeline's `?mission=`) | Takes the Mission's UID, the key of a brief dropped by hand, or any handle it was ever given, compared without case (`ai6::BriefStore::resolve_mission`); an ID the Registry does not know is taken as it is. Answers carry `mission_id` (the UID) and `handle` (the current one). |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verdict` | Requires `mission.verify`; body `{"verdict": "confirmed" \| "disputed" \| "failed-verification", "note"?}`, unknown fields refused. Puts it on the latest attempt, replacing any it has, and returns `{operation_id, mission_id, attempt, session_id, verdict, note?, by, at}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (the attempt has not ended done or held) or `404`. Audited `mission.verdict` first (resource `mission:UID`, target `UID VERDICT`, never the note), timeline kind `verdict` action the verdict. A Station settles a held or verifying Mission by it; `redispatch` is refused here (`400`): it goes by `verify`. |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verify` | Requires `mission.verify`; body `{"decision": "done" \| "redispatch" \| "failed", "reason", "amendment"?}` (`reason` required, `amendment` only with `redispatch`), unknown fields refused. Decides a Mission whose latest attempt is `verifying`: it becomes the attempt's verdict (`confirmed`, `failed-verification` or `redispatch`, the reason as its note), and its Station then settles the Mission done or failed, or queues attempt N+1 told the reason and amendment. Returns `{operation_id, mission_id, attempt, session_id, decision, verdict, note, amendment?, by, at}`; `400` (malformed), `409` (the latest attempt is not verifying) or `404`. Audited `mission.verify` first (resource `mission:UID`, target `UID DECISION`, never the reason), timeline kind `verify` action the decision. |

@@ -1203,6 +1203,13 @@ async fn a_queue_entry_is_reloaded_and_then_dropped_by_its_station() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["mission_id"], key.as_str());
     assert_eq!(listed[0]["failures"], 1);
+    assert!(
+        listed[0]["waiting"]
+            .as_str()
+            .is_some_and(|said| !said.is_empty()),
+        "the entry says why its start failed: {:?}",
+        listed[0]
+    );
 
     let reloaded = controls::apply(
         &state,
@@ -1228,6 +1235,10 @@ async fn a_queue_entry_is_reloaded_and_then_dropped_by_its_station() {
     assert_eq!(mission.state, MissionState::Failed);
     assert!(mission.failure.unwrap().contains("dropped"));
     assert!(queue_entries(&state).is_empty());
+    let failed = failed_start_entries(&state);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["mission_id"], key.as_str());
+    assert!(failed[0]["reason"].as_str().unwrap().contains("dropped"));
     assert!(schedule_intake_once(&state));
     assert_eq!(
         state.intake.filed_brief(&key).unwrap().unwrap().state,
