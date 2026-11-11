@@ -67,7 +67,7 @@ class OverviewPage extends StatelessWidget {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
     final phone = width < OoBreakpoints.phone;
-    final missions = groupMissions(board.sessions);
+    final missions = board.missionGroups();
     final active = missions.where((mission) => !mission.finished).toList();
     final working = active.where((mission) => mission.state == 'working');
     final stations = board.stationBoard.stations;
@@ -731,7 +731,8 @@ DateTime _local(double seconds) =>
     DateTime.fromMillisecondsSinceEpoch((seconds * 1000).round()).toLocal();
 
 /// The Missions waiting to run: queued Missions on the board, oldest first, then briefs
-/// vetting holds for review. Briefs no Station has placed yet are not on the board.
+/// vetting holds for review. A queued Mission is one a Station has queued, one waiting for a
+/// place or retrying its start, or a brief no Station has taken, each with why.
 class _Upcoming extends StatelessWidget {
   const _Upcoming({
     required this.board,
@@ -747,13 +748,8 @@ class _Upcoming extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
-    double? queuedAt(MissionGroup mission) => mission.sessions
-        .map((session) => session.updatedAt)
-        .whereType<double>()
-        .fold<double?>(
-          null,
-          (latest, at) => latest == null || at > latest ? at : latest,
-        );
+    double? queuedAt(MissionGroup mission) => mission.updatedAt;
+    final now = ooClock().millisecondsSinceEpoch / 1000;
     final queued =
         missions.where((mission) => mission.state == 'queued').toList()
           ..sort((left, right) {
@@ -764,7 +760,12 @@ class _Upcoming extends StatelessWidget {
     final rows = <Widget>[
       for (final mission in queued)
         _UpcomingRow(
-          kind: 'Queued Mission',
+          kind: switch (mission.pending) {
+            PendingMission(station: null) => 'Unplaced brief',
+            PendingMission(kind: 'retrying') => 'Mission retrying its start',
+            PendingMission(kind: 'waiting') => 'Mission waiting for a place',
+            _ => 'Queued Mission',
+          },
           at: queuedAt(mission),
           color: tokens.accent,
           title:
@@ -773,7 +774,10 @@ class _Upcoming extends StatelessWidget {
           detail: [
             ?board.missionBrief(mission.operationId, mission.missionId)?.name,
             'Operation ${mission.operationId}',
-            'queued',
+            ?mission.pending?.name,
+            mission.pending?.describe(now) ?? 'queued',
+            ?mission.pending?.reason,
+            ?mission.pending?.agent,
             ?board
                 .missionBrief(mission.operationId, mission.missionId)
                 ?.agentId,
@@ -899,7 +903,7 @@ class _UpcomingRow extends StatelessWidget {
                   ),
                   Text(
                     detail,
-                    maxLines: 2,
+                    maxLines: 4,
                     overflow: TextOverflow.ellipsis,
                     style: text.bodySmall?.copyWith(color: tokens.muted),
                   ),

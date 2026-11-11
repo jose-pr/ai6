@@ -9,6 +9,7 @@ import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
 import 'mission_outcome.dart';
 import 'mission_rename.dart';
+import 'mission_pending.dart';
 import 'mission_verification.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
@@ -93,6 +94,7 @@ class MissionDetail extends StatelessWidget {
                 operationId: operationId,
                 missionId: mission.missionId,
                 sessions: mission.sessions,
+                state: mission.state,
               ),
             ],
           ),
@@ -132,14 +134,17 @@ class MissionDetail extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            [
-              'State from',
-              if (current != null) 'attempt ${current.attempt}',
-              'Session ${latest.sessionId}',
-            ].join(' · '),
-            style: text.bodySmall?.copyWith(color: tokens.muted),
-          ),
+          if (mission.pending case final pending?)
+            MissionPendingNote(pending: pending)
+          else if (latest != null)
+            Text(
+              [
+                'State from',
+                if (current != null) 'attempt ${current.attempt}',
+                'Session ${latest.sessionId}',
+              ].join(' · '),
+              style: text.bodySmall?.copyWith(color: tokens.muted),
+            ),
           if (control != null) ...[
             const SizedBox(height: 6),
             Text(control.describe(), style: text.labelMedium),

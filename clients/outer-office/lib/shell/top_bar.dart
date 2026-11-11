@@ -12,7 +12,6 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
-import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
 
@@ -356,7 +355,7 @@ class _OoSearchState extends State<OoSearch> {
         'Operation',
         _route(OoPage.operations, {'operation_id': operation.operationId}),
       ),
-    for (final mission in groupMissions(widget.board.sessions))
+    for (final mission in widget.board.missionGroups())
       (
         OoIconName.missions,
         'Mission ${widget.board.handleOf(mission.operationId, mission.missionId)}',

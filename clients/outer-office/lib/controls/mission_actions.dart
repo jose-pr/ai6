@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../shell/mission_verification.dart' show decideMission;
 
 /// Mission states after which a Mission has ended.
 const _ended = {'done', 'failed', 'blown', 'abandoned'};
@@ -226,6 +227,7 @@ class MissionActionsMenu extends StatelessWidget {
     required this.operationId,
     required this.missionId,
     required this.sessions,
+    this.state,
     super.key,
   });
 
@@ -234,13 +236,23 @@ class MissionActionsMenu extends StatelessWidget {
   final String missionId;
   final List<SessionSummary> sessions;
 
+  /// The Mission's state when it has no Session to say (queued, failed before it started).
+  final String? state;
+
+  /// Whether the Mission waits for a decision and this person may give it.
+  bool _mayVerify(String? state) =>
+      state == 'verifying' &&
+      !board.demo &&
+      board.hasOperationAction(operationId, 'mission.verify');
+
   @override
   Widget build(BuildContext context) {
     final current = currentSession(sessions);
+    final shown = current?.state ?? state;
     final busy = board.requestInProgress(operationId, missionId);
     final options = [
       for (final option in missionControls(
-        state: current?.state,
+        state: shown,
         permitted: board.canControlMission(operationId),
       ))
         busy
@@ -256,6 +268,24 @@ class MissionActionsMenu extends StatelessWidget {
       tooltip: 'Mission actions',
       icon: const Icon(Icons.more_vert),
       itemBuilder: (context) => [
+        if (_mayVerify(shown)) ...[
+          for (final (value, label, icon) in const [
+            ('verify-done', 'Verify done', Icons.check_circle_outline),
+            ('verify-redispatch', 'Redispatch', Icons.replay),
+            ('verify-failed', 'Verify failed', Icons.highlight_off),
+          ])
+            PopupMenuItem<String>(
+              value: value,
+              enabled: !busy,
+              child: ListTile(
+                dense: true,
+                enabled: !busy,
+                leading: Icon(icon),
+                title: Text(label),
+              ),
+            ),
+          const PopupMenuDivider(),
+        ],
         for (final option in options)
           PopupMenuItem<String>(
             value: option.action,
@@ -280,6 +310,22 @@ class MissionActionsMenu extends StatelessWidget {
     String action,
     SessionSummary? current,
   ) async {
+    if (action.startsWith('verify-')) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      try {
+        await decideMission(
+          context,
+          board,
+          operationId: operationId,
+          missionId: missionId,
+          decision: action.substring('verify-'.length),
+          attempt: board.currentAttempt(operationId, missionId)?.attempt,
+        );
+      } on Object catch (error) {
+        messenger?.showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+      return;
+    }
     final request = await showDialog<_ControlRequest>(
       context: context,
       builder: (_) => _ControlDialog(action: action, missionId: missionId),

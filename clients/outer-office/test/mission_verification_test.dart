@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:outer_office/controls/mission_actions.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/shell/mission_detail.dart';
@@ -188,7 +189,7 @@ void main() {
     );
     // Without mission.verify a reader may look and not decide.
     expect(find.text('Probe now'), findsNothing);
-    expect(find.text('Done'), findsNothing);
+    expect(find.text('Verify done'), findsNothing);
     expect(find.text('Failed'), findsNothing);
     expect(find.textContaining('Redispatch'), findsNothing);
   });
@@ -251,7 +252,7 @@ void main() {
     final calls = <(String, Map<String, dynamic>?)>[];
     final board = await _board(['mission.verify'], calls: calls);
     await _detail(tester, board);
-    await tester.tap(find.text('Done'));
+    await tester.tap(find.text('Verify done'));
     await tester.pumpAndSettle();
     expect(
       tester
@@ -310,7 +311,7 @@ void main() {
       refuse: (409, 'Mission m1 is not verifying: its latest attempt is done'),
     );
     await _detail(tester, board);
-    await tester.tap(find.text('Done'));
+    await tester.tap(find.text('Verify done'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'fine');
     await tester.pump();
@@ -320,6 +321,140 @@ void main() {
       find.text('Mission m1 is not verifying: its latest attempt is done'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a reader is told what deciding needs; a checker gets the '
+      'verdict beside the decision', (tester) async {
+    final reader = await _board(['mission.read']);
+    await _detail(tester, reader);
+    expect(
+      find.textContaining('Deciding needs mission.verify'),
+      findsOneWidget,
+    );
+    expect(find.text('Confirm it'), findsNothing);
+
+    final checker = await _board(['mission.verify']);
+    await _detail(tester, checker);
+    expect(find.textContaining('Deciding needs mission.verify'), findsNothing);
+    expect(find.text('VERDICT'), findsOneWidget);
+    expect(find.text('Confirm it'), findsOneWidget);
+    expect(find.text('Dispute it'), findsOneWidget);
+    expect(find.text('It failed verification'), findsOneWidget);
+  });
+
+  testWidgets('a verdict on a verifying Mission is sent with its note', (
+    tester,
+  ) async {
+    final verdicts = <Map<String, dynamic>>[];
+    final board = MissionBoard(
+      apiOrigin: Uri.parse('https://oo.example'),
+      pollInterval: null,
+      client: MockClient((request) async {
+        http.Response json(Object body) => http.Response(
+          jsonEncode(body),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+        if (request.url.path.endsWith('/verdict')) {
+          verdicts.add(jsonDecode(request.body) as Map<String, dynamic>);
+          return json({'operation_id': 'G', 'mission_id': 'm1'});
+        }
+        return switch (request.url.path) {
+          '/v1/auth/login' => http.Response(
+            jsonEncode({'token': 'user-token'}),
+            201,
+            headers: {'content-type': 'application/json'},
+          ),
+          '/v1/user/profile' => json({
+            'person_id': 'operator-007',
+            'name': 'operator',
+            'display_name': null,
+            'groups': [],
+            'expires_at': 1_900_000_000,
+            'operations': [
+              {
+                'operation_id': 'G',
+                'actions': ['mission.verify'],
+              },
+            ],
+            'stations': [],
+          }),
+          '/v1/stations' => json({
+            'headquarters_station': null,
+            'stations': [],
+          }),
+          '/v1/operations/G/missions/m1' => json({
+            'operation_id': 'G',
+            'mission_id': 'm1',
+            'sessions': const <Object>[],
+            'attempts': const <Object>[],
+          }),
+          _ => json(const <Object>[]),
+        };
+      }),
+    );
+    await board.login('operator', 'secret');
+    addTearDown(board.dispose);
+    await _show(
+      tester,
+      SingleChildScrollView(
+        child: MissionOutcomeSection(
+          board: board,
+          operationId: 'G',
+          missionId: 'm1',
+          state: 'verifying',
+        ),
+      ),
+    );
+    await tester.tap(find.text('Dispute it'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'the file is empty');
+    await tester.tap(find.text('Record it'));
+    await tester.pumpAndSettle();
+    expect(verdicts, [
+      {'verdict': 'disputed', 'note': 'the file is empty'},
+    ]);
+  });
+
+  Future<void> menu(WidgetTester tester, MissionBoard board) => _show(
+    tester,
+    Align(
+      alignment: Alignment.topRight,
+      child: MissionActionsMenu(
+        board: board,
+        operationId: 'G',
+        missionId: 'm1',
+        sessions: const [_session],
+        state: 'verifying',
+      ),
+    ),
+  );
+
+  testWidgets('the Mission menu offers a reader no decision', (tester) async {
+    final reader = await _board(['mission.read']);
+    await menu(tester, reader);
+    await tester.tap(find.byTooltip('Mission actions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Verify done'), findsNothing);
+  });
+
+  testWidgets('the Mission menu offers a checker the decision', (tester) async {
+    final calls = <(String, Map<String, dynamic>?)>[];
+    final checker = await _board(['mission.verify'], calls: calls);
+    await menu(tester, checker);
+    await tester.tap(find.byTooltip('Mission actions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Verify done'), findsOneWidget);
+    expect(find.text('Redispatch'), findsOneWidget);
+    expect(find.text('Verify failed'), findsOneWidget);
+    await tester.tap(find.text('Verify failed'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'never pushed');
+    await tester.pump();
+    await tester.tap(find.text('Record it'));
+    await tester.pumpAndSettle();
+    expect(calls.single.$2, {'decision': 'failed', 'reason': 'never pushed'});
+    expect(find.textContaining('Decision recorded: failed'), findsOneWidget);
   });
 
   testWidgets('a forbidden probe is shown in the gateway\'s words', (

@@ -226,7 +226,7 @@ class _MissionsPageState extends State<MissionsPage> {
       slivers: [
         SliverToBoxAdapter(
           child: BoardHeader(
-            missions: groupMissions(board.sessions),
+            missions: board.missionGroups(),
             selectedStates: listRoute.states,
             onSelectStates: (states) =>
                 widget.onRoute(listRoute.withField('state', states)),

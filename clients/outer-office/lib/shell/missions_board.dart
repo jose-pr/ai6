@@ -8,6 +8,7 @@ import '../operations/operation_tree.dart';
 import '../routes/oo_route.dart';
 import 'oo_shell.dart' show OoPage;
 import '../terminal/session_connection.dart';
+import 'mission_pending.dart';
 import '../terminal/session_terminal.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
@@ -102,7 +103,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   final descending = sort == 'updated'
       ? route['order'] != 'asc'
       : route['order'] == 'desc';
-  final missions = groupMissions(board.sessions).where(matches).indexed.toList()
+  final missions = board.missionGroups().where(matches).indexed.toList()
     ..sort((a, b) {
       final order = key(a.$2).compareTo(key(b.$2));
       return order != 0 ? (descending ? -order : order) : a.$1.compareTo(b.$1);
@@ -231,31 +232,40 @@ class MissionGroup {
     required this.operationId,
     required this.missionId,
     required this.sessions,
+    this.pending,
   });
 
   final String operationId;
   final String missionId;
   final List<SessionSummary> sessions;
 
-  /// The Session that sets the Mission's state, by [currentSession]'s rule. A group always has
-  /// a Session.
-  SessionSummary get latest => currentSession(sessions)!;
+  /// Where a Mission with no Session stands; `null` for one that has Sessions.
+  final PendingMission? pending;
 
-  /// The state of its latest Session; a Session not yet reporting one is working.
-  String get state => latest.state ?? 'working';
+  /// The Session that sets the Mission's state, by [currentSession]'s rule; `null` for a
+  /// Mission that has none yet.
+  SessionSummary? get latest => currentSession(sessions);
+
+  /// The state of its latest Session, a Session not yet reporting one being working; without a
+  /// Session, `queued` or `failed` as the Registry says.
+  String get state => latest == null
+      ? (pending?.state ?? 'queued')
+      : (latest!.state ?? 'working');
 
   /// Why the latest Session holds that state, when it says.
-  String? get reason => latest.reason;
+  String? get reason => latest?.reason;
 
   /// When the board last heard of any of its Sessions, as Unix seconds; `null` before it
-  /// has heard of one.
-  double? get updatedAt => sessions
-      .map((session) => session.updatedAt)
-      .whereType<double>()
-      .fold<double?>(
-        null,
-        (latest, at) => latest == null || at > latest ? at : latest,
-      );
+  /// has heard of one. A Mission with none has the time the Registry last said where it stands.
+  double? get updatedAt =>
+      sessions
+          .map((session) => session.updatedAt)
+          .whereType<double>()
+          .fold<double?>(
+            null,
+            (latest, at) => latest == null || at > latest ? at : latest,
+          ) ??
+      (sessions.isEmpty ? pending?.at : null);
 
   /// Whether it has stopped for good: done, failed or abandoned.
   bool get finished => const {'done', 'failed', 'abandoned'}.contains(state);
@@ -283,6 +293,12 @@ List<MissionGroup> groupMissions(List<SessionSummary> sessions) {
         ),
       )
       .toList();
+  return sortedMissionGroups(result);
+}
+
+/// [groups] by Operation then Mission ID.
+List<MissionGroup> sortedMissionGroups(List<MissionGroup> groups) {
+  final result = [...groups];
   result.sort((left, right) {
     final station = left.operationId.compareTo(right.operationId);
     return station != 0
@@ -375,6 +391,7 @@ class MissionCard extends StatelessWidget {
                 operationId: mission.operationId,
                 missionId: mission.missionId,
                 sessions: mission.sessions,
+                state: mission.state,
               ),
             ],
           ),
@@ -494,8 +511,8 @@ class MissionFacts extends StatelessWidget {
       mission.missionId,
     );
     final brief = board.missionBrief(mission.operationId, mission.missionId);
-    final station = attempt?.station ?? mission.latest.stationId;
-    final agent = brief?.agentId ?? mission.latest.agent;
+    final station = attempt?.station ?? mission.latest?.stationId;
+    final agent = brief?.agentId ?? mission.latest?.agent;
     final role = brief?.roleId;
     return Wrap(
       spacing: 14,
@@ -523,6 +540,8 @@ class MissionFacts extends StatelessWidget {
             if (attempt?.route case final route?) ('Route $route', null),
           ], style: muted),
         OoTime(mission.updatedAt, prefix: 'Updated '),
+        if (mission.pending case final pending?)
+          MissionPendingNote(pending: pending),
         if (agent != null || role != null)
           OoLinkLine([
             if (agent != null)

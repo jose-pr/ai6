@@ -8,7 +8,6 @@ import '../operations/operation_tree.dart';
 import '../routes/oo_filters.dart';
 import '../roster/record_editor.dart';
 import '../routes/oo_route.dart';
-import 'missions_board.dart';
 import 'oo_empty.dart';
 import 'oo_link.dart';
 import 'operation_summary.dart';
@@ -151,7 +150,7 @@ class _OperationsPageState extends State<OperationsPage>
         ],
       );
     }
-    final missions = groupMissions(board.sessions);
+    final missions = board.missionGroups();
     final rows = <(OperationNode, int)>[];
     void walk(List<OperationNode> nodes, int depth) {
       for (final node in nodes) {

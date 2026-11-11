@@ -450,6 +450,31 @@ class MissionBoard extends ChangeNotifier
 
   /// What each Mission is called now, by (Operation, Mission UID).
   Map<(String, String), String> missionHandles = const {};
+
+  /// Where each Mission with no Session stands, by (Operation, Mission UID): queued, waiting,
+  /// retrying a start, or failed before one.
+  Map<(String, String), PendingMission> missionPending = const {};
+
+  /// The Missions the board lists: those with a Session, then those with none yet.
+  List<MissionGroup> missionGroups() {
+    final started = groupMissions(sessions);
+    final seen = {
+      for (final group in started) (group.operationId, group.missionId),
+    };
+    final waiting = [
+      for (final entry in missionPending.entries)
+        if (!seen.contains(entry.key))
+          MissionGroup(
+            operationId: entry.key.$1,
+            missionId: entry.key.$2,
+            sessions: const [],
+            pending: entry.value,
+          ),
+    ];
+    if (waiting.isEmpty) return started;
+    return sortedMissionGroups([...started, ...waiting]);
+  }
+
   List<AuditEntrySummary> auditEntries = const [];
 
   /// The briefs vetting holds, in the Operations whose held briefs this account may review.
@@ -2974,6 +2999,12 @@ class MissionBoard extends ChangeNotifier
                 (item['operation_id'] as String, item['mission_id'] as String):
                     handle,
           };
+          missionPending = {
+            for (final item in missions.cast<Map<String, dynamic>>())
+              if (item['pending'] case final Map<String, dynamic> pending)
+                (item['operation_id'] as String, item['mission_id'] as String):
+                    PendingMission.fromJson(pending),
+          };
         });
       }
       if (reads.contains(BoardRead.stations)) {
@@ -3068,6 +3099,7 @@ class MissionBoard extends ChangeNotifier
     missionBriefs = const [];
     missionAttempts = const {};
     missionHandles = const {};
+    missionPending = const {};
     auditEntries = const [];
     heldBriefs = const [];
     missionProposals = const [];
@@ -3245,8 +3277,9 @@ class MissionBoard extends ChangeNotifier
   }
 
   /// Decides a verifying Mission: `done`, `redispatch` (with an optional [amendment] for the
-  /// next attempt) or `failed`, each with its [reason].
-  Future<void> verifyMission({
+  /// next attempt) or `failed`, each with its [reason]. Returns the decision as recorded, with
+  /// the attempt it is on.
+  Future<Map<String, dynamic>> verifyMission({
     required String operationId,
     required String missionId,
     required String decision,
@@ -3262,6 +3295,18 @@ class MissionBoard extends ChangeNotifier
     );
     _requireOk(response, 'the decision');
     await refresh();
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// The Mission's state on the board now, or `null` when the board does not list it.
+  String? missionState(String operationId, String missionId) {
+    for (final mission in missionGroups()) {
+      if (mission.operationId == operationId &&
+          mission.missionId == missionId) {
+        return mission.state;
+      }
+    }
+    return null;
   }
 
   /// Throws the gateway's own words when [response] is not a 200.
@@ -4769,6 +4814,80 @@ class ProbeEvidenceSummary {
         detail: json['detail'] as String? ?? '',
         at: (json['at'] as num).toDouble(),
       );
+}
+
+/// Where a Mission with no Session stands, as the gateway read it from the Registry.
+class PendingMission {
+  const PendingMission({
+    required this.state,
+    required this.kind,
+    this.reason,
+    this.failures = 0,
+    this.retryAt,
+    this.agent,
+    this.station,
+    this.name,
+    this.at,
+  });
+
+  /// `queued` or `failed`.
+  final String state;
+
+  /// `unplaced`, `waiting`, `retrying`, `recovering`, `queued` or `failed`.
+  final String kind;
+
+  /// Why it waits, why its last start failed, or why it failed. Text of a Station or an
+  /// Agent's setup, shown as it is.
+  final String? reason;
+
+  /// Start tries that failed in a row.
+  final int failures;
+
+  /// When the next try is due, as Unix seconds, while it waits out a backoff.
+  final double? retryAt;
+  final String? agent;
+
+  /// The Station that holds it; `null` for a brief no Station has taken.
+  final String? station;
+
+  /// What to show beside its handle.
+  final String? name;
+
+  /// When the Registry last said so, as Unix seconds.
+  final double? at;
+
+  factory PendingMission.fromJson(Map<String, dynamic> json) => PendingMission(
+    state: json['state'] as String,
+    kind: json['kind'] as String,
+    reason: json['reason'] as String?,
+    failures: (json['failures'] as num?)?.toInt() ?? 0,
+    retryAt: (json['retry_at'] as num?)?.toDouble(),
+    agent: json['agent'] as String?,
+    station: json['station'] as String?,
+    name: json['name'] as String?,
+    at: (json['at'] as num?)?.toDouble(),
+  );
+
+  /// What it is doing, in words, at [now] (Unix seconds): `Retrying: 3 starts failed, next try
+  /// in 160 s`.
+  String describe(double now) => switch (kind) {
+    'unplaced' => 'Waiting for a Station to take it',
+    'waiting' => 'Waiting: it has not started',
+    'retrying' =>
+      'Retrying: $failures ${failures == 1 ? 'start' : 'starts'} failed'
+          '${_next(now)}',
+    'recovering' => 'Waiting to be resumed after a restart',
+    'failed' => 'Failed before it started',
+    _ => 'Queued',
+  };
+
+  String _next(double now) {
+    final at = retryAt;
+    if (at == null) return '';
+    return at > now
+        ? ', next try in ${(at - now).round()} s'
+        : ', next try due';
+  }
 }
 
 /// One attempt at a Mission: where it ran and how it stands.

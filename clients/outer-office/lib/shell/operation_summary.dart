@@ -7,7 +7,6 @@ import '../routes/oo_route.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
 import '../timeline/timeline_page.dart';
-import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
 import 'overview_page.dart' show timelineKindIcon;
@@ -79,7 +78,7 @@ class _OperationSummaryState extends State<OperationSummary> {
     final text = Theme.of(context).textTheme;
     final board = widget.board;
     final counts = <String, int>{};
-    for (final mission in groupMissions(board.sessions)) {
+    for (final mission in board.missionGroups()) {
       if (mission.operationId != _id) continue;
       counts.update(mission.state, (count) => count + 1, ifAbsent: () => 1);
     }

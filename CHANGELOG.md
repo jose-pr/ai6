@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office lists the Missions no Session has been recorded for: queued, waiting for a place (with
+  placement's reason), retrying a start (its failures and next try, with the reason), a brief no Station
+  has taken, and a Mission that failed before it started (with its failure), on Missions and in
+  Overview's Upcoming. `GET /v1/missions` and the Mission detail carry them with `pending`; a Station's
+  check-in lists the Missions that failed before starting under `failed_starts` and gives a queue entry
+  the reason of its last failed start in `waiting`.
+- A Mission waiting for a verification decision can be decided from Outer Office's board and table (the
+  Mission menu: Verify done, Redispatch, Verify failed, each with a required reason), and its page
+  takes the verdict beside the decision and says what deciding needs when the person lacks
+  `mission.verify`.
+
 - People are shown by name. The gateway keeps what the directory said of each person who signs in (the
   Registry's `principals`, within `[registry.limits.principals]`) and names them: the audit carries
   `actor_name`, `POST /v1/user/principals` resolves IDs, `GET /v1/user/principals?q=` finds people and

@@ -30,6 +30,9 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
   bool _busy = false;
   String? _refusal;
 
+  /// What was said when the person last decided, until the Station settles the Mission.
+  String? _recorded;
+
   Future<MissionAttemptSummary?> _load() =>
       widget.board.loadLatestAttempt(widget.operationId, widget.missionId);
 
@@ -65,23 +68,17 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
     });
   }
 
-  Future<void> _decide(String decision, int attempt) async {
-    final answer = await showDialog<_Decision>(
-      context: context,
-      builder: (context) =>
-          _DecisionDialog(decision: decision, attempt: attempt),
+  Future<void> _decide(String decision, int? attempt) => _run(() async {
+    final said = await decideMission(
+      context,
+      widget.board,
+      operationId: widget.operationId,
+      missionId: widget.missionId,
+      decision: decision,
+      attempt: attempt,
     );
-    if (answer == null) return;
-    await _run(
-      () => widget.board.verifyMission(
-        operationId: widget.operationId,
-        missionId: widget.missionId,
-        decision: decision,
-        reason: answer.reason,
-        amendment: answer.amendment,
-      ),
-    );
-  }
+    if (said != null) _recorded = said;
+  });
 
   Future<void> _probe() => _run(() async {
     await widget.board.probeMission(
@@ -98,6 +95,11 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
       final tokens = OoTokens.of(context);
       final attempt = snapshot.data;
       final report = attempt?.finalReport;
+      final number =
+          attempt?.attempt ??
+          widget.board
+              .currentAttempt(widget.operationId, widget.missionId)
+              ?.attempt;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -152,38 +154,49 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
                 'No final message is on record.',
                 style: TextStyle(color: tokens.muted),
               ),
-            if (_mayDecide) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  OutlinedButton(
-                    onPressed: _busy ? null : _probe,
-                    child: const Text('Probe now'),
-                  ),
-                  FilledButton(
-                    onPressed: _busy
-                        ? null
-                        : () => _decide('done', attempt.attempt),
-                    child: const Text('Done'),
-                  ),
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => _decide('redispatch', attempt.attempt),
-                    child: Text('Redispatch as attempt ${attempt.attempt + 1}'),
-                  ),
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => _decide('failed', attempt.attempt),
-                    child: const Text('Failed'),
-                  ),
-                ],
-              ),
-            ],
           ],
+          if (_mayDecide) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton(
+                  onPressed: _busy ? null : _probe,
+                  child: const Text('Probe now'),
+                ),
+                FilledButton(
+                  onPressed: _busy ? null : () => _decide('done', number),
+                  child: const Text('Verify done'),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : () => _decide('redispatch', number),
+                  child: Text(
+                    number == null
+                        ? 'Redispatch'
+                        : 'Redispatch as attempt ${number + 1}',
+                  ),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : () => _decide('failed', number),
+                  child: const Text('Failed'),
+                ),
+              ],
+            ),
+          ] else if (!widget.board.demo)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                'Deciding needs mission.verify in this Operation, which your '
+                'account does not have.',
+                style: text.bodySmall?.copyWith(color: tokens.muted),
+              ),
+            ),
+          if (_recorded case final recorded?)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(recorded, style: text.titleSmall),
+            ),
           if (_refusal case final refusal?)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -247,6 +260,44 @@ class _DeliverableRow extends StatelessWidget {
   }
 }
 
+/// Asks why, records [decision] on the Mission (the attempt it is on, when known), and says where
+/// the Mission stands after, in a message too. `null` when the person cancels; the gateway's
+/// own words are thrown when it refuses.
+Future<String?> decideMission(
+  BuildContext context,
+  MissionBoard board, {
+  required String operationId,
+  required String missionId,
+  required String decision,
+  int? attempt,
+}) async {
+  final answer = await showDialog<_Decision>(
+    context: context,
+    builder: (context) => _DecisionDialog(decision: decision, attempt: attempt),
+  );
+  if (answer == null || !context.mounted) return null;
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final recorded = await board.verifyMission(
+    operationId: operationId,
+    missionId: missionId,
+    decision: decision,
+    reason: answer.reason,
+    amendment: answer.amendment,
+  );
+  final state = board.missionState(operationId, missionId);
+  final next = (recorded['attempt'] as num?)?.toInt();
+  final said = [
+    'Decision recorded: ${switch (decision) {
+      'redispatch' => next == null ? 'redispatch' : 'redispatch as attempt ${next + 1}',
+      _ => decision,
+    }}',
+    if (state != null) 'Mission is $state',
+    if (state == 'verifying') 'its Station settles it next',
+  ].join(' · ');
+  messenger?.showSnackBar(SnackBar(content: Text(said)));
+  return said;
+}
+
 class _Decision {
   const _Decision(this.reason, this.amendment);
 
@@ -258,7 +309,7 @@ class _DecisionDialog extends StatefulWidget {
   const _DecisionDialog({required this.decision, required this.attempt});
 
   final String decision;
-  final int attempt;
+  final int? attempt;
 
   @override
   State<_DecisionDialog> createState() => _DecisionDialogState();
@@ -282,7 +333,10 @@ class _DecisionDialogState extends State<_DecisionDialog> {
     title: Text(switch (widget.decision) {
       'done' => 'Decide: done',
       'failed' => 'Decide: failed',
-      _ => 'Decide: redispatch as attempt ${widget.attempt + 1}',
+      _ =>
+        widget.attempt == null
+            ? 'Decide: redispatch'
+            : 'Decide: redispatch as attempt ${widget.attempt! + 1}',
     }),
     content: Column(
       mainAxisSize: MainAxisSize.min,

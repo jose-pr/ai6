@@ -89,7 +89,7 @@ List<(MissionGroup, SessionSummary?)> sessionsHere(
   String stationId,
 ) {
   final here = <(MissionGroup, SessionSummary?)>[];
-  for (final mission in groupMissions(board.sessions)) {
+  for (final mission in board.missionGroups()) {
     final attempts = board.attempts(mission.operationId, mission.missionId);
     if (!attempts.any(
       (attempt) => attempt.station == stationId && attempt.status == 'active',

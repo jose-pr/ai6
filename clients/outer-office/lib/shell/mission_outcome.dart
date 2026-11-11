@@ -41,7 +41,8 @@ class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
     }
   }
 
-  bool get _settled => const {'done', 'held'}.contains(widget.state);
+  bool get _settled =>
+      const {'done', 'held', 'verifying'}.contains(widget.state);
 
   bool get _mayJudge =>
       _settled &&
@@ -81,15 +82,34 @@ class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
       final attempt = snapshot.data;
       final report = attempt?.finalReport;
       final verdict = attempt?.verdict;
-      if (widget.state == 'verifying') return const SizedBox.shrink();
+      // A verifying Mission shows its report in the panel that decides it; here, only a verdict.
+      final verifying = widget.state == 'verifying';
+      if (verifying && verdict == null && !_mayJudge) {
+        return const SizedBox.shrink();
+      }
       if (report == null && verdict == null && !_settled) {
         return const SizedBox.shrink();
       }
+      final branch = attempt?.checkpointBranch;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('OUTCOME', style: ooSectionLabel(context)),
+          Text(
+            verifying ? 'VERDICT' : 'OUTCOME',
+            style: ooSectionLabel(context),
+          ),
           const SizedBox(height: 8),
+          if (!verifying)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                [
+                  'Mission is ${widget.state}',
+                  if (branch != null) 'branch $branch',
+                ].join(' · '),
+                style: text.bodyMedium,
+              ),
+            ),
           if (widget.state == 'held')
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -104,7 +124,9 @@ class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(verdict.describe(), style: text.titleSmall),
             ),
-          if (report != null)
+          if (verifying)
+            const SizedBox.shrink()
+          else if (report != null)
             OoMarkdown(report)
           else if (snapshot.connectionState == ConnectionState.done)
             Text(

@@ -8,6 +8,7 @@ import '../routes/oo_route.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import '../widgets/oo_data_table.dart';
+import 'mission_pending.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
@@ -103,16 +104,24 @@ class MissionsTable extends StatelessWidget {
           label: 'State',
           flex: 3,
           sortKey: (mission) => boardStates.indexOf(mission.state),
-          cell: (context, mission) => Row(
+          cell: (context, mission) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              OoStateMark(mission.state, reason: mission.reason),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  stateLine(mission.state, mission.reason),
-                  overflow: TextOverflow.ellipsis,
-                ),
+              Row(
+                children: [
+                  OoStateMark(mission.state, reason: mission.reason),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      stateLine(mission.state, mission.reason),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
+              if (mission.pending case final pending?)
+                MissionPendingNote(pending: pending, compact: true),
             ],
           ),
         ),
@@ -125,7 +134,7 @@ class MissionsTable extends StatelessWidget {
               mission.operationId,
               mission.missionId,
             );
-            final agent = brief?.agentId ?? mission.latest.agent;
+            final agent = brief?.agentId ?? mission.latest?.agent;
             return Text(
               [?agent, ?brief?.roleId].join(' · '),
               overflow: TextOverflow.ellipsis,
@@ -141,7 +150,7 @@ class MissionsTable extends StatelessWidget {
               mission.operationId,
               mission.missionId,
             );
-            final station = attempt?.station ?? mission.latest.stationId;
+            final station = attempt?.station ?? mission.latest?.stationId;
             return Text(
               [?station, ?attempt?.theater].join(' / '),
               style: muted,
@@ -175,6 +184,7 @@ class MissionsTable extends StatelessWidget {
             operationId: mission.operationId,
             missionId: mission.missionId,
             sessions: mission.sessions,
+            state: mission.state,
           ),
         ),
       ],

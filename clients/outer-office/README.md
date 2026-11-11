@@ -32,7 +32,10 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   and counts go by a Mission's state, that of the Session updated last, as Overview and an
   Operation's counts do; the Sessions page filters each Session by its own. With the
   `queued` state a strip counts the briefs vetting holds and the Mission proposals waiting,
-  each linking to Briefings; neither is ever a row. **Mission details** (route
+  each linking to Briefings; neither is ever a row. A Mission no Session has been recorded for is
+  a row too: queued, waiting for a place, retrying a start (its failures and next try), a brief no
+  Station has taken, or failed before it started, each with the reason the Station gave; Overview's
+  Upcoming lists the queued ones. **Mission details** (route
   `missions?operation_id=…&mission_id=…`) opens a read-only detail beside the queue, or in
   place of it in a narrow window: the state and the Session that sets it, every attempt (its
   Station and Theater as links, why it was lost, its checkpoint branch, the Sessions on it
@@ -136,8 +139,11 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   page shows its Agent's final message and any verdict, and takes one with `mission.verify`.
   The Missions board counts `verifying` Missions, those waiting for a decision. Such a Mission's page
   shows each deliverable with the latest probe of it (found, missing, unprobed or failed), the final
-  report, and, with `mission.verify`, Probe now and Done, Redispatch (as the next attempt, with an
-  amendment) and Failed, each with a required reason.
+  report, and, with `mission.verify`, Probe now and Verify done, Redispatch (as the next attempt,
+  with an amendment) and Failed, each with a required reason, and the verdict (confirmed, disputed,
+  failed verification); the same three decisions are in the Mission's actions menu on the board and in
+  the table. Without `mission.verify` the page says what deciding needs. After a decision a message
+  says where the Mission stands.
 - Agents, Account pools and Green ink open on **All Operations**: every Operation the person
   may read there, each one's rows under its name, an Operation that could not be read named with
   why. The picker narrows to one (`operation_id` in the route), and an action on a row goes to
