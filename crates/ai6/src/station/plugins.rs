@@ -25,7 +25,7 @@ use crate::directorates::registry::bona_fides::{
     KeepVerified, LibraryPin, PinCheck, PinSet, PluginProfile, PublisherKey, library_pin,
     publisher_message,
 };
-use crate::providers::ProviderEntry;
+use crate::providers::{FoundLibrary, ProviderEntry};
 
 use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
 use crate::directorates::q::ephemeral::TheaterProvider;
@@ -67,6 +67,9 @@ pub struct PluginScanSummary {
     pub checked: Vec<LibraryCheck>,
     /// Libraries the `strict` profile did not load, and why.
     pub refused: Vec<String>,
+    /// The libraries behind `refused` that a person could approve: each with its digest, the
+    /// kinds it declares and who signed it, read without running it.
+    pub found: Vec<FoundLibrary>,
     /// Every way the scan was looser than `strict` with every library pinned to its digest: the
     /// profile, each library that loaded unpinned or unmatched, SHA-1 pins, a publisher whose
     /// signature alone is enough.
@@ -946,10 +949,15 @@ fn check_candidate(
     summary: &mut PluginScanSummary,
 ) -> Option<PathBuf> {
     let shown = candidate.display().to_string();
+    let mut declared = Declared::default();
     let not_ai6 = match probe(candidate) {
         Err(_) => Some("not a library this build can examine".to_owned()),
         Ok(probed) if !probed.entry => Some("no Guatiao entry symbol".to_owned()),
-        Ok(probed) => declares_ai6_kind(&probed.declared).err(),
+        Ok(probed) => {
+            let verdict = declares_ai6_kind(&probed.declared).err();
+            declared = probed.declared;
+            verdict
+        }
     };
     if let Some(reason) = not_ai6 {
         // Under strict, nothing unchecked reaches the loader, even a file that looked inert:
@@ -1023,10 +1031,14 @@ fn check_candidate(
             summary.refused.push(format!(
                 "{shown}: {file} is not pinned ({digest}); `ai6 plugins pin` prints its entry"
             ));
+            let seen = Seen::new(&file, &digest, &declared, &sha256, signature.as_deref());
+            summary.found_library(&seen, "unpinned", policy);
             None
         }
         (PluginProfile::Strict, PinCheck::Refused(why)) => {
             summary.refused.push(format!("{shown}: {why}"));
+            let seen = Seen::new(&file, &digest, &declared, &sha256, signature.as_deref());
+            summary.found_library(&seen, &format!("refused: {why}"), policy);
             None
         }
         (_, PinCheck::Unpinned) => {
@@ -1044,6 +1056,68 @@ fn check_candidate(
             Some(candidate.to_path_buf())
         }
         _ => Some(candidate.to_path_buf()),
+    }
+}
+
+/// What a scan read of one library, for [`PluginScanSummary::found_library`].
+struct Seen<'a> {
+    file: &'a str,
+    digest: String,
+    declared: &'a Declared,
+    sha256: &'a [u8; 32],
+    signature: Option<&'a [u8]>,
+}
+
+impl<'a> Seen<'a> {
+    fn new(
+        file: &'a str,
+        digest: &PeerId,
+        declared: &'a Declared,
+        sha256: &'a [u8; 32],
+        signature: Option<&'a [u8]>,
+    ) -> Self {
+        Self {
+            file,
+            digest: digest.to_string(),
+            declared,
+            sha256,
+            signature,
+        }
+    }
+}
+
+impl PluginScanSummary {
+    /// Lists a library `strict` did not load as one a person could approve, once per file and
+    /// digest.
+    fn found_library(&mut self, seen: &Seen<'_>, verdict: &str, policy: &PluginPolicy) {
+        if self
+            .found
+            .iter()
+            .any(|held| held.file == seen.file && held.digest == seen.digest)
+        {
+            return;
+        }
+        self.found.push(FoundLibrary {
+            file: seen.file.to_owned(),
+            digest: seen.digest.clone(),
+            kinds: seen.declared.kinds().map(str::to_owned).collect(),
+            declared: seen
+                .declared
+                .iter()
+                .filter(|(key, _)| *key != "kind")
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect(),
+            verdict: verdict.to_owned(),
+            signed: seen.signature.is_some(),
+            publisher: seen
+                .signature
+                .and_then(|signature| {
+                    policy
+                        .pins
+                        .publisher_of(seen.file, seen.sha256, signature, &verify_ed25519)
+                })
+                .map(|key| key.to_string()),
+        });
     }
 }
 
@@ -2238,6 +2312,68 @@ tty = false
             summary.verified_held[0].contains(&verified.path().display().to_string()),
             "{summary:?}"
         );
+    }
+
+    #[test]
+    fn a_library_strict_does_not_load_is_found_with_what_a_person_needs_to_approve_it() {
+        let (directory, library, bytes) = one_library();
+        let verified = scratch();
+        let digest = library_pin(&bytes).to_string();
+        let pins = |entries: Vec<LibraryPin>| {
+            let policy = entries
+                .into_iter()
+                .fold(PinSet::new(), PinSet::with_library);
+            PluginPolicy::new(Some(policy), verified.path())
+        };
+        let (pair, key) = publisher();
+        let elsewhere = LibraryPin::publisher(format!("other.{DLL_EXTENSION}"), key);
+        let scan = |policy: &PluginPolicy| {
+            Plugins::scan_with(&[directory.path().to_path_buf()], policy)
+                .scan_summary()
+                .clone()
+        };
+
+        // Named by no record: found, its kinds read as data, and nobody recognised as signer.
+        let summary = scan(&pins(vec![elsewhere.clone()]));
+        assert_eq!(summary.found.len(), 1, "{summary:?}");
+        let found = &summary.found[0];
+        assert_eq!(found.file, file_name());
+        assert_eq!(found.digest, digest);
+        assert_eq!(found.verdict, "unpinned");
+        assert!(!found.kinds.is_empty() && !found.signed && found.publisher.is_none());
+
+        // Signed by a key the records name for another file: the key is told.
+        sign(&pair, &library);
+        let summary = scan(&pins(vec![elsewhere.clone()]));
+        let found = &summary.found[0];
+        assert!(found.signed);
+        assert_eq!(found.publisher, Some(key.to_string()));
+
+        // Signed by a key no record names: signed, publisher unknown.
+        let (_, stranger) = publisher();
+        let summary = scan(&pins(vec![LibraryPin::publisher(
+            format!("other.{DLL_EXTENSION}"),
+            stranger,
+        )]));
+        assert!(summary.found[0].signed && summary.found[0].publisher.is_none());
+
+        // A record names the file and not these bytes: found, with why.
+        let summary = scan(&pins(vec![LibraryPin::digest(
+            file_name(),
+            library_pin(b"some other build"),
+        )]));
+        assert!(
+            summary.found[0].verdict.starts_with("refused: expected "),
+            "{summary:?}"
+        );
+
+        // Accepted: loaded, and not offered.
+        let summary = scan(&digest_policy(&bytes, verified.path()));
+        assert!(summary.found.is_empty(), "{summary:?}");
+
+        // Under report it loads, so there is nothing to approve.
+        let report = pins(vec![elsewhere]).with_profile(PluginProfile::Report);
+        assert!(scan(&report).found.is_empty());
     }
 
     #[test]

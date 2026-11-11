@@ -1141,6 +1141,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
 | `provider_catalog_bytes` | 512 KiB | **Largest provider catalog.** Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out. |
+| `found_libraries` | 64 | **Most unloaded libraries listed.** Libraries found on the plugin paths but not loaded that a check-in lists for a person to approve; past it, the rest are left out. |
 | `shutdown_wait` | 2 | **Wait for each loop when stopping.** Seconds the Station waits for each of its loops when it stops. |
 <!-- schema:record.station.scheduler:end -->
 

@@ -8991,6 +8991,14 @@ pub fn ai6::provider_settings::settings_of<T: guatiao::value::convert::FromValue
 pub fn ai6::provider_settings::settings_value(&serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<guatiao::value::value::Value, alloc::string::String>
 pub fn ai6::provider_settings::table_value(&toml::table::Table) -> core::result::Result<guatiao::value::value::Value, alloc::string::String>
 pub mod ai6::providers
+pub struct ai6::providers::FoundLibrary
+pub ai6::providers::FoundLibrary::declared: alloc::vec::Vec<alloc::string::String>
+pub ai6::providers::FoundLibrary::digest: alloc::string::String
+pub ai6::providers::FoundLibrary::file: alloc::string::String
+pub ai6::providers::FoundLibrary::kinds: alloc::vec::Vec<alloc::string::String>
+pub ai6::providers::FoundLibrary::publisher: core::option::Option<alloc::string::String>
+pub ai6::providers::FoundLibrary::signed: bool
+pub ai6::providers::FoundLibrary::verdict: alloc::string::String
 pub struct ai6::providers::ProviderEntry
 pub ai6::providers::ProviderEntry::digest: alloc::string::String
 pub ai6::providers::ProviderEntry::form: core::option::Option<serde_json::value::Value>
@@ -9213,6 +9221,7 @@ pub fn ai6::station::limits::RunnerLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::SchedulerLimits
 pub ai6::station::limits::SchedulerLimits::check_in: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::event_queue: ai6::bounds::Limit
+pub ai6::station::limits::SchedulerLimits::found_libraries: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::intake_attempts: u32
 pub ai6::station::limits::SchedulerLimits::interval: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::provider_catalog_bytes: ai6::bounds::Limit
@@ -9347,6 +9356,7 @@ pub fn ai6::station::plugins::PluginPolicy::default() -> Self
 pub struct ai6::station::plugins::PluginScanSummary
 pub ai6::station::plugins::PluginScanSummary::checked: alloc::vec::Vec<ai6::station::plugins::LibraryCheck>
 pub ai6::station::plugins::PluginScanSummary::failed: alloc::vec::Vec<alloc::string::String>
+pub ai6::station::plugins::PluginScanSummary::found: alloc::vec::Vec<ai6::providers::FoundLibrary>
 pub ai6::station::plugins::PluginScanSummary::loaded: alloc::vec::Vec<alloc::string::String>
 pub ai6::station::plugins::PluginScanSummary::profile: alloc::string::String
 pub ai6::station::plugins::PluginScanSummary::refused: alloc::vec::Vec<alloc::string::String>

@@ -6259,6 +6259,14 @@ pub fn check_provider_settings(schema: &Value, definition: &Value, reports: &[(S
 
 A Station also answers `GET /internal/providers` with its catalog.
 
+```rust
+pub struct FoundLibrary { pub file, digest: String, pub kinds: Vec<String>, pub declared: Vec<String> /* other key=value */,
+    pub verdict: String /* "unpinned" | "refused: .." */, pub signed: bool, pub publisher: Option<String> /* ed25519: key a record names that verifies the signature */ }
+PluginScanSummary.found: Vec<FoundLibrary>   // the libraries `strict` did not load, read as data; the check-in carries `found_libraries` (at most `[scheduler] found_libraries`, 64)
+```
+
+`plugin.manage` (in `ACTIONS`, on `config:plugin`; no built-in role holds it, the chief does) approves one through the gateway.
+
 `ai6::provider_settings` carries a record's settings to a provider as its Guatiao value, never as text:
 
 ```rust

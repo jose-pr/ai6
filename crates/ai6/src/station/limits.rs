@@ -172,6 +172,11 @@ pub struct SchedulerLimits {
     #[schema(title = "Largest provider catalog", format = "bytes")]
     #[map(default = SchedulerLimits::default().provider_catalog_bytes)]
     pub provider_catalog_bytes: Limit,
+    /// Libraries found on the plugin paths but not loaded that a check-in lists for a person to
+    /// approve; past it, the rest are left out.
+    #[schema(title = "Most unloaded libraries listed")]
+    #[map(default = SchedulerLimits::default().found_libraries)]
+    pub found_libraries: Limit,
     /// Seconds the Station waits for each of its loops when it stops.
     #[schema(title = "Wait for each loop when stopping")]
     #[map(default = SchedulerLimits::default().shutdown_wait)]
@@ -189,6 +194,7 @@ impl Default for SchedulerLimits {
             intake_attempts: 3,
             role_catalog_bytes: Limit::at(512 * KIB),
             provider_catalog_bytes: Limit::at(512 * KIB),
+            found_libraries: Limit::at(64),
             shutdown_wait: Seconds::new(2),
         }
     }

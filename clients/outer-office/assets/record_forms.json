@@ -8014,6 +8014,26 @@
               "description": "Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out.",
               "default": 524288
             },
+            "found_libraries": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Most unloaded libraries listed",
+              "description": "Libraries found on the plugin paths but not loaded that a check-in lists for a person to approve; past it, the rest are left out.",
+              "default": 64
+            },
             "shutdown_wait": {
               "type": "number",
               "minimum": 0,
@@ -8035,6 +8055,7 @@
             "intake_attempts": 3,
             "role_catalog_bytes": 524288,
             "provider_catalog_bytes": 524288,
+            "found_libraries": 64,
             "shutdown_wait": 2.0
           }
         },

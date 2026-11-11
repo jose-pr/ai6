@@ -2554,6 +2554,7 @@ fn publish_station_check_in(state: &DaemonState) {
         serde_json::json!(available_handlers(state)),
     );
     info.insert("providers".to_owned(), provider_catalog(state));
+    info.insert("found_libraries".to_owned(), found_libraries(state));
     let mut theaters = state
         .transports
         .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok());
@@ -3562,6 +3563,21 @@ fn provider_catalog(state: &DaemonState) -> serde_json::Value {
             serde_json::json!([])
         }
     }
+}
+
+/// The libraries this Station found and did not load, for a person to approve. Past
+/// `[scheduler] found_libraries` the rest are left out.
+fn found_libraries(state: &DaemonState) -> serde_json::Value {
+    let limit = state.station.limits().scheduler.found_libraries;
+    let found = &state.plugins.scan_summary().found;
+    if !limit.allows(found.len()) {
+        eprintln!(
+            "ai6: {} libraries were found and not loaded; the check-in lists {limit} \
+             ([scheduler] found_libraries)",
+            found.len()
+        );
+    }
+    serde_json::json!(found.iter().take(limit.or_max()).collect::<Vec<_>>())
 }
 
 fn available_handlers(state: &DaemonState) -> Vec<String> {

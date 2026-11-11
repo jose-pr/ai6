@@ -712,6 +712,24 @@ impl PinSet {
         weakened
     }
 
+    /// The publisher key among those this set names whose signature `signature` is for the
+    /// library `file` with SHA-256 `sha256`; `None` when it carries none that verifies. A
+    /// signature does not say who made it, so only keys already named here can be recognised.
+    #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+    pub(crate) fn publisher_of(
+        &self,
+        file: &str,
+        sha256: &[u8; 32],
+        signature: &[u8],
+        verify: &SignatureCheck<'_>,
+    ) -> Option<PublisherKey> {
+        let message = publisher_message(file, sha256);
+        self.libraries
+            .iter()
+            .filter_map(|entry| entry.publisher)
+            .find(|key| verify(key, &message, signature))
+    }
+
     /// What the pin set says about the library `file` with these `bytes` and the detached
     /// `signature` found beside it. `verify(key, message, signature)` checks an Ed25519
     /// signature; the message a publisher signs is [`publisher_message`].

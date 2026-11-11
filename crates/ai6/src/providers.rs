@@ -35,6 +35,32 @@ pub struct ProviderEntry {
     pub digest: String,
 }
 
+/// A provider library a Station found on its plugin paths and did not load, because its pin set
+/// does not accept it. Everything here was read as data: nothing in the library ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundLibrary {
+    /// The file name a `plugin` record is keyed by.
+    pub file: String,
+    /// The `sha256:HEX` digest of its bytes.
+    pub digest: String,
+    /// The Guatiao kinds it declares, such as `ai6_agent_handler`. The provider IDs inside are
+    /// known only once it loads, so they are not here unless the library declares them.
+    pub kinds: Vec<String>,
+    /// Every other `key=value` the library declares about itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared: Vec<String>,
+    /// What the pin set said: `unpinned`, or `refused: <why>` when a record names the file and
+    /// does not accept these bytes.
+    pub verdict: String,
+    /// Whether a `FILE.sig` sits beside it.
+    #[serde(default)]
+    pub signed: bool,
+    /// The `ed25519:HEX` key, among those this Station's records name, whose signature that is.
+    /// A signature does not say who made it, so a key no record names is not recognised.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+}
+
 impl ProviderEntry {
     /// The entry without its schema and form.
     #[must_use]
