@@ -13,6 +13,8 @@ mod cable_wake_tests;
 mod cable_wakes;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
+#[cfg(test)]
+mod check_in_cost_tests;
 #[cfg(feature = "cables-mcp")]
 mod compartments;
 mod contexts;

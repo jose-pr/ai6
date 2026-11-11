@@ -384,11 +384,22 @@ impl SqlRegistry {
         })
     }
 
+    /// The transactions this handle has made, and the statements it ran.
+    #[cfg(test)]
+    pub(crate) fn tally(&self) -> (u64, u64) {
+        self.db.tally().totals()
+    }
+
     fn read<T, E: From<io::Error>>(
         &self,
         work: impl FnOnce(&mut Tx<'_>) -> Result<T, E>,
     ) -> Result<T, E> {
         self.db.read(work)
+    }
+
+    /// One query that writes nothing, without a transaction around it.
+    fn read_one(&self, sql: &str, params: &[db::Value]) -> io::Result<Vec<db::Row>> {
+        self.db.read_one(sql, params)
     }
 
     fn write<T, E: From<io::Error>>(

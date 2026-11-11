@@ -294,7 +294,14 @@ impl ConfigProvider for SqlProvider {
     }
 
     fn revision(&self, _station: &str) -> Result<ConfigRevision, RosterError> {
-        revision_of(self.db.read(clock).map_err(failed)?)
+        let rows = self
+            .db
+            .read_one("SELECT revision FROM ai6_clock WHERE name = 'config'", &[])
+            .map_err(failed)?;
+        revision_of(match rows.first() {
+            Some(row) => row.int(0).map_err(failed)?,
+            None => 0,
+        })
     }
 
     fn definitions(

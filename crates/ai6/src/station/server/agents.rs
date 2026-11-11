@@ -325,12 +325,30 @@ pub(super) fn retirements(roster: &Roster, now: i64) -> Vec<serde_json::Value> {
 /// as the Station works the Agent.
 pub(super) fn clearances(state: &DaemonState) -> serde_json::Value {
     let now = state.clock.now();
+    // One read of every grant: a read for each Agent in each Operation costs a round trip apiece.
+    let reads = state.intake.clearance_grant_reads();
+    if let Err(error) = &reads {
+        eprintln!("ai6: clearance grants unreadable: {error}");
+    }
     let mut operations = serde_json::Map::new();
     for operation in state.roster.operations() {
         let posted = state.roster.agents_for_operation(&operation.id);
         let mut agents = serde_json::Map::new();
         for agent in posted.unwrap_or_default() {
-            let read = grant_of(state, &operation.id, &agent.id);
+            let read = match &reads {
+                Ok(reads) => match reads.get(&(operation.id.clone(), agent.id.clone())) {
+                    Some(Ok(grant)) => Some(Some(grant.clone())),
+                    Some(Err(error)) => {
+                        eprintln!(
+                            "ai6: clearance grant of Agent {:?} in {:?} unreadable: {error}",
+                            agent.id, operation.id
+                        );
+                        None
+                    }
+                    None => Some(None),
+                },
+                Err(_) => None,
+            };
             let grant = match &read {
                 Some(grant) => grant.clone().filter(|grant| is_backed(state, grant)),
                 None => Some(unreadable(state, &operation.id, &agent.id)),

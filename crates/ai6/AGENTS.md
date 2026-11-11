@@ -1921,6 +1921,7 @@ every type that implements each family (a blanket impl: nothing to write for it)
 ```rust
 pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs);
                              // filed_brief(key), filed_briefs(operation, limit) -> FiledBrief { brief, state, attempts, outcome }
+                             // refile_lost(key, outcome, ok) -> bool: replaces the outcome of a brief filed as lost (its Station was dark) with the one the Station settled; false when not filed as lost
                              // request_cancel(key, at) -> io::Result<bool>: keeps the first time a cancel of the
                              //   claimed brief was asked (false: not claimed); finishing forgets it, a lapse back to
                              //   the queue keeps it. cancel_requests() -> io::Result<BTreeMap<key, at>>: claimed ones.
@@ -1981,7 +1982,7 @@ impl RegistryLimits {
 }
 impl LogbookLimits { pub fn record_bytes(&self) -> Limit; }       // a whole logbook, from its four keys
 impl QuarantineLimits { pub fn history_bytes(&self) -> Limit; }   // 16 × record_bytes
-// StationLimits::gone_dark_after is Seconds (45): pass `registry.limits().stations.gone_dark_after.0`
+// StationLimits::gone_dark_after is Seconds (180): pass `registry.limits().stations.gone_dark_after.0`
 // where a Station or Universal Exports judges a check-in dark.
 ```
 
@@ -2999,6 +3000,7 @@ pub trait ClearanceStore {
     fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool>
     fn clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>>
     fn clearance_grants(&self, operation: &str) -> io::Result<Vec<ClearanceGrant>>
+    fn clearance_grant_reads(&self) -> io::Result<GrantReads>   // every grant in one read, by (operation, agent); an unreadable one is an Err in its place
     fn remove_clearance_grant(&self, operation: &str, agent: &str) -> io::Result<Option<ClearanceGrant>>
 }
 ```

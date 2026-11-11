@@ -203,7 +203,7 @@ pub use directorates::registry::cables::{
     CablePrincipal, CableRecipient, CableRelay, CableRelayError, CableRelease, CableScope,
     CableSendRequest, CableState, CableTarget, MAX_CABLE_FANOUT,
 };
-pub use directorates::registry::clearance::ClearanceGrant;
+pub use directorates::registry::clearance::{ClearanceGrant, GrantReads};
 pub use directorates::registry::contexts::{
     ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, SessionContext,
 };

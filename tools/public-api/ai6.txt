@@ -4861,6 +4861,7 @@ pub fn ai6::directorates::registry::backend::BriefStore::promote_mission_proposa
 pub fn ai6::directorates::registry::backend::BriefStore::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::backend::BriefStore::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::backend::BriefStore::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::backend::BriefStore::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::backend::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::backend::BriefStore::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::backend::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -4889,6 +4890,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -4917,6 +4919,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::store::FileRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -4954,6 +4957,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&
 pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub trait ai6::directorates::registry::backend::ClearanceStore
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::backend::ClearanceStore::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::ClearanceStore::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -4961,6 +4965,7 @@ pub fn ai6::directorates::registry::backend::ClearanceStore::remove_clearance_gr
 pub fn ai6::directorates::registry::backend::ClearanceStore::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -4968,6 +4973,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -5796,6 +5802,7 @@ pub fn ai6::directorates::registry::clearance::ClearanceGrant::raises(&self) -> 
 pub fn ai6::directorates::registry::clearance::ClearanceGrant::validate(&self, &ai6::directorates::registry::limits::ClearanceLimits) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::clearance::ClearanceStore
 pub fn ai6::directorates::registry::clearance::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::clearance::ClearanceStore::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::clearance::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::clearance::ClearanceStore::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::clearance::ClearanceStore::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -5803,6 +5810,7 @@ pub fn ai6::directorates::registry::clearance::ClearanceStore::remove_clearance_
 pub fn ai6::directorates::registry::clearance::ClearanceStore::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -5810,11 +5818,13 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub type ai6::directorates::registry::clearance::GrantReads = alloc::collections::btree::map::BTreeMap<(alloc::string::String, alloc::string::String), core::io::error::Result<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub mod ai6::directorates::registry::contexts
 #[non_exhaustive] pub enum ai6::directorates::registry::contexts::ContextOwner
 pub ai6::directorates::registry::contexts::ContextOwner::Conversation
@@ -7419,6 +7429,7 @@ impl ai6::directorates::registry::backend::Limited for ai6::directorates::regist
 pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -7574,6 +7585,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -7717,6 +7729,7 @@ impl ai6::directorates::registry::backend::Limited for ai6::directorates::regist
 pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -7872,6 +7885,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::store::FileRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -8032,6 +8046,7 @@ pub fn ai6::directorates::registry::store::BriefStore::promote_mission_proposal(
 pub fn ai6::directorates::registry::store::BriefStore::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::BriefStore::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::BriefStore::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::store::BriefStore::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::BriefStore::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -8060,6 +8075,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -8088,6 +8104,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::store::FileRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -9224,6 +9241,7 @@ pub ai6::station::limits::SchedulerLimits::event_queue: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::found_libraries: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::intake_attempts: u32
 pub ai6::station::limits::SchedulerLimits::interval: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::lease: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::provider_catalog_bytes: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::retry_backoff: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::retry_backoff_max: ai6::bounds::Seconds
@@ -11710,6 +11728,7 @@ impl ai6::directorates::registry::backend::Limited for ai6::directorates::regist
 pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -11865,6 +11884,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::store::FileRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -13569,6 +13589,7 @@ impl ai6::directorates::registry::backend::Limited for ai6::directorates::regist
 pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -13724,6 +13745,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -14728,6 +14750,7 @@ pub fn ai6::BriefStore::promote_mission_proposal(&self, &str, &str, &str) -> cor
 pub fn ai6::BriefStore::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::BriefStore::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::BriefStore::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::BriefStore::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::BriefStore::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::BriefStore::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::BriefStore::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -14756,6 +14779,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::promote_mission_proposal(&
 pub fn ai6::directorates::registry::sql::SqlRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::sql::SqlRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::sql::SqlRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::sql::SqlRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -14784,6 +14808,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::promote_mission_proposa
 pub fn ai6::directorates::registry::store::FileRegistry::read_claimed(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::Brief>>
 pub fn ai6::directorates::registry::store::FileRegistry::recover(&self, &ai6::directorates::registry::store::Lease, u32, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::store::LeaseRecovery>>
 pub fn ai6::directorates::registry::store::FileRegistry::reenter_brief(&self, &ai6::directorates::registry::store::Brief, &ai6::directorates::registry::mission_ids::MissionEntry, &dyn core::ops::function::Fn(&ai6::directorates::registry::store::Brief) -> bool) -> core::io::error::Result<ai6::directorates::registry::store::Reentry>
+pub fn ai6::directorates::registry::store::FileRegistry::refile_lost(&self, &str, &serde_json::value::Value, bool) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::reject_mission_proposal(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::store::MissionProposal>
 pub fn ai6::directorates::registry::store::FileRegistry::rename_mission(&self, &str, &str) -> core::io::error::Result<ai6::directorates::registry::mission_ids::MissionHandle>
 pub fn ai6::directorates::registry::store::FileRegistry::renew(&self, &str, &str, core::time::Duration) -> core::io::error::Result<bool>
@@ -14821,6 +14846,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::take_quotas(&self, &[(&
 pub fn ai6::directorates::registry::store::FileRegistry::update_cable_delivery(&self, &str, &str, core::option::Option<&str>, ai6::directorates::registry::cables::CableState, core::option::Option<&str>, core::option::Option<f64>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::cables::Cable>>
 pub trait ai6::ClearanceStore
 pub fn ai6::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::ClearanceStore::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::ClearanceStore::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::ClearanceStore::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::ClearanceStore::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -14828,6 +14854,7 @@ pub fn ai6::ClearanceStore::remove_clearance_grant_if(&self, &ai6::directorates:
 pub fn ai6::ClearanceStore::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -14835,6 +14862,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::remove_clearance_grant_if(
 pub fn ai6::directorates::registry::sql::SqlRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
+pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grants(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
@@ -15493,5 +15521,6 @@ pub fn ai6::valid_handle(&str) -> bool
 pub fn ai6::validate_operation_access(&str, &ai6::OperationAccess, &ai6::AccessSet<'_>) -> core::result::Result<(), ai6::Refusal>
 pub fn ai6::vet(&ai6::directorates::registry::store::Brief, &ai6::directorates::m::vetting::VettingPolicy, &ai6::directorates::m::vetting::VettingContext) -> ai6::directorates::m::vetting::Vetting
 pub fn ai6::work_title(&ai6::directorates::registry::store::Brief) -> alloc::string::String
+pub type ai6::GrantReads = alloc::collections::btree::map::BTreeMap<(alloc::string::String, alloc::string::String), core::io::error::Result<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub type ai6::ProviderConfig = guatiao_serde::adapt::Serde<serde_json::map::Map<alloc::string::String, serde_json::value::Value>, guatiao::value::types::map::Map>
 pub type ai6::SignatureCheck<'a> = (dyn core::ops::function::Fn(&ai6::directorates::registry::bona_fides::PublisherKey, &[u8], &[u8]) -> bool + 'a)

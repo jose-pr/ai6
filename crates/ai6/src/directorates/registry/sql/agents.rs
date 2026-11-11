@@ -9,7 +9,7 @@ use crate::directorates::registry::agent_records::{
     AgentOutcomeReport, AgentRecord, AgentRecordStore, parse_record, record_bytes,
 };
 use crate::directorates::registry::clearance::{
-    ClearanceGrant, ClearanceStore, grant_bytes, parse_grant,
+    ClearanceGrant, ClearanceStore, GrantReads, grant_bytes, parse_grant,
 };
 use crate::directorates::registry::limits::{AgentLimits, ClearanceLimits};
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
@@ -162,6 +162,27 @@ impl ClearanceStore for SqlRegistry {
         }
         grants.sort_by(|left, right| left.agent.cmp(&right.agent));
         Ok(grants)
+    }
+
+    fn clearance_grant_reads(&self) -> io::Result<GrantReads> {
+        let rows = self.read(|tx| {
+            tx.query(
+                "SELECT operation, agent, record FROM ai6_clearance_grants",
+                &[],
+            )
+        })?;
+        let mut reads = GrantReads::new();
+        for row in rows {
+            let (operation, agent) = (row.text(0)?, row.text(1)?);
+            let read = parse_grant(row.text(2)?.as_bytes(), &self.limits.clearance);
+            match read {
+                Ok(grant) if grant.operation != operation || grant.agent != agent => {}
+                read => {
+                    reads.insert((operation, agent), read);
+                }
+            }
+        }
+        Ok(reads)
     }
 
     fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool> {

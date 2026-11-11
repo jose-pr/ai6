@@ -186,6 +186,9 @@ impl ClearanceGrant {
     }
 }
 
+/// What a bulk read found of each grant, by `(Operation, Agent)`.
+pub type GrantReads = std::collections::BTreeMap<(String, String), io::Result<ClearanceGrant>>;
+
 /// Clearance grants: each Agent's clearance per Operation when it is not the configured one.
 pub trait ClearanceStore {
     /// Stores a grant, replacing the Agent's grant in that Operation.
@@ -222,6 +225,15 @@ pub trait ClearanceStore {
     ///
     /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
     fn clearance_grants(&self, operation: &str) -> io::Result<Vec<ClearanceGrant>>;
+
+    /// Every grant of every Operation in one read, by `(Operation, Agent)`, each as
+    /// [`ClearanceStore::clearance_grant`] would answer for it: an unreadable grant is an error
+    /// in its place, not left out.
+    ///
+    /// # Errors
+    ///
+    /// I/O errors when the grants cannot be listed.
+    fn clearance_grant_reads(&self) -> io::Result<GrantReads>;
 
     /// Removes `expected` only if it is still the Agent's grant in its Operation, in one step;
     /// `false` when the grant changed or is gone.
@@ -321,6 +333,40 @@ impl ClearanceStore for FileRegistry {
         }
         grants.sort_by(|left, right| left.agent.cmp(&right.agent));
         Ok(grants)
+    }
+
+    fn clearance_grant_reads(&self) -> io::Result<GrantReads> {
+        let mut reads = GrantReads::new();
+        let operations = match fs::read_dir(self.grants_root()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(reads),
+            Err(error) => return Err(error),
+        };
+        for operation in operations {
+            let operation = operation?;
+            let Some(operation_key) = operation.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Ok(entries) = fs::read_dir(operation.path()) else {
+                continue;
+            };
+            for entry in entries {
+                let path = entry?.path();
+                let Some(agent) = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(|name| name.strip_suffix(".json"))
+                else {
+                    continue;
+                };
+                if let Some(read) =
+                    read_grant(&path, &operation_key, agent, &self.limits.clearance).transpose()
+                {
+                    reads.insert((operation_key.clone(), agent.to_owned()), read);
+                }
+            }
+        }
+        Ok(reads)
     }
 
     fn remove_clearance_grant_if(&self, expected: &ClearanceGrant) -> io::Result<bool> {

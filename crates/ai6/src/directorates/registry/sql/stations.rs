@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 
-use super::db::Tx;
+use super::db::{Row, Tx};
 use super::{SqlRegistry, row_limit};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::registry::store::{
@@ -13,25 +13,26 @@ use crate::directorates::registry::store::{
 };
 
 /// The Headquarters lease, read in the transaction that may replace it.
+const HEADQUARTERS: &str = "SELECT station, expires, term FROM ai6_headquarters WHERE id = 1";
+
 pub(super) fn headquarters_in(tx: &mut Tx<'_>) -> io::Result<Option<HeadquartersLease>> {
-    let Some(row) = tx.query_opt(
-        "SELECT station, expires, term FROM ai6_headquarters WHERE id = 1",
-        &[],
-    )?
-    else {
-        return Ok(None);
-    };
+    tx.query_opt(HEADQUARTERS, &[])?
+        .map(|row| headquarters_row(&row))
+        .transpose()
+}
+
+fn headquarters_row(row: &Row) -> io::Result<HeadquartersLease> {
     let station = row.text(0)?;
     let expires = row.real(1)?;
     validate_station_id(&station)?;
     if !expires.is_finite() {
         return Err(invalid_data("invalid Headquarters lease expiry"));
     }
-    Ok(Some(HeadquartersLease {
+    Ok(HeadquartersLease {
         station,
         expires,
         term: u64::try_from(row.int(2)?).map_err(|_| invalid_data("invalid Headquarters term"))?,
-    }))
+    })
 }
 
 impl StationStore for SqlRegistry {
@@ -93,14 +94,12 @@ impl StationStore for SqlRegistry {
 
     fn station_settings(&self, station: &str) -> io::Result<Option<StationSettings>> {
         validate_station_id(station)?;
-        let row = self.read(|tx| {
-            tx.query_opt(
-                "SELECT max_concurrent_missions, min_free_memory_mb, max_cpu_percent \
-                 FROM ai6_station_settings WHERE station = $1",
-                &[station.into()],
-            )
-        })?;
-        let Some(row) = row else {
+        let rows = self.read_one(
+            "SELECT max_concurrent_missions, min_free_memory_mb, max_cpu_percent \
+             FROM ai6_station_settings WHERE station = $1",
+            &[station.into()],
+        )?;
+        let Some(row) = rows.first() else {
             return Ok(None);
         };
         let memory = u64::try_from(row.int(1)?).ok();
@@ -171,6 +170,9 @@ impl StationStore for SqlRegistry {
     }
 
     fn headquarters(&self) -> io::Result<Option<HeadquartersLease>> {
-        self.read(headquarters_in)
+        self.read_one(HEADQUARTERS, &[])?
+            .first()
+            .map(headquarters_row)
+            .transpose()
     }
 }

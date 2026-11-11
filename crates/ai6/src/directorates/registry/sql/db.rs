@@ -176,6 +176,43 @@ fn invalid(message: impl Into<String>) -> io::Error {
 /// A database a SQL Registry or roster is kept in, with its schema in place.
 pub(crate) struct Database {
     kind: Kind,
+    tally: Tally,
+}
+
+/// How much a handle asked of its database: transactions (each two round trips on PostgreSQL
+/// besides its statements) and the statements run, in them or alone.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Default)]
+pub(crate) struct Tally {
+    calls: std::sync::atomic::AtomicU64,
+    statements: std::sync::atomic::AtomicU64,
+}
+
+impl Tally {
+    fn call(&self) {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[cfg(feature = "sqlite")]
+    fn uncall(&self) {
+        self.calls
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn statement(&self) {
+        self.statements
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The transactions so far, and the statements run in them or alone.
+    #[cfg(test)]
+    pub(crate) fn totals(&self) -> (u64, u64) {
+        (
+            self.calls.load(std::sync::atomic::Ordering::Relaxed),
+            self.statements.load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
 }
 
 enum Kind {
@@ -394,6 +431,7 @@ impl Database {
         }
         Ok(Self {
             kind: Kind::Sqlite(Mutex::new(connection)),
+            tally: Tally::default(),
         })
     }
 
@@ -409,6 +447,7 @@ impl Database {
     fn open_postgres(url: &str, options: &SqlOptions) -> io::Result<Self> {
         Ok(Self {
             kind: Kind::Postgres(Box::new(postgres::Connection::open(url, options)?)),
+            tally: Tally::default(),
         })
     }
 
@@ -437,6 +476,38 @@ impl Database {
         self.transaction(Mode::Read, |tx, _| work(tx))
     }
 
+    /// Runs one query that writes nothing. On PostgreSQL it goes out on its own, one round trip
+    /// where a transaction around it would take three; a single statement sees one snapshot
+    /// either way.
+    pub(crate) fn read_one(&self, sql: &str, params: &[Value]) -> io::Result<Vec<Row>> {
+        match &self.kind {
+            #[cfg(feature = "sqlite")]
+            Kind::Sqlite(_) => {
+                let rows = self.read(|tx| tx.query(sql, params));
+                // Counted as PostgreSQL would: a lone read is no transaction.
+                self.tally.uncall();
+                rows
+            }
+            #[cfg(feature = "postgres")]
+            Kind::Postgres(connection) => {
+                self.tally.statement();
+                let mut slot = connection.lock();
+                let client = connection.connected(&mut slot)?;
+                block_on(client.query(sql, &postgres::params(params)))
+                    .map_err(postgres::error)?
+                    .iter()
+                    .map(postgres::row)
+                    .collect()
+            }
+        }
+    }
+
+    /// What this handle has asked of the database so far.
+    #[cfg(test)]
+    pub(crate) fn tally(&self) -> &Tally {
+        &self.tally
+    }
+
     /// Runs `work` in a write transaction holding `clock`, passing the revision to stamp on
     /// written rows. An error from `work` rolls everything back.
     pub(crate) fn write<T, E: From<io::Error>>(
@@ -452,6 +523,7 @@ impl Database {
         mode: Mode,
         work: impl FnOnce(&mut Tx<'_>, i64) -> Result<T, E>,
     ) -> Result<T, E> {
+        self.tally.call();
         match &self.kind {
             #[cfg(feature = "sqlite")]
             Kind::Sqlite(connection) => {
@@ -467,6 +539,7 @@ impl Database {
                     .map_err(sqlite_error)?;
                 let mut tx = Tx {
                     inner: TxInner::Sqlite(transaction),
+                    tally: &self.tally,
                 };
                 let result = run_in(&mut tx, mode, work);
                 finish(tx, result)
@@ -488,6 +561,7 @@ impl Database {
                 let transaction = block_on(builder.start()).map_err(postgres::error)?;
                 let mut tx = Tx {
                     inner: TxInner::Postgres(transaction),
+                    tally: &self.tally,
                 };
                 let result = run_in(&mut tx, mode, work);
                 finish(tx, result)
@@ -812,6 +886,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// An open transaction.
 pub(crate) struct Tx<'a> {
     inner: TxInner<'a>,
+    tally: &'a Tally,
 }
 
 enum TxInner<'a> {
@@ -843,6 +918,7 @@ impl Tx<'_> {
 
     /// Runs one statement and returns how many rows it changed.
     pub(crate) fn execute(&mut self, sql: &str, params: &[Value]) -> io::Result<u64> {
+        self.tally.statement();
         match &mut self.inner {
             #[cfg(feature = "sqlite")]
             TxInner::Sqlite(transaction) => {
@@ -864,6 +940,7 @@ impl Tx<'_> {
 
     /// Runs one query and returns every row.
     pub(crate) fn query(&mut self, sql: &str, params: &[Value]) -> io::Result<Vec<Row>> {
+        self.tally.statement();
         match &mut self.inner {
             #[cfg(feature = "sqlite")]
             TxInner::Sqlite(transaction) => {
@@ -902,6 +979,7 @@ impl Tx<'_> {
 
     /// Runs statements that take no parameters, such as a schema.
     fn batch(&mut self, sql: &str) -> io::Result<()> {
+        self.tally.statement();
         match &mut self.inner {
             #[cfg(feature = "sqlite")]
             TxInner::Sqlite(transaction) => transaction.execute_batch(sql).map_err(sqlite_error),
