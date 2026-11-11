@@ -63,7 +63,7 @@ pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String> {
 
 /// A setting an overlay's delivery reports each time it is issued, weaker than the default or
 /// one the host found: an AOS non-default setting (`unpinned`, `env-script`, ...) or one of the
-/// host's own (`read-only-not-enforced`, `skill-collision`). Never a value.
+/// host's own (`read-only-not-enforced`, `skill-collision`, `context-ignored`). Never a value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Weakening {
     /// The identifier.

@@ -20,10 +20,10 @@ use coqui_aos::Step as PrepStep;
 use coqui_aos::{
     Change, Dependency, Digest, Document, Environment, Facts, FailStep, OverlayTree, Phase,
     Runtime, ScriptRun, SetupRecord, SetupRun, Source, SourceKind, StdFs, TreeEntry,
-    check_requirements, composed_environment, context_file_text, context_of, default_on,
-    digest_entries, effective, env_files_of, is_reserved_variable, is_sensitive_variable,
-    normalize_name, preparation, read_env_script_output, root_variable, rules_of, skills_of,
-    state_variable, tree_digest, valid_relative_path,
+    check_requirements, composed_environment, context_file_text, context_ignored, context_of,
+    default_on, digest_entries, effective, env_files_of, harness_context_of, is_reserved_variable,
+    is_sensitive_variable, normalize_name, preparation, read_env_script_output, root_variable,
+    rules_of, skills_of, state_variable, tree_digest, valid_relative_path,
 };
 
 use crate::directorates::q::overlays::{
@@ -1053,7 +1053,7 @@ impl Prepared {
             &base,
             &mut weakenings,
         )?;
-        let context = self.context(&roots, session.handler, fit)?;
+        let context = self.context(&roots, session.handler, fit, &mut weakenings)?;
         let mut delivered = Delivered {
             environment: harness_environment,
             theater_environment,
@@ -1378,6 +1378,7 @@ impl Prepared {
         roots: &BTreeMap<String, String>,
         handler: &str,
         fit: &Fit,
+        weakenings: &mut Vec<Reported>,
     ) -> Result<Option<String>, String> {
         let mut text = String::from(
             "An operator issued these overlays to this Session, so what they say is instruction. \
@@ -1407,19 +1408,18 @@ impl Prepared {
                 .and_then(Data::as_array)
                 .map(|lines| lines.iter().filter_map(Data::as_str).collect())
                 .unwrap_or_default();
-            let hinted: Vec<String> = manifest
-                .get("harness")
-                .and_then(|harness| harness.get(harness_id(handler)))
-                .and_then(|hints| hints.get("context"))
-                .and_then(Data::as_array)
-                .map(|files| {
-                    files
-                        .iter()
-                        .filter_map(Data::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
+            let hinted = harness_context_of(manifest, harness_id(handler), &tree);
+            weakenings.extend(
+                context_ignored(manifest, &tree)
+                    .into_iter()
+                    .map(|file| Reported {
+                        overlay: identity.clone(),
+                        weakening: Weakening {
+                            id: "context-ignored".to_owned(),
+                            subject: file,
+                        },
+                    }),
+            );
             let files: Vec<String> = rules_of(manifest, &tree)
                 .into_iter()
                 .chain(context_of(manifest, &tree))

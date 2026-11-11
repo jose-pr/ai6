@@ -1068,6 +1068,83 @@ fn an_overlay_md_is_the_manifest_and_its_body_arrives_as_context() {
 }
 
 #[test]
+fn a_context_md_beside_an_overlay_md_body_is_reported_and_not_delivered() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[
+            ("OVERLAY.md", "---\nname: tools\n---\nBody text\n"),
+            ("CONTEXT.md", "Loose context\n"),
+        ],
+    );
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let delivered = case.deliver(&prepared, &[], true, "codex").unwrap();
+    let text = delivered.context.unwrap();
+    assert!(text.contains("From `OVERLAY.md`:\nBody text"), "{text}");
+    assert!(!text.contains("Loose context"), "{text}");
+    assert!(!text.contains("name: tools"), "{text}");
+    assert!(
+        delivered
+            .weakenings
+            .iter()
+            .any(|reported| reported.overlay == "tools"
+                && reported.weakening.id == "context-ignored"
+                && reported.weakening.subject == "CONTEXT.md")
+    );
+}
+
+#[test]
+fn a_harness_hint_naming_context_md_is_dropped_while_a_body_is_context() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[
+            (
+                "OVERLAY.md",
+                "---\nname: tools\nharness:\n  codex:\n    context: [CONTEXT.md, extra.md]\n---\nBody text\n",
+            ),
+            ("CONTEXT.md", "Loose context\n"),
+            ("extra.md", "Extra text\n"),
+        ],
+    );
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let text = case
+        .deliver(&prepared, &[], true, "codex")
+        .unwrap()
+        .context
+        .unwrap();
+    assert!(text.contains("Body text"), "{text}");
+    assert!(text.contains("Extra text"), "{text}");
+    assert!(!text.contains("Loose context"), "{text}");
+}
+
+#[test]
+fn an_overlay_without_a_body_still_delivers_context_md_unreported() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "tools",
+        &[("CONTEXT.md", "Loose context\n"), ("bin/helper", "x\n")],
+    );
+    let list = records([record("tools", &dir)]);
+    let prepared = case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let delivered = case.deliver(&prepared, &[], true, "codex").unwrap();
+    assert!(delivered.context.unwrap().contains("Loose context"));
+    assert!(
+        !delivered
+            .weakenings
+            .iter()
+            .any(|reported| reported.weakening.id == "context-ignored")
+    );
+}
+#[test]
 fn an_overlay_with_a_hook_refuses_the_session_naming_it() {
     let case = Case::new();
     let source = tempfile::tempdir().unwrap();
