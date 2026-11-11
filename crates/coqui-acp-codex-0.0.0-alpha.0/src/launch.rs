@@ -96,6 +96,9 @@ pub struct CodexLaunch {
     pub client_info: ClientInfo,
     /// Variables set for Codex over the inherited environment.
     pub env: BTreeMap<OsString, OsString>,
+    /// Variables removed from the inherited environment before `env` is set, so a credential the caller's own
+    /// environment holds does not reach Codex.
+    pub remove_env: Vec<OsString>,
     /// Start Codex from an empty environment and `env` alone.
     pub clear_env: bool,
 }
@@ -113,6 +116,7 @@ impl core::fmt::Debug for CodexLaunch {
             .field("approval_policy", &self.approval_policy)
             .field("sandbox", &self.sandbox)
             .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("remove_env", &self.remove_env)
             .field("clear_env", &self.clear_env)
             .finish_non_exhaustive()
     }
@@ -141,6 +145,7 @@ impl CodexLaunch {
             extra_args: Vec::new(),
             client_info: ClientInfo::new("coqui-acp-codex", env!("CARGO_PKG_VERSION")),
             env: BTreeMap::new(),
+            remove_env: Vec::new(),
             clear_env: false,
         }
     }
@@ -158,6 +163,7 @@ impl CodexLaunch {
             .cwd(self.cwd.clone())
             .clear_env(self.clear_env);
         launch.env.clone_from(&self.env);
+        launch.remove_env.clone_from(&self.remove_env);
         launch
     }
 

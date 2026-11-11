@@ -7,26 +7,29 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::time::Duration;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, Status};
+use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, Status, ToValue};
 use coqui_acp_api::{
     AccountCatalog, AccountGrant, AccountKeeper, AccountRef, AcpHarness, Channel, ChannelSink,
     Environment, ExportPage, HarnessInfo, ImportReport, LoginOutcome, LoginPrompter, LoginRequest,
     ModelInfo, ModelListing, ModelsRequest, Narrowing, ProcessSpawner, RenewReport, RenewRequest,
     Requirement, SessionExport, SessionImport, StartRequest, UsageQuery, UsageReport,
 };
+use coqui_acp_harness::Mode;
+use coqui_acp_harness::account::{Accounts, Files, Hold, fingerprint, same_name};
 use coqui_acp_harness::acp::Harness;
-use coqui_acp_harness::provider::{Reports, Serving, account_refusal, shared, takes_of};
+use coqui_acp_harness::provider::{Reports, Serving, shared, takes_of};
 use coqui_acp_harness::{Settings, ThroughSpawner};
 
-use crate::accounts;
 use crate::{CodexAgent, CodexLaunch, CodexSession, CodexSettings};
+use crate::{accounts, signin};
 
 /// How the Codex provider is configured.
-#[derive(FromValue, Schema, Debug, Clone)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 pub struct ProviderSettings {
     /// The Codex program: a path, or a name looked up on the `PATH` where the spawner runs it.
@@ -45,6 +48,10 @@ pub struct ProviderSettings {
     /// Whether the Bypass mode may be chosen: never ask, no sandbox.
     #[map(default = false)]
     pub allow_bypass: bool,
+    /// The modes a client may choose, written by id (`manual`, `accept_edits`, `auto`, `plan`, `bypass`): these widen what
+    /// the approval policy and sandbox amount to and every stricter mode. Bypass is offered only with `allow_bypass`,
+    /// whatever this names. Absent, a client chooses that mode and every stricter one.
+    pub modes: Option<Vec<Mode>>,
     /// The highest ACP version `initialize` answers: 1 or 2.
     #[map(default = 2)]
     pub max_acp_version: u64,
@@ -61,6 +68,14 @@ pub struct ProviderSettings {
     /// Whether a client may give a session MCP servers, which start programs.
     #[map(default = true)]
     pub client_mcp_servers: bool,
+    /// How often, in milliseconds, a connection on an account that keeps its login in a file looks at the file for a
+    /// renewal or a loss; 0 looks only when a call is made on the account and when the connection closes.
+    #[map(default = 30_000)]
+    pub renew_poll_ms: u64,
+    /// The longest, in milliseconds, a command Codex is asked to run for an account (`login`) may take; 0 ends it at
+    /// once.
+    #[map(default = 60_000)]
+    pub command_timeout_ms: u64,
 }
 
 impl Default for ProviderSettings {
@@ -72,11 +87,14 @@ impl Default for ProviderSettings {
             approval_policy: None,
             sandbox: None,
             allow_bypass: false,
+            modes: None,
             max_acp_version: 2,
             max_sessions: 8,
             max_requests: 32,
             max_message_bytes: 64 * 1024 * 1024,
             client_mcp_servers: true,
+            renew_poll_ms: 30_000,
+            command_timeout_ms: 60_000,
         }
     }
 }
@@ -97,6 +115,10 @@ pub struct CodexProvider {
     settings: ProviderSettings,
     /// What the account's readings and the connections learned of its usage.
     reports: Arc<Reports>,
+    /// What the provider knows of its accounts' files, and who hears of them.
+    accounts: Arc<Accounts>,
+    /// For each home a key or token was saved in, a fingerprint of it.
+    saved: std::sync::Mutex<alloc::collections::BTreeMap<String, u64>>,
 }
 
 impl From<ProviderSettings> for CodexProvider {
@@ -112,6 +134,8 @@ impl CodexProvider {
         Self {
             settings,
             reports: Arc::new(Reports::new()),
+            accounts: Arc::new(Accounts::new()),
+            saved: std::sync::Mutex::new(alloc::collections::BTreeMap::new()),
         }
     }
 
@@ -139,6 +163,7 @@ impl CodexProvider {
             .clone_from(&self.settings.approval_policy);
         launch.sandbox.clone_from(&self.settings.sandbox);
         launch.allow_bypass = self.settings.allow_bypass;
+        launch.modes.clone_from(&self.settings.modes);
         for (name, value) in environment.iter() {
             launch.env.insert(name.into(), value.into());
         }
@@ -174,11 +199,110 @@ fn unsupported(why: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, why)
 }
 
-/// Why a call that applies `account` cannot: `None` when it can.
-fn account_check(account: Option<&AccountRef>) -> Result<Option<String>, ProviderError> {
-    match account {
-        Some(account) => account_refusal(&accounts::catalog(), account),
-        None => Ok(None),
+/// What a call that applies an account holds: the account's files and who hears of them.
+struct Applying {
+    hold: Option<Hold>,
+}
+
+impl CodexProvider {
+    fn command_limit(&self) -> Duration {
+        Duration::from_millis(self.settings.command_timeout_ms)
+    }
+
+    /// Applies `account` to `launch`: the variables Codex is given, every credential variable removed first, the
+    /// files of a login placed in the account's home through `files`, and a key or token saved by `codex login`.
+    ///
+    /// # Errors
+    ///
+    /// `BAD_VALUE` for a grant the kind refuses or a key Codex refuses; `UNSUPPORTED` for a kind that needs files from
+    /// a spawner with none.
+    fn apply(
+        &self,
+        account: Option<&AccountGrant>,
+        spawner: &Arc<Object<dyn ProcessSpawner>>,
+        keeper: Object<dyn AccountKeeper>,
+        launch: &mut CodexLaunch,
+    ) -> Result<Applying, ProviderError> {
+        let Some(grant) = account else {
+            return Ok(Applying { hold: None });
+        };
+        let Some(mut applied) = accounts::plan(grant)? else {
+            return Ok(Applying { hold: None });
+        };
+        let files = Files::new(Arc::clone(spawner));
+        if !files.available() {
+            return Err(unsupported(
+                "this spawner serves no private files, which the credential is kept in",
+            ));
+        }
+        // What the host's environment holds under a credential name does not reach Codex beside the account's.
+        launch.env.retain(|name, _| {
+            !applied
+                .remove
+                .iter()
+                .any(|v| same_name(&name.to_string_lossy(), v))
+        });
+        launch.remove_env = applied.remove.iter().map(OsString::from).collect();
+        for (name, value) in &applied.set {
+            launch.env.insert(name.into(), value.into());
+        }
+        launch
+            .config_overrides
+            .extend(applied.config.iter().cloned());
+        signin::configure(&files)?;
+        if let Some(login) = &applied.login {
+            let spawn = ThroughSpawner::shared(Arc::clone(spawner));
+            let print = fingerprint(&login.secret);
+            let there = files.info(accounts::AUTH_FILE)?.is_some();
+            // A key already in `auth.json` is not saved again. A token, which Codex does not show back, is saved once
+            // for this home while the file is there: a poll of the account's usage does not run `codex login` each time.
+            let saved = if login.key == "api_key" {
+                files
+                    .read(accounts::AUTH_FILE)?
+                    .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                    .is_some_and(|auth| auth["OPENAI_API_KEY"].as_str() == Some(&login.secret))
+            } else {
+                there
+                    && self
+                        .saved
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&applied.dir)
+                        == Some(&print)
+            };
+            if !saved {
+                signin::save(
+                    &spawn,
+                    &self.executable(),
+                    &applied.dir,
+                    login,
+                    self.command_limit(),
+                    None,
+                )?;
+                self.saved
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(applied.dir.clone(), print);
+            }
+        }
+        if applied.watched.is_empty() {
+            drop(keeper);
+            return Ok(Applying { hold: None });
+        }
+        let hold = self.accounts.hold(
+            files,
+            Some(keeper),
+            &grant.id,
+            &applied.dir,
+            grant.revision,
+            grant.credentials.expose(),
+            core::mem::take(&mut applied.watched),
+        )?;
+        Ok(Applying { hold: Some(hold) })
+    }
+
+    fn executable(&self) -> OsString {
+        OsString::from(&self.settings.executable)
     }
 }
 
@@ -216,16 +340,14 @@ impl AcpHarness for CodexProvider {
         sink: Object<dyn ChannelSink>,
         keeper: Object<dyn AccountKeeper>,
     ) -> Result<Object<dyn Channel>, ProviderError> {
-        drop(keeper);
-        let (launch, refusal) = self.launch(request.environment.expose(), &request.requirements)?;
+        let (mut launch, refusal) =
+            self.launch(request.environment.expose(), &request.requirements)?;
         if let Some(why) = refusal {
             return Err(unsupported(&why));
         }
-        let account = request.account.as_ref().map(AccountGrant::reference);
-        if let Some(why) = account_check(account.as_ref())? {
-            return Err(unsupported(&why));
-        }
-        let account_id = account.map(|account| account.id);
+        let spawner = Arc::new(spawner);
+        let applying = self.apply(request.account.as_ref(), &spawner, keeper, &mut launch)?;
+        let account_id = request.account.as_ref().map(|account| account.id.clone());
         let mut settings = Settings::new();
         settings.max_sessions = usize::try_from(self.settings.max_sessions).unwrap_or(usize::MAX);
         settings.max_requests = usize::try_from(self.settings.max_requests).unwrap_or(usize::MAX);
@@ -243,7 +365,16 @@ impl AcpHarness for CodexProvider {
             reports.observe(&support, account_id.as_deref(), report);
         }));
         let limit = usize::try_from(self.settings.max_message_bytes).unwrap_or(usize::MAX);
-        Serving::new(settings, limit).open(spawner, sink, move |spawn| {
+        let mut serving = Serving::new(settings, limit);
+        if let Some(hold) = applying.hold {
+            let watcher = (self.settings.renew_poll_ms > 0)
+                .then(|| hold.watch(Duration::from_millis(self.settings.renew_poll_ms)));
+            serving = serving.ending(move || {
+                drop(watcher);
+                hold.finish();
+            });
+        }
+        serving.open_shared(spawner, sink, move |spawn| {
             Ok(shared(CodexAgent::new().defaults(launch).spawn(spawn)))
         })
     }
@@ -257,7 +388,10 @@ impl AcpHarness for CodexProvider {
         if let Some(why) = narrow(&requirements)? {
             return Ok(Some(why));
         }
-        account_check(account.as_ref())
+        if let Some(account) = &account {
+            accounts::check(account)?;
+        }
+        Ok(None)
     }
 
     fn program(&self) -> Result<Option<String>, ProviderError> {
@@ -270,7 +404,9 @@ impl AcpHarness for CodexProvider {
         _spawner: Object<dyn ProcessSpawner>,
         _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ImportReport, ProviderError> {
-        let _ = session;
+        if let Some(account) = &session.account {
+            accounts::plan(account)?;
+        }
         Err(unsupported(
             "this provider does not import a session into Codex yet",
         ))
@@ -282,7 +418,9 @@ impl AcpHarness for CodexProvider {
         _spawner: Object<dyn ProcessSpawner>,
         _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ExportPage, ProviderError> {
-        let _ = export;
+        if let Some(account) = &export.account {
+            accounts::plan(account)?;
+        }
         Err(unsupported(
             "this provider does not export a Codex thread yet",
         ))
@@ -292,77 +430,76 @@ impl AcpHarness for CodexProvider {
         &self,
         request: ModelsRequest,
         spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
+        keeper: Object<dyn AccountKeeper>,
     ) -> Result<ModelListing, ProviderError> {
-        if let Some(why) = account_check(
-            request
-                .account
-                .as_ref()
-                .map(AccountGrant::reference)
-                .as_ref(),
-        )? {
-            return Err(unsupported(&why));
+        let (mut launch, _) = self.launch(request.environment.expose(), &[])?;
+        let spawner = Arc::new(spawner);
+        let applying = self.apply(request.account.as_ref(), &spawner, keeper, &mut launch)?;
+        let spawn = ThroughSpawner::shared(spawner);
+        let listing = match CodexSession::read_models(&launch, &spawn, CodexSettings::new()) {
+            Ok(Some(models)) => ModelListing::of(
+                models
+                    .into_iter()
+                    .map(|model| {
+                        let mut info = ModelInfo::new(model.id);
+                        info.name = Some(model.name);
+                        info.description = model.description;
+                        info
+                    })
+                    .collect(),
+            ),
+            Ok(None) => ModelListing::unknown("Codex listed no model"),
+            Err(error) => ModelListing::unknown(format!("Codex could not be asked: {error}")),
+        };
+        // The last look: a refresh Codex made while it was asked is told before the call returns.
+        if let Some(hold) = applying.hold {
+            hold.finish();
         }
-        let (launch, _) = self.launch(request.environment.expose(), &[])?;
-        let spawn = ThroughSpawner::new(spawner);
-        Ok(
-            match CodexSession::read_models(&launch, &spawn, CodexSettings::new()) {
-                Ok(Some(models)) => ModelListing::of(
-                    models
-                        .into_iter()
-                        .map(|model| {
-                            let mut info = ModelInfo::new(model.id);
-                            info.name = Some(model.name);
-                            info.description = model.description;
-                            info
-                        })
-                        .collect(),
-                ),
-                Ok(None) => ModelListing::unknown("Codex listed no model"),
-                Err(error) => ModelListing::unknown(format!("Codex could not be asked: {error}")),
-            },
-        )
+        Ok(listing)
     }
 
     fn usage(
         &self,
         query: UsageQuery,
         spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
+        keeper: Object<dyn AccountKeeper>,
     ) -> Result<UsageReport, ProviderError> {
-        let account = query.account.as_ref().map(AccountGrant::reference);
-        if let Some(why) = account_check(account.as_ref())? {
-            return Err(unsupported(&why));
-        }
-        let id = account.as_ref().map(|account| account.id.as_str());
-        let (launch, _) = self.launch(query.environment.expose(), &[])?;
-        let spawn = ThroughSpawner::new(spawner);
+        let (mut launch, _) = self.launch(query.environment.expose(), &[])?;
+        let spawner = Arc::new(spawner);
+        let applying = self.apply(query.account.as_ref(), &spawner, keeper, &mut launch)?;
+        let id = query.account.as_ref().map(|account| account.id.as_str());
+        let spawn = ThroughSpawner::shared(spawner);
         // Codex answers with no turn: ask it. A login with no allowances answers with an error, and nothing is reported.
-        Ok(
-            match CodexSession::read_account_usage(&launch, &spawn, CodexSettings::new()) {
-                Ok(buckets) => self.reports.read(&self.support(), id, buckets),
-                Err(_) => self.reports.report(&self.support(), id),
-            },
-        )
+        let report = match CodexSession::read_account_usage(&launch, &spawn, CodexSettings::new()) {
+            Ok(buckets) => self.reports.read(&self.support(), id, buckets),
+            Err(_) => self.reports.report(&self.support(), id),
+        };
+        if let Some(hold) = applying.hold {
+            hold.finish();
+        }
+        Ok(report)
     }
 
     fn login(
         &self,
-        _request: LoginRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-        _prompter: Object<dyn LoginPrompter>,
+        request: LoginRequest,
+        spawner: Object<dyn ProcessSpawner>,
+        prompter: Object<dyn LoginPrompter>,
     ) -> Result<LoginOutcome, ProviderError> {
-        Err(unsupported(
-            "this provider offers no way to sign in to Codex yet",
-        ))
+        signin::login(
+            &self.executable(),
+            self.command_limit(),
+            &request,
+            spawner,
+            prompter,
+        )
     }
 
     fn renew(
         &self,
         request: RenewRequest,
-        _spawner: Object<dyn ProcessSpawner>,
+        spawner: Object<dyn ProcessSpawner>,
     ) -> Result<RenewReport, ProviderError> {
-        account_check(Some(&request.account.reference()))?;
-        Err(unsupported("this provider renews no Codex login yet"))
+        signin::renew(&self.accounts, &self.executable(), &request, spawner)
     }
 }

@@ -5,7 +5,6 @@
 //! tested on every system from a recording.
 
 use alloc::collections::BTreeSet;
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::net::SocketAddr;
 use core::time::Duration;

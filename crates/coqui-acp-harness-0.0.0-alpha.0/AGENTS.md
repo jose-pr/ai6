@@ -58,10 +58,13 @@ impl Spawn for ThroughSpawner
 ## Provider (`coqui_acp_harness::provider`, feature `kind`)
 
 ```rust
-pub fn Serving::new(settings: Settings, max_message_bytes: usize) -> Serving       // Debug, Clone; #[must_use]
+pub fn Serving::new(settings: Settings, max_message_bytes: usize) -> Serving       // Debug; #[must_use]
 pub fn Serving::open(self, spawner: Object<dyn ProcessSpawner>, sink: Object<dyn ChannelSink>,
     harness: impl FnOnce(Arc<dyn Spawn>) -> Result<Arc<dyn Harness>, ProviderError>) -> Result<Object<dyn Channel>, ProviderError>
+pub fn Serving::open_shared(self, spawner: Arc<Object<dyn ProcessSpawner>>, sink, harness) -> ...   // as open; the spawner is shared (see Accounts)
+pub fn Serving::ending(self, f: impl FnOnce() + Send + 'static) -> Serving       // runs once after serve returned, before the spawner is released
 pub fn shared(harness: impl Harness) -> Arc<dyn Harness>
+pub fn track(thread: JoinHandle<()>);  pub fn to_json(&guatiao::Value) -> Value        // track: threads_done waits for it
 pub fn threads_done() -> Status                                                    // a library's `unload` hook
 pub struct Reports;                                                               // Debug, Default
 pub fn Reports::new() -> Reports
@@ -79,7 +82,74 @@ What a provider of `acp_harness` needs to front a harness that `serve` serves. `
 
 `account_refusal` is for a provider that applies nothing to the harness's environment yet: `GUATIAO_ERR_BAD_VALUE` for an id that is not an account id or a kind the catalog does not list, a reason for any listed kind but `harness-login`, `None` for that one.
 
+## Accounts (`coqui_acp_harness::{account, cli, login}`, feature `kind`; `cli` needs no feature)
+
+What a provider that applies an account to a harness started through a host's spawner needs.
+
+```rust
+pub struct SecretText;   // a credential as text: wiped when dropped, Debug shows its length; Deref<Target = str>
+pub enum FileState { Missing, Text(SecretText), Planted /* longer than MAX_FILE_BYTES, a link, not a file */ }
+pub struct Files;   // Clone; the held spawner's file methods
+Files::new(Arc<Object<dyn ProcessSpawner>>);  .available() -> bool;  .write(path, text);  .state(path) -> Result<FileState>;  .read(path) -> Result<Option<SecretText>>;
+    .info(path) -> Result<Option<FileInfo>>;  .remove(path)
+#[non_exhaustive] pub struct Watched { pub path, pub key, pub usable: fn(&str) -> bool, pub expires: fn(&str) -> Option<String>, pub identity: fn(&str) -> Option<String> }
+Watched::new(path, key) /* usable: not blank */ .usable(f) .expires(f) .identity(f)
+pub struct Accounts;   // one per provider; Accounts::new()
+pub fn Accounts::hold(self: &Arc<Self>, files: Files, keeper: Option<Object<dyn AccountKeeper>>, id: &str, dir: &str, revision: u64,
+    credentials: &Credentials, watched: Vec<Watched>) -> Result<Hold, ProviderError>
+pub struct Hold;   // Clone; #[must_use]
+Hold::look() -> Result<Looked { renewed: Vec<(Secret<Credentials>, Option<String>)>, lost: Vec<String> }>;  .lost() -> Option<String>;  .credentials() -> Result<Secret<Credentials>>;
+    .expires_at() -> Option<String>;  .finish();  .watch(poll: Duration) -> Watcher   // Watcher::stop(); dropping it stops it too
+pub fn rfc3339_ms(ms: i64) -> String;  pub fn jwt_expiry(token: &str) -> Option<String>;  pub fn fingerprint(text: &str) -> u64;  pub fn same_name(a: &str, b: &str) -> bool   // case-blind on Windows
+pub const MAX_FILE_BYTES: u64;  pub const DEFAULT_POLL_MS: u64;
+```
+
+`hold` registers the keeper (a call with none hears nothing and tells the others) and places the files of `credentials` in `dir` (relative paths, through the spawner): absent, with no record of it or no hold on it, the grant's copy is written; planted (too long, a link, not a file), removed and replaced by the grant's copy, with a line on standard error; there with no record, the same text is kept, a login changed since the provider began (by the spawner's own clock, read from a file the hold writes and removes) is news (told, kept), a blank or older one replaced; there with a record and no other hold, the recorded file is kept unless the grant is a newer revision with other credentials, a login changed since the last look is news, a blank or older one is replaced by the grant's copy (a loss, once reported, is not reported again by the next hold); another hold on the file keeps it unless the grant is newer. **A change is read twice, 100 ms apart, and told only when the reads agree**: a file still being written is neither a renewal nor a loss. A change found by any look is **recorded, and given the account's next sequence, under one lock per account** (so an older reading never takes a later sequence) and then told to every keeper live for the account with no lock of the registry held. A text that is blank or that `usable` refuses is `lost`, once; a login that appears again is `renewed`; a login whose `identity` differs from the grant's is refused as lost and logged. **A keeper** may call back into the provider, end its own hold or close the connection from the call that tells it: ending a hold waits for the calls to its keeper that other threads have in flight, never for one on its own thread, and a `Watcher` stopped from its own thread is not joined; a keeper that blocks holds the thread that called it. `finish` (and drop) looks once more, lets go of the keeper (destroying it) and of the spawner. `Serving::open_shared(spawner, sink, build)` takes the spawner as an `Arc` so a hold can share it, and `Serving::ending(f)` runs `f` once on the serving thread after `serve` returned and before the spawner is released: stop the `Watcher` and call `finish` there.
+
+```rust
+pub fn cli::Cli::start(spawn: &dyn Spawn, launch: &Launch) -> io::Result<Arc<Cli>>;  .next(wait) -> Next { Piece(Piece { error, bytes }), Idle, Ended };  .write(bytes);  .close_input();
+    .exit() -> Option<Exit>;  .wait(wait) -> Option<Exit>;  .kill();  .collect(input, limit, max_bytes) -> Done   // the output waits in a bounded queue (256 pieces): a reader that is busy holds the program back
+pub fn cli::run(spawn, launch, input: Option<&[u8]>, limit: Duration, max_bytes: usize) -> io::Result<Done { exit, stdout, stderr, timed_out }>   // Done::succeeded(); inside a sign-in use Job::run
+pub fn cli::plain(text) -> String;  pub fn cli::host_of(url) -> Option<String>;  pub fn cli::is_loopback(host) -> bool   // localhost and loopback or unspecified IPs, parsed
+pub fn cli::address_in(text, hosts: &[&str]) -> Option<String>   // OSC 8 link, else the first http(s) address once something follows it; never one on this machine; with `hosts`, only on one of them or under one
+pub fn login::supervise(spawner: Arc<Object<dyn ProcessSpawner>>, prompter: Object<dyn LoginPrompter>, timeout_ms: u64, work: Work) -> Result<LoginOutcome, ProviderError>
+pub struct login::Job;  Job::start(&dyn Spawn, &Launch) -> Result<Arc<Cli>>;  Job::run(&dyn Spawn, &Launch, input, limit, max_bytes) -> Result<Done>;  Job::check() -> Result<()>      // GONE once the supervisor has answered
+pub fn login::asked(result) -> result  // a prompter's GONE is `login cancelled`;  login::gone(why);  login::reason(output, typed: &[&str]) -> String   // a command's last line: no address (with or without a scheme), and nothing that echoes a value typed, whole or its first or last four characters
+```
+
+`supervise` runs the work on a thread of its own (tracked by `threads_done`) and answers when it does, or `GONE` `login cancelled` / `login timed out` when the person cancels or `timeout_ms` passes, after killing every command the work started through `Job::start` or `Job::run` (a command started as the supervisor answers is killed too); the work asks and starts nothing more once it has answered. When the supervisor answers first it gives the work one second to let go of the spawner and prompter, so a caller told of the end finds them gone unless the work is blocked in the host's prompter. `ThroughSpawner::link_wait(d)` bounds how long a read waits for a link that is down (five minutes by default).
+
 The one process-wide state of the crate is the list of threads `provider` started; `threads_done` is `GUATIAO_ERR_BUSY` while one runs.
+
+## Stdio provider (`coqui_acp_harness::stdio`, feature `kind`)
+
+```rust
+pub struct StdioProvider;                     // Debug; a provider of `acp_harness` under the id `stdio`
+pub fn StdioProvider::new(settings: StdioSettings) -> StdioProvider
+pub struct StdioSettings { pub harness: StdioHarness, pub executable: Option<String>, pub max_acp_version: u64 /* 1 */,
+    pub renew_poll_ms: u64 /* 30000, 0 looks only at calls and at close */, pub command_timeout_ms: u64 /* 60000 */, pub max_requests: u64 /* 32 */, pub max_message_bytes: u64 /* 67108864 */ }   // ToValue, FromValue, Schema
+pub const fn StdioSettings::new(harness: StdioHarness) -> StdioSettings
+#[non_exhaustive] pub enum StdioHarness { Grok, Antigravity, Pi }                      // written grok, antigravity, pi
+pub mod accounts { pub struct HarnessDef; pub struct KindDef; pub fn catalog(..); pub fn apply(..); pub fn known(..);
+    pub fn json_of(..); pub mod grok; pub mod antigravity; pub mod pi }               // the tables
+```
+
+A provider for agents that speak ACP on their own standard input and output: `grok agent stdio`, `agy acp` and `pi-acp` (`executable` replaces the program; the arguments are the harness's). The host's messages go to the program a line each and its lines come back as messages. The provider answers for itself only a message that is no request (`-32700`, `-32600`), the shape of `session/new`, `session/load`, `session/resume`, `session/fork` and `session/prompt` (`-32602`), and the working roots (`-32602` for a `cwd` or an additional directory outside them). A session id the program reports must be a UUID, as the kind says: nothing is translated. Measured: `agy acp` (1.5.3) answers `session/new` with a `sessionId` of the shape 8-4-4-4-12 lower-case hex, so Antigravity's ids are UUIDs. Grok's and Pi's are unmeasured (neither is installed here) and may be refused by a host. `send` waits while four answers wait for the sink, and a request waits while `max_requests` have no answer taken by the sink yet; `close` cancels the prompts still out, waits up to three seconds for them to end (answering `cancelled` for one that does not), ends the program, takes a last look at the account's login file, lets go of the spawner and the keeper, and only then calls `closed`. A program that exits ends the connection (`GUATIAO_ERR_INTERNAL` with its exit code). It claims nothing of what the program takes beyond ACP version 1 (or 1 and 2 with `max_acp_version`), holds no requirement (every one is refused, one it cannot read `GUATIAO_ERR_BAD_VALUE`), reports no usage, refuses `import_session` and `export_session` `GUATIAO_ERR_UNSUPPORTED`, and answers `models` as unknown.
+
+Accounts (each harness's `DEF` is data; the catalog, the schemas and the checks on a grant come from it). A start on any kind but `harness-login` removes every name in the harness's `credential_variables` from what it starts (the host's environment included; on Windows whatever the case), then sets the kind's. Those names are the credentials, the cloud identities, the endpoints and the provider switches the harness reads: for Grok `XAI_API_KEY`, `GROK_CODE_XAI_API_KEY`, `GROK_AUTH`, the OIDC and external-program variables, `GROK_CLI_CHAT_PROXY_BASE_URL`, `GROK_XAI_API_BASE_URL`, `GROK_MODELS_BASE_URL`, `GROK_MODELS_LIST_URL`, `GROK_DEPLOYMENT_KEY`, `GROK_WEB_FETCH_PROXY` and the telemetry URLs and keys; for Pi every provider's key variable, every `*_BASE_URL` and `AZURE_OPENAI_*` / `VERTEX_BASE_URL` / `CLOUDFLARE_*` endpoint, the `AWS_*` and Google cloud identities and `PI_INSTALLER_API_BASE`, `PI_SHARE_VIEWER_URL`. Not measured: Grok's own `config.toml` `endpoints` keys beyond the two named in the notes (the account's directory has none), the variables Grok's binary reads that its README does not name, the variables Pi's dependencies add for providers newer than 1.5.0, Antigravity's (it applies no kind but `harness-login`, which clears nothing, and the provider never passes `--cloud_code_endpoint`), and the general `HTTP(S)_PROXY` variables, which are the host's network and are left alone. A login file counts as settled when it is not blank and, when it looks like JSON, whole: half an object is never a renewal. A Grok renewal that leaves the login of another account in `auth.json` (the file says `account_id`, `user_id`, `sub` or `email`, which is unmeasured) is refused `GUATIAO_ERR_BAD_VALUE` and the grant's copy put back. A kind with a state_dir is placed and watched through `crate::account`; a kind with a `state_dir` is placed and watched through `crate::account` (`auth.json`), and `renew_poll_ms` is how often the file is looked at. A kind that needs files on a spawner that has none is `GUATIAO_ERR_UNSUPPORTED`; a bad setting, an unknown or missing credential, no directory for a kind that needs one, `GUATIAO_ERR_BAD_VALUE`.
+
+| harness | kind | credential | variables and files | state_dir | rotates | renews |
+| --- | --- | --- | --- | --- | --- | --- |
+| grok | `grok-login` | `auth_json` | `GROK_HOME` = state_dir, `auth.json`; settings `proxy_base_url`, `xai_api_base_url` | yes | yes | `grok models` |
+| grok | `xai-api-key` | `api_key` | `XAI_API_KEY`; `GROK_HOME` = state_dir, which holds no `auth.json` or `config.toml` to override the key or its endpoints | yes | no | no |
+| grok | `grok-oidc` | `auth_json` (optional) | `GROK_OIDC_ISSUER`, `GROK_OIDC_CLIENT_ID`, `GROK_HOME`, `auth.json`; settings `issuer`, `client_id`, `proxy_base_url` | yes | yes | `grok models` |
+| pi | `pi-api-key` | `api_key` | the variable the setting `variable` names (one of Pi's provider variables only); `PI_CODING_AGENT_DIR` = state_dir, which holds no `auth.json` or `models.json` to override the key or its `baseUrl` | yes | no | no |
+| pi | `pi-oauth` | `auth_json` | `PI_CODING_AGENT_DIR` = state_dir, `auth.json` | yes | yes | no: Pi refreshes itself |
+| antigravity | none beyond `harness-login` | | | | | |
+
+Login methods (Grok only): `device` (`grok login`, steps `open_url` with the code, remote), `browser` (`grok login --oauth`, loopback so not remote), `api-key` (asks for the key, checks it with `grok models`, `checked`). A sign-in runs the CLI in the login's directory on a thread of its own, so a cancel or the timeout answers `GUATIAO_ERR_GONE` (`login cancelled`, `login timed out`) within two seconds with the program killed; a key the CLI did not accept is `GUATIAO_ERR_BAD_VALUE` `login refused: ...` with no word of the CLI's output; the key is never in an argument. Every other `login` is `GUATIAO_ERR_UNSUPPORTED`: Antigravity's `agy acp --login`, whose prompts, token location and Credential Manager use were not measured; Pi's `/login`, which exists only inside its terminal interface; Grok's identity-provider sign-in, which needs a provider to answer. `grok-external` (`GROK_AUTH_PROVIDER_COMMAND`, a program named in settings) is not a kind until the owner decides.
+
+`renew` runs the harness's renewal program on the account's directory, then looks at the file: a changed file is the new credentials, an unchanged one `not_renewed_because`, a missing or blank one `GUATIAO_ERR_GONE`. `usage` and `models` look at the file too, so a renewal made since is told to every live keeper.
 
 ## Stream (`coqui_acp_harness::stream`)
 
@@ -223,7 +293,7 @@ What each event becomes:
 ## Modes (`coqui_acp_harness::mode`)
 
 ```rust
-#[non_exhaustive] pub enum Mode { Manual, AcceptEdits, Auto, Plan, Bypass }   // Clone, Copy, Debug, PartialEq, Eq, Hash
+#[non_exhaustive] pub enum Mode { Manual, AcceptEdits, Auto, Plan, Bypass }   // Clone, Copy, Debug, PartialEq, Eq, Hash, ToValue, FromValue, Schema; as a setting, its id in snake case
 pub const ALL: [Mode; 5]   // Mode::ALL, in the order a client cycles them
 pub const fn id(self) -> &'static str          // manual, accept_edits, auto, plan, bypass
 pub const fn name(self) -> &'static str;  pub const fn description(self) -> &'static str

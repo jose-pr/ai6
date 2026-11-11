@@ -7,13 +7,17 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
+
 use crate::acp::{ConfigOption, OptionValue};
 
 /// The id of the mode option.
 pub const OPTION_ID: &str = "mode";
 
-/// How much a harness asks before it acts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// How much a harness asks before it acts. As a setting it is written by its id: `manual`, `accept_edits`, `auto`, `plan`
+/// or `bypass`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ToValue, FromValue, Schema)]
+#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Mode {
     /// Asks before everything that is not read-only.

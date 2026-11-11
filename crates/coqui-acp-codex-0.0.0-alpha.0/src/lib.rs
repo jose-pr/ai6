@@ -12,6 +12,7 @@ pub mod mode;
 pub mod parse;
 mod provider;
 mod session;
+mod signin;
 
 use alloc::string::String;
 use core::fmt;

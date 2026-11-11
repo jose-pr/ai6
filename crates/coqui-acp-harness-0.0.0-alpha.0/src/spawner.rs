@@ -21,6 +21,9 @@ use coqui_acp_api::{
     TerminalSize,
 };
 
+/// How long a read waits for a link that is down, by default.
+const LINK_WAIT: Duration = Duration::from_secs(300);
+
 use crate::process::{ErrorStream, Exit, Launch, Process, Spawn, Spawned, start};
 
 /// Starts programs on this machine, as [`PlainSpawn`](crate::PlainSpawn) does, for a host to hand
@@ -352,7 +355,8 @@ impl SpawnedProcess for LocalProcess {
 ///
 /// Standard error is kept apart. Reading waits through a link that is down, as the spawner keeps the output.
 pub struct ThroughSpawner {
-    spawner: Object<dyn ProcessSpawner>,
+    spawner: Arc<Object<dyn ProcessSpawner>>,
+    link_wait: Duration,
 }
 
 impl core::fmt::Debug for ThroughSpawner {
@@ -364,7 +368,26 @@ impl core::fmt::Debug for ThroughSpawner {
 impl ThroughSpawner {
     /// Starts programs through `spawner`.
     pub fn new(spawner: Object<dyn ProcessSpawner>) -> Self {
-        Self { spawner }
+        Self {
+            spawner: Arc::new(spawner),
+            link_wait: LINK_WAIT,
+        }
+    }
+
+    /// Starts programs through a spawner someone else holds too (its file methods, say): it is destroyed when the last
+    /// holder lets go.
+    pub const fn shared(spawner: Arc<Object<dyn ProcessSpawner>>) -> Self {
+        Self {
+            spawner,
+            link_wait: LINK_WAIT,
+        }
+    }
+
+    /// Waits at most `wait` for a link that is down to come back before a read fails (the default is five minutes).
+    #[must_use]
+    pub const fn link_wait(mut self, wait: Duration) -> Self {
+        self.link_wait = wait;
+        self
     }
 }
 
@@ -412,10 +435,14 @@ impl Spawn for ThroughSpawner {
             Box::new(Output {
                 process: Arc::clone(&process),
                 error: false,
+                link_wait: self.link_wait,
+                down_since: None,
             }),
             Some(Box::new(Output {
                 process: Arc::clone(&process),
                 error: true,
+                link_wait: self.link_wait,
+                down_since: None,
             })),
             Box::new(Remote(process)),
         ))
@@ -446,6 +473,9 @@ impl Drop for Input {
 struct Output {
     process: Shared,
     error: bool,
+    link_wait: Duration,
+    /// Since when the link has been down, while it is.
+    down_since: Option<Instant>,
 }
 
 impl Read for Output {
@@ -458,9 +488,21 @@ impl Read for Output {
             }
             .map_err(|e| as_io(&e))?;
             match read {
-                READ_TIMED_OUT | READ_LINK_DOWN => {}
+                READ_TIMED_OUT => {}
+                READ_LINK_DOWN => {
+                    let since = *self.down_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= self.link_wait {
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "the link stayed down",
+                        ));
+                    }
+                }
                 n if n < 0 => return Err(io::Error::other("the spawner answered no count")),
-                n => return Ok(usize::try_from(n).unwrap_or(0)),
+                n => {
+                    self.down_since = None;
+                    return Ok(usize::try_from(n).unwrap_or(0));
+                }
             }
         }
     }

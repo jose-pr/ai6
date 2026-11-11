@@ -302,6 +302,28 @@ impl CodexSession {
         read
     }
 
+    /// Asks for the signed-in account with no thread and no turn, and for its login to be refreshed ahead of its end
+    /// (`account/read` with `refreshToken`): starts `codex app-server` as `launch` says, initializes it, asks, and ends
+    /// it. The answer is Codex's own (`account` is null when nobody is signed in).
+    ///
+    /// # Errors
+    ///
+    /// As [`CodexSession::start`] up to the handshake; [`Error::Harness`] when Codex refused, [`Error::Timeout`] when it
+    /// did not answer.
+    pub fn refresh_account(
+        launch: &CodexLaunch,
+        spawn: &dyn Spawn,
+        settings: CodexSettings,
+    ) -> Result<Value, Error> {
+        let mut session = Self::connect(launch, spawn, settings, |_| true)?;
+        let limit = session.settings.request_timeout;
+        let read = session
+            .handshake(launch)
+            .and_then(|()| session.request("account/read", json!({"refreshToken": true}), limit));
+        session.close();
+        read
+    }
+
     /// Lists the models with no thread and no turn: starts `codex app-server` as `launch` says, initializes it, asks
     /// `model/list` page by page, and ends it. `None` when Codex listed none at all.
     ///
@@ -352,7 +374,7 @@ impl CodexSession {
             settings.max_queued_writes,
             "coqui-acp-codex-stdin",
         )
-        .map_err(&ended_with)?;
+        .map_err(ended_with)?;
         let parser = Arc::new(Mutex::new(Parser::with_limits(
             Arc::clone(&writer),
             settings.max_tools,
@@ -369,7 +391,7 @@ impl CodexSession {
             thread::Builder::new()
                 .name("coqui-acp-codex-stderr".into())
                 .spawn(move || lines::read_diagnostics(stderr, max_line, &tail))
-                .map_err(&ended_with)?;
+                .map_err(ended_with)?;
         }
         let mut stream = Stream::new(
             "Codex app-server",
@@ -397,7 +419,7 @@ impl CodexSession {
                     },
                     Vec::new,
                 )
-                .map_err(&ended_with)?;
+                .map_err(ended_with)?;
         }
         Ok(Self {
             thread: String::new(),

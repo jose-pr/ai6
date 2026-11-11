@@ -33,7 +33,9 @@ const QUEUE: usize = 4;
 /// The threads this library started, joined when it is unloaded.
 static THREADS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
-fn track(thread: JoinHandle<()>) {
+/// Has this library wait for `thread` before it is unloaded, as it does for the threads of its connections: a provider's own
+/// worker thread (a sign-in's) is handed here.
+pub fn track(thread: JoinHandle<()>) {
     let mut threads = THREADS.lock().unwrap_or_else(PoisonError::into_inner);
     let (done, running): (Vec<_>, Vec<_>) = threads.drain(..).partition(|t| t.is_finished());
     *threads = running;
@@ -57,12 +59,24 @@ pub fn threads_done() -> Status {
     Status::GUATIAO_OK
 }
 
+/// What runs once `serve` has returned, before the spawner is let go.
+type Ending = Box<dyn FnOnce() + Send>;
+
 /// How a connection is made: the limits of the channel and of `serve`.
-#[derive(Debug, Clone)]
 #[must_use]
 pub struct Serving {
     settings: Settings,
     max_message_bytes: usize,
+    ending: Option<Ending>,
+}
+
+impl core::fmt::Debug for Serving {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Serving")
+            .field("settings", &self.settings)
+            .field("max_message_bytes", &self.max_message_bytes)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Serving {
@@ -75,7 +89,16 @@ impl Serving {
         Self {
             settings,
             max_message_bytes,
+            ending: None,
         }
+    }
+
+    /// Runs `ending` once, on the serving thread, after `serve` has returned and the harness and its programs are
+    /// gone, and before the spawner is let go and the sink told the connection has closed: the place for a last look at
+    /// an account's files and for destroying what the connection holds besides the spawner.
+    pub fn ending(mut self, ending: impl FnOnce() + Send + 'static) -> Self {
+        self.ending = Some(Box::new(ending));
+        self
     }
 
     /// Starts a connection: `harness` is built from the `Spawn` that starts programs through `spawner`, and `serve` runs
@@ -92,14 +115,30 @@ impl Serving {
         sink: Object<dyn ChannelSink>,
         harness: impl FnOnce(Arc<dyn Spawn>) -> Result<Arc<dyn Harness>, ProviderError>,
     ) -> Result<Object<dyn Channel>, ProviderError> {
+        self.open_shared(Arc::new(spawner), sink, harness)
+    }
+
+    /// [`open`](Self::open) for a spawner someone else holds too, such as the file methods of an account's hold: it is
+    /// destroyed when the last holder lets go, so they let go in [`ending`](Self::ending).
+    ///
+    /// # Errors
+    ///
+    /// `harness` refused, or no thread could be started.
+    pub fn open_shared(
+        self,
+        spawner: Arc<Object<dyn ProcessSpawner>>,
+        sink: Object<dyn ChannelSink>,
+        harness: impl FnOnce(Arc<dyn Spawn>) -> Result<Arc<dyn Harness>, ProviderError>,
+    ) -> Result<Object<dyn Channel>, ProviderError> {
         let lent = Arc::new(Lent {
-            spawner: Mutex::new(Some(ThroughSpawner::new(spawner))),
+            spawner: Mutex::new(Some(ThroughSpawner::shared(spawner))),
         });
         let harness = harness(Arc::clone(&lent) as Arc<dyn Spawn>)?;
         let shared = Arc::new(Shared::default());
         let Self {
             settings,
             max_message_bytes,
+            ending,
         } = self;
         let served = Arc::clone(&shared);
         let serving = std::thread::Builder::new()
@@ -118,6 +157,9 @@ impl Serving {
                         line: Vec::new(),
                     },
                 );
+                if let Some(ending) = ending {
+                    ending();
+                }
                 lent.release();
                 let mut state = served.lock();
                 if state.status.is_none() {
@@ -549,4 +591,10 @@ pub fn account_refusal(
             coqui_acp_api::HARNESS_LOGIN
         )
     }))
+}
+
+/// A Guatiao value as JSON; `null` when it holds something JSON cannot: what a request's settings are read as.
+#[must_use]
+pub fn to_json(value: &coqui_acp_api::guatiao::Value) -> Value {
+    serde_json::to_value(guatiao_serde::Serializable::from(value)).unwrap_or(Value::Null)
 }

@@ -95,6 +95,7 @@ impl CodexAgent {
                     .arg("--version")
                     .clear_env(self.defaults.clear_env);
                 launch.env.clone_from(&self.defaults.env);
+                launch.remove_env.clone_from(&self.defaults.remove_env);
                 let spawned = self.spawn.spawn(&launch).ok()?;
                 let (sender, received) = std::sync::mpsc::channel();
                 let mut stdout = spawned.stdout;
