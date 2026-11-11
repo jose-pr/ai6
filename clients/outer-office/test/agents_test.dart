@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show ActionChip, DropdownButton, Tab, TextField;
+    show ActionChip, AlertDialog, DropdownButton, Tab, TextField;
 import 'package:outer_office/agents/agents_page.dart' show AgentSummary;
 import 'package:outer_office/main.dart';
 
@@ -368,7 +368,13 @@ void main() {
       await tester.tap(find.text('Lower clearance'));
       await tester.pumpAndSettle();
       expect(find.byType(DropdownButton<String>), findsWidgets);
-      await tester.enterText(find.byType(TextField), 'under review');
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        'under review',
+      );
       await tester.tap(find.text('Lower'));
       await tester.pumpAndSettle();
       final lowered = requests.lastWhere((request) => request.method == 'PUT');
@@ -448,14 +454,20 @@ void main() {
       expect(paths, contains('/v1/user/operations/G/agents'));
       expect(paths, contains('/v1/user/operations/L/agents'));
       expect(find.text('All Operations'), findsOneWidget);
-      expect(find.text('Operation G'), findsOneWidget);
+      expect(find.text('G'), findsWidgets);
       expect(find.textContaining('Operation L: '), findsOneWidget);
       expect(find.text('field (configured desk)'), findsOneWidget);
 
       // An action from All goes to the row's Operation.
       await tester.tap(find.text('Lower clearance'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'under review');
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        'under review',
+      );
       await tester.tap(find.text('Lower'));
       await tester.pumpAndSettle();
       expect(

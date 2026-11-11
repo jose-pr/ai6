@@ -1,19 +1,30 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../main.dart';
+import '../routes/oo_route.dart';
+import '../widgets/oo_data_table.dart';
+import '../widgets/oo_principals.dart';
 import 'access_api.dart';
 
-/// The ordered rules of a policy. Order is meaning (the first rule that matches decides), so
-/// rows move by drag handle or by the move buttons, and Save sends the whole list with the
-/// revision it was read at.
+/// The ordered rules of a policy, as a table. Order is meaning (the first rule that matches
+/// decides), so the priority column is the rule's place in the list whatever the table is sorted
+/// by, rows move by the move buttons, and Save sends the whole list with the revision it was
+/// read at.
 class RulesEditor extends StatefulWidget {
   const RulesEditor({
     required this.view,
     required this.operationId,
     required this.canEdit,
     required this.onSave,
+    required this.board,
+    required this.route,
+    required this.onRoute,
     super.key,
   });
 
+  final MissionBoard board;
+  final OoRoute route;
+  final ValueChanged<OoRoute> onRoute;
   final AccessView view;
   final String? operationId;
   final bool canEdit;
@@ -55,6 +66,7 @@ class _RulesEditorState extends State<RulesEditor> {
     final rule = await showDialog<AccessRule>(
       context: context,
       builder: (context) => _RuleDialog(
+        principals: widget.board.principals,
         roles: [for (final role in widget.view.roles) role.name],
         scope: widget.operationId == null
             ? '*'
@@ -67,52 +79,104 @@ class _RulesEditorState extends State<RulesEditor> {
   @override
   Widget build(BuildContext context) {
     final edit = widget.canEdit;
+    final principals = widget.board.principals;
+    final indexed = [for (final (index, rule) in _rules.indexed) (index, rule)];
+    return ListenableBuilder(
+      listenable: principals,
+      builder: (context, _) => _table(context, edit, principals, indexed),
+    );
+  }
+
+  Widget _table(
+    BuildContext context,
+    bool edit,
+    OoPrincipals principals,
+    List<(int, AccessRule)> indexed,
+  ) {
+    String kind(AccessRule rule) => OoPrincipalRef.parse(rule.subject).kind;
     return Column(
       children: [
         Expanded(
-          child: ReorderableListView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            buildDefaultDragHandles: edit,
-            onReorderItem: (from, to) => setState(() {
-              _rules.insert(to, _rules.removeAt(from));
-            }),
-            children: [
-              for (final (index, rule) in _rules.indexed)
-                ListTile(
-                  key: ObjectKey(rule),
-                  title: Text('${rule.subject}  at  ${rule.scope}'),
-                  subtitle: Text(
-                    '${rule.role}${rule.propagate ? '' : ' (this scope only)'}'
-                    '${rule.editor == null ? '' : ' - ${rule.editor}'}',
+          child: OoDataTable<(int, AccessRule)>(
+            rows: indexed,
+            rowId: (row) => '${row.$1}',
+            noun: 'rules',
+            route: widget.route,
+            onRoute: widget.onRoute,
+            defaultSort: ('priority', true),
+            searchText: (row) =>
+                '${ooPrincipalText(principals, row.$2.subject)} ${row.$2.subject} '
+                '${row.$2.scope} ${row.$2.role}',
+            facets: [
+              OoFacet(
+                id: 'subject',
+                label: 'Subject kind',
+                values: (row) => [kind(row.$2)],
+              ),
+            ],
+            columns: [
+              OoColumn(
+                id: 'priority',
+                label: '#',
+                width: 56,
+                sortKey: (row) => row.$1,
+                cell: (context, row) => Text('${row.$1 + 1}'),
+              ),
+              OoColumn(
+                id: 'subject',
+                label: 'Subject',
+                flex: 3,
+                sortKey: (row) =>
+                    ooPrincipalText(principals, row.$2.subject).toLowerCase(),
+                cell: (context, row) => OoPrincipalBadge(row.$2.subject),
+              ),
+              OoColumn(
+                id: 'scope',
+                label: 'Scope',
+                flex: 2,
+                sortKey: (row) => row.$2.scope,
+                cell: (context, row) => Text(row.$2.scope),
+              ),
+              OoColumn(
+                id: 'role',
+                label: 'Role',
+                flex: 2,
+                sortKey: (row) => row.$2.role,
+                cell: (context, row) => Text(
+                  '${row.$2.role}${row.$2.propagate ? '' : ' (this scope only)'}'
+                  '${row.$2.editor == null ? '' : ' - ${row.$2.editor}'}',
+                ),
+              ),
+              if (edit)
+                OoColumn(
+                  id: 'actions',
+                  label: 'Actions',
+                  width: 150,
+                  cell: (context, row) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Move rule ${row.$1 + 1} up',
+                        icon: const Icon(Icons.arrow_upward),
+                        onPressed: row.$1 == 0
+                            ? null
+                            : () => _move(row.$1, row.$1 - 1),
+                      ),
+                      IconButton(
+                        tooltip: 'Move rule ${row.$1 + 1} down',
+                        icon: const Icon(Icons.arrow_downward),
+                        onPressed: row.$1 == _rules.length - 1
+                            ? null
+                            : () => _move(row.$1, row.$1 + 1),
+                      ),
+                      IconButton(
+                        tooltip: 'Delete rule ${row.$1 + 1}',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () =>
+                            setState(() => _rules.removeAt(row.$1)),
+                      ),
+                    ],
                   ),
-                  trailing: edit
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'Move rule ${index + 1} up',
-                              icon: const Icon(Icons.arrow_upward),
-                              onPressed: index == 0
-                                  ? null
-                                  : () => _move(index, index - 1),
-                            ),
-                            IconButton(
-                              tooltip: 'Move rule ${index + 1} down',
-                              icon: const Icon(Icons.arrow_downward),
-                              onPressed: index == _rules.length - 1
-                                  ? null
-                                  : () => _move(index, index + 1),
-                            ),
-                            IconButton(
-                              tooltip: 'Delete rule ${index + 1}',
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: () =>
-                                  setState(() => _rules.removeAt(index)),
-                            ),
-                            const SizedBox(width: 32),
-                          ],
-                        )
-                      : null,
                 ),
             ],
           ),
@@ -152,8 +216,13 @@ class _RulesEditorState extends State<RulesEditor> {
 }
 
 class _RuleDialog extends StatefulWidget {
-  const _RuleDialog({required this.roles, required this.scope});
+  const _RuleDialog({
+    required this.roles,
+    required this.scope,
+    required this.principals,
+  });
 
+  final OoPrincipals principals;
   final List<String> roles;
   final String scope;
 
@@ -182,12 +251,7 @@ class _RuleDialogState extends State<_RuleDialog> {
     content: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TextField(
-          controller: _subject,
-          decoration: const InputDecoration(
-            labelText: 'Subject (account:NAME, person:ID, group:NAME)',
-          ),
-        ),
+        OoPrincipalPicker(controller: _subject, principals: widget.principals),
         TextField(
           controller: _scope,
           decoration: const InputDecoration(

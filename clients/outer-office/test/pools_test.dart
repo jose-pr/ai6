@@ -169,9 +169,9 @@ void main() {
     }, reason: 'All Operations is the default');
     expect(find.text('All Operations'), findsOneWidget);
     expect(
-      find.text('Operation G'),
-      findsOneWidget,
-      reason: 'G has accounts; L has none and no heading',
+      find.text('G'),
+      findsWidgets,
+      reason: 'G has accounts and names itself on their rows; L has none',
     );
     expect(find.text('Operation L'), findsNothing);
     expect(find.text('team/alpha'), findsOneWidget);

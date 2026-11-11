@@ -16,6 +16,7 @@ import 'package:guatiao/guatiao.dart' as guatiao;
 import 'access/access_page.dart';
 import 'compartments/compartments_page.dart';
 import 'access/access_words.dart';
+import 'audit/audit_page.dart';
 import 'agents/agents_page.dart';
 import 'agents/scorecard.dart';
 import 'pools/models_section.dart';
@@ -70,6 +71,7 @@ import 'theme/oo_art.dart';
 import 'theme/oo_icon.dart';
 import 'theme/oo_theme.dart';
 import 'timeline/timeline_page.dart';
+import 'widgets/oo_principals.dart';
 
 const _apiOverride = String.fromEnvironment('OO_API');
 const _demoMode = bool.fromEnvironment('OO_DEMO');
@@ -2667,6 +2669,54 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
+  /// The names of the people who signed in through the gateway, for the pages that show a
+  /// principal.
+  late final OoPrincipals principals = OoPrincipals(
+    lookup: _lookupPeople,
+    search: _searchPeople,
+  );
+
+  Future<List<OoPerson>> _lookupPeople(List<String> ids) async {
+    final token = accessToken;
+    if (demo || token == null) return const [];
+    final response = await _client.post(
+      apiOrigin.resolve('/v1/user/principals'),
+      headers: {
+        'authorization': 'Bearer $token',
+        'content-type': 'application/json',
+      },
+      body: jsonEncode({'ids': ids}),
+    );
+    if (response.statusCode != 200) {
+      throw _readRefused(response.statusCode, 'people');
+    }
+    return _people(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<OoPrincipalHits> _searchPeople(String text) async {
+    final token = accessToken;
+    if (demo || token == null) return const OoPrincipalHits();
+    final response = await _client.get(
+      apiOrigin
+          .resolve('/v1/user/principals')
+          .replace(queryParameters: {'q': text}),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      throw _readRefused(response.statusCode, 'people');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return OoPrincipalHits(
+      people: _people(body),
+      groups: (body['groups'] as List<dynamic>? ?? const []).cast<String>(),
+    );
+  }
+
+  static List<OoPerson> _people(Map<String, dynamic> body) => [
+    for (final person in body['people'] as List<dynamic>? ?? const [])
+      OoPerson.fromJson(person as Map<String, dynamic>),
+  ];
+
   Future<List<AuditEntrySummary>> loadAudit({int? limit}) async {
     if (demo) {
       return auditEntries;
@@ -2692,6 +2742,11 @@ class MissionBoard extends ChangeNotifier
               AuditEntrySummary.fromJson(record as Map<String, dynamic>),
         )
         .toList(growable: false);
+    principals.learn([
+      for (final record in records)
+        if (record.actorName case final name?)
+          OoPerson(id: OoPrincipalRef.parse(record.actor).id, label: name),
+    ]);
     auditEntries = records;
     notifyListeners();
     return records;
@@ -5500,10 +5555,13 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               ),
               OoPageHeading(route.page),
               Expanded(
-                child: OoLinks(
-                  pages: pages,
-                  onRoute: _openRoute,
-                  child: _pageBody(context, route, pages),
+                child: OoPrincipalsScope(
+                  principals: widget.board.principals,
+                  child: OoLinks(
+                    pages: pages,
+                    onRoute: _openRoute,
+                    child: _pageBody(context, route, pages),
+                  ),
                 ),
               ),
             ],
@@ -5585,6 +5643,7 @@ class AuditEntrySummary {
     this.resource,
     required this.target,
     required this.at,
+    this.actorName,
   });
 
   final String id;
@@ -5595,6 +5654,9 @@ class AuditEntrySummary {
   final String target;
   final double at;
 
+  /// The name of the person who acted, when the gateway has seen them sign in.
+  final String? actorName;
+
   factory AuditEntrySummary.fromJson(Map<String, dynamic> json) =>
       AuditEntrySummary(
         id: json['id'] as String,
@@ -5604,6 +5666,7 @@ class AuditEntrySummary {
         resource: json['resource'] as String?,
         target: json['target'] as String,
         at: (json['at'] as num).toDouble(),
+        actorName: json['actor_name'] as String?,
       );
 }
 
@@ -6662,126 +6725,6 @@ class _AgentRoleEditorDialogState extends State<AgentRoleEditorDialog> {
           OoLinkTo.station(resource.substring('station:'.length)),
         )
       : (resource, null);
-}
-
-class AuditLogPage extends StatefulWidget {
-  const AuditLogPage({
-    required this.board,
-    required this.route,
-    required this.onRoute,
-    super.key,
-  });
-
-  final MissionBoard board;
-
-  /// An Audit route: its `operation_id` or `station_id` keeps only that scope's records.
-  final OoRoute route;
-  final ValueChanged<OoRoute> onRoute;
-
-  @override
-  State<AuditLogPage> createState() => _AuditLogPageState();
-}
-
-class _AuditLogPageState extends State<AuditLogPage> {
-  late Future<List<AuditEntrySummary>> _records;
-
-  @override
-  void initState() {
-    super.initState();
-    _records = widget.board.loadAudit();
-  }
-
-  void _refresh() => setState(() => _records = widget.board.loadAudit());
-
-  bool _selected(AuditEntrySummary record) {
-    if (widget.route['operation_id'] case final operation?) {
-      return record.operation == operation;
-    }
-    if (widget.route['station_id'] case final station?) {
-      return record.resource == 'station:$station';
-    }
-    return true;
-  }
-
-  @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Row(
-        children: [
-          Expanded(
-            child: OoFilterBar(
-              route: widget.route,
-              onRoute: widget.onRoute,
-              padding: const EdgeInsets.fromLTRB(20, 8, 8, 0),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Refresh audit log',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      Expanded(
-        child: FutureBuilder<List<AuditEntrySummary>>(
-          future: _records,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return OoEmptyState(
-                icon: OoIconName.audit,
-                title: 'Audit records could not be read.',
-                body: '${snapshot.error}',
-                action: ('Try again', _refresh),
-              );
-            }
-            if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final records = snapshot.requireData.where(_selected).toList();
-            if (records.isEmpty) {
-              return OoEmptyState(
-                icon: OoIconName.audit,
-                title: widget.route.filtered
-                    ? 'No audit records match these filters.'
-                    : 'No audit records yet.',
-                body: widget.route.filtered
-                    ? 'Remove a filter above to see more.'
-                    : 'Every change a person or Agent makes through AI6 is recorded here.',
-              );
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: records.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final record = records[index];
-                return ListTile(
-                  leading: const Icon(Icons.receipt_long_outlined),
-                  title: Text(
-                    '${record.actor} · ${timelineSentence(record.action)}',
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Tooltip(
-                        message: record.action,
-                        child: OoLinkLine([
-                          auditPlace(record),
-                          (record.target, null),
-                        ]),
-                      ),
-                      OoTime(record.at),
-                    ],
-                  ),
-                  isThreeLine: true,
-                );
-              },
-            );
-          },
-        ),
-      ),
-    ],
-  );
 }
 
 Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {

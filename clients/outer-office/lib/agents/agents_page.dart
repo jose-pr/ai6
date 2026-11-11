@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../routes/oo_filters.dart';
+import '../widgets/oo_data_table.dart';
 import '../roster/record_editor.dart';
 import '../routes/oo_route.dart';
 import '../routes/oo_scope.dart';
@@ -642,7 +643,10 @@ class _AgentsPageState extends State<AgentsPage>
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: note,
           ),
-        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
+        OoFilterBar(
+          route: withoutTableFields(widget.route, const ['handler']),
+          onRoute: widget.onRoute,
+        ),
         if (_failed.isNotEmpty && (shown.length > 1 || agents.isNotEmpty))
           OoReadFailures(failed: _failed, several: shown.length > 1),
         Expanded(
@@ -678,215 +682,265 @@ class _AgentsPageState extends State<AgentsPage>
                             'Agent $named is not in Operation $operation.',
                         }),
                 )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              : Column(
                   children: [
-                    for (final group in shown) ...[
-                      if (operation == null &&
-                          agents.any((row) => row.$1 == group))
-                        OoOperationHeading(group),
+                    for (final group in shown)
                       if (widget.board.canReadScorecard(group) && named == null)
                         ScorecardSection(board: widget.board, operation: group),
-                      for (final (from, agent) in agents)
-                        if (from == group)
-                          _AgentTile(
-                            agent: agent,
-                            onEdit: canChangeRecords
-                                ? () => unawaited(editRecord(agent.agent))
-                                : null,
-                            onRemove: canChangeRecords
-                                ? () => unawaited(removeRecord(agent.agent))
-                                : null,
-                            onLower:
-                                canConfigure(from) &&
-                                    !_changing &&
-                                    agent.lowerClearances.isNotEmpty
-                                ? () => unawaited(_lower(from, agent))
-                                : null,
-                            onRestore:
-                                canConfigure(from) &&
-                                    !_changing &&
-                                    agent.grant != null
-                                ? () => unawaited(_restore(from, agent))
-                                : null,
-                            onLift: canConfigure(from) && !_changing
-                                ? (hold) =>
-                                      unawaited(_liftHold(from, agent, hold))
-                                : null,
+                    Expanded(
+                      child: OoDataTable<OoGrouped<AgentSummary>>(
+                        rows: groupByEntity(agents, (agent) => agent.agent),
+                        rowId: (row) => row.row.agent,
+                        noun: 'agents',
+                        route: widget.route,
+                        onRoute: widget.onRoute,
+                        defaultSort: ('agent', true),
+                        searchText: (row) => [
+                          row.row.agent,
+                          ...row.operations,
+                          ...row.row.modelLabels,
+                          for (final route in row.row.routes) ?route.handler,
+                          for (final (_, agent) in row.reads) ...[
+                            ?agent.clearance,
+                            for (final hold in agent.holds) hold.label,
+                          ],
+                        ].join(' '),
+                        facets: [
+                          OoFacet(
+                            id: 'handler',
+                            label: 'Handler',
+                            values: (row) => [
+                              for (final route in row.row.routes)
+                                ?route.handler,
+                            ],
                           ),
-                    ],
+                        ],
+                        columns: _columns(
+                          canConfigure: canConfigure,
+                          several: shown.length > 1,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
         ),
       ],
     );
   }
-}
 
-class _AgentTile extends StatelessWidget {
-  const _AgentTile({
-    required this.agent,
-    this.onLower,
-    this.onRestore,
-    this.onLift,
-    this.onEdit,
-    this.onRemove,
-  });
+  /// One cell per read of the Agent, each named by its Operation when several are shown.
+  Widget _perRead(
+    OoGrouped<AgentSummary> row,
+    bool several,
+    Widget Function(String operation, AgentSummary agent) cell,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (final (operation, agent) in row.reads)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: row.reads.length > 1 || several
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      operation,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    cell(operation, agent),
+                  ],
+                )
+              : cell(operation, agent),
+        ),
+    ],
+  );
 
-  final AgentSummary agent;
-
-  /// Opens its record's form, and removes the record; `null` without `roster.manage`.
-  final VoidCallback? onEdit;
-  final VoidCallback? onRemove;
-  final VoidCallback? onLower;
-  final VoidCallback? onRestore;
-
-  /// Lifts one hold; null without `agent.configure`.
-  final ValueChanged<HoldSummary>? onLift;
-
-  @override
-  Widget build(BuildContext context) {
+  List<OoColumn<OoGrouped<AgentSummary>>> _columns({
+    required bool Function(String operation) canConfigure,
+    required bool several,
+  }) {
     final theme = Theme.of(context);
-    final quarantinedEverywhere = agent.everyOperation.quarantined;
-    final clearance = agent.clearance;
-    final configured = agent.configuredClearance;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+    String? handler(OoGrouped<AgentSummary> row) =>
+        row.row.routes.map((route) => route.handler).nonNulls.firstOrNull;
+    return [
+      OoColumn(
+        id: 'agent',
+        label: 'Agent',
+        flex: 2,
+        sortKey: (row) => row.row.agent,
+        cell: (context, row) => Row(
+          children: [
+            Icon(
+              row.row.retirement?.status == 'retired'
+                  ? Icons.person_off_outlined
+                  : Icons.badge_outlined,
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: OoLink(
+                row.row.agent,
+                route: OoLinkTo.missions().withField('agent', row.row.agent),
+                semanticLabel: 'Open the Missions of Agent ${row.row.agent}',
+                style: theme.textTheme.titleSmall,
+              ),
+            ),
+          ],
+        ),
+      ),
+      OoColumn(
+        id: 'operations',
+        label: 'Operations and clearance',
+        flex: 2,
+        cell: (context, row) => _perRead(row, several, (operation, agent) {
+          final clearance = agent.clearance;
+          final configured = agent.configuredClearance;
+          return clearance == null
+              ? const SizedBox.shrink()
+              : Text(
+                  configured != null && configured != clearance
+                      ? '$clearance (configured $configured)'
+                      : clearance,
+                );
+        }),
+      ),
+      OoColumn(
+        id: 'handler',
+        label: 'Handler and model',
+        flex: 3,
+        sortKey: handler,
+        cell: (context, row) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  agent.retirement?.status == 'retired'
-                      ? Icons.person_off_outlined
-                      : Icons.badge_outlined,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: OoLink(
-                      agent.agent,
-                      route: OoLinkTo.missions().withField(
-                        'agent',
-                        agent.agent,
-                      ),
-                      semanticLabel:
-                          'Open the Missions of Agent ${agent.agent}',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                  ),
-                ),
-                if (clearance != null)
-                  Chip(
-                    label: Text(
-                      configured != null && configured != clearance
-                          ? '$clearance (configured $configured)'
-                          : clearance,
-                    ),
-                  ),
-                if (onEdit != null)
-                  IconButton(
-                    tooltip: 'Edit ${agent.agent}',
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-                if (onRemove != null)
-                  IconButton(
-                    tooltip: 'Remove ${agent.agent}',
-                    onPressed: onRemove,
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(agent.operation.label),
-            if (quarantinedEverywhere > 0)
-              Text('$quarantinedEverywhere quarantined in every Operation'),
             Text(
               [
-                ...agent.modelLabels,
-                if (agent.lastMissionAt case final at?)
+                ...row.row.modelLabels,
+                if (row.row.lastMissionAt case final at?)
                   'last Mission ${_date(at)}',
-                if (!agent.posted) 'not posted',
+                if (!row.row.posted) 'not posted',
               ].join(' · '),
               style: theme.textTheme.bodySmall,
             ),
-            if (agent.earlierModels case final earlier when earlier.isNotEmpty)
+            if (row.row.earlierModels case final earlier
+                when earlier.isNotEmpty)
               Text(
                 'Earlier: ${earlier.join(', ')}',
                 style: theme.textTheme.bodySmall,
               ),
-            if (agent.retirement case final retirement?)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
+          ],
+        ),
+      ),
+      OoColumn(
+        id: 'done',
+        label: 'Record',
+        flex: 3,
+        sortKey: (row) =>
+            row.reads.fold<int>(0, (sum, read) => sum + read.$2.operation.done),
+        cell: (context, row) => _perRead(
+          row,
+          several,
+          (operation, agent) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(agent.operation.label),
+              if (agent.everyOperation.quarantined > 0)
+                Text(
+                  '${agent.everyOperation.quarantined} quarantined in every Operation',
+                ),
+            ],
+          ),
+        ),
+      ),
+      OoColumn(
+        id: 'status',
+        label: 'Holds and status',
+        flex: 4,
+        cell: (context, row) => _perRead(row, several, (operation, agent) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (agent.retirement case final retirement?)
+                Row(
                   children: [
                     Icon(Icons.event_busy, color: theme.colorScheme.error),
                     const SizedBox(width: 6),
-                    Text(retirement.label),
+                    Flexible(child: Text(retirement.label)),
                   ],
                 ),
-              ),
-            if (agent.grantUnreadable)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
+              if (agent.grantUnreadable)
+                Text(
                   'Clearance grant unreadable: Stations work it at desk',
                   style: TextStyle(color: theme.colorScheme.error),
                 ),
-              ),
-            if (agent.grant case final grant?)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(grant.label),
-              ),
-            if (agent.promotion case final promotion?)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text('Promotion to $promotion awaits green ink'),
-              ),
-            for (final hold in agent.holds)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
+              if (agent.grant case final grant?) Text(grant.label),
+              if (agent.promotion case final promotion?)
+                Text('Promotion to $promotion awaits green ink'),
+              for (final hold in agent.holds)
+                Row(
                   children: [
                     Icon(
                       Icons.pause_circle_outline,
                       color: theme.colorScheme.error,
                     ),
                     const SizedBox(width: 6),
-                    Expanded(child: Text(hold.label)),
-                    if (onLift != null)
+                    Flexible(child: Text(hold.label)),
+                    if (canConfigure(operation) && !_changing)
                       TextButton(
-                        onPressed: () => onLift!(hold),
+                        onPressed: () =>
+                            unawaited(_liftHold(operation, agent, hold)),
                         child: const Text('Lift hold'),
                       ),
                   ],
                 ),
+            ],
+          );
+        }),
+      ),
+      OoColumn(
+        id: 'actions',
+        label: 'Actions',
+        width: 200,
+        cell: (context, row) => Wrap(
+          alignment: WrapAlignment.end,
+          children: [
+            if (canChangeRecords)
+              IconButton(
+                tooltip: 'Edit ${row.row.agent}',
+                onPressed: () => unawaited(editRecord(row.row.agent)),
+                icon: const Icon(Icons.edit_outlined),
               ),
-            if (onLower != null || onRestore != null)
-              OverflowBar(
-                alignment: MainAxisAlignment.end,
-                children: [
-                  if (onRestore != null)
-                    TextButton(
-                      onPressed: onRestore,
-                      child: const Text('Restore configured clearance'),
-                    ),
-                  if (onLower != null)
-                    TextButton(
-                      onPressed: onLower,
-                      child: const Text('Lower clearance'),
-                    ),
-                ],
+            if (canChangeRecords)
+              IconButton(
+                tooltip: 'Remove ${row.row.agent}',
+                onPressed: () => unawaited(removeRecord(row.row.agent)),
+                icon: const Icon(Icons.delete_outline),
               ),
+            for (final (operation, agent) in row.reads) ...[
+              if (canConfigure(operation) && !_changing && agent.grant != null)
+                TextButton(
+                  onPressed: () => unawaited(_restore(operation, agent)),
+                  child: Text(
+                    row.reads.length > 1
+                        ? 'Restore configured clearance in $operation'
+                        : 'Restore configured clearance',
+                  ),
+                ),
+              if (canConfigure(operation) &&
+                  !_changing &&
+                  agent.lowerClearances.isNotEmpty)
+                TextButton(
+                  onPressed: () => unawaited(_lower(operation, agent)),
+                  child: Text(
+                    row.reads.length > 1
+                        ? 'Lower clearance in $operation'
+                        : 'Lower clearance',
+                  ),
+                ),
+            ],
           ],
         ),
       ),
-    );
+    ];
   }
 }
 

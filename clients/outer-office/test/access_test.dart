@@ -149,7 +149,8 @@ void main() {
       await openAccess(tester, controller);
       expect(find.text('Roles'), findsOneWidget);
       expect(find.text('built in'), findsWidgets);
-      expect(find.text('account:root (from ai6.cfg, fixed)'), findsOneWidget);
+      expect(find.text('account:root'), findsOneWidget);
+      expect(find.text(' (from ai6.cfg, fixed)'), findsOneWidget);
       expect(find.text('New role'), findsOneWidget);
       expect(find.byTooltip('Edit operator'), findsOneWidget);
       expect(

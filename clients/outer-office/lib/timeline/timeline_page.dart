@@ -11,6 +11,8 @@ import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_icon.dart';
+import '../widgets/oo_data_table.dart';
+import '../widgets/oo_principals.dart';
 
 /// One entry of an Operation's activity timeline: metadata only.
 @immutable
@@ -69,8 +71,8 @@ class TimelineItemSummary {
         },
       );
 
-  /// Where it happened and who acted, each thing named as what opens it.
-  List<(String, OoRoute?)> get names => [
+  /// Where it happened, each thing named as what opens it.
+  List<(String, OoRoute?)> get places => [
     ('Operation $operationId', OoLinkTo.operation(operationId)),
     if (missionId case final mission?)
       ('Mission ${handle ?? mission}', OoLinkTo.mission(operationId, mission)),
@@ -79,6 +81,11 @@ class TimelineItemSummary {
     if (stationId case final station?)
       ('Station $station', OoLinkTo.station(station)),
     if (target case final target? when target != missionId) (target, null),
+  ];
+
+  /// Where it happened and who acted, each thing named as what opens it.
+  List<(String, OoRoute?)> get names => [
+    ...places,
     if (actor case final actor?) ('by $actor', null),
   ];
 
@@ -339,7 +346,10 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
             ],
           ),
         ),
-        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
+        OoFilterBar(
+          route: withoutTableFields(widget.route, const ['event']),
+          onRoute: widget.onRoute,
+        ),
         if (_error case final error? when _items.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -374,46 +384,98 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
                       ? const ('Go to Missions', OoRoute(OoPage.missions))
                       : null,
                 )
-              : ListView.builder(
-                  key: const PageStorageKey('operation-timeline'),
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                  itemCount: _items.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == _items.length) {
-                      return _nextCursor == null
-                          ? const SizedBox(height: 24)
-                          : Center(
-                              child: TextButton(
-                                onPressed: _loading ? null : _loadOlder,
-                                child: const Text('Load older activity'),
-                              ),
-                            );
-                    }
-                    final item = _items[index];
-                    return ListTile(
-                      leading: Tooltip(
-                        message: item.kind,
-                        child: Icon(_kindIcon(item.kind)),
-                      ),
-                      title: Tooltip(
-                        message: item.action,
-                        child: Text(timelineSentence(item.action)),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          OoLinkLine(item.names),
-                          for (final entry in item.detail.entries)
-                            Text('${entry.key}: ${entry.value}'),
+              : Column(
+                  children: [
+                    Expanded(
+                      child: OoDataTable<TimelineItemSummary>(
+                        rows: _items,
+                        rowId: (item) => item.id,
+                        noun: 'events',
+                        route: widget.route,
+                        onRoute: widget.onRoute,
+                        defaultSort: ('when', false),
+                        searchText: (item) =>
+                            '${item.action} ${timelineSentence(item.action)} '
+                            '${item.kind} ${item.operationId} ${item.context} '
+                            '${item.detail.entries.map((e) => '${e.key} ${e.value}').join(' ')}',
+                        facets: [
+                          OoFacet(
+                            id: 'event',
+                            label: 'Event',
+                            values: (item) => [item.kind],
+                          ),
+                        ],
+                        columns: [
+                          OoColumn(
+                            id: 'when',
+                            label: 'When',
+                            width: 140,
+                            sortKey: (item) => item.at,
+                            cell: (context, item) => OoTime(
+                              item.at,
+                              style: Theme.of(context).textTheme.labelMedium,
+                            ),
+                          ),
+                          OoColumn(
+                            id: 'event',
+                            label: 'Event',
+                            flex: 2,
+                            sortKey: (item) => item.kind,
+                            cell: (context, item) => Row(
+                              children: [
+                                Tooltip(
+                                  message: item.kind,
+                                  child: Icon(_kindIcon(item.kind), size: 18),
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(child: Text(item.kind)),
+                              ],
+                            ),
+                          ),
+                          OoColumn(
+                            id: 'action',
+                            label: 'What happened',
+                            flex: 3,
+                            sortKey: (item) => item.action,
+                            cell: (context, item) => Tooltip(
+                              message: item.action,
+                              child: Text(timelineSentence(item.action)),
+                            ),
+                          ),
+                          OoColumn(
+                            id: 'operation',
+                            label: 'Where',
+                            flex: 4,
+                            sortKey: (item) => item.operationId,
+                            cell: (context, item) => Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                OoLinkLine(item.places),
+                                for (final entry in item.detail.entries)
+                                  Text('${entry.key}: ${entry.value}'),
+                              ],
+                            ),
+                          ),
+                          OoColumn(
+                            id: 'actor',
+                            label: 'By',
+                            flex: 2,
+                            cell: (context, item) => item.actor == null
+                                ? const SizedBox.shrink()
+                                : OoPrincipalBadge(item.actor!),
+                          ),
                         ],
                       ),
-                      trailing: OoTime(
-                        item.at,
-                        style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    if (_nextCursor != null)
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: TextButton(
+                          onPressed: _loading ? null : _loadOlder,
+                          child: const Text('Load older activity'),
+                        ),
                       ),
-                      isThreeLine: item.detail.isNotEmpty,
-                    );
-                  },
+                  ],
                 ),
         ),
       ],

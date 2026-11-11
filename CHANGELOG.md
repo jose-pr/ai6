@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- People are shown by name. The gateway keeps what the directory said of each person who signs in (the
+  Registry's `principals`, within `[registry.limits.principals]`) and names them: the audit carries
+  `actor_name`, `POST /v1/user/principals` resolves IDs, `GET /v1/user/principals?q=` finds people and
+  groups by name, and a page's classification bar says "for you" to its owner. Outer Office shows a
+  person's name with their ID on hover (an ID never seen stays as it is, muted), lists the people who
+  signed in under Access > Accounts, and finds a person or group by name when a rule's subject is typed.
+- Outer Office's collection pages are tables with sortable columns, filter chips that hold several
+  values, a quick search on `/`, compact or comfortable rows, cards on a narrow window, keyboard
+  navigation and selection with bulk actions; the view is in the link (`sort`, `order`, `text` and each
+  facet). Audit, Timeline, Agents, Account Pools, Sessions, Missions and the Access rules and accounts
+  are on it; with All Operations an Agent or a pool account read in several Operations is one row
+  naming them. Missions hide the reviewers' turns unless the link says `reviews=show`, and cancel,
+  retry or resume the selected ones. Every action the access kinds define has words in "Your access".
+
 - Providers are reported with the schema and form of their configuration. Every Station publishes, at
   check-in, each provider it has loaded of any kind (`providers`, bounded by `[scheduler]
   provider_catalog_bytes`, 512 KiB by default; past it the schemas and forms are left out and each

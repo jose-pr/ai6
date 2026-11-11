@@ -6,6 +6,7 @@ import '../routes/oo_route.dart';
 import '../theme/oo_decor.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
+import '../widgets/oo_data_table.dart';
 import 'oo_empty.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
@@ -14,6 +15,7 @@ import 'oo_shell.dart';
 /// The Sessions a Sessions [route] selects from the board, in its order: by Operation,
 /// Mission and Session unless it sorts, ties kept in that order.
 List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
+  final text = route['text']?.toLowerCase();
   bool matches(SessionSummary session) =>
       (route['operation_id'] == null ||
           session.operationId == route['operation_id']) &&
@@ -21,7 +23,16 @@ List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
           (session.state ?? 'working') == route['state']) &&
       (route['station_id'] == null ||
           session.stationId == route['station_id']) &&
-      (route['agent'] == null || session.agent == route['agent']);
+      (route['agent'] == null || session.agent == route['agent']) &&
+      (text == null ||
+          [
+            session.operationId,
+            session.missionId,
+            board.handleOf(session.operationId, session.missionId),
+            session.sessionId,
+            ?session.stationId,
+            ?session.agent,
+          ].any((item) => item.toLowerCase().contains(text)));
 
   int byBoard(SessionSummary left, SessionSummary right) {
     for (final (a, b) in [
@@ -69,12 +80,6 @@ class SessionsPage extends StatelessWidget {
   final OoRoute route;
   final ValueChanged<OoRoute> onRoute;
   final ValueChanged<SessionSummary> onOpen;
-
-  void _sort(String sort, bool ascending) => onRoute(
-    route
-        .withField('sort', sort)
-        .withField('order', ascending ? 'asc' : 'desc'),
-  );
 
   // The width the page has, not the window's: a docked chat takes part of it.
   @override
@@ -145,130 +150,111 @@ class SessionsPage extends StatelessWidget {
         onOpen: onOpen,
       );
     } else {
-      final sort = route['sort'];
-      table = Padding(
-        padding: const EdgeInsets.all(24),
-        child: Card(
-          clipBehavior: Clip.antiAlias,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              sortColumnIndex: switch (sort) {
-                'operation' => 0,
-                'mission' => 1,
-                'session' => 2,
-                'state' => 3,
-                'updated' || 'created' => 4,
-                _ => null,
-              },
-              sortAscending: route['order'] != 'desc',
-              showCheckboxColumn: false,
-              columns: [
-                for (final (label, sort) in const [
-                  ('Operation', 'operation'),
-                  ('Mission', 'mission'),
-                  ('Session', 'session'),
-                  ('State', 'state'),
-                  ('Updated', 'updated'),
-                ])
-                  DataColumn(
-                    label: Text(label),
-                    onSort: (_, ascending) => _sort(sort, ascending),
+      table = OoDataTable<SessionSummary>(
+        rows: sessions,
+        rowId: (session) => session.sessionId,
+        narrowed: true,
+        noun: 'Sessions',
+        route: route,
+        onRoute: onRoute,
+        onOpen: onOpen,
+        searchText: (session) => session.sessionId,
+        defaultSort: ('operation', true),
+        cardsBelow: OoBreakpoints.phone,
+        columns: [
+          OoColumn(
+            id: 'operation',
+            label: 'Operation',
+            sortKey: (session) => session.operationId,
+            cell: (context, session) => OoLink(
+              session.operationId,
+              route: OoLinkTo.operation(session.operationId),
+              semanticLabel: 'Open Operation ${session.operationId}',
+            ),
+          ),
+          OoColumn(
+            id: 'mission',
+            label: 'Mission',
+            sortKey: (session) => session.missionId,
+            cell: (context, session) => OoLink(
+              board.handleOf(session.operationId, session.missionId),
+              route: OoLinkTo.mission(session.operationId, session.missionId),
+              semanticLabel:
+                  'Open Mission '
+                  '${board.handleOf(session.operationId, session.missionId)}',
+            ),
+          ),
+          OoColumn(
+            id: 'session',
+            label: 'Session',
+            sortKey: (session) => session.sessionId,
+            cell: (context, session) => Text(
+              session.sessionId,
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
+          ),
+          OoColumn(
+            id: 'state',
+            label: 'State',
+            flex: 2,
+            sortKey: (session) =>
+                boardStates.indexOf(session.state ?? 'working'),
+            cell: (context, session) => Row(
+              children: [
+                OoStateMark(session.state ?? 'working', reason: session.reason),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    [
+                      session.state ?? 'working',
+                      if (session.reason case final reason?)
+                        reasonWords(reason),
+                    ].join(' · '),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                const DataColumn(label: Text('Station')),
-                const DataColumn(label: Text('Agent')),
-              ],
-              rows: [
-                for (final session in sessions)
-                  DataRow(
-                    key: ValueKey(session.sessionId),
-                    selected: session.sessionId == selectedId,
-                    onSelectChanged: (_) => onOpen(session),
-                    cells: [
-                      DataCell(
-                        OoLink(
-                          session.operationId,
-                          route: OoLinkTo.operation(session.operationId),
-                          semanticLabel:
-                              'Open Operation ${session.operationId}',
-                        ),
-                      ),
-                      DataCell(
-                        OoLink(
-                          board.handleOf(
-                            session.operationId,
-                            session.missionId,
-                          ),
-                          route: OoLinkTo.mission(
-                            session.operationId,
-                            session.missionId,
-                          ),
-                          semanticLabel:
-                              'Open Mission '
-                              '${board.handleOf(session.operationId, session.missionId)}',
-                        ),
-                      ),
-                      DataCell(
-                        Text(
-                          session.sessionId,
-                          style: const TextStyle(fontFamily: 'monospace'),
-                        ),
-                      ),
-                      DataCell(
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            OoStateMark(
-                              session.state ?? 'working',
-                              reason: session.reason,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              [
-                                session.state ?? 'working',
-                                if (session.reason case final reason?)
-                                  reasonWords(reason),
-                              ].join(' · '),
-                            ),
-                          ],
-                        ),
-                      ),
-                      DataCell(OoTime(session.updatedAt, style: null)),
-                      DataCell(
-                        session.stationId == null
-                            ? const Text('—')
-                            : OoLink(
-                                session.stationId!,
-                                route: OoLinkTo.station(session.stationId!),
-                                semanticLabel:
-                                    'Open Station ${session.stationId}',
-                              ),
-                      ),
-                      DataCell(
-                        session.agent == null
-                            ? const Text('—')
-                            : OoLink(
-                                session.agent!,
-                                route: OoLinkTo.agent(
-                                  session.agent!,
-                                  operation: session.operationId,
-                                ),
-                                semanticLabel: 'Open Agent ${session.agent}',
-                              ),
-                      ),
-                    ],
-                  ),
+                ),
               ],
             ),
           ),
-        ),
+          OoColumn(
+            id: 'updated',
+            label: 'Updated',
+            sortKey: (session) => session.updatedAt ?? 0,
+            cell: (context, session) => OoTime(session.updatedAt, style: null),
+          ),
+          OoColumn(
+            id: 'station',
+            label: 'Station',
+            cell: (context, session) => session.stationId == null
+                ? const Text('—')
+                : OoLink(
+                    session.stationId!,
+                    route: OoLinkTo.station(session.stationId!),
+                    semanticLabel: 'Open Station ${session.stationId}',
+                  ),
+          ),
+          OoColumn(
+            id: 'agent',
+            label: 'Agent',
+            cell: (context, session) => session.agent == null
+                ? const Text('—')
+                : OoLink(
+                    session.agent!,
+                    route: OoLinkTo.agent(
+                      session.agent!,
+                      operation: session.operationId,
+                    ),
+                    semanticLabel: 'Open Agent ${session.agent}',
+                  ),
+          ),
+        ],
       );
     }
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: controls),
         if (details != null) SliverToBoxAdapter(child: details),
-        if (table is _SessionList)
+        if (table is _SessionList || table is OoDataTable<SessionSummary>)
           SliverFillRemaining(child: table)
         else
           SliverToBoxAdapter(child: table),

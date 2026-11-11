@@ -1,10 +1,11 @@
 import 'dart:convert';
+import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart'
-    show DropdownButton, ListTile, Text, TextField, TextInputAction, Tooltip;
+    show DropdownButton, TextField, TextInputAction;
 import 'package:outer_office/main.dart';
 
 import 'shell_navigation.dart';
@@ -120,6 +121,10 @@ void main() {
     final timeline = FakeTimeline();
     final board = await signedIn(timeline);
     addTearDown(board.dispose);
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
@@ -151,11 +156,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(timeline.asked.last.queryParameters.containsKey('cursor'), isFalse);
     // The new item is on top and nothing already loaded is lost or repeated.
-    final titles = tester
-        .widgetList<ListTile>(find.byType(ListTile))
-        .map((tile) => ((tile.title! as Tooltip).child! as Text).data)
-        .toList();
-    expect(titles, ['Done', 'Resume applied', 'Blocked', 'Working']);
+    final titles = [
+      for (final title in ['Done', 'Resume applied', 'Blocked', 'Working'])
+        (title, tester.getTopLeft(find.text(title)).dy),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    expect(
+      [for (final (title, _) in titles) title],
+      ['Done', 'Resume applied', 'Blocked', 'Working'],
+    );
   });
 
   testWidgets('the timeline filters by Mission and by Operation', (
@@ -164,13 +172,20 @@ void main() {
     final timeline = FakeTimeline();
     final board = await signedIn(timeline);
     addTearDown(board.dispose);
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );
     await openPage(tester, 'Timeline');
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), 'mission-1');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Filter by Mission'),
+      'mission-1',
+    );
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(timeline.asked.last.queryParameters['mission'], 'mission-1');

@@ -10,6 +10,8 @@ import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import 'mission_detail.dart';
 import 'missions_board.dart';
+import 'missions_table.dart';
+import '../widgets/oo_data_table.dart' show OoTablePreferences;
 import 'oo_empty.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
@@ -93,6 +95,7 @@ class _MissionsPageState extends State<MissionsPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(OoTablePreferences.load());
     if (route['compartment'] != null) unawaited(_readCompartment());
   }
 
@@ -219,7 +222,7 @@ class _MissionsPageState extends State<MissionsPage> {
           mission,
     ];
     final waiting = _alsoWaiting(context, listRoute);
-    final boardView = CustomScrollView(
+    Widget boardViewFor(bool table) => CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
           child: BoardHeader(
@@ -237,6 +240,35 @@ class _MissionsPageState extends State<MissionsPage> {
         SliverToBoxAdapter(
           child: OoFilterBar(route: listRoute, onRoute: widget.onRoute),
         ),
+        if (MediaQuery.sizeOf(context).width >= OoBreakpoints.compact)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: OoTablePreferences.missionsAsTable,
+                  builder: (context, asTable, _) => SegmentedButton<bool>(
+                    key: const ValueKey('missions-view'),
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    segments: const [
+                      ButtonSegment(value: false, label: Text('Cards')),
+                      ButtonSegment(value: true, label: Text('Table')),
+                    ],
+                    selected: {asTable},
+                    onSelectionChanged: (chosen) => unawaited(
+                      OoTablePreferences.chooseMissionsView(
+                        table: chosen.first,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (waiting != null) SliverToBoxAdapter(child: waiting),
         if (board.demo) const SliverToBoxAdapter(child: DemoBanner()),
         if (board.error != null)
@@ -283,6 +315,17 @@ class _MissionsPageState extends State<MissionsPage> {
               action: ('Try again', () => board.refresh()),
             ),
           )
+        else if (table)
+          SliverFillRemaining(
+            child: MissionsTable(
+              board: board,
+              missions: missions,
+              route: listRoute,
+              onRoute: widget.onRoute,
+              onDetails: _details,
+              open: open,
+            ),
+          )
         else
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 36),
@@ -314,7 +357,15 @@ class _MissionsPageState extends State<MissionsPage> {
           ),
       ],
     );
-    return boardView;
+    // A wide queue may be a table; the cards show each Mission's Sessions, so they stay the
+    // default, and a narrow queue always has them.
+    return LayoutBuilder(
+      builder: (context, box) => ValueListenableBuilder<bool>(
+        valueListenable: OoTablePreferences.missionsAsTable,
+        builder: (context, asTable, _) =>
+            boardViewFor(asTable && box.maxWidth >= OoBreakpoints.compact),
+      ),
+    );
   }
 
   /// "Also waiting: N held briefs · N Mission proposals" with a link to each, when the queue

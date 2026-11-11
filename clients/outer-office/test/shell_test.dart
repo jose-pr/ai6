@@ -2,8 +2,9 @@ import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart'
-    show DataTable, NavigationDrawer, NavigationDrawerDestination;
+    show NavigationDrawer, NavigationDrawerDestination;
 import 'package:outer_office/main.dart';
+import 'package:outer_office/widgets/oo_data_table.dart';
 import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/theme/oo_backdrop.dart';
@@ -87,10 +88,8 @@ void main() {
       expect(navLabel(page), findsOneWidget, reason: page);
     }
     await openPage(tester, 'Audit');
-    expect(
-      find.text('operator-007 · Mission create requested'),
-      findsOneWidget,
-    );
+    expect(find.text('operator-007'), findsOneWidget);
+    expect(find.text('Mission create requested'), findsOneWidget);
   });
 
   testWidgets('a narrow window puts the rail behind a menu button', (
@@ -111,7 +110,7 @@ void main() {
     await tester.tap(navLabel('Sessions'));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationDrawer), findsNothing);
-    expect(find.byType(DataTable), findsOneWidget);
+    expect(find.byType(OoDataTable<SessionSummary>), findsOneWidget);
   });
 
   testWidgets('Overview counts what the board holds and links what needs '
@@ -166,7 +165,7 @@ void main() {
         ),
     ];
     await openPage(tester, 'Sessions');
-    expectNoBackdrop(find.byType(DataTable));
+    expectNoBackdrop(find.byType(OoDataTable<SessionSummary>));
     expect(find.byType(OoBackdrop), findsNothing);
     List<String> order() =>
         [

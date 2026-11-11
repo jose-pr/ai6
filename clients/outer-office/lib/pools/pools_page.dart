@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../routes/oo_filters.dart';
+import '../widgets/oo_data_table.dart';
 import '../routes/oo_route.dart';
 import '../routes/oo_scope.dart';
 import '../settings/oo_config.dart';
@@ -284,7 +285,10 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
             ],
           ),
         ),
-        OoFilterBar(route: widget.route, onRoute: widget.onRoute),
+        OoFilterBar(
+          route: withoutTableFields(widget.route, const ['handler']),
+          onRoute: widget.onRoute,
+        ),
         if (_failed.isNotEmpty && (shown.length > 1 || accounts.isNotEmpty))
           OoReadFailures(failed: _failed, several: shown.length > 1),
         Expanded(
@@ -319,82 +323,117 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                       'A pool shares logins among Sessions. Without one, a Session uses '
                       'the login its Agent is given.',
                 )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              : Column(
                   children: [
                     if (widget.board.canReadRoster)
                       ModelsSection(board: widget.board),
-                    for (final group in shown) ...[
-                      if (operation == null &&
-                          accounts.any((row) => row.$1 == group))
-                        OoOperationHeading(group),
-                      for (final (from, account) in accounts)
-                        if (from == group)
-                          _AccountTile(account: account, operation: from),
-                    ],
+                    Expanded(
+                      child: OoDataTable<OoGrouped<PoolAccountSummary>>(
+                        rows: groupByEntity(
+                          accounts,
+                          (account) => '${account.pool}/${account.account}',
+                        ),
+                        rowId: (row) => '${row.row.pool}/${row.row.account}',
+                        noun: 'pool accounts',
+                        route: widget.route,
+                        onRoute: widget.onRoute,
+                        defaultSort: ('pool', true),
+                        searchText: (row) =>
+                            '${row.row.pool} ${row.row.account} ${row.row.handler} '
+                            '${row.row.kind} ${row.operations.join(' ')}',
+                        facets: [
+                          OoFacet(
+                            id: 'handler',
+                            label: 'Handler',
+                            values: (row) => [row.row.handler],
+                          ),
+                        ],
+                        columns: _columns(),
+                      ),
+                    ),
                   ],
                 ),
         ),
       ],
     );
   }
-}
 
-class _AccountTile extends StatelessWidget {
-  const _AccountTile({required this.account, required this.operation});
-
-  final PoolAccountSummary account;
-  final String operation;
-
-  @override
-  Widget build(BuildContext context) {
-    final limited = account.limitedLabel;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+  List<OoColumn<OoGrouped<PoolAccountSummary>>> _columns() => [
+    OoColumn(
+      id: 'pool',
+      label: 'Pool and account',
+      flex: 3,
+      sortKey: (row) => '${row.row.pool}/${row.row.account}',
+      cell: (context, row) => Row(
+        children: [
+          Icon(
+            row.row.limitedLabel == null
+                ? Icons.vpn_key_outlined
+                : Icons.hourglass_bottom,
+            size: 18,
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              '${row.row.pool}/${row.row.account}',
+              style: Theme.of(context).textTheme.titleSmall,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    ),
+    OoColumn(
+      id: 'handler',
+      label: 'Handler',
+      flex: 2,
+      sortKey: (row) => row.row.handler,
+      cell: (context, row) => Text(row.row.handler),
+    ),
+    OoColumn(
+      id: 'kind',
+      label: 'Login kind',
+      flex: 2,
+      sortKey: (row) => row.row.kind,
+      cell: (context, row) => Text(row.row.kind),
+    ),
+    OoColumn(
+      id: 'operations',
+      label: 'Operations',
+      flex: 2,
+      cell: (context, row) => OoOperationBadges(row.operations),
+    ),
+    OoColumn(
+      id: 'use',
+      label: 'Use',
+      flex: 5,
+      cell: (context, row) {
+        final account = row.row;
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  limited == null
-                      ? Icons.vpn_key_outlined
-                      : Icons.hourglass_bottom,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${account.pool}/${account.account}',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Text('${account.handler} · ${account.kind}'),
-              ],
-            ),
-            const SizedBox(height: 8),
             if (account.highestUse case final use?)
               LinearProgressIndicator(value: use),
-            const SizedBox(height: 8),
             Text(
               [
                 account.sessions,
                 if (account.windows.isNotEmpty)
                   account.windows.map((window) => window.label).join(', '),
                 '${account.tokensToday} tokens today',
-                ?limited,
+                ?account.limitedLabel,
               ].join(' · '),
             ),
             if (account.readLabel case final read?) Text(read),
-            if (account.active.isNotEmpty)
-              OoLinkLine([
-                ('Used by', null),
-                for (final mission in account.active)
-                  ('Mission $mission', OoLinkTo.mission(operation, mission)),
-              ]),
+            for (final (operation, read) in row.reads)
+              if (read.active.isNotEmpty)
+                OoLinkLine([
+                  ('Used by', null),
+                  for (final mission in read.active)
+                    ('Mission $mission', OoLinkTo.mission(operation, mission)),
+                ]),
           ],
-        ),
-      ),
-    );
-  }
+        );
+      },
+    ),
+  ];
 }

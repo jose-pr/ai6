@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../routes/oo_route.dart';
+import '../widgets/oo_principals.dart';
 import 'access_api.dart';
 import 'accounts_page.dart';
 import 'role_editor.dart';
@@ -215,10 +216,22 @@ class _AccessPageState extends State<AccessPage> {
           child: _loading && view == null
               ? const Center(child: CircularProgressIndicator())
               : switch (tab) {
-                  'accounts' => AccountsTab(board: widget.board, api: _api),
-                  'check' => _CheckTab(api: _api, operation: _operation),
+                  'accounts' => AccountsTab(
+                    board: widget.board,
+                    api: _api,
+                    route: widget.route,
+                    onRoute: widget.onRoute,
+                  ),
+                  'check' => _CheckTab(
+                    api: _api,
+                    operation: _operation,
+                    principals: widget.board.principals,
+                  ),
                   _ when view == null => const SizedBox.shrink(),
                   'rules' => RulesEditor(
+                    board: widget.board,
+                    route: widget.route,
+                    onRoute: widget.onRoute,
                     view: view,
                     operationId: _operation,
                     canEdit: _canManage && view.writable,
@@ -365,8 +378,13 @@ class _RolesTab extends StatelessWidget {
           const SizedBox(height: 16),
           Text('Chief', style: Theme.of(context).textTheme.titleSmall),
           for (final subject in view.chiefHost)
-            Text('$subject (from ai6.cfg, fixed)'),
-          for (final subject in view.chiefStored) Text(subject),
+            Row(
+              children: [
+                OoPrincipalBadge(subject),
+                const Text(' (from ai6.cfg, fixed)'),
+              ],
+            ),
+          for (final subject in view.chiefStored) OoPrincipalBadge(subject),
         ],
       ],
     );
@@ -396,8 +414,13 @@ class _RolesTab extends StatelessWidget {
 }
 
 class _CheckTab extends StatefulWidget {
-  const _CheckTab({required this.api, required this.operation});
+  const _CheckTab({
+    required this.api,
+    required this.operation,
+    required this.principals,
+  });
 
+  final OoPrincipals principals;
   final AccessApi api;
   final String? operation;
 
@@ -443,12 +466,7 @@ class _CheckTabState extends State<_CheckTab> {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(24),
     children: [
-      TextField(
-        controller: _subject,
-        decoration: const InputDecoration(
-          labelText: 'Subject (account:NAME, person:ID or group:NAME)',
-        ),
-      ),
+      OoPrincipalPicker(controller: _subject, principals: widget.principals),
       TextField(
         controller: _action,
         decoration: const InputDecoration(labelText: 'Action'),

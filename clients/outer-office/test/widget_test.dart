@@ -1320,10 +1320,8 @@ void main() {
     await openPage(tester, 'Audit');
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('operator-007 · Mission create requested'),
-      findsOneWidget,
-    );
+    expect(find.text('operator-007'), findsOneWidget);
+    expect(find.text('Mission create requested'), findsOneWidget);
     expect(find.text('oo--mission-007'), findsOneWidget);
     expect(find.textContaining('prompt'), findsNothing);
   });
@@ -1446,10 +1444,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Audit'), findsOneWidget);
-    expect(
-      find.text('operator-007 · Mission create requested'),
-      findsOneWidget,
-    );
+    expect(find.text('operator-007'), findsOneWidget);
+    expect(find.text('Mission create requested'), findsOneWidget);
     expect(find.text('mission-007'), findsOneWidget);
     expect(find.textContaining('prompt'), findsNothing);
   });
