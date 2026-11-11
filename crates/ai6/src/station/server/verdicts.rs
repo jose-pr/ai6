@@ -107,6 +107,13 @@ pub(super) fn hold_unapproved(
 /// it, `failed` otherwise, and for a verifying one asked to be redispatched, its next attempt. Its
 /// brief is filed on the next intake pass.
 pub(super) fn settle_held(state: &DaemonState) {
+    let retry = UNFILED
+        .lock()
+        .map(|mut unfiled| std::mem::take(&mut *unfiled))
+        .unwrap_or_default();
+    for mission_id in retry {
+        file_settled(state, &mission_id);
+    }
     let waiting = state
         .missions
         .lock()
@@ -165,6 +172,24 @@ fn settle(state: &DaemonState, mission_id: &str, verdict: &MissionVerdict) {
         telemetry: review::published(state, mission_id),
     };
     publish_finished_event(state, mission_id, event, Some(finished));
+    file_settled(state, mission_id);
+}
+
+/// Missions a verdict settled whose brief the Registry could not be told about yet.
+static UNFILED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Brings the Registry's brief in line with a Mission a verdict settled, which may have been
+/// requeued or filed lost while its Station was dark; a failed call is tried again on the next
+/// pass.
+fn file_settled(state: &DaemonState, mission_id: &str) {
+    if let Err(error) = super::file_settled_brief(state, mission_id) {
+        eprintln!("ai6: Mission {mission_id:?}: its brief was not brought in line: {error}");
+        if let Ok(mut unfiled) = UNFILED.lock()
+            && !unfiled.iter().any(|unfiled| unfiled == mission_id)
+        {
+            unfiled.push(mission_id.to_owned());
+        }
+    }
 }
 
 #[cfg(test)]

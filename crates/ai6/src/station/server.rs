@@ -26,6 +26,8 @@ mod harness;
 mod head_of_station;
 #[cfg(feature = "cables-mcp")]
 mod issues;
+#[cfg(test)]
+mod lease_tests;
 mod logins;
 mod medical;
 #[cfg(feature = "cables-mcp")]
@@ -1648,6 +1650,11 @@ struct DaemonState {
 }
 
 impl DaemonState {
+    /// How long a lease on a Mission's brief or Session lasts between renewals.
+    fn mission_lease(&self) -> Duration {
+        self.station.limits().scheduler.lease.0
+    }
+
     fn mission_capacity(&self) -> usize {
         match self.intake.station_settings(&self.station_id) {
             Ok(Some(settings)) => settings.max_concurrent_missions(),
@@ -1783,12 +1790,7 @@ async fn scheduler_loop(base: DaemonState) {
         let tick = state.clone();
         let _ = tokio::task::spawn_blocking(move || {
             if check_in {
-                publish_station_check_in(&tick);
-                renew_session_leases(&tick);
-                accounts::tend(&tick);
-                recovery::checkpoint_due(&tick);
-                ephemeral::sweep(&tick);
-                agents::enforce_clearances(&tick);
+                check_in_round(&tick);
             }
             medical::enforce_quarantines(&tick);
             verdicts::settle_held(&tick);
@@ -1896,7 +1898,9 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
     };
     for lease in leases.iter().filter(|lease| lease.station() == station) {
         if let recovery::Adoption::Pending = recovery::adopt(state, lease) {
-            let _ = state.intake.renew(lease.key(), station, DEFAULT_LEASE);
+            let _ = state
+                .intake
+                .renew(lease.key(), station, state.mission_lease());
             continue;
         }
         if let Err(error) = ensure_leased_mission(state, lease) {
@@ -1908,8 +1912,10 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
             );
             continue;
         }
-        if lease.expires() <= unix_now() + DEFAULT_LEASE.as_secs_f64() / 2.0 {
-            let _ = state.intake.renew(lease.key(), station, DEFAULT_LEASE);
+        if lease.expires() <= unix_now() + state.mission_lease().as_secs_f64() / 2.0 {
+            let _ = state
+                .intake
+                .renew(lease.key(), station, state.mission_lease());
         }
         if finish_terminal_intake_claim(state, lease).is_some() {
             continue;
@@ -1946,11 +1952,12 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
                     "mission_id".to_owned(),
                     serde_json::json!(mission_id.as_str()),
                 )]);
-                if let Ok(Some(lease)) =
-                    state
-                        .intake
-                        .claim_with_lease(Some(&brief.key()), station, DEFAULT_LEASE, meta)
-                {
+                if let Ok(Some(lease)) = state.intake.claim_with_lease(
+                    Some(&brief.key()),
+                    station,
+                    state.mission_lease(),
+                    meta,
+                ) {
                     let _ = finish_intake_claim(
                         state,
                         &lease,
@@ -1994,7 +2001,7 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         let Ok(Some(lease)) = state.intake.claim_with_lease(
             Some(&brief.key()),
             &execution_station,
-            DEFAULT_LEASE,
+            state.mission_lease(),
             meta,
         ) else {
             continue;
@@ -2250,7 +2257,7 @@ fn acquire_session_hold(
     let taken = match &existing {
         Some(hold) => state
             .intake
-            .take_session(&hold.id, &state.station_id, DEFAULT_LEASE),
+            .take_session(&hold.id, &state.station_id, state.mission_lease()),
         None => Err(SessionError::NotFound),
     };
     let record = match taken {
@@ -2307,7 +2314,10 @@ fn current_handle(state: &DaemonState, mission_id: &str) -> String {
 /// another Station wrote, for a Mission this Station knows of no earlier attempt at.
 fn open_run(state: &DaemonState, mut run: NewSession) -> Result<SessionRecord, SessionError> {
     loop {
-        match state.intake.open_session(run.clone(), DEFAULT_LEASE) {
+        match state
+            .intake
+            .open_session(run.clone(), state.mission_lease())
+        {
             Err(SessionError::Exists) => {
                 run = run.next_attempt().ok_or(SessionError::Exists)?;
             }
@@ -2365,6 +2375,17 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
     eprintln!("ai6: Mission {mission_id:?} fenced out: another Station holds its Session");
 }
 
+/// What a Station does with the Registry at each check-in. The lease renewals come first: the
+/// rest of the round is slow on a distant Registry and must not make them late.
+fn check_in_round(state: &DaemonState) {
+    renew_session_leases(state);
+    publish_station_check_in(state);
+    accounts::tend(state);
+    recovery::checkpoint_due(state);
+    ephemeral::sweep(state);
+    agents::enforce_clearances(state);
+}
+
 /// Extends the lease on every Session this Station holds, fencing out any it has lost.
 fn renew_session_leases(state: &DaemonState) {
     let held = state
@@ -2383,10 +2404,12 @@ fn renew_session_leases(state: &DaemonState) {
         })
         .unwrap_or_default();
     for (mission_id, hold) in held {
-        match state
-            .intake
-            .renew_session(&hold.id, &state.station_id, hold.fence, DEFAULT_LEASE)
-        {
+        match state.intake.renew_session(
+            &hold.id,
+            &state.station_id,
+            hold.fence,
+            state.mission_lease(),
+        ) {
             Ok(_) | Err(SessionError::Ended) => {}
             Err(SessionError::Stale | SessionError::HeldBy(_)) => fence_out(state, &mission_id),
             Err(error) => eprintln!("ai6: Session lease {:?} not renewed: {error}", hold.id),
@@ -3823,6 +3846,12 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
     }
     vetting::review_ended(state, lease, &mission);
     review::reviewer_ended(state, lease, &mission);
+    let outcome = terminal_outcome(state, mission_id, &mission);
+    finish_intake_claim(state, lease, &outcome, mission.state == MissionState::Done)
+}
+
+/// The outcome filed for a Mission that ended.
+fn terminal_outcome(state: &DaemonState, mission_id: &str, mission: &Mission) -> serde_json::Value {
     let mut outcome = serde_json::json!({
         "state": format!("{:?}", mission.state).to_lowercase(),
         "mission_id": mission.mission_id.as_str(),
@@ -3855,7 +3884,48 @@ fn finish_terminal_intake_claim(state: &DaemonState, lease: &Lease) -> Option<()
             outcome["verdict"] = serde_json::json!(verdict);
         }
     }
-    finish_intake_claim(state, lease, &outcome, mission.state == MissionState::Done)
+    outcome
+}
+
+/// Makes the Registry's brief agree with a Mission that ended here after the Registry had let go
+/// of its claim: a brief filed as lost while this Station was dark is refiled with the Mission's
+/// outcome, and one queued again is claimed and filed. `Ok(false)` when it does not apply.
+///
+/// # Errors
+///
+/// A Registry read or write that failed; the caller tries again.
+fn file_settled_brief(state: &DaemonState, mission_id: &str) -> std::io::Result<bool> {
+    let Some(mission) = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned())
+        .filter(|mission| is_terminal_state(mission.state))
+    else {
+        return Ok(false);
+    };
+    let Some(filed) = state.intake.filed_brief(mission_id)? else {
+        return Ok(false);
+    };
+    let outcome = terminal_outcome(state, mission_id, &mission);
+    let done = mission.state == MissionState::Done;
+    match filed.state.as_str() {
+        "failed" => state.intake.refile_lost(mission_id, &outcome, done),
+        "new" => {
+            let meta = BTreeMap::from([("mission_id".to_owned(), serde_json::json!(mission_id))]);
+            let Some(lease) = state.intake.claim_with_lease(
+                Some(mission_id),
+                &state.station_id,
+                state.mission_lease(),
+                meta,
+            )?
+            else {
+                return Ok(false);
+            };
+            Ok(finish_intake_claim(state, &lease, &outcome, done).is_some())
+        }
+        _ => Ok(false),
+    }
 }
 
 fn finish_intake_claim(

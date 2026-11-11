@@ -29,7 +29,7 @@ use crate::directorates::registry::limits::SessionLimits;
 use crate::directorates::registry::sessions::{
     SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{DEFAULT_LEASE, Lease, LeaseRecovery};
+use crate::directorates::registry::store::{Lease, LeaseRecovery};
 use crate::station::reach::ReachWatch;
 use crate::{MissionId, SessionId};
 use coqui_acp_provider::{AgentEvent, AgentSession};
@@ -74,6 +74,14 @@ impl Extraction {
     }
 }
 
+/// Whether the attempt ended and its Mission waits for a person: it is being verified or held.
+fn waits_for_verdict(record: &SessionRecord) -> bool {
+    record
+        .result
+        .as_ref()
+        .is_some_and(|result| matches!(result.state.as_str(), "verifying" | "held"))
+}
+
 /// Decides what happens to the Mission behind an expired brief lease whose Station stopped
 /// renewing it: hand it to a Station that adopts its Session, or mark the Session lost.
 pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
@@ -81,6 +89,9 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
         return Extraction::Requeue;
     };
     let record = match state.intake.latest_session(mission_id) {
+        // A Mission waiting on a person has no harness to lose, so its Station going dark spends
+        // no attempt; the verdict settles it once the Station is back.
+        Ok(Some(record)) if waits_for_verdict(&record) => return Extraction::Wait,
         Ok(Some(record)) if !record.status.is_closed() => record,
         // A live Station that gave its Session up lets the brief lease lapse as well.
         Ok(Some(record)) if record.status == SessionStatus::Lost => {
@@ -101,7 +112,10 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
         Ok(station) => {
             let meta =
                 BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.session_id))]);
-            match state.intake.hand_over(lease, &station, DEFAULT_LEASE, meta) {
+            match state
+                .intake
+                .hand_over(lease, &station, state.mission_lease(), meta)
+            {
                 Ok(Some(_)) => eprintln!(
                     "ai6: Station {:?} went dark; Station {station:?} adopts Mission \
                      {mission_id:?} and re-attaches to its Session",
@@ -525,17 +539,18 @@ pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
             return Adoption::Pending;
         }
     };
-    let record = match state
-        .intake
-        .take_session(session_id, &state.station_id, DEFAULT_LEASE)
-    {
-        Ok(record) => record,
-        Err(SessionError::Ended | SessionError::NotFound) => return Adoption::NotAsked,
-        Err(error) => {
-            eprintln!("ai6: Session {session_id:?} not adopted yet: {error}");
-            return Adoption::Pending;
-        }
-    };
+    let record =
+        match state
+            .intake
+            .take_session(session_id, &state.station_id, state.mission_lease())
+        {
+            Ok(record) => record,
+            Err(SessionError::Ended | SessionError::NotFound) => return Adoption::NotAsked,
+            Err(error) => {
+                eprintln!("ai6: Session {session_id:?} not adopted yet: {error}");
+                return Adoption::Pending;
+            }
+        };
     if let Err(error) = ensure_leased_mission(state, lease) {
         eprintln!("ai6: Mission {mission_id:?} not adopted: {error}");
         return Adoption::Pending;

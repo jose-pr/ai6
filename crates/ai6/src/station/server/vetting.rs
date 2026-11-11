@@ -33,9 +33,7 @@ use crate::directorates::registry::bona_fides::Origin;
 use crate::directorates::registry::logbook::Severity;
 use crate::directorates::registry::mission_ids::MissionEntry;
 use crate::directorates::registry::reports::ReportFiler;
-use crate::directorates::registry::store::{
-    AuditRecord, Brief, DEFAULT_LEASE, Lease, MissionProposal,
-};
+use crate::directorates::registry::store::{AuditRecord, Brief, Lease, MissionProposal};
 use crate::directorates::registry::timeline::TimelineEvent;
 
 /// The class authorisation kind that lets M promote a clean proposal.
@@ -1269,7 +1267,7 @@ fn refuse(state: &DaemonState, brief: &Brief, mission_id: &str, vetting: &Vettin
     if let Ok(Some(lease)) =
         state
             .intake
-            .claim_with_lease(Some(&key), &state.station_id, DEFAULT_LEASE, meta)
+            .claim_with_lease(Some(&key), &state.station_id, state.mission_lease(), meta)
     {
         let reason = vetting
             .findings
@@ -1506,6 +1504,7 @@ mod tests {
     use super::*;
     use crate::directorates::m::mission::MissionStore;
     use crate::directorates::registry::sources::SourceItem;
+    use crate::directorates::registry::store::DEFAULT_LEASE;
 
     #[test]
     fn an_operations_own_agents_file_cannot_choose_a_reviews_harness_or_check() {

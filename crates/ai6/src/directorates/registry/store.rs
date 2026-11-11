@@ -1337,6 +1337,15 @@ pub trait BriefStore {
     /// Returns an error for an invalid key or Registry I/O failures.
     fn filed_brief(&self, key: &str) -> io::Result<Option<FiledBrief>>;
 
+    /// Replaces the outcome of a brief filed as lost, because its Station was dark, with the one
+    /// the Station settled for its Mission afterwards: `ok` files it as done, otherwise as failed.
+    /// `false`, changing nothing, when `key` is not filed as lost.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid key or outcome, or Registry I/O failures.
+    fn refile_lost(&self, key: &str, outcome: &serde_json::Value, ok: bool) -> io::Result<bool>;
+
     /// The briefs of `operation`, newest first, at most `limit` of them. Every brief is read to
     /// find them, up to `[registry.limits.briefs] records` per state.
     ///
@@ -1437,6 +1446,35 @@ impl BriefStore for FileRegistry {
             }
         }
         Ok(None)
+    }
+
+    fn refile_lost(&self, key: &str, outcome: &serde_json::Value, ok: bool) -> io::Result<bool> {
+        validate_registry_key(key)?;
+        if !outcome.is_object() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Registry outcomes must be JSON objects",
+            ));
+        }
+        let _registry_lock = self.lock()?;
+        let Some(filed) = self.filed_in("failed", key)? else {
+            return Ok(false);
+        };
+        if !is_lost(filed.outcome.as_ref()) {
+            return Ok(false);
+        }
+        let failed = self.root.join("failed");
+        finish_locked(self, &filed.brief, outcome, ok, None)?;
+        if ok {
+            for suffix in ["json", "outcome.json", "provenance", "log"] {
+                match fs::remove_file(failed.join(format!("{key}.{suffix}"))) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        Ok(true)
     }
 
     fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>> {
@@ -3188,6 +3226,11 @@ fn validate_audit_action(action: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// Whether `outcome` is the one [`lost_outcome`] files.
+pub(super) fn is_lost(outcome: Option<&serde_json::Value>) -> bool {
+    outcome.is_some_and(|outcome| outcome["state"] == "lost")
+}
+
 /// The outcome filed for a brief whose last allowed attempt was lost with its Station.
 pub(super) fn lost_outcome(lease: &Lease, by: &str) -> serde_json::Value {
     serde_json::json!({
@@ -3939,6 +3982,7 @@ mod tests {
         a_cancel_is_kept_from_its_first_request_until_the_brief_finishes,
         a_filed_brief_is_read_in_any_state,
         expired_leases_requeue_or_fail_at_the_attempt_limit,
+        a_brief_filed_lost_is_refiled_only_as_lost,
         an_expired_lease_is_handed_over_once_with_its_claim_and_attempt,
         leased_claim_is_exclusive_and_registry_keys_are_checked,
         cable_store_is_idempotent_and_rejects_conflicting_retries,
@@ -4575,6 +4619,48 @@ mod tests {
         assert_eq!(
             registry
                 .finish(&brief, &serde_json::json!("done"), true, None, None)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    fn a_brief_filed_lost_is_refiled_only_as_lost(store: &dyn Store) {
+        let registry = store.handle();
+        registry
+            .ingest_source_item("G", "github", &source_item("o/r#lost"), "station-a")
+            .unwrap();
+        let lease = registry
+            .claim_with_lease(None, "operation-01", DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .unwrap();
+        let key = lease.key().to_owned();
+        let done = serde_json::json!({"state": "done"});
+        assert!(
+            !registry.refile_lost(&key, &done, true).unwrap(),
+            "a claimed brief is not filed lost"
+        );
+        let lapsed = lapse(registry.as_ref(), &key, "operation-01");
+        assert_eq!(
+            registry.recover(&lapsed, 1, "operation-02").unwrap(),
+            Some(LeaseRecovery::Failed)
+        );
+        let filed = registry.filed_brief(&key).unwrap().unwrap();
+        assert_eq!(filed.state, "failed");
+
+        assert!(registry.refile_lost(&key, &done, true).unwrap());
+        let filed = registry.filed_brief(&key).unwrap().unwrap();
+        assert_eq!(
+            (filed.state.as_str(), filed.outcome),
+            ("done", Some(done.clone()))
+        );
+        assert!(
+            !registry.refile_lost(&key, &done, false).unwrap(),
+            "a brief that was settled stays settled"
+        );
+        assert_eq!(
+            registry
+                .refile_lost(&key, &serde_json::json!("done"), true)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::InvalidInput

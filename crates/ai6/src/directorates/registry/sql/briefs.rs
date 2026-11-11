@@ -17,7 +17,7 @@ use crate::directorates::registry::sources::{
 };
 use crate::directorates::registry::store::{
     Brief, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, Reentry, current_handle,
-    invalid_data, lost_outcome, newest_first, unix_time, validate_registry_key,
+    invalid_data, is_lost, lost_outcome, newest_first, unix_time, validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
     Clearance, HeldBrief, VettingStore, already_decided, check_actor, check_limit, is_withdrawn,
@@ -858,6 +858,39 @@ impl BriefStore for SqlRegistry {
             )?
             .map(|row| filed_row(&row))
             .transpose()
+        })
+    }
+
+    fn refile_lost(&self, key: &str, outcome: &serde_json::Value, ok: bool) -> io::Result<bool> {
+        validate_registry_key(key)?;
+        if !outcome.is_object() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Registry outcomes must be JSON objects",
+            ));
+        }
+        self.write(|tx, revision| {
+            let Some(row) = tx.query_opt(
+                "SELECT brief, provenance, state, attempts, outcome FROM ai6_briefs WHERE key = $1",
+                &[key.into()],
+            )?
+            else {
+                return Ok(false);
+            };
+            let filed = filed_row(&row)?;
+            if filed.state != "failed" || !is_lost(filed.outcome.as_ref()) {
+                return Ok(false);
+            }
+            tx.execute(
+                "UPDATE ai6_briefs SET state = $2, outcome = $3, revision = $4 WHERE key = $1",
+                &[
+                    key.into(),
+                    (if ok { "done" } else { "failed" }).into(),
+                    to_json(outcome)?.into(),
+                    revision.into(),
+                ],
+            )?;
+            Ok(true)
         })
     }
 
