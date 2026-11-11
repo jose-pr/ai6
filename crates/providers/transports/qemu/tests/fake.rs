@@ -54,7 +54,7 @@ impl FakeAgent {
 
     fn settings(&self) -> String {
         format!(
-            "address = \"127.0.0.1:{}\"\nreply_timeout_secs = 10\n",
+            "address = \"127.0.0.1:{}\"\nreply_timeout_secs = 60\n",
             self.port
         )
     }
@@ -72,7 +72,7 @@ impl FakeAgent {
     }
 }
 
-fn serve(stream: TcpStream, guest: &Guest) {
+fn serve(stream: TcpStream, guest: &Arc<Guest>) {
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
     loop {
@@ -119,7 +119,7 @@ fn serve(stream: TcpStream, guest: &Guest) {
                     json!({"return": {"exited": false}})
                 } else {
                     let status = guest.finished.lock().unwrap().get(&pid).cloned();
-                    json!({"return": status.expect("a known pid")})
+                    json!({"return": status.unwrap_or_else(|| json!({"exited": false}))})
                 }
             }
             other => json!({"error": {"class": "CommandNotFound", "desc": format!("no {other}")}}),
@@ -128,8 +128,8 @@ fn serve(stream: TcpStream, guest: &Guest) {
     }
 }
 
-/// Runs the command to completion and files its status under a new pid.
-fn exec(guest: &Guest, arguments: &Value) -> Result<u64, String> {
+/// Starts the command and files its status under a new pid once it has exited.
+fn exec(guest: &Arc<Guest>, arguments: &Value) -> Result<u64, String> {
     let path = arguments["path"].as_str().unwrap();
     let args: Vec<&str> = arguments["arg"]
         .as_array()
@@ -164,17 +164,22 @@ fn exec(guest: &Guest, arguments: &Value) -> Result<u64, String> {
     std::thread::spawn(move || {
         let _ = stdin.write_all(&input);
     });
-    let output = child.wait_with_output().unwrap();
+    // The real agent answers with the pid at once and the command runs on; a command that
+    // outlasts the reply timeout under load must not look like a dead connection.
     let pid = guest.next_pid.fetch_add(1, Ordering::Relaxed);
-    guest.finished.lock().unwrap().insert(
-        pid,
-        json!({
-            "exited": true,
-            "exitcode": output.status.code(),
-            "out-data": BASE64.encode(&output.stdout),
-            "err-data": BASE64.encode(&output.stderr),
-        }),
-    );
+    let finished = guest.clone();
+    std::thread::spawn(move || {
+        let output = child.wait_with_output().unwrap();
+        finished.finished.lock().unwrap().insert(
+            pid,
+            json!({
+                "exited": true,
+                "exitcode": output.status.code(),
+                "out-data": BASE64.encode(&output.stdout),
+                "err-data": BASE64.encode(&output.stderr),
+            }),
+        );
+    });
     Ok(pid)
 }
 
