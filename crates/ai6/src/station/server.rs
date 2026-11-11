@@ -14488,6 +14488,11 @@ queue = 1
     pub(super) const DRIP_TICKS: u32 = 60;
     pub(super) const DRIP_INTERVAL: Duration = Duration::from_millis(50);
 
+    /// The highest tick a drip harness may say, by the `AI6_DRIP_HOLD` value it was started with;
+    /// one started without it says them all. A test raises it as it needs the harness to have got
+    /// further, so how far it has got never depends on how fast the machine runs.
+    pub(super) static DRIP_HOLDS: Mutex<BTreeMap<String, u32>> = Mutex::new(BTreeMap::new());
+
     /// A harness that says `tick N` for N in 1 through [`DRIP_TICKS`] at a steady pace and
     /// then completes, whoever is listening.
     #[derive(Default, Provider)]
@@ -14500,6 +14505,7 @@ queue = 1
             request: AgentStart,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let hold = request.environment.get("AI6_DRIP_HOLD").cloned();
             RECORDED_STARTS.lock().unwrap().push(request);
             // Each start is a new provider Session, so a later attempt can be told apart.
             static STARTS: AtomicUsize = AtomicUsize::new(0);
@@ -14507,6 +14513,7 @@ queue = 1
             Ok(DripSession::new(
                 SessionId::try_new(format!("provider-session-drip-{start}"))
                     .map_err(|error| test_provider_error(&error.to_string()))?,
+                hold,
             )
             .into_object())
         }
@@ -14516,19 +14523,21 @@ queue = 1
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(DripSession::new(request.session_id).into_object())
+            Ok(DripSession::new(request.session_id, None).into_object())
         }
     }
 
     struct DripSession {
         session_id: SessionId,
         next: Mutex<(u32, std::time::Instant)>,
+        hold: Option<String>,
     }
 
     impl DripSession {
-        fn new(session_id: SessionId) -> Self {
+        fn new(session_id: SessionId, hold: Option<String>) -> Self {
             Self {
                 session_id,
+                hold,
                 next: Mutex::new((1, std::time::Instant::now() + DRIP_INTERVAL)),
             }
         }
@@ -14549,6 +14558,19 @@ queue = 1
             if tick > DRIP_TICKS + 1 {
                 drop(next);
                 std::thread::sleep(Duration::from_millis(10));
+                return Ok(None);
+            }
+            let held = self.hold.as_ref().is_some_and(|hold| {
+                tick > DRIP_HOLDS
+                    .lock()
+                    .unwrap()
+                    .get(hold)
+                    .copied()
+                    .unwrap_or(u32::MAX)
+            });
+            if held {
+                drop(next);
+                std::thread::sleep(Duration::from_millis((timeout_ms as u64).min(10)));
                 return Ok(None);
             }
             let wait = due.saturating_duration_since(std::time::Instant::now());
@@ -14653,6 +14675,10 @@ queue = 1
         let root = tempfile::tempdir().unwrap();
         let runner_dir = root.path().join("runner");
         let _runner = start_test_runner(&runner_dir).await;
+        // The harness is held a few ticks past what A needs, then only as far as the test says,
+        // so neither A nor the runner can finish the Session before the test is ready for it.
+        let hold = root.path().to_string_lossy().into_owned();
+        DRIP_HOLDS.lock().unwrap().insert(hold.clone(), 8);
 
         // Station A starts the Mission; the harness runs on the runner, not in A.
         let first = runner_station(root.path(), &runner_dir);
@@ -14662,7 +14688,7 @@ queue = 1
             Json(StartMission {
                 working_directory: None,
                 initial_context: Vec::new(),
-                environment: BTreeMap::new(),
+                environment: BTreeMap::from([("AI6_DRIP_HOLD".to_owned(), hold.clone())]),
             }),
         )
         .await
@@ -14719,6 +14745,7 @@ queue = 1
         );
         let link = RunnerLink::local(runner_dir.clone(), PathBuf::from("unused"));
         let at_crash = link.status(&key).unwrap().unwrap().last;
+        DRIP_HOLDS.lock().unwrap().insert(hold.clone(), 8 + 20);
         // Polled, not slept: a loaded runner drips far slower than DRIP_INTERVAL.
         let unattended = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
@@ -14763,8 +14790,9 @@ queue = 1
                 ),
             "the restarted Station re-attached to the same runner Session"
         );
+        DRIP_HOLDS.lock().unwrap().remove(&hold);
         let mut replayed = Vec::new();
-        tokio::time::timeout(Duration::from_secs(20), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while !ticks(&replayed).1 {
                 if let Some(event) = pop_event(&second, "mission-1") {
                     replayed.push(event);
@@ -14790,9 +14818,26 @@ queue = 1
             (after[0]..=DRIP_TICKS).collect::<Vec<_>>(),
             "no tick is lost or reordered"
         );
-        let report = link.status(&key).unwrap().unwrap();
+        // The acknowledgement is a notification the runner takes after the Station has its
+        // events, so it lands after the Mission is done: waited for, not assumed.
+        let report = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let report = link.status(&key).unwrap().unwrap();
+                if report.ended && report.cursor == report.last {
+                    return report;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("everything was acknowledged");
         assert!(report.ended);
-        assert_eq!(report.cursor, report.last, "everything was acknowledged");
+        // The Station's pumps stop before the directory under the runner goes.
+        second.stopping.store(true, Ordering::Release);
+        let event_pumps = std::mem::take(&mut *second.event_pumps.lock().unwrap());
+        for event_pump in event_pumps {
+            event_pump.await.unwrap();
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
