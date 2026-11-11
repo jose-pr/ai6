@@ -166,6 +166,11 @@ async fn require(
     family: &Family,
     action: &'static str,
 ) -> Result<(), ApiError> {
+    // What code every Station loads is decided by the `plugin` family, so changing it takes
+    // `plugin.manage` as well, whichever route it comes through.
+    if family.record == ConfigRecord::Plugin && action == family.manage {
+        crate::libraries::require_manage(gateway, person, "a write to the plugin family").await?;
+    }
     if resource_action_allowed(gateway, person.clone(), family.resource.clone(), action).await? {
         Ok(())
     } else {
@@ -1044,6 +1049,15 @@ pub(crate) async fn resources(
         for action in [family.read, family.manage] {
             if resource_action_allowed(&gateway, person.clone(), family.resource.clone(), action)
                 .await?
+                && (record != ConfigRecord::Plugin
+                    || action != family.manage
+                    || resource_action_allowed(
+                        &gateway,
+                        person.clone(),
+                        crate::libraries::RESOURCE.to_owned(),
+                        "plugin.manage",
+                    )
+                    .await?)
             {
                 allowed.push(action);
             }

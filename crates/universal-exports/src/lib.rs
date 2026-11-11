@@ -4220,6 +4220,19 @@ async fn user_profile(
                         })
                         .map_err(|_| ApiError::internal())?
                         .allowed;
+                    // Changing the plugin family also takes plugin.manage.
+                    let allowed = allowed
+                        && (record != ai6::ConfigRecord::Plugin
+                            || action != "config.manage"
+                            || authorizer
+                                .authorize(AuthorizationRequest {
+                                    person: authorization_person.clone(),
+                                    action: "plugin.manage".to_owned(),
+                                    resource: libraries::RESOURCE.to_owned(),
+                                    ancestors: Vec::new(),
+                                })
+                                .map_err(|_| ApiError::internal())?
+                                .allowed);
                     if allowed {
                         config
                             .entry(kind.to_owned())

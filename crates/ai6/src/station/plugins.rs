@@ -949,15 +949,10 @@ fn check_candidate(
     summary: &mut PluginScanSummary,
 ) -> Option<PathBuf> {
     let shown = candidate.display().to_string();
-    let mut declared = Declared::default();
     let not_ai6 = match probe(candidate) {
         Err(_) => Some("not a library this build can examine".to_owned()),
         Ok(probed) if !probed.entry => Some("no Guatiao entry symbol".to_owned()),
-        Ok(probed) => {
-            let verdict = declares_ai6_kind(&probed.declared).err();
-            declared = probed.declared;
-            verdict
-        }
+        Ok(probed) => declares_ai6_kind(&probed.declared).err(),
     };
     if let Some(reason) = not_ai6 {
         // Under strict, nothing unchecked reaches the loader, even a file that looked inert:
@@ -1031,13 +1026,13 @@ fn check_candidate(
             summary.refused.push(format!(
                 "{shown}: {file} is not pinned ({digest}); `ai6 plugins pin` prints its entry"
             ));
-            let seen = Seen::new(&file, &digest, &declared, &sha256, signature.as_deref());
+            let seen = Seen::new(&file, &digest, &bytes, &sha256, signature.as_deref());
             summary.found_library(&seen, "unpinned", policy);
             None
         }
         (PluginProfile::Strict, PinCheck::Refused(why)) => {
             summary.refused.push(format!("{shown}: {why}"));
-            let seen = Seen::new(&file, &digest, &declared, &sha256, signature.as_deref());
+            let seen = Seen::new(&file, &digest, &bytes, &sha256, signature.as_deref());
             summary.found_library(&seen, &format!("refused: {why}"), policy);
             None
         }
@@ -1059,11 +1054,27 @@ fn check_candidate(
     }
 }
 
+/// What `bytes` declare, probed from a private copy that is removed again.
+fn declared_in(bytes: &[u8]) -> Result<Declared, String> {
+    use std::io::Write;
+    let mut copy = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+    copy.write_all(bytes).map_err(|error| error.to_string())?;
+    copy.as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    let probed = probe(copy.path()).map_err(|error| error.to_string())?;
+    if !probed.entry {
+        return Err("no Guatiao entry symbol".to_owned());
+    }
+    declares_ai6_kind(&probed.declared)?;
+    Ok(probed.declared)
+}
+
 /// What a scan read of one library, for [`PluginScanSummary::found_library`].
 struct Seen<'a> {
     file: &'a str,
     digest: String,
-    declared: &'a Declared,
+    bytes: &'a [u8],
     sha256: &'a [u8; 32],
     signature: Option<&'a [u8]>,
 }
@@ -1072,14 +1083,14 @@ impl<'a> Seen<'a> {
     fn new(
         file: &'a str,
         digest: &PeerId,
-        declared: &'a Declared,
+        bytes: &'a [u8],
         sha256: &'a [u8; 32],
         signature: Option<&'a [u8]>,
     ) -> Self {
         Self {
             file,
             digest: digest.to_string(),
-            declared,
+            bytes,
             sha256,
             signature,
         }
@@ -1097,12 +1108,23 @@ impl PluginScanSummary {
         {
             return;
         }
+        // What it declares is read from the very bytes that were hashed, not from the file again:
+        // the file could have been replaced since.
+        let declared = match declared_in(seen.bytes) {
+            Ok(declared) => declared,
+            Err(reason) => {
+                self.failed.push(format!(
+                    "{}: its declarations were not read: {reason}",
+                    seen.file
+                ));
+                return;
+            }
+        };
         self.found.push(FoundLibrary {
             file: seen.file.to_owned(),
             digest: seen.digest.clone(),
-            kinds: seen.declared.kinds().map(str::to_owned).collect(),
-            declared: seen
-                .declared
+            kinds: declared.kinds().map(str::to_owned).collect(),
+            declared: declared
                 .iter()
                 .filter(|(key, _)| *key != "kind")
                 .map(|(key, value)| format!("{key}={value}"))

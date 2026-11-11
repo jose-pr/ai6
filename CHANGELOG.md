@@ -38,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   /v1/user/stations/{id}/libraries/approve` writes that Station's own `plugin` record, a pin of the
   reported bytes or a trust of the publisher that signed them, held until sent with `confirm` and
   audited `plugin.approve`. The new action `plugin.manage` on `config:plugin` is in no built-in role
-  but `chief`. The gateway takes no library bytes.
+  but `chief`, and every other write to the `plugin` family through the gateway needs it too. A
+  publisher trust is offered only for a key a `plugin` record names, and a confirmation has to carry
+  the key and the record revision its preview returned. The gateway takes no library bytes.
 - Outer Office edits Theaters, loadouts, sandbox profiles, MCP servers, overlays, secrets, secret
   providers and account pools in the schema-drawn record form, on the Roster page, under
   `config.read` and `config.manage` on each family.

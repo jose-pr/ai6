@@ -433,16 +433,25 @@ did not load in its check-in (`found_libraries`: file name, digest, the kinds it
 verifies for), read as data without running it. A library declares its kinds, not its provider IDs,
 so the IDs are known only once it loads. At most `[scheduler] found_libraries` (64) are listed.
 
-`GET /v1/user/stations/{id}/libraries` answers them (`station.read`). A person who holds
+`GET /v1/user/stations/{id}/libraries` answers them (`station.read`). The list is the Station's own
+claim: the gateway shows only well-formed entries (a file name and not a path, a `sha256:` digest
+of 64 lowercase hex digits, no control or invisible characters) from a Station it heard from within
+`[registry] gone_dark_after`. A person who holds
 `plugin.manage` on `config:plugin` approves one on the Roster page, in the Provider library records:
 Outer Office shows the file name, digest, kinds and publisher, and what the gateway says will
 change, before anything is stored. `POST /v1/user/stations/{id}/libraries/approve` takes the file
 and digest the Station reported, `"trust": "pin"` or `"publisher"` and `confirm`; without `confirm`
-it stores nothing and answers `applied: false` with `changes` and `weakened`.
+it stores nothing and answers `applied: false` with `changes`, `weakened`, the
+`record_revision` it read and, for a publisher trust, the `publisher`; `confirm` has to carry both
+back, a record changed since is a 409, and another key is refused.
 
 - A pin stores `{pin = digest}` as that Station's own `plugin` record for the file, keeping a
-  publisher the record already named; the answer says which pin it replaces. A publisher trust
-  stores `{publisher = key}` and is offered only when the Station recognised the signer; it admits
+  publisher the record already named; the answer says which pin it replaces. Only what is approved
+  is written: when the Station has no record of its own for the file, a global one is not copied,
+  and the preview says that the new record replaces it on that Station. A publisher trust
+  stores `{publisher = key}` and is offered only when the Station recognised the signer and the
+  gateway finds the key named by a `plugin` record (global or the Station's own); the preview says
+  which files it is already trusted for. It admits
   anything that key signs for that file name, and the answer lists that as a weakening, as for any
   publisher entry. A record requiring both a pin and a publisher is approved by pin.
 - The record is the Station's own, never the global one, so approving a library on one Station
@@ -451,7 +460,8 @@ it stores nothing and answers `applied: false` with `changes` and `weakened`.
   the file reaches the host by deployment.
 - The Station reads `plugin` records at its next start. `plugin.manage` is in no built-in role but
   `chief`; the write is audited `plugin.approve` on `config:plugin` with the person, the Station,
-  the file and the digest (a refusal is `plugin.refused`).
+  the file and the digest (a refusal, including one for lacking the action, is `plugin.refused`).
+  Every other write to the `plugin` family through the gateway needs `plugin.manage` too.
 - A rebuild signed by a key a record already names for that file needs no approval.
 
 ### What a publisher entry gives up

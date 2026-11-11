@@ -1717,7 +1717,9 @@ person's token.
 ## Who can write the provider
 
 Whoever writes the provider decides which provider libraries every Station loads (`plugin`;
-each host still applies its own `[station.plugins] profile`), its TLS policy (`tls`), the programs a
+each host still applies its own `[station.plugins] profile`; changing it through the gateway takes
+`plugin.manage` on `config:plugin` as well as `config.manage`, by the record routes and by `apply`,
+global or a Station's own), its TLS policy (`tls`), the programs a
 Station starts on its own host (a `theater` runner), the files a Station reads secrets from
 (`secret`), and who signs in to Universal Exports and what they may do (`unex`, `access`).
 Treat the provider's write credentials as sensitive as the strongest role they grant. Every
