@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import 'attention_fake.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -128,6 +131,47 @@ class Gateway {
       return heldStatus == 200 ? ok(held) : http.Response('', heldStatus);
     }
     if (path == '$actions/green-ink') return ok(greenInk);
+    if (path == '/v1/user/attention') {
+      return ok(
+        attentionBody(
+          items: [
+            for (final brief
+                in heldStatus == 200 ? held : const <Map<String, Object?>>[])
+              attentionEntry(
+                id: 'held_brief:operation-alpha:${brief['key']}',
+                kind: 'held_brief',
+                title:
+                    'Brief "${(brief['brief'] as Map)['title']}" is held for review in Operation operation-alpha',
+                route: {
+                  'page': 'briefings',
+                  'tab': 'held',
+                  'operation_id': 'operation-alpha',
+                  'item_id': brief['key'],
+                },
+              ),
+            for (final request in greenInk)
+              attentionEntry(
+                id: 'green_ink:operation-alpha:${request['id']}',
+                kind: 'green_ink',
+                title:
+                    'Agent ${request['agent']} waits for green ink to push origin:refs/heads/main in Operation operation-alpha',
+                route: {
+                  'page': 'green_ink',
+                  'operation_id': 'operation-alpha',
+                  'request_id': request['id'],
+                },
+              ),
+          ],
+          coverage: [
+            attentionRead('held_briefs', 'Held briefs', switch (heldStatus) {
+              200 => 'checked',
+              403 => 'not_permitted',
+              _ => 'unavailable',
+            }),
+          ],
+        ),
+      );
+    }
     if (path == '$actions/mission-proposals') return ok(<Object>[]);
     if (path.endsWith('/missions/mission-007/actions') &&
         request.method == 'POST') {
@@ -264,6 +308,23 @@ void main() {
     expect(board.heldBriefs, isEmpty);
     expect(board.freshness(BoardSource.heldBriefs), OoFreshness.noAccess);
     expect(find.textContaining('Fix the login page'), findsNothing);
+    // Not the person's to see is said, and is not a gap.
+    expect(find.text('Nothing needs your attention.'), findsOneWidget);
+    expect(
+      find.textContaining('Not visible to you, so not included: Held briefs.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('held briefs that could not be read are named and never called '
+      'clear', (tester) async {
+    final gateway = Gateway()..greenInk = [];
+    final board = await signedIn(gateway);
+    await openAt(tester, board, '/');
+    gateway
+      ..heldStatus = 500
+      ..held = [];
+    await refresh(tester, board);
     expect(find.textContaining('Nothing needs your attention'), findsNothing);
     expect(
       find.text(

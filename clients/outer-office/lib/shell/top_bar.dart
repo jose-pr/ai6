@@ -12,12 +12,14 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
+import 'attention_summary.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
 
 /// One thing that needs the person: a blocked Session, a green ink request or Mission
-/// proposal waiting for a decision, a held brief or a dark Station, when it began, and the
-/// route of the page that deals with it.
+/// proposal waiting for a decision, a held brief, a dark Station or a Station's refused
+/// configuration, as the gateway's attention summary lists it, with whether it still holds,
+/// what was checked and when.
 @immutable
 class OoAttention {
   const OoAttention({
@@ -25,6 +27,10 @@ class OoAttention {
     required this.color,
     required this.text,
     required this.route,
+    required this.condition,
+    required this.scope,
+    required this.checkedAt,
+    this.detail,
     this.at,
   });
 
@@ -33,18 +39,24 @@ class OoAttention {
   final String text;
   final OoRoute route;
 
+  /// Whether it holds now, has passed, or could not be confirmed either way.
+  final AttentionCondition condition;
+
+  /// What was checked: `operation:G` or `station:NAME`.
+  final String scope;
+
+  /// When the gateway read its source, as Unix seconds.
+  final double checkedAt;
+
+  /// Why it is what it is, when there is more to say.
+  final String? detail;
+
   /// When it began, as Unix seconds, when the data says.
   final double? at;
 }
 
-/// The sources the attention list is read from; it says "nothing" only when all are live.
-const attentionSources = [
-  BoardSource.board,
-  BoardSource.stations,
-  BoardSource.heldBriefs,
-  BoardSource.greenInk,
-  BoardSource.proposals,
-];
+/// The sources the attention list is read from; it says "nothing" only when it is live.
+const attentionSources = [BoardSource.attention];
 
 /// [page] with [fields]; the page alone when a value is not one a route takes (an ID from
 /// outside AI6 may not be an identifier).
@@ -60,112 +72,59 @@ OoRoute _route(OoPage page, [Map<String, String> fields = const {}]) {
   }
 }
 
-/// What needs the person's attention, derived from what the board has loaded and never
-/// stored: Sessions blocked, green ink requests and Mission proposals waiting for a decision,
-/// held briefs, and dark Stations. Each opens its own page; opening one changes nothing.
+/// How an item's condition is said when it is not simply current, or null when it is.
+String? attentionStatus(OoAttention item) => switch (item.condition) {
+  AttentionCondition.current => null,
+  AttentionCondition.historical => 'Historical, no longer current',
+  AttentionCondition.unverified => 'Could not confirm it still holds',
+};
+
+OoIconName _iconOf(String kind) => switch (kind) {
+  'green_ink' => OoIconName.greenInk,
+  'held_brief' || 'mission_proposal' => OoIconName.briefings,
+  'blocked_session' => OoIconName.interrupt,
+  _ => OoIconName.stations,
+};
+
+/// What needs the person's attention: the gateway's summary, the same one Moneypenny reads, so
+/// the page and her answer agree. Each item opens its own page; opening one changes nothing.
+/// Items that have passed come last and are muted.
 List<OoAttention> attentionItems(MissionBoard board, OoTokens tokens) {
-  // A Session held for green ink is the request waiting for it, not a second item.
-  final asked = {
-    for (final request in board.greenInkRequests)
-      (request.operationId, request.sessionId),
-  };
+  final summary = board.attention;
+  if (summary == null) return const [];
   return [
-    for (final session in board.sessions.where(
-      (session) =>
-          session.state == 'blocked' &&
-          !(session.reason == 'green-ink' &&
-              asked.contains((session.operationId, session.sessionId))),
-    ))
-      session.reason == 'green-ink'
-          ? OoAttention(
-              icon: OoIconName.greenInk,
-              color: tokens.warning,
-              text:
-                  'Session ${session.sessionId} of Mission '
-                  '${board.handleOf(session.operationId, session.missionId)} waits for '
-                  'green ink',
-              route: _route(OoPage.greenInk, {
-                'operation_id': session.operationId,
-              }),
-              at: session.updatedAt,
-            )
-          : OoAttention(
-              icon: OoIconName.interrupt,
-              color: tokens.warning,
-              text:
-                  'Session ${session.sessionId} of Mission '
-                  '${board.handleOf(session.operationId, session.missionId)} is blocked'
-                  '${session.reason == null ? '' : ': ${reasonWords(session.reason!)}'}',
-              route: _route(OoPage.missions, {
-                'operation_id': session.operationId,
-                'mission_id': session.missionId,
-              }),
-              at: session.updatedAt,
-            ),
-    for (final request in board.greenInkRequests)
+    for (final entry in summary.items)
       OoAttention(
-        icon: OoIconName.greenInk,
-        color: tokens.warning,
-        text:
-            // The Agent's own text: show what renders as nothing.
-            'Agent ${revealInvisible(request.agent)} waits for green ink to '
-            '${revealInvisible(request.kind)} ${revealInvisible(request.target)} '
-            'in Operation ${request.operationId}',
-        route: _route(OoPage.greenInk, {
-          'operation_id': request.operationId,
-          'request_id': request.id,
-        }),
-        at: request.requestedAt,
-      ),
-    for (final brief in board.heldBriefs)
-      OoAttention(
-        icon: OoIconName.briefings,
-        color: tokens.warning,
-        text:
-            // A brief from a Source is untrusted text: show what renders as nothing.
-            'Brief "${revealInvisible(brief.title)}" is held for review in Operation '
-            '${brief.operationId}',
-        route: _route(OoPage.briefings, {
-          'tab': 'held',
-          'operation_id': brief.operationId,
-          'item_id': brief.key,
-        }),
-        at: brief.heldAt,
-      ),
-    for (final proposal in board.missionProposals)
-      OoAttention(
-        icon: OoIconName.briefings,
-        color: tokens.warning,
-        text:
-            'Mission proposal "${revealInvisible(proposal.title)}" waits for a '
-            'decision in Operation ${proposal.operationId}',
-        route: _route(OoPage.briefings, {
-          'tab': 'proposals',
-          'operation_id': proposal.operationId,
-          'item_id': proposal.id,
-        }),
-        at: proposal.createdAt.toDouble(),
-      ),
-    for (final station in board.stationBoard.stations.where(
-      (station) => !station.healthy,
-    ))
-      OoAttention(
-        icon: OoIconName.stations,
-        color: tokens.danger,
-        text: 'Station ${station.stationId} has gone dark',
-        route: _route(OoPage.stations, {'station_id': station.stationId}),
-        at: station.seen > 0 ? station.seen : null,
+        icon: _iconOf(entry.kind),
+        color: switch (entry.condition) {
+          AttentionCondition.historical => tokens.muted,
+          _ when entry.kind == 'station_dark' => tokens.danger,
+          _ => tokens.warning,
+        },
+        // Parts of a title are an Agent's or a Source's own words: show what renders as nothing.
+        text: revealInvisible(entry.title),
+        route: entry.route ?? const OoRoute(OoPage.overview),
+        condition: entry.condition,
+        scope: entry.scope,
+        checkedAt: entry.checkedAt,
+        detail: entry.detail == null ? null : revealInvisible(entry.detail!),
+        at: entry.since,
       ),
   ];
 }
 
-/// The attention sources that are not live, named, when there are any: the list may then
-/// be missing things, so it never says nothing needs the person.
+/// What could not be read, named, when the summary is missing a source or is not live: the
+/// list may then be missing things, so it never says nothing needs the person.
 String? attentionGaps(MissionBoard board) {
-  final gaps = board.gaps(attentionSources);
-  return gaps.isEmpty
-      ? null
-      : 'Could not be read: ${gaps.map((source) => source.label).join(', ')}.';
+  final summary = board.attention;
+  final stale = board.gaps(attentionSources);
+  if (summary == null) return 'Could not be read: Attention.';
+  if (stale.isNotEmpty) {
+    return 'Showing an earlier read: the latest attention check failed. '
+            '${summary.gaps ?? ''}'
+        .trim();
+  }
+  return summary.gaps;
 }
 
 /// The bell, "Needs attention": a count of [attentionItems] and a menu listing them, each
@@ -189,10 +148,13 @@ class AttentionBell extends StatelessWidget {
     final items = attentionItems(board, tokens);
     final gaps = attentionGaps(board);
     final requests = board.openRequests;
+    final open = items
+        .where((item) => item.condition != AttentionCondition.historical)
+        .length;
     return MenuAnchor(
       alignmentOffset: const Offset(-260, 4),
       menuChildren: [
-        if (items.isEmpty)
+        if (open == 0)
           MenuItemButton(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 320),
@@ -202,40 +164,37 @@ class AttentionBell extends StatelessWidget {
                     : 'Nothing found in what loaded. $gaps',
               ),
             ),
-          )
-        else ...[
-          for (final item in items)
-            MenuItemButton(
-              leadingIcon: IconTheme.merge(
-                data: IconThemeData(color: item.color, size: 20),
-                child: OoIcon(item.icon),
-              ),
-              onPressed: pages.contains(item.route.page)
-                  ? () => onOpen(item.route)
-                  : null,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 320),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.text,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    OoTime(item.at),
-                  ],
-                ),
+          ),
+        for (final item in items)
+          MenuItemButton(
+            leadingIcon: IconTheme.merge(
+              data: IconThemeData(color: item.color, size: 20),
+              child: OoIcon(item.icon),
+            ),
+            onPressed: pages.contains(item.route.page)
+                ? () => onOpen(item.route)
+                : null,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.text, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  if (attentionStatus(item) case final status?)
+                    Text(status, style: TextStyle(color: tokens.muted)),
+                  OoTime(item.at),
+                ],
               ),
             ),
-          if (gaps != null)
-            MenuItemButton(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 320),
-                child: Text(gaps),
-              ),
+          ),
+        if (open != 0 && gaps != null)
+          MenuItemButton(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(gaps),
             ),
-        ],
+          ),
+
         if (requests.isNotEmpty) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -266,14 +225,12 @@ class AttentionBell extends StatelessWidget {
         ],
       ],
       builder: (context, controller, _) => IconButton(
-        tooltip: items.isEmpty
-            ? 'Needs attention'
-            : 'Needs attention: ${items.length}',
+        tooltip: open == 0 ? 'Needs attention' : 'Needs attention: $open',
         onPressed: () =>
             controller.isOpen ? controller.close() : controller.open(),
         icon: Badge(
-          isLabelVisible: items.isNotEmpty,
-          label: Text('${items.length}'),
+          isLabelVisible: open != 0,
+          label: Text('$open'),
           child: const OoIcon(OoIconName.notifications),
         ),
       ),

@@ -128,8 +128,11 @@ void main() {
       find.text('Station station-remote-02 has gone dark'),
       findsOneWidget,
     );
-    await tester.ensureVisible(find.text('Open Stations'));
-    await tester.tap(find.text('Open Stations'));
+    // The past refusal is listed too, muted and labelled, with its own Station link.
+    expect(find.text('Historical, no longer current'), findsOneWidget);
+    expect(find.text('PAST CONDITIONS'), findsOneWidget);
+    await tester.ensureVisible(find.text('Open Stations').first);
+    await tester.tap(find.text('Open Stations').first);
     await tester.pumpAndSettle();
     expect(find.text('station-remote-02'), findsOneWidget);
   });

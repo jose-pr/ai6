@@ -1,3 +1,5 @@
+import 'attention_fake.dart';
+
 import 'dart:convert';
 import 'dart:ui' show Size;
 
@@ -476,6 +478,9 @@ void main() {
           if (request.url.path == '/v1/stations') {
             return http.Response(stationBoardResponse(), 200);
           }
+          if (request.url.path == '/v1/user/attention') {
+            return http.Response(jsonEncode(attentionBody()), 200);
+          }
           if (request.url.path == '/v1/user/profile') {
             return http.Response(userProfileResponse(), 200);
           }
@@ -499,6 +504,7 @@ void main() {
         '/v1/missions',
         '/v1/stations',
         '/v1/user/profile',
+        '/v1/user/attention',
         '/v1/user/operations/operation-alpha/held-briefs',
         '/v1/user/operations/operation-alpha/mission-proposals',
       ]);
@@ -566,6 +572,9 @@ void main() {
           if (request.url.path == '/v1/stations') {
             return http.Response(stationBoardResponse(), 200);
           }
+          if (request.url.path == '/v1/user/attention') {
+            return http.Response(jsonEncode(attentionBody()), 200);
+          }
           if (request.url.path == '/v1/user/profile') {
             return http.Response(userProfileResponse(), 200);
           }
@@ -592,6 +601,7 @@ void main() {
         '/v1/missions',
         '/v1/stations',
         '/v1/user/profile',
+        '/v1/user/attention',
         '/v1/user/operations/operation-alpha/held-briefs',
         '/v1/user/operations/operation-alpha/mission-proposals',
       ]);
@@ -1472,6 +1482,30 @@ void main() {
         if (request.url.path == '/v1/stations') {
           return http.Response(stationBoardResponse(), 200);
         }
+        if (request.url.path == '/v1/user/attention') {
+          return http.Response(
+            jsonEncode(
+              attentionBody(
+                items: [
+                  attentionEntry(
+                    id: 'held_brief:operation-alpha:source_github--org_repo_9',
+                    kind: 'held_brief',
+                    title:
+                        'Brief "Fix the​ login page" is held for review in '
+                        'Operation operation-alpha',
+                    route: {
+                      'page': 'briefings',
+                      'tab': 'held',
+                      'operation_id': 'operation-alpha',
+                    },
+                  ),
+                ],
+              ),
+            ),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.url.path == '/v1/user/profile') {
           return http.Response(userProfileResponse(), 200);
         }
@@ -1549,6 +1583,7 @@ void main() {
       '/v1/missions',
       '/v1/stations',
       '/v1/user/profile',
+      '/v1/user/attention',
       '/v1/user/operations/operation-alpha/held-briefs',
       '/v1/user/operations/operation-alpha/mission-proposals',
     ]);

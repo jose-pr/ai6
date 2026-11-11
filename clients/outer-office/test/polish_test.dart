@@ -83,7 +83,7 @@ void main() {
     );
     for (final tooltip in [
       OoSearch.tooltip,
-      'Needs attention: 5',
+      'Needs attention: 4',
       'Your account and settings',
     ]) {
       expect(find.byTooltip(tooltip), findsOneWidget, reason: tooltip);
@@ -134,8 +134,8 @@ void main() {
     tester,
   ) async {
     await demoAt(tester, const Size(1400, 900));
-    final bell = find.byTooltip('Needs attention: 5');
-    expect(find.descendant(of: bell, matching: find.text('5')), findsOneWidget);
+    final bell = find.byTooltip('Needs attention: 4');
+    expect(find.descendant(of: bell, matching: find.text('4')), findsOneWidget);
     await tester.tap(bell);
     await tester.pumpAndSettle();
     final item = find.descendant(

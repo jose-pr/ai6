@@ -52,6 +52,7 @@ import 'settings/oo_settings_section.dart';
 import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
 import 'shell/app_window.dart';
+import 'shell/attention_summary.dart';
 import 'shell/board_reads.dart';
 import 'shell/stay_signed_in.dart';
 import 'shell/oo_shell.dart';
@@ -386,6 +387,7 @@ class MissionBoard extends ChangeNotifier
       heldBriefs = _demoHeldBriefs('G');
       missionProposals = _demoMissionProposals;
       greenInkRequests = _demoGreenInk('G');
+      attention = _demoAttention();
       for (final source in BoardSource.values) {
         _freshness[source] = OoFreshness.live;
         _lastGood[source] = ooClock();
@@ -487,6 +489,10 @@ class MissionBoard extends ChangeNotifier
   /// The green ink requests waiting for a decision, in the Operations where this account may
   /// decide them; read at most every `[refresh] slow`.
   List<GreenInkRequestSummary> greenInkRequests = const [];
+
+  /// What needs the person, as the gateway derived it for this page and for Moneypenny alike;
+  /// null until it has been read.
+  AttentionSummary? attention;
   DateTime? _slowAt;
 
   final _freshness = <BoardSource, OoFreshness>{
@@ -999,6 +1005,105 @@ class MissionBoard extends ChangeNotifier
                 .map((operation) => operation.operationId)
                 .toList(growable: false) ??
             const [];
+
+  /// The attention summary of the preview data, in the gateway's shape.
+  static AttentionSummary _demoAttention() {
+    final now = _demoNow();
+    AttentionEntry entry(
+      String id,
+      String kind,
+      String title,
+      String scope,
+      Map<String, Object> route, {
+      AttentionCondition condition = AttentionCondition.current,
+      String? detail,
+      double? since,
+    }) => AttentionEntry(
+      id: id,
+      kind: kind,
+      condition: condition,
+      title: title,
+      detail: detail,
+      scope: scope,
+      checkedAt: now,
+      since: since,
+      route: OoRoute.fromJson(route),
+    );
+    return AttentionSummary(
+      checkedAt: now,
+      scopeLabel: 'All accessible Operations',
+      headline: '',
+      complete: true,
+      coverage: const [],
+      items: [
+        entry(
+          'station_dark:station-remote-02',
+          'station_dark',
+          'Station station-remote-02 has gone dark',
+          'station:station-remote-02',
+          {'page': 'stations', 'station_id': 'station-remote-02'},
+          since: now - 900,
+        ),
+        entry(
+          'green_ink:G:green-ink-preview',
+          'green_ink',
+          'Agent 007 waits for green ink to push origin:refs/heads/main in '
+              'Operation G',
+          'operation:G',
+          {
+            'page': 'green_ink',
+            'operation_id': 'G',
+            'request_id': 'green-ink-preview',
+          },
+          since: now - 420,
+        ),
+        entry(
+          'held_brief:G:source_github--org_repo_7',
+          'held_brief',
+          'Brief "Resolve github item org/repo#7" is held for review in '
+              'Operation G',
+          'operation:G',
+          {
+            'page': 'briefings',
+            'tab': 'held',
+            'operation_id': 'G',
+            'item_id': 'source_github--org_repo_7',
+          },
+          since: now - 3000,
+        ),
+        entry(
+          'mission_proposal:G:proposal-preview-001',
+          'mission_proposal',
+          'Mission proposal "Review the role catalog" waits for a decision in '
+              'Operation G',
+          'operation:G',
+          {
+            'page': 'briefings',
+            'tab': 'proposals',
+            'operation_id': 'G',
+            'item_id': 'proposal-preview-001',
+          },
+          since: now - 1200,
+        ),
+        entry(
+          'config_refused:station-control-01:78',
+          'config_refused',
+          'Station station-control-01 refused a configuration (revision 78)',
+          'station:station-control-01',
+          {
+            'page': 'stations',
+            'station_id': 'station-control-01',
+            'tab': 'settings',
+          },
+          condition: AttentionCondition.historical,
+          detail:
+              'configuration revision 78: the roster does not parse (the '
+              'Station now runs revision 79 and reports no refusal)',
+          since: now - 7200,
+        ),
+      ],
+    );
+  }
 
   static List<MissionProposalSummary> get _demoMissionProposals => [
     MissionProposalSummary(
@@ -2923,6 +3028,7 @@ class MissionBoard extends ChangeNotifier
       BoardRead.stations,
       BoardRead.profile,
       BoardRead.heldBriefs,
+      BoardRead.attention,
       if (_slowAt == null ||
           slow == null ||
           now.difference(_slowAt!) >= slow) ...{
@@ -2948,6 +3054,7 @@ class MissionBoard extends ChangeNotifier
         core(BoardRead.missions, '/v1/missions'),
         core(BoardRead.stations, '/v1/stations'),
         core(BoardRead.profile, '/v1/user/profile'),
+        core(BoardRead.attention, '/v1/user/attention'),
       ]);
       if (accessToken != token) return;
       if (responses.any((response) => response?.statusCode == 401)) {
@@ -3040,6 +3147,25 @@ class MissionBoard extends ChangeNotifier
           failed = true;
         }
       }
+      if (reads.contains(BoardRead.attention)) {
+        // Not a failure of the board when it is missing: the summary says it is not read.
+        final response = responses[4];
+        if (response?.statusCode == 200) {
+          try {
+            attention = AttentionSummary.fromJson(
+              jsonDecode(response!.body) as Map<String, dynamic>,
+            );
+            _live(BoardSource.attention);
+          } on Object {
+            _failed(BoardSource.attention);
+          }
+        } else {
+          _failed(
+            BoardSource.attention,
+            forbidden: response?.statusCode == 403,
+          );
+        }
+      }
       if (reads.contains(BoardRead.heldBriefs)) {
         heldBriefs = _settle(
           BoardSource.heldBriefs,
@@ -3116,6 +3242,7 @@ class MissionBoard extends ChangeNotifier
     heldBriefs = const [];
     missionProposals = const [];
     greenInkRequests = const [];
+    attention = null;
     _sourcePages.clear();
     controls = const {};
     requests = const {};

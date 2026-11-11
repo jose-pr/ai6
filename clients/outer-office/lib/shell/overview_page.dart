@@ -14,6 +14,7 @@ import '../theme/oo_icon.dart';
 import '../theme/oo_theme.dart';
 import '../timeline/timeline_page.dart';
 import '../routes/oo_route.dart';
+import 'attention_summary.dart';
 import 'missions_board.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
@@ -78,6 +79,14 @@ class OverviewPage extends StatelessWidget {
     final operations = board.userSession?.operations ?? const [];
     final busyOperations = active.map((mission) => mission.operationId).toSet();
     final attention = attentionItems(board, tokens);
+    final open = [
+      for (final item in attention)
+        if (item.condition != AttentionCondition.historical) item,
+    ];
+    final past = [
+      for (final item in attention)
+        if (item.condition == AttentionCondition.historical) item,
+    ];
     final gaps = attentionGaps(board);
     final muted = TextStyle(color: tokens.muted);
 
@@ -197,7 +206,7 @@ class OverviewPage extends StatelessWidget {
         board: board,
         assistant: assistant,
         onAsk: onAsk,
-        waiting: attention.length,
+        waiting: open.length,
         covered: gaps == null,
       ),
       _ => null,
@@ -272,49 +281,60 @@ class OverviewPage extends StatelessWidget {
             upcoming,
           ],
           SizedBox(height: gap),
-          if (attention.isEmpty)
+          if (open.isEmpty)
             OoBackdrop(
               padding: EdgeInsets.zero,
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: gaps == null
-                    ? const Text('Nothing needs your attention.')
-                    : Text('Nothing found in what loaded. $gaps'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      gaps == null
+                          ? 'Nothing needs your attention.'
+                          : 'Nothing found in what loaded. $gaps',
+                    ),
+                    _Checked(board: board),
+                  ],
+                ),
               ),
             )
           else
             OoPanel(
               title: 'NEEDS ATTENTION',
-              trailing: Text('${attention.length}', style: text.titleMedium),
+              trailing: Text('${open.length}', style: text.titleMedium),
               child: Column(
                 children: [
-                  for (final item in attention)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: IconTheme.merge(
-                        data: IconThemeData(color: item.color),
-                        child: OoIcon(item.icon),
-                      ),
-                      title: Text(
-                        item.text,
-                        maxLines: phone ? 3 : 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: OoTime(item.at),
-                      trailing: pages.contains(item.route.page) && !phone
-                          ? TextButton(
-                              onPressed: () => onRoute(item.route),
-                              child: Text('Open ${item.route.page.label}'),
-                            )
-                          : null,
-                      onTap: pages.contains(item.route.page) && phone
-                          ? () => onRoute(item.route)
-                          : null,
+                  for (final item in open)
+                    _AttentionTile(
+                      item: item,
+                      phone: phone,
+                      pages: pages,
+                      onRoute: onRoute,
                     ),
                   if (gaps != null) Text(gaps, style: muted),
+                  _Checked(board: board),
                 ],
               ),
             ),
+          if (past.isNotEmpty) ...[
+            SizedBox(height: gap),
+            OoPanel(
+              title: 'PAST CONDITIONS',
+              trailing: Text('${past.length}', style: text.titleMedium),
+              child: Column(
+                children: [
+                  for (final item in past)
+                    _AttentionTile(
+                      item: item,
+                      phone: phone,
+                      pages: pages,
+                      onRoute: onRoute,
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1082,6 +1102,99 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
                 child: const Text('Try again'),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One attention item: what it is, whether it still holds, what was checked and when, with
+/// the button that opens the page that deals with it.
+class _AttentionTile extends StatelessWidget {
+  const _AttentionTile({
+    required this.item,
+    required this.phone,
+    required this.pages,
+    required this.onRoute,
+  });
+
+  final OoAttention item;
+  final bool phone;
+  final List<OoPage> pages;
+  final ValueChanged<OoRoute> onRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = OoTokens.of(context);
+    final muted = TextStyle(color: tokens.muted);
+    final status = attentionStatus(item);
+    final openable = pages.contains(item.route.page);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: IconTheme.merge(
+        data: IconThemeData(color: item.color),
+        child: OoIcon(item.icon),
+      ),
+      title: Text(
+        item.text,
+        maxLines: phone ? 3 : 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (status != null)
+            Text(
+              status,
+              style: TextStyle(
+                color: tokens.warning,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          if (item.detail case final detail?)
+            Text(detail, maxLines: 3, overflow: TextOverflow.ellipsis),
+          OoTime(item.at),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('Checked ${item.scope} ', style: muted),
+              OoTime(item.checkedAt),
+            ],
+          ),
+        ],
+      ),
+      trailing: openable && !phone
+          ? TextButton(
+              onPressed: () => onRoute(item.route),
+              child: Text('Open ${item.route.page.label}'),
+            )
+          : null,
+      onTap: openable && phone ? () => onRoute(item.route) : null,
+    );
+  }
+}
+
+/// The scope the attention summary covered and when it was made, so a quiet page still says
+/// what it looked at.
+class _Checked extends StatelessWidget {
+  const _Checked({required this.board});
+
+  final MissionBoard board;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = board.attention;
+    if (summary == null) return const SizedBox.shrink();
+    final muted = TextStyle(color: OoTokens.of(context).muted);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('Checked ${summary.scopeLabel} ', style: muted),
+          OoTime(summary.checkedAt),
+          if (summary.hidden case final hidden?)
+            Text('. $hidden', style: muted),
         ],
       ),
     );

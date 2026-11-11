@@ -10,6 +10,7 @@ enum BoardRead {
   heldBriefs,
   proposals,
   greenInk,
+  attention,
 }
 
 /// What a page shows from the board and how current it must be: [live] at `[refresh] sessions`,
@@ -26,9 +27,14 @@ enum BoardRead {
     BoardRead.heldBriefs,
     BoardRead.proposals,
     BoardRead.greenInk,
+    BoardRead.attention,
   };
   final (live, extra) = switch (page) {
-    OoPage.overview || OoPage.memory || OoPage.pages => (
+    OoPage.overview => (
+      const {BoardRead.board, BoardRead.stations, BoardRead.attention},
+      const {BoardRead.missions},
+    ),
+    OoPage.memory || OoPage.pages => (
       const {BoardRead.board, BoardRead.stations},
       const {BoardRead.missions},
     ),

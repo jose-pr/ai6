@@ -32,6 +32,7 @@ enum BoardSource {
   heldBriefs('Held briefs'),
   greenInk('Green ink requests'),
   proposals('Mission proposals'),
+  attention('Attention'),
   timeline('Timeline');
 
   const BoardSource(this.label);
