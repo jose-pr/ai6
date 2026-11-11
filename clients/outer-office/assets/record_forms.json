@@ -7964,6 +7964,14 @@
               "description": "Seconds between the Station's check-ins with the Registry.",
               "default": 15.0
             },
+            "lease": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A Mission lease lasts",
+              "description": "Seconds a lease on a Mission's brief or Session lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery.",
+              "default": 180.0
+            },
             "intake_attempts": {
               "type": "integer",
               "minimum": 0,
@@ -8052,6 +8060,7 @@
             "retry_backoff": 5.0,
             "retry_backoff_max": 600.0,
             "check_in": 15.0,
+            "lease": 180.0,
             "intake_attempts": 3,
             "role_catalog_bytes": 524288,
             "provider_catalog_bytes": 524288,

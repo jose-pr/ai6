@@ -155,6 +155,12 @@ pub struct SchedulerLimits {
     #[schema(title = "Between check-ins with the Registry")]
     #[map(default = SchedulerLimits::default().check_in)]
     pub check_in: Seconds,
+    /// Seconds a lease on a Mission's brief or Session lasts unless the Station renews it at a
+    /// check-in. A Station whose check-ins can take longer than this loses its Missions to
+    /// recovery.
+    #[schema(title = "A Mission lease lasts")]
+    #[map(default = SchedulerLimits::default().lease)]
+    pub lease: Seconds,
     /// Times a brief is placed before it is filed as failed.
     #[schema(title = "Tries to place a brief")]
     #[map(default = SchedulerLimits::default().intake_attempts)]
@@ -191,6 +197,7 @@ impl Default for SchedulerLimits {
             retry_backoff: Seconds::new(5),
             retry_backoff_max: Seconds::new(600),
             check_in: Seconds::new(15),
+            lease: Seconds::new(180),
             intake_attempts: 3,
             role_catalog_bytes: Limit::at(512 * KIB),
             provider_catalog_bytes: Limit::at(512 * KIB),

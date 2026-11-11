@@ -1236,7 +1236,7 @@ impl Default for StationLimits {
             records: Limit::at(1_000),
             settings_bytes: Limit::at(4_096),
             mission_capacity: Limit::at(1_024),
-            gone_dark_after: Seconds::new(45),
+            gone_dark_after: Seconds::new(180),
         }
     }
 }

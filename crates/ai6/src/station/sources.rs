@@ -2916,7 +2916,7 @@ title = \"Update dependencies\"
             ]
         );
         // A Station that has gone dark is held no round.
-        assert!(round_stations(&registry, &roster, "H", &sleeper, real + 120).is_empty());
+        assert!(round_stations(&registry, &roster, "H", &sleeper, real + 600).is_empty());
         // A sleeper's own `stations` narrows the rounds.
         let narrowed = Sleeper {
             stations: vec!["station-b".to_owned()],

@@ -35,7 +35,6 @@ use crate::directorates::m::watches::{Watch, WatchScope};
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::cables::CablePrincipal;
 use crate::directorates::registry::sessions::SessionRecord;
-use crate::directorates::registry::store::DEFAULT_LEASE;
 use crate::directorates::registry::watches::{
     TURN_WINDOW_SECS, WatchError, WatchLogEntry, WatchRecord, WatchUpdate,
 };
@@ -607,7 +606,9 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
         let window = std::time::Duration::from_secs(DARK_WINDOW_SECS);
         if let (Ok(known), Ok(alive)) = (
             state.intake.stations(window),
-            state.intake.stations(DEFAULT_LEASE),
+            state
+                .intake
+                .stations(state.intake.limits().stations.gone_dark_after.0),
         ) {
             for dark in known.iter().filter(|station| {
                 !alive

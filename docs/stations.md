@@ -37,7 +37,9 @@ The default roles are `control` and `execution`. Every Station is also labeled w
 Station ID, host and operating system; the record's `labels` adds more.
 
 The record's tables bound and pace the Station's own work: how often it checks in
-(`[scheduler] check_in`), how much it holds for Universal Exports (`[publisher]`), how it
+(`[scheduler] check_in`), how long its leases on Missions last without a renewal
+(`[scheduler] lease`, 180 seconds by default: keep it well above the longest a check-in takes on a
+distant Registry), how much it holds for Universal Exports (`[publisher]`), how it
 probes Theaters and re-attaches to Sessions, how long its secret leases last, and so on, each
 key with a default ([Station runtime limits](configuration.md#station-runtime-limits)). Its
 `[providers.<id>]` tables configure the handlers, terminals and safe houses it builds:
@@ -70,7 +72,7 @@ combinations that pass these checks:
 | Operation `stations` | the Operation lists Stations and this one is not among them |
 | Mission `stations` | the brief narrows to Stations and this one is not among them. A Mission can only narrow the Operation's list, never widen it |
 | Role | the Station has no `execution` role |
-| Health | its last check-in is older than `[registry.limits.stations] gone_dark_after`, 45 seconds by default (gone dark) |
+| Health | its last check-in is older than `[registry.limits.stations] gone_dark_after`, 180 seconds by default (gone dark) |
 | Capacity | its capacity is 0, or it already holds that many Missions: its leases or the Sessions it reported running, whichever is more |
 | Resources | it reported less free memory than `min_free_memory_mb` (default 512) or a CPU busier than `max_cpu_percent` (default 95). The same limits rule out a Theater by its own sample. A figure that was not reported never rules anything out |
 | Theater binding | the Operation's `theater` names a different Theater |

@@ -538,7 +538,7 @@ global one.
 | `records` | 1,000 | Station records. |
 | `settings_bytes` | 4 KiB | **Largest Station settings record.** Bytes of a Station's settings record. |
 | `mission_capacity` | 1,024 | **Most Missions a Station may run at once.** Missions a Station's settings may let it run at once. |
-| `gone_dark_after` | 45 | **A Station goes dark after.** Seconds after its last check-in that a Station counts as dark. |
+| `gone_dark_after` | 180 | **A Station goes dark after.** Seconds after its last check-in that a Station counts as dark. |
 <!-- schema:registry.limits.stations:end -->
 
 `[registry.limits.timeline]`
@@ -1138,6 +1138,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `retry_backoff` | 5 | **Retry a failed Mission start after.** Seconds before a Mission whose start failed is tried again; each further failure in a row doubles the wait, up to `retry_backoff_max`. `0` retries on the next round. |
 | `retry_backoff_max` | 600 | **Longest wait between start retries.** Seconds the wait between tries of a Mission start grows to, at most. |
 | `check_in` | 15 | **Between check-ins with the Registry.** Seconds between the Station's check-ins with the Registry. |
+| `lease` | 180 | **A Mission lease lasts.** Seconds a lease on a Mission's brief or Session lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery. |
 | `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
 | `provider_catalog_bytes` | 512 KiB | **Largest provider catalog.** Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out. |
