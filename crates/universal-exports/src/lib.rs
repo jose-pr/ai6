@@ -8,6 +8,9 @@ mod accounts;
 mod agents;
 #[cfg(test)]
 mod board_tests;
+mod attention;
+#[cfg(test)]
+mod attention_tests;
 mod compartments;
 mod controls;
 #[cfg(test)]
@@ -2077,6 +2080,7 @@ impl Gateway {
             .route("/v1/auth/renew", post(renew))
             .route("/v1/auth/resume", post(resume))
             .route("/v1/auth/session", get(access_session))
+            .route("/v1/user/attention", get(attention::read))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
             .route(

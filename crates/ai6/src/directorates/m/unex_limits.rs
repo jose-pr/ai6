@@ -237,6 +237,16 @@ pub struct UnexTimelineLimits {
     #[schema(title = "Most audit records a page may ask for")]
     #[map(default = UnexTimelineLimits::default().max_audit_page)]
     pub max_audit_page: Limit,
+    /// Items the attention summary lists; past it the oldest go, and the summary says so.
+    #[schema(title = "Attention items listed")]
+    #[map(default = UnexTimelineLimits::default().attention_items)]
+    pub attention_items: Limit,
+    /// How far back, in seconds, the attention summary looks for a condition that has since
+    /// passed, such as a refused configuration a later revision replaced. `"none"` looks as far
+    /// as the audit log goes.
+    #[schema(title = "Past conditions the attention summary shows")]
+    #[map(default = UnexTimelineLimits::default().attention_history)]
+    pub attention_history: TimeLimit,
 }
 
 impl Default for UnexTimelineLimits {
@@ -247,6 +257,8 @@ impl Default for UnexTimelineLimits {
             text_chars: Limit::at(256),
             audit_page: 100,
             max_audit_page: Limit::at(500),
+            attention_items: Limit::at(100),
+            attention_history: TimeLimit::secs(7 * DAY),
         }
     }
 }
@@ -363,6 +375,8 @@ const PACE: &[&str] = &[
     "fanout",
     "socket_buffer_bytes",
     "audit_page",
+    "attention_items",
+    "attention_history",
 ];
 
 /// One line per bound of `current` looser than its default, its pace keys left out.

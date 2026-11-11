@@ -264,6 +264,31 @@ static READ_TOOLS: &[Tool] = &[
         post: None,
     },
     Tool {
+        name: "attention",
+        description: "What needs the person's attention, the same answer the Overview page \
+                      gives. Call it first for \"what needs my attention\", \"anything wrong\" \
+                      or \"is everything fine\": do not answer those from board or missions. \
+                      Each item says if it is current, historical (it happened and has since \
+                      passed, such as a refused configuration a later revision replaced) or \
+                      unverified (seen, but whether it still holds could not be checked), with \
+                      the entity link to cite, the scope checked and when. `coverage` names \
+                      what could not be read; say so, and never say everything is clear while \
+                      `complete` or `clear` is false. State the scope and `checked_at`. \
+                      Optionally one Operation.",
+        schema: || object(&[operation()], &[]),
+        plan: |input, _| {
+            let query = match optional_id(input, "operation_id")? {
+                Some(operation) => format!("?operation_id={}", encode(operation)),
+                None => String::new(),
+            };
+            Ok(Plan::Read(vec![(
+                "result",
+                Call::get(format!("/v1/user/attention{query}")),
+            )]))
+        },
+        post: None,
+    },
+    Tool {
         name: "audit",
         description: "The newest audit records (who did what, when) of an Operation or a \
                       Station (not both, as on the Audit page), or of everything the person \

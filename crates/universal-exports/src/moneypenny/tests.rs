@@ -1017,6 +1017,93 @@ async fn the_tools_refuse_what_the_person_may_not_do() {
 }
 
 #[tokio::test]
+async fn her_attention_tool_gives_the_answer_the_overview_page_reads() {
+    let served = served(AssistantConfig::default()).await;
+    served
+        .registry
+        .check_in(
+            "worker",
+            BTreeMap::from([
+                ("operations".to_owned(), json!(["G"])),
+                ("capacity".to_owned(), json!(4)),
+                (
+                    "config".to_owned(),
+                    json!({"revision": "77",
+                           "refused": ["configuration revision 78: the roster does not parse"]}),
+                ),
+            ]),
+        )
+        .unwrap();
+    let (mut app, _) = open(&served, &served.operator).await;
+    say(&mut app, "What needs my attention?", None).await;
+    let job = take(&served, "hq").await;
+
+    let tools = mcp(&served, &job.mcp_token, "tools/list", json!({}))
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert!(
+        tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "attention")
+    );
+    let answer = call_tool(&served, &job.mcp_token, "attention", json!({})).await;
+    assert_eq!(answer["isError"], false, "{answer}");
+    let text = answer["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("<ai6-data tool=\"attention\">"), "{text}");
+    let from_tool: Value = serde_json::from_str(
+        text.trim_start_matches("<ai6-data tool=\"attention\">")
+            .trim_end_matches("</ai6-data>"),
+    )
+    .unwrap();
+
+    let from_page: Value = reqwest::Client::new()
+        .get(format!("{}/v1/user/attention", served.base))
+        .bearer_auth(&served.operator)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let ids = |summary: &Value| -> Vec<Value> {
+        summary["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| json!([item["id"], item["condition"], item["link"]]))
+            .collect()
+    };
+    assert_eq!(ids(&from_tool), ids(&from_page));
+    assert_eq!(from_tool["headline"], from_page["headline"]);
+    assert_eq!(from_tool["clear"], from_page["clear"]);
+    assert_eq!(from_page["clear"], false);
+    assert_eq!(from_page["items"][0]["kind"], "config_refused");
+    assert_eq!(from_page["items"][0]["condition"], "current");
+
+    // One Operation, as an input: a bad identifier never reaches the route.
+    let narrowed = call_tool(
+        &served,
+        &job.mcp_token,
+        "attention",
+        json!({"operation_id": "G"}),
+    )
+    .await;
+    assert_eq!(narrowed["isError"], false, "{narrowed}");
+    let sneaky = call_tool(
+        &served,
+        &job.mcp_token,
+        "attention",
+        json!({"operation_id": "G", "path": "/v1/user/audit"}),
+    )
+    .await;
+    assert_eq!(sneaky["isError"], true);
+}
+
+#[tokio::test]
 async fn a_refused_or_unanswered_job_goes_to_another_station_and_stations_are_checked() {
     let served = served(tuned(|limits| limits.answer_timeout = Seconds::new(1))).await;
     let (mut app, _) = open(&served, &served.operator).await;
