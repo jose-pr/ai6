@@ -40,7 +40,22 @@ const _missionSorts = ['updated', 'created', 'state', 'operation', 'mission'];
 const _sessionSorts = [..._missionSorts, 'session'];
 const _orders = ['asc', 'desc'];
 
-enum _Kind { identifier, text, states, oneOf }
+/// The columns each table page sorts by; a table's column ids are these.
+const _agentSorts = ['agent', 'handler', 'model', 'done'];
+const _poolSorts = ['pool', 'handler', 'kind'];
+const _timelineSorts = ['when', 'operation', 'event', 'action'];
+const _auditSorts = ['when', 'actor', 'action', 'scope'];
+const _accessSorts = [
+  'priority',
+  'subject',
+  'scope',
+  'role',
+  'name',
+  'groups',
+  'status',
+];
+
+enum _Kind { identifier, text, states, list, oneOf }
 
 class _Field {
   const _Field(this.name, this.kind, [this.words = const []]);
@@ -67,6 +82,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('mission_id', _Kind.identifier),
     _Field('subtree', _Kind.oneOf, ['true']),
     _Field('compartment', _Kind.identifier),
+    _Field('reviews', _Kind.oneOf, ['show']),
   ],
   OoPage.sessions: [
     _Field('operation_id', _Kind.identifier),
@@ -76,6 +92,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('sort', _Kind.oneOf, _sessionSorts),
     _Field('order', _Kind.oneOf, _orders),
     _Field('session_id', _Kind.identifier),
+    _Field('text', _Kind.text),
   ],
   OoPage.stations: [
     _Field('station_id', _Kind.identifier),
@@ -93,6 +110,10 @@ const _fields = <OoPage, List<_Field>>{
     _Field('agent', _Kind.identifier),
     _Field('role', _Kind.identifier),
     _Field('mission_id', _Kind.identifier),
+    _Field('handler', _Kind.list),
+    _Field('text', _Kind.text),
+    _Field('sort', _Kind.oneOf, _agentSorts),
+    _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.greenInk: [
     _Field('tab', _Kind.oneOf, ['inbox', 'expired', 'classes']),
@@ -135,18 +156,35 @@ const _fields = <OoPage, List<_Field>>{
     _Field('operation_id', _Kind.identifier),
     _Field('pool', _Kind.identifier),
     _Field('mission_id', _Kind.identifier),
+    _Field('handler', _Kind.list),
+    _Field('text', _Kind.text),
+    _Field('sort', _Kind.oneOf, _poolSorts),
+    _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.timeline: [
     _Field('operation_id', _Kind.identifier),
     _Field('mission_id', _Kind.identifier),
+    _Field('event', _Kind.list),
+    _Field('text', _Kind.text),
+    _Field('sort', _Kind.oneOf, _timelineSorts),
+    _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.audit: [
     _Field('operation_id', _Kind.identifier),
     _Field('station_id', _Kind.identifier),
+    _Field('actor', _Kind.list),
+    _Field('action', _Kind.list),
+    _Field('text', _Kind.text),
+    _Field('sort', _Kind.oneOf, _auditSorts),
+    _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.access: [
     _Field('tab', _Kind.oneOf, ['roles', 'rules', 'accounts', 'check']),
     _Field('operation_id', _Kind.identifier),
+    _Field('subject', _Kind.list),
+    _Field('text', _Kind.text),
+    _Field('sort', _Kind.oneOf, _accessSorts),
+    _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.memory: [
     _Field('scope', _Kind.oneOf, ['global']),
@@ -188,7 +226,7 @@ class OoRoute {
   /// The fields that are set, in link order.
   Iterable<String> get keys => _values.keys;
 
-  /// A field's value; `null` when it is absent. A Missions `state` reads comma-joined.
+  /// A field's value; `null` when it is absent. A list reads comma-joined.
   String? operator [](String key) => switch (_values[key]) {
     final String text => text,
     final List<String> states => states.join(','),
@@ -199,6 +237,13 @@ class OoRoute {
   List<String> get states => switch (_values['state']) {
     final String state => [state],
     final List<String> states => states,
+    _ => const [],
+  };
+
+  /// The values of the list field [key] (a table's facet), none when it is absent.
+  List<String> listOf(String key) => switch (_values[key]) {
+    final List<String> values => values,
+    final String value => [value],
     _ => const [],
   };
 
@@ -220,9 +265,13 @@ class OoRoute {
     for (final key in keys) {
       final field = _field(page, key);
       final value = json[key];
-      if (field.kind == _Kind.states) {
+      if (field.kind == _Kind.states || field.kind == _Kind.list) {
         if (value is! List || value.any((item) => item is! String)) {
-          throw const FormatException('state is a list of board states');
+          throw FormatException(
+            field.kind == _Kind.states
+                ? 'state is a list of board states'
+                : '${field.name} is a list of identifiers',
+          );
         }
         values.add((field.name, List<String>.of(value.cast<String>())));
       } else if (value is String) {
@@ -253,7 +302,7 @@ class OoRoute {
         final value = pair.substring(equals + 1);
         values.add((
           field.name,
-          field.kind == _Kind.states
+          field.kind == _Kind.states || field.kind == _Kind.list
               ? [
                   for (final state in value.split(','))
                     _decode(field.name, state),
@@ -418,6 +467,19 @@ OoRoute _checked(OoPage page, List<(String, Object)> values) {
         }
       case (_Kind.states, _):
         throw const FormatException('state is a list of board states');
+      case (_Kind.list, final List<String> items):
+        for (final item in items) {
+          if (!isIdentifier(item)) {
+            throw FormatException(
+              '$name has an item that is not an identifier',
+            );
+          }
+        }
+        if (items.isEmpty || items.toSet().length != items.length) {
+          throw FormatException('$name lists distinct identifiers');
+        }
+      case (_Kind.list, _):
+        throw FormatException('$name is a list of identifiers');
       case (_, _):
         throw FormatException('$name is a string');
     }

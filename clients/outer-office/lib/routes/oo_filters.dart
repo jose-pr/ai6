@@ -22,6 +22,12 @@ const _labels = {
   'pool': 'Pool',
   'subtree': 'Subtree',
   'compartment': 'Compartment',
+  'handler': 'Handler',
+  'event': 'Event',
+  'actor': 'Actor',
+  'action': 'Action',
+  'subject': 'Subject',
+  'reviews': 'Reviewer turns',
 };
 
 /// Field [key] of [route] as a chip says it, such as `State: failed, blocked`.

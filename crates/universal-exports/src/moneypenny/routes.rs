@@ -56,6 +56,13 @@ const SESSION_SORTS: &[&str] = &[
     "session",
 ];
 const ORDERS: &[&str] = &["asc", "desc"];
+const AGENT_SORTS: &[&str] = &["agent", "handler", "model", "done"];
+const POOL_SORTS: &[&str] = &["pool", "handler", "kind"];
+const TIMELINE_SORTS: &[&str] = &["when", "operation", "event", "action"];
+const AUDIT_SORTS: &[&str] = &["when", "actor", "action", "scope"];
+const ACCESS_SORTS: &[&str] = &[
+    "priority", "subject", "scope", "role", "name", "groups", "status",
+];
 const STATION_TABS: &[&str] = &["overview", "theaters", "settings", "placement"];
 const AGENT_TABS: &[&str] = &["agents", "roles"];
 const GREEN_INK_TABS: &[&str] = &["inbox", "classes"];
@@ -94,6 +101,8 @@ enum Kind {
     Text,
     /// 1 to 10 distinct board states: a JSON array, comma-joined in a link.
     States,
+    /// Distinct identifiers, one or more: a JSON array, comma-joined in a link. A table's facet.
+    List,
     /// One of these words.
     OneOf(&'static [&'static str]),
 }
@@ -170,7 +179,7 @@ impl Page {
 
     /// The page's fields, in link order.
     fn fields(self) -> &'static [(&'static str, Kind)] {
-        use Kind::{Identifier, OneOf, States, Text};
+        use Kind::{Identifier, List, OneOf, States, Text};
         match self {
             Self::Overview => &[],
             Self::Memory => &[
@@ -189,6 +198,7 @@ impl Page {
                 ("mission_id", Identifier),
                 ("subtree", OneOf(&["true"])),
                 ("compartment", Identifier),
+                ("reviews", OneOf(&["show"])),
             ],
             Self::Sessions => &[
                 ("operation_id", Identifier),
@@ -198,6 +208,7 @@ impl Page {
                 ("sort", OneOf(SESSION_SORTS)),
                 ("order", OneOf(ORDERS)),
                 ("session_id", Identifier),
+                ("text", Text),
             ],
             Self::Stations => &[
                 ("station_id", Identifier),
@@ -210,6 +221,10 @@ impl Page {
                 ("agent", Identifier),
                 ("role", Identifier),
                 ("mission_id", Identifier),
+                ("handler", List),
+                ("text", Text),
+                ("sort", OneOf(AGENT_SORTS)),
+                ("order", OneOf(ORDERS)),
             ],
             Self::GreenInk => &[
                 ("tab", OneOf(GREEN_INK_TABS)),
@@ -228,10 +243,36 @@ impl Page {
                 ("operation_id", Identifier),
                 ("pool", Identifier),
                 ("mission_id", Identifier),
+                ("handler", List),
+                ("text", Text),
+                ("sort", OneOf(POOL_SORTS)),
+                ("order", OneOf(ORDERS)),
             ],
-            Self::Timeline => &[("operation_id", Identifier), ("mission_id", Identifier)],
-            Self::Audit => &[("operation_id", Identifier), ("station_id", Identifier)],
-            Self::Access => &[("tab", OneOf(ACCESS_TABS)), ("operation_id", Identifier)],
+            Self::Timeline => &[
+                ("operation_id", Identifier),
+                ("mission_id", Identifier),
+                ("event", List),
+                ("text", Text),
+                ("sort", OneOf(TIMELINE_SORTS)),
+                ("order", OneOf(ORDERS)),
+            ],
+            Self::Audit => &[
+                ("operation_id", Identifier),
+                ("station_id", Identifier),
+                ("actor", List),
+                ("action", List),
+                ("text", Text),
+                ("sort", OneOf(AUDIT_SORTS)),
+                ("order", OneOf(ORDERS)),
+            ],
+            Self::Access => &[
+                ("tab", OneOf(ACCESS_TABS)),
+                ("operation_id", Identifier),
+                ("subject", List),
+                ("text", Text),
+                ("sort", OneOf(ACCESS_SORTS)),
+                ("order", OneOf(ORDERS)),
+            ],
             Self::Compartments => &[("compartment_id", Identifier)],
             Self::Pages => &[("page_id", Identifier)],
         }
@@ -251,6 +292,7 @@ impl Page {
 pub(crate) enum Field {
     Text(String),
     States(Vec<String>),
+    List(Vec<String>),
 }
 
 /// A checked route: a page and its fields, in the page's field order.
@@ -287,6 +329,14 @@ impl Route {
                         .ok_or("state is a list of board states")?,
                 ),
                 (Kind::States, _) => return Err("state is a list of board states".to_owned()),
+                (Kind::List, Value::Array(items)) => Field::List(
+                    items
+                        .iter()
+                        .map(|item| item.as_str().map(str::to_owned))
+                        .collect::<Option<_>>()
+                        .ok_or_else(|| format!("{name} is a list of identifiers"))?,
+                ),
+                (Kind::List, _) => return Err(format!("{name} is a list of identifiers")),
                 (_, Value::String(text)) => Field::Text(text.clone()),
                 (_, _) => return Err(format!("{name} is a string")),
             };
@@ -302,7 +352,7 @@ impl Route {
         for (name, field) in &self.fields {
             let value = match field {
                 Field::Text(text) => Value::from(text.as_str()),
-                Field::States(states) => Value::from(states.clone()),
+                Field::States(items) | Field::List(items) => Value::from(items.clone()),
             };
             object.insert((*name).to_owned(), value);
         }
@@ -331,6 +381,12 @@ impl Route {
                     value
                         .split(',')
                         .map(|state| decode(name, state))
+                        .collect::<Result<_, _>>()?,
+                ),
+                Kind::List => Field::List(
+                    value
+                        .split(',')
+                        .map(|item| decode(name, item))
                         .collect::<Result<_, _>>()?,
                 ),
                 _ => Field::Text(decode(name, value)?),
@@ -363,7 +419,7 @@ impl Route {
         }
         let states = self.fields.iter().find_map(|(_, value)| match value {
             Field::States(states) => Some(states),
-            Field::Text(_) => None,
+            Field::Text(_) | Field::List(_) => None,
         });
         let sessions = mission["sessions"]
             .as_array()
@@ -400,13 +456,18 @@ impl Route {
             .filter_map(Value::as_str)
             .any(|item| item.to_lowercase().contains(&wanted))
         });
+        // A reviewer's turn is a Mission of its own; it shows when asked for, or when named.
+        let review = self.text("reviews") == Some("show")
+            || self.text("mission_id").is_some()
+            || mission["brief"]["provenance"]["origin"] != "review";
         let named = self.text("mission_id").is_none_or(|wanted| {
             mission["mission_id"] == wanted
                 || mission["handle"]
                     .as_str()
                     .is_some_and(|handle| handle.eq_ignore_ascii_case(wanted))
         });
-        equals("operation_id", &mission["operation_id"])
+        review
+            && equals("operation_id", &mission["operation_id"])
             && named
             && any_session("station_id", "station_id")
             && any_session("agent", "agent")
@@ -431,9 +492,9 @@ impl Route {
             .map(|(name, field)| {
                 let value = match field {
                     Field::Text(text) => encode(text),
-                    Field::States(states) => states
+                    Field::States(items) | Field::List(items) => items
                         .iter()
-                        .map(|state| encode(state))
+                        .map(|item| encode(item))
                         .collect::<Vec<_>>()
                         .join(","),
                 };
@@ -500,10 +561,25 @@ impl Route {
                         ));
                     }
                 }
-                (Kind::States, Field::Text(_)) => {
+                (Kind::States, Field::Text(_) | Field::List(_)) => {
                     return Err("state is a list of board states".to_owned());
                 }
-                (_, Field::States(_)) => return Err(format!("{name} is a string")),
+                (Kind::List, Field::List(items)) => {
+                    if items.iter().any(|item| identifier(name, item).is_err()) {
+                        return Err(format!("{name} has an item that is not an identifier"));
+                    }
+                    let distinct = items
+                        .iter()
+                        .enumerate()
+                        .all(|(index, item)| !items[..index].contains(item));
+                    if items.is_empty() || !distinct {
+                        return Err(format!("{name} lists distinct identifiers"));
+                    }
+                }
+                (Kind::List, _) => return Err(format!("{name} is a list of identifiers")),
+                (_, Field::States(_) | Field::List(_)) => {
+                    return Err(format!("{name} is a string"));
+                }
             }
         }
         let has = |key: &str| fields.iter().any(|(name, _)| *name == key);
@@ -553,7 +629,7 @@ pub(crate) fn schema() -> Value {
                     "items": {"type": "string", "enum": STATES},
                     "description": "Missions: a list of board states; Sessions: one."
                 }),
-                Kind::States => {
+                Kind::States | Kind::List => {
                     serde_json::json!({"type": "array", "items": {"type": "string"}})
                 }
                 Kind::OneOf(words) => {
@@ -600,6 +676,7 @@ pub(crate) fn describe() -> String {
                 .map(|(name, kind)| match kind {
                     Kind::Identifier | Kind::Text => (*name).to_owned(),
                     Kind::States => format!("{name}: board states, comma-separated"),
+                    Kind::List => format!("{name}: identifiers, comma-separated"),
                     Kind::OneOf(words) if words.iter().eq(STATES.iter()) => {
                         format!("{name}: one board state")
                     }

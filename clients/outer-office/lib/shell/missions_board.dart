@@ -42,6 +42,16 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
         when !board.names(mission.operationId, mission.missionId, id)) {
       return false;
     }
+    // A reviewer's turn is a Mission of its own; it shows when asked for, or when named.
+    if (route['reviews'] != 'show' &&
+        route['mission_id'] == null &&
+        board
+                .missionBrief(mission.operationId, mission.missionId)
+                ?.origin
+                ?.origin ==
+            'review') {
+      return false;
+    }
     if (route['station_id'] case final station?
         when !mission.sessions.any((session) => session.stationId == station)) {
       return false;
