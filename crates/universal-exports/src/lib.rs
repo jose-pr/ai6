@@ -6,11 +6,11 @@
 mod access_admin;
 mod accounts;
 mod agents;
-#[cfg(test)]
-mod board_tests;
 mod attention;
 #[cfg(test)]
 mod attention_tests;
+#[cfg(test)]
+mod board_tests;
 mod compartments;
 mod controls;
 #[cfg(test)]
