@@ -7477,6 +7477,48 @@
               "title": "Most audit records a page may ask for",
               "description": "The most records a page of the audit log may ask for.",
               "default": 500
+            },
+            "attention_items": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Attention items listed",
+              "description": "Items the attention summary lists; past it the oldest go, and the summary says so.",
+              "default": 100
+            },
+            "attention_history": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Past conditions the attention summary shows",
+              "description": "How far back, in seconds, the attention summary looks for a condition that has since passed, such as a refused configuration a later revision replaced. `\"none\"` looks as far as the audit log goes.",
+              "default": 604800.0
             }
           },
           "additionalProperties": false,
@@ -7487,7 +7529,9 @@
             "max_page": 200,
             "text_chars": 256,
             "audit_page": 100,
-            "max_audit_page": 500
+            "max_audit_page": 500,
+            "attention_items": 100,
+            "attention_history": 604800.0
           }
         },
         "login": {
