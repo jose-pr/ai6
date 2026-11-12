@@ -384,18 +384,23 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_reader_grace_bounds_the_wait_for_a_descendant_holding_the_pipe() {
-        let started = Instant::now();
+        // The descendant keeps the pipe open until the test lets it go, or for a minute, and says
+        // so in `ended` if it got that far: the call returning first is not waiting for it.
+        let dir = tempfile::tempdir().unwrap();
+        let (release, ended) = (dir.path().join("release"), dir.path().join("ended"));
+        let script = format!(
+            "(i=0; while [ ! -e '{release}' ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i+1)); done;              echo x > '{ended}') & echo hi",
+            release = release.display(),
+            ended = ended.display(),
+        );
         let output = run_process(
-            Command::new("sh").arg("-c").arg("sleep 5 & echo hi"),
+            Command::new("sh").arg("-c").arg(script),
             &ProcessInput::default(),
             Duration::from_millis(100),
         )
         .unwrap();
-        assert!(
-            started.elapsed() < Duration::from_secs(3),
-            "{:?}",
-            started.elapsed()
-        );
+        assert!(!ended.exists(), "it waited for the descendant");
+        std::fs::write(&release, b"").unwrap();
         assert_eq!(output.code, Some(0));
     }
 }

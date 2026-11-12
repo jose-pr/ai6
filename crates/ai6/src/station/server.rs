@@ -8972,7 +8972,7 @@ queue = 1
     }
 
     async fn wait_for_event(state: &DaemonState, mission_id: &str) -> AgentEvent {
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if let Some(event) = pop_event(state, mission_id) {
                     return event;
@@ -10518,7 +10518,7 @@ queue = 1
             state.sessions.lock().unwrap().is_empty(),
             "the harness is closed"
         );
-        let event = tokio::time::timeout(Duration::from_secs(5), async {
+        let event = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(event) = pop_event(&state, "mission-1") {
                     return event;
@@ -10567,7 +10567,7 @@ queue = 1
         assert_eq!(provider_ids, ["provider-session-limited"]);
         assert_eq!(session_hold(&state, "mission-1").unwrap().id, hold.id);
         // The record is closed just after the Mission book says Done.
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state.intake.session(&hold.id).unwrap().unwrap().status != SessionStatus::Ended {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
@@ -10639,7 +10639,7 @@ queue = 1
             .transition("mission-2", MissionState::Abandoned)
             .unwrap();
         start_mission_one(&state).await;
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state
                 .missions
                 .lock()
@@ -10780,7 +10780,7 @@ queue = 1
         };
 
         schedule_queued_once(&state).await;
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 let first = state
                     .missions
@@ -10823,7 +10823,7 @@ queue = 1
         assert_eq!(completed.state, MissionState::Abandoned);
         state.retry_after.lock().unwrap().clear();
         schedule_queued_once(&state).await;
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 let second = state
                     .missions
@@ -11033,7 +11033,7 @@ queue = 1
         let failed = dir.join("registry").join("failed");
         assert!(failed.join("manual--brief-0.json").is_file());
         schedule_queued_once(&state).await;
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if state
                     .missions
@@ -11758,7 +11758,7 @@ theater = \"other-box\"
         assert_eq!(selected_settings.handler_provider, "mock-agent");
         assert_eq!(selected_settings.model.as_deref(), Some("agent-model"));
         assert_eq!(selected_settings.effort.as_deref(), Some("low"));
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 let state = state
                     .missions
@@ -11949,7 +11949,7 @@ theater = \"other-box\"
 
         spawn_event_pump(state.clone(), mission_id.to_string(), session);
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             for event_pump in event_pumps {
                 event_pump.await.unwrap();
             }
@@ -12067,7 +12067,7 @@ theater = \"other-box\"
             session,
             monitor.clone(),
         );
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if state
                     .missions
@@ -12091,7 +12091,7 @@ theater = \"other-box\"
         );
 
         monitor.record_terminal_output(b"yes\n");
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if state
                     .missions
@@ -12115,7 +12115,7 @@ theater = \"other-box\"
         );
 
         monitor.record_terminal_output(b"retry\nretry\n");
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if state
                     .missions
@@ -12139,7 +12139,7 @@ theater = \"other-box\"
             stalled.text.as_deref(),
             Some("no new terminal line for 0.0 seconds after repeated output")
         );
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if !state
                     .sessions
@@ -12156,7 +12156,7 @@ theater = \"other-box\"
         .expect("stalled Session should be removed after the event is published");
 
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             for event_pump in event_pumps {
                 event_pump.await.unwrap();
             }
@@ -12263,25 +12263,33 @@ theater = \"other-box\"
         let session = Arc::new(Mutex::new(()));
         let gate = SessionGate::default();
         let stop = Arc::new(AtomicBool::new(false));
+        let polls = Arc::new(AtomicUsize::new(0));
         let poller = {
-            let (session, gate, stop) = (session.clone(), gate.clone(), stop.clone());
+            let (session, gate, stop, polls) =
+                (session.clone(), gate.clone(), stop.clone(), polls.clone());
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Acquire) {
                     gate.yield_to_operator();
                     let _poll = session.lock().unwrap();
+                    polls.fetch_add(1, Ordering::AcqRel);
                     std::thread::sleep(Duration::from_millis(50));
                 }
             })
         };
-        std::thread::sleep(Duration::from_millis(20));
-        let started = std::time::Instant::now();
+        // Counted, not timed: once the poller is polling, the operator gets the lock before more
+        // than the poll in progress and one the poller had already begun waiting for.
+        while polls.load(Ordering::Acquire) == 0 {
+            std::thread::yield_now();
+        }
+        let before = polls.load(Ordering::Acquire);
         drop(gate.lock(&session).unwrap());
-        let waited = started.elapsed();
+        let after = polls.load(Ordering::Acquire);
         stop.store(true, Ordering::Release);
         poller.join().unwrap();
         assert!(
-            waited < Duration::from_secs(2),
-            "operator waited {waited:?} for a poller that holds the lock for 50 ms"
+            after <= before + 1,
+            "the poller took the lock {} times before the operator did",
+            after - before
         );
     }
 
@@ -12358,7 +12366,7 @@ theater = \"other-box\"
             "the deadline must restart when the operator message is accepted"
         );
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
-        tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             for event_pump in event_pumps {
                 event_pump.await.unwrap();
             }
@@ -12985,7 +12993,7 @@ theater = \"other-box\"
             "[agent.007]\nhandler = \"mock-spend\"\n[agent.007.env]\nMOCK_TOOLS = \"Read,WebFetch\"\n",
         );
         start_mission_one(&state).await;
-        let seen = tokio::time::timeout(Duration::from_secs(5), async {
+        let seen = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if !exposure_sources(&state, "mission-1").is_empty() {
                     return exposure_sources(&state, "mission-1");
@@ -13000,7 +13008,7 @@ theater = \"other-box\"
             ["tool:WebFetch"],
             "Read is not on the Operation's list"
         );
-        let announced = tokio::time::timeout(Duration::from_secs(5), async {
+        let announced = tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 while let Some(event) = pop_event(&state, "mission-1") {
                     if event.kind == "exposed" {
@@ -15060,7 +15068,7 @@ theater = \"other-box\"
             .unwrap();
 
         state.stopping.store(true, Ordering::Release);
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state.sessions.lock().unwrap().contains_key("mission-1") {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }

@@ -553,37 +553,58 @@ mod tests {
         );
     }
 
+    /// Runs `step` until one run takes less than `window`, and answers that run's result. A check
+    /// that must hold within a window of an event says nothing when the thread was descheduled
+    /// across the window.
+    fn promptly(window: Duration, mut step: impl FnMut() -> bool) -> bool {
+        let give_up = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let begun = std::time::Instant::now();
+            let held = step();
+            if begun.elapsed() < window || std::time::Instant::now() >= give_up {
+                return held;
+            }
+        }
+    }
+
     #[test]
     fn activity_resets_the_inactivity_deadline() {
         let monitor = Watchdog::new(Duration::from_millis(10));
         std::thread::sleep(Duration::from_millis(15));
         assert!(monitor.is_stalled());
 
-        monitor.record_activity();
-        assert!(!monitor.is_stalled());
+        assert!(promptly(Duration::from_millis(10), || {
+            monitor.record_activity();
+            !monitor.is_stalled()
+        }));
     }
 
     #[test]
     fn a_paused_session_is_not_judged_and_resumes_with_a_fresh_deadline() {
-        let monitor = Watchdog::with_config(
-            WatchdogConfig::default()
-                .with_stall_timeout(Duration::from_millis(10))
-                .with_max_runtime(Some(Duration::from_millis(40))),
-        );
-        monitor.pause();
-        monitor.pause();
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(monitor.is_paused());
-        assert!(!monitor.is_stalled());
-        assert!(!monitor.is_max_runtime_exceeded());
+        let monitor = loop {
+            let monitor = Watchdog::with_config(
+                WatchdogConfig::default()
+                    .with_stall_timeout(Duration::from_millis(10))
+                    .with_max_runtime(Some(Duration::from_millis(40))),
+            );
+            monitor.pause();
+            monitor.pause();
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(monitor.is_paused());
+            assert!(!monitor.is_stalled());
+            assert!(!monitor.is_max_runtime_exceeded());
 
-        monitor.resume();
-        assert!(!monitor.is_paused());
-        assert!(!monitor.is_stalled());
-        assert!(
-            !monitor.is_max_runtime_exceeded(),
-            "the time spent paused does not count"
-        );
+            // What follows must hold within the stall timeout of the resume: a run the thread
+            // was descheduled across is made again.
+            let resumed = std::time::Instant::now();
+            monitor.resume();
+            let fresh =
+                !monitor.is_paused() && !monitor.is_stalled() && !monitor.is_max_runtime_exceeded();
+            if resumed.elapsed() < Duration::from_millis(10) {
+                assert!(fresh, "the time spent paused does not count");
+                break monitor;
+            }
+        };
         std::thread::sleep(Duration::from_millis(15));
         assert!(monitor.is_stalled());
     }
@@ -595,9 +616,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(15));
         assert!(monitor.is_stalled());
 
-        operator.record_activity();
-
-        assert!(!monitor.is_stalled());
+        assert!(promptly(Duration::from_millis(10), || {
+            operator.record_activity();
+            !monitor.is_stalled()
+        }));
     }
 
     #[test]
@@ -645,10 +667,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(25));
         assert!(monitor.is_waiting_at_prompt());
 
-        monitor.record_operator_input();
-
-        assert!(!monitor.is_waiting_at_prompt());
-        assert!(!monitor.is_stalled());
+        assert!(promptly(Duration::from_millis(20), || {
+            monitor.record_operator_input();
+            !monitor.is_waiting_at_prompt() && !monitor.is_stalled()
+        }));
     }
 
     #[test]

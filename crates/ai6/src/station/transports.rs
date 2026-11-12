@@ -522,7 +522,8 @@ mod tests {
     }
 
     fn wait_for(transports: &Transports, done: impl Fn(&TheaterSummary) -> bool) -> TheaterSummary {
-        for _ in 0..200 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
             let summary = transports.summary("box", true).unwrap();
             if done(&summary) {
                 return summary;

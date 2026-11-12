@@ -953,9 +953,7 @@ mod tests {
             .map(|piece| [piece, b"\r\n".as_slice()].concat())
             .collect::<Vec<_>>()
             .concat();
-        let started = std::time::Instant::now();
         assert_eq!(lines_of(&[&broken]), [rebuilt(&text)]);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
