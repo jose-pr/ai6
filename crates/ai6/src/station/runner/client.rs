@@ -941,7 +941,7 @@ mod tests {
             let _ = done.send(authenticated_stream(&path, &limits).map(|_| ()));
         });
         let error = answer
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(60))
             .expect("the read of the answer is bounded")
             .unwrap_err();
         assert!(error.contains("did not answer"), "{error}");

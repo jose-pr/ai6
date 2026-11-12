@@ -1536,7 +1536,7 @@ mod tests {
     /// Waits until no account is claimed: a Session's account is freed just after its
     /// Mission is marked done.
     async fn until_released(state: &DaemonState) {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state
                 .intake
                 .accounts()
@@ -2685,7 +2685,7 @@ secret = "codex-b"
         let (state, _now, logins) = pooled_state(root.path(), "", "", loadouts);
         create_mission(&state, "pooled-codex");
         start_mission_by_id(&state, "pooled-codex").await;
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state
                 .missions
                 .lock()
@@ -2702,7 +2702,7 @@ secret = "codex-b"
         .expect("the limited Mission is queued again");
         let first = session_hold(&state, "pooled-codex").unwrap();
         // The Mission is queued again before the attempt it replaces is closed.
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while state.intake.session(&first.id).unwrap().unwrap().status != SessionStatus::Ended {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }

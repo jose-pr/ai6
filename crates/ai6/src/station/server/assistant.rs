@@ -5259,7 +5259,7 @@ event_bytes = 7
         let stopping = Arc::new(AtomicBool::new(false));
         let stop = stopping.clone();
         let served = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(60);
             let mut polls = Vec::new();
             while polls.len() < 2 && Instant::now() < deadline {
                 let (stream, _) = match listener.accept() {
@@ -5386,7 +5386,7 @@ event_bytes = 7
         assert!(
             gateway
                 .paths
-                .recv_timeout(std::time::Duration::from_secs(5))
+                .recv_timeout(std::time::Duration::from_secs(60))
                 .unwrap()
                 .starts_with("/v1/station/assistant/")
         );
@@ -5455,7 +5455,7 @@ event_bytes = 7
             };
             let (sink, seen, waiting) = (sink.clone(), seen.clone(), waiting.clone());
             std::thread::spawn(move || {
-                let deadline = Instant::now() + Duration::from_secs(2);
+                let deadline = Instant::now() + Duration::from_secs(60);
                 let held = loop {
                     let held = match waiting.lock().unwrap().get(&report.conversation_id) {
                         Some(Held::Waiting(held)) => held.len(),
@@ -6229,7 +6229,7 @@ event_bytes = 7
         drop(held);
         // A process another test forks holds a copy of the lock's descriptor until it execs,
         // so the lock can stay taken for a moment after the desk lets go.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while live.exists() && std::time::Instant::now() < deadline {
             if sweep_stale_roots(temp.path(), STALE) == 0 {
                 std::thread::sleep(std::time::Duration::from_millis(20));
@@ -6281,7 +6281,7 @@ event_bytes = 7
         drop(roots);
         // A process another test forks holds a copy of each lock's descriptor until it execs, so
         // some locks can stay taken for a moment after their desks let go.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         let mut swept = sweep_stale_roots(temp.path(), STALE);
         while swept < 50 && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(20));

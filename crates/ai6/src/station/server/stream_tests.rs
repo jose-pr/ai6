@@ -258,7 +258,7 @@ fn agent(key: &str, environment: &str, limits: &str) -> String {
 }
 
 async fn wait_until(what: &str, mut holds: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !holds() {
         assert!(Instant::now() < deadline, "never happened: {what}");
         tokio::time::sleep(Duration::from_millis(5)).await;

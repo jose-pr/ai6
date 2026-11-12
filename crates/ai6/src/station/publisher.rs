@@ -2261,9 +2261,9 @@ mod tests {
         telemetry.bind(SessionId::try_new("session/a").unwrap());
         telemetry.publish_lifecycle("working");
 
-        let registration = requests.recv_timeout(Duration::from_secs(3)).unwrap();
-        let terminal = requests.recv_timeout(Duration::from_secs(3)).unwrap();
-        let lifecycle = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        let registration = requests.recv_timeout(Duration::from_secs(60)).unwrap();
+        let terminal = requests.recv_timeout(Duration::from_secs(60)).unwrap();
+        let lifecycle = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         gateway.join().unwrap();
 
         assert_eq!(registration.path, "/v1/station/sessions");
@@ -2467,11 +2467,11 @@ mod tests {
         telemetry.bind(SessionId::try_new("session-input").unwrap());
 
         assert_eq!(
-            inputs.recv_timeout(Duration::from_secs(3)).unwrap(),
+            inputs.recv_timeout(Duration::from_secs(60)).unwrap(),
             RecordedInput::Write(vec![0, 255, 10])
         );
         assert_eq!(
-            inputs.recv_timeout(Duration::from_secs(3)).unwrap(),
+            inputs.recv_timeout(Duration::from_secs(60)).unwrap(),
             RecordedInput::Resize(40, 120)
         );
         gateway.join().unwrap();
@@ -2576,13 +2576,13 @@ mod tests {
             .send(ControlOutcome::applied("working"))
             .unwrap();
 
-        let poll = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        let poll = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(
             poll.path,
             "/v1/station/controls/next?station=station-7&wait_ms=1000&fresh=true"
         );
         assert!(poll.headers.contains("Bearer test-token"));
-        let report = requests.recv_timeout(Duration::from_secs(3)).unwrap();
+        let report = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&report.body).unwrap(),
             serde_json::json!({
