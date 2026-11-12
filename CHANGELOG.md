@@ -133,6 +133,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A Mission waiting for a decision (verifying, held, or blocked with its harness closed) no longer takes
   up a place in its Station's capacity: with `max_concurrent_missions = 1` the Station starts the next
   Mission instead of waiting for someone to decide the first.
+- Outer Office shows the held briefs, green ink requests and Mission proposals the Operations that answered
+  returned, and names the Operations that could not be read and why (not found, refused or unreachable),
+  instead of "could not be read" for the whole section; an Operation the account may not read is left out
+  quietly. The Agents page keeps its table as the main content, with the scorecards under one collapsed
+  "Scorecards" heading.
 
 - The Mission board no longer forgets ended and verifying Sessions when the gateway restarts. It reads
   the Registry's Session records (state, reason, Station, exposure) and lays the lifecycle frames

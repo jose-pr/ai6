@@ -211,13 +211,18 @@ class FreshnessNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lines = [
-      for (final source in sources)
+      for (final source in sources) ...[
         switch (board.freshness(source)) {
           OoFreshness.stale =>
             '${source.label}: Last updated ${ooClockTime(board.lastUpdated(source)!)}',
           OoFreshness.unavailable => '${source.label}: could not be read',
           _ => null,
         },
+        if (board.unreadOperations(source) case final unread
+            when unread.isNotEmpty)
+          '${source.label}: could not be read in '
+              '${unread.entries.map((e) => '${e.key} (${e.value})').join(', ')}',
+      ],
     ].nonNulls.toList();
     if (lines.isEmpty) return const SizedBox.shrink();
     final tokens = OoTokens.of(context);

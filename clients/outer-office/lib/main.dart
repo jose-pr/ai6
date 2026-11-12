@@ -493,6 +493,11 @@ class MissionBoard extends ChangeNotifier
     for (final source in BoardSource.values) source: OoFreshness.loading,
   };
   final _lastGood = <BoardSource, DateTime>{};
+  final _unread = <BoardSource, Map<String, String>>{};
+
+  /// The Operations whose last read of [source] failed while others answered, each with why.
+  Map<String, String> unreadOperations(BoardSource source) =>
+      _unread[source] ?? const {};
 
   /// How current what the board holds from [source] is.
   OoFreshness freshness(BoardSource source) => _freshness[source]!;
@@ -1523,14 +1528,14 @@ class MissionBoard extends ChangeNotifier
     Future<List<T>> Function(String operationId) load,
   ) async {
     var refused = 0;
-    var failed = 0;
+    final unread = <String, String>{};
     final lists = await Future.wait([
       for (final operation in operations)
         load(operation).catchError((Object error) {
           if (error is GatewayRefused && error.statusCode == 403) {
             refused++;
           } else {
-            failed++;
+            unread[operation] = _unreadWhy(error);
           }
           return <T>[];
         }),
@@ -1539,18 +1544,25 @@ class MissionBoard extends ChangeNotifier
       [for (final list in lists) ...list],
       operations.length,
       refused,
-      failed,
+      unread,
     );
   }
 
   /// Settles [source] from what its [sweep] gave: live, or not asked, or refused everywhere
   /// (no access, its data gone), or stale.
   List<T> _settle<T>(BoardSource source, _Sweep<T> sweep, List<T> current) {
-    if (sweep.asked == 0 ||
-        (sweep.failed == 0 && sweep.refused < sweep.asked)) {
+    final answered = sweep.asked - sweep.refused - sweep.failed;
+    if (sweep.asked == 0 || answered > 0) {
+      // Some answered: show them, and name the Operations that did not.
       _live(source);
+      if (sweep.unread.isEmpty) {
+        _unread.remove(source);
+      } else {
+        _unread[source] = sweep.unread;
+      }
       return sweep.items;
     }
+    _unread.remove(source);
     if (sweep.failed == 0) {
       _failed(source, forbidden: true);
       return const [];
@@ -2134,11 +2146,11 @@ class MissionBoard extends ChangeNotifier
   }
 
   /// Why a read of [what] came back with [status]: the person may not, or it failed.
-  StateError _readRefused(int status, String what) => StateError(
-    status == 403
-        ? 'This account may not read $what.'
-        : 'Universal Exports could not give $what (HTTP $status). Try again.',
-  );
+  StateError _readRefused(int status, String what) => status == 403
+      ? ReadForbidden('This account may not read $what.')
+      : StateError(
+          'Universal Exports could not give $what (HTTP $status). Try again.',
+        );
 
   /// The pool accounts an Operation may draw from.
   Future<List<PoolAccountSummary>> loadPools(String operationId) async {
@@ -3116,6 +3128,7 @@ class MissionBoard extends ChangeNotifier
     loading = false;
     _slowAt = null;
     _lastGood.clear();
+    _unread.clear();
     for (final source in BoardSource.values) {
       _freshness[source] = OoFreshness.loading;
     }
@@ -3961,17 +3974,33 @@ class GatewayRefused implements Exception {
   String toString() => message;
 }
 
+/// A read the gateway refused with 403: the account lacks the action, which is not a fault.
+class ReadForbidden extends StateError {
+  ReadForbidden(super.message);
+}
+
 /// What reading one list from each of several Operations gave.
 class _Sweep<T> {
-  const _Sweep(this.items, this.asked, this.refused, this.failed);
+  const _Sweep(this.items, this.asked, this.refused, this.unread);
 
   final List<T> items;
 
-  /// How many Operations were read, and how many the gateway refused (403) or failed.
+  /// How many Operations were read, and how many the gateway refused (403).
   final int asked;
   final int refused;
-  final int failed;
+
+  /// The Operations that failed otherwise, each with why: not found, refused or unreachable.
+  final Map<String, String> unread;
+
+  int get failed => unread.length;
 }
+
+/// Why a read of an Operation failed, in a few words.
+String _unreadWhy(Object error) => switch (error) {
+  GatewayRefused(statusCode: 404) => 'not found',
+  GatewayRefused() => 'refused',
+  _ => 'unreachable',
+};
 
 /// The gateway answered 403 to a placement preview: the person may not see where an
 /// Operation's Missions would run.
