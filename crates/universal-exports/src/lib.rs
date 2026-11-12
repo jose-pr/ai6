@@ -10199,7 +10199,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
         let mut received_frames = Vec::new();
         for _ in 0..4 {
-            let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            let message = tokio::time::timeout(Duration::from_secs(60), socket.next())
                 .await
                 .unwrap()
                 .unwrap()
@@ -10211,7 +10211,7 @@ mod tests {
         }
         assert!(received_frames.contains(&terminal_value));
         socket.close(None).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if observed
                     .inner

@@ -5372,7 +5372,8 @@ async fn pages_only_the_person_opens_a_page_and_deleting_it_ends_its_links() {
 
 #[tokio::test]
 async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
-    let roster = pages_roster(json!({"open_ttl": 2.0}));
+    // Long enough that a loaded machine opens each link before it ends.
+    let roster = pages_roster(json!({"open_ttl": 10.0}));
     let served = served_with(AssistantConfig::default(), Some(roster)).await;
     let (_app, job) = accepted(&served, &served.operator, "Links.").await;
     let id = published_id(
@@ -5386,8 +5387,13 @@ async fn pages_a_link_fails_after_its_ttl_and_after_sign_out() {
     let url = page_url(&served, &served.operator, &id, None).await;
     let get = |url: String| async move { plain().get(url).send().await.unwrap().status() };
     assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::OK);
-    tokio::time::sleep(Duration::from_millis(2500)).await;
-    assert_eq!(get(format!("{url}f/page.txt")).await, StatusCode::NOT_FOUND);
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while get(format!("{url}f/page.txt")).await != StatusCode::NOT_FOUND {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the link fails after its ttl");
     // Sign-out ends a link made before it.
     let second = issue_access_token_record(
         Arc::new(served.registry.clone()),

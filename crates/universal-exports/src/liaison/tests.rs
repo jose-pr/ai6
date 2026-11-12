@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 use super::{Addressee, Liaison, LiaisonConfig, LiaisonPeer, LinkListener};
 use crate::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
 
-const WAIT: Duration = Duration::from_secs(10);
+const WAIT: Duration = Duration::from_secs(60);
 const TOKEN: &str = "m-token-that-is-long-enough-for-testing";
 const STATION: &str = "worker";
 

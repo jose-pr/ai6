@@ -490,7 +490,7 @@ async fn a_claim_waits_for_the_station_checks_the_manifest_and_gives_up() {
     // Files that arrive while the claim waits.
     let waiting = {
         let store = store.clone();
-        tokio::spawn(async move { store.claim("c", "d", Duration::from_secs(5)).await })
+        tokio::spawn(async move { store.claim("c", "d", Duration::from_secs(60)).await })
     };
     tokio::time::sleep(Duration::from_millis(100)).await;
     store

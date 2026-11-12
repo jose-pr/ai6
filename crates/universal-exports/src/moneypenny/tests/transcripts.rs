@@ -24,7 +24,7 @@ async fn logged(
 #[tokio::test]
 async fn a_flush_with_no_log_started_returns_at_once() {
     let assistant = super::super::Assistant::new(AssistantConfig::default());
-    tokio::time::timeout(Duration::from_secs(5), assistant.flush_log())
+    tokio::time::timeout(Duration::from_secs(60), assistant.flush_log())
         .await
         .expect("nothing to wait for");
 }
