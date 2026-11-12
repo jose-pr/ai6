@@ -343,13 +343,15 @@ impl AgentHandler for AntigravityHandler {
     /// that serves no quota within `usage_wait_ms`, is an error.
     fn usage(&self, environment: BTreeMap<String, String>) -> Result<UsageReport, ProviderError> {
         let home = usage::home_of(&environment);
-        if let Some(buckets) = usage::through_session(&home) {
+        let wait = std::time::Duration::from_millis(self.config.usage_wait_ms);
+        let started = std::time::Instant::now();
+        if let Some(buckets) = usage::through_session(&home, wait) {
             return Ok(usage::report_of(buckets));
         }
         usage::through_private_agent(
             &self.config.executable,
             &environment,
-            std::time::Duration::from_millis(self.config.usage_wait_ms),
+            wait.saturating_sub(started.elapsed()),
         )
         .map(usage::report_of)
         .map_err(|reason| refuse(Status::GUATIAO_ERR_INTERNAL, &reason))

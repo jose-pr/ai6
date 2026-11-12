@@ -121,14 +121,21 @@ pub(crate) fn report_of(buckets: Vec<Bucket>) -> UsageReport {
     report
 }
 
-/// The quota read from the agy of a live Session of the account at `home`, when one serves it.
-pub(crate) fn through_session(home: &str) -> Option<Vec<Bucket>> {
+/// A read that may take `wait` in all, ports listed and connections opened included: listing the
+/// ports starts a program of the system's, which a busy machine can be slow to run.
+fn limits_within(wait: Duration) -> ReadLimits {
+    ReadLimits::default().connect(wait).total(wait)
+}
+
+/// The quota read from the agy of a live Session of the account at `home`, when one serves it
+/// within `wait`.
+pub(crate) fn through_session(home: &str, wait: Duration) -> Option<Vec<Bucket>> {
     let roots = live_under(home);
     if roots.is_empty() {
         return None;
     }
     let owners = with_descendants(&process_table(), &roots);
-    AgyQuota::new(ReadLimits::default()).read(&owners, &[]).ok()
+    AgyQuota::new(limits_within(wait)).read(&owners, &[]).ok()
 }
 
 /// A line of a private agent's output, or the end of it.
@@ -231,7 +238,9 @@ fn read_started(
     send(json!({"jsonrpc": "2.0", "id": 2, "method": "session/new",
         "params": {"cwd": directory.display().to_string(), "mcpServers": []}}))?;
     let models = models_of(&answer(&lines, 2, deadline)?);
-    let mut quota = AgyQuota::new(ReadLimits::default());
+    let mut quota = AgyQuota::new(limits_within(
+        deadline.saturating_duration_since(Instant::now()),
+    ));
     let mut last = ReadError::NoPort;
     while Instant::now() < deadline {
         let owners = with_descendants(&process_table(), &[child.id()]);
