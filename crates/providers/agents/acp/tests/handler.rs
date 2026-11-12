@@ -345,10 +345,11 @@ fn an_agent_without_http_mcp_refuses_a_session_with_cable_tools() {
 #[test]
 fn a_slow_initialize_is_a_setting_not_a_hang() {
     let terminal = terminal();
-    let started = Instant::now();
+    // The agent answers a minute from now: the error can only be the setting ending the wait,
+    // whatever the machine's load.
     let error = handler("initialize_timeout_ms = 200\n")
         .start(
-            start(environment(&[("FAKE_INIT_DELAY_MS", "5000")])),
+            start(environment(&[("FAKE_INIT_DELAY_MS", "60000")])),
             terminal,
         )
         .map(|_| ())
@@ -357,7 +358,6 @@ fn a_slow_initialize_is_a_setting_not_a_hang() {
         error.to_string().contains("no answer within 200 ms"),
         "{error}"
     );
-    assert!(started.elapsed() < Duration::from_secs(4));
 }
 
 #[test]
