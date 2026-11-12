@@ -67,6 +67,10 @@ struct Counts {
 
 static COUNTS: Mutex<BTreeMap<String, Counts>> = Mutex::new(BTreeMap::new());
 
+/// Keys whose listings are held until the test releases them, so a test can say what happens
+/// while a listing is in flight without racing a clock.
+static HELD: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
 fn counts<T>(key: &str, read: impl FnOnce(&mut Counts) -> T) -> T {
     read(COUNTS.lock().unwrap().entry(key.to_owned()).or_default())
 }
@@ -106,6 +110,9 @@ impl AgentHandler for MockProgramHandler {
             counts.most_listing = counts.most_listing.max(counts.listing);
         });
         std::thread::sleep(Duration::from_millis(self.models_ms));
+        while HELD.lock().unwrap().contains(&self.key) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         counts(&self.key, |counts| counts.listing -= 1);
         Ok(ModelListing::of(Vec::new()))
     }
@@ -606,16 +613,6 @@ async fn a_harness_on_the_agents_own_path_starts() {
 /// A Station whose check-in comes every 100 ms and is dark after a second of silence, with a
 /// route whose handler takes `models_ms` to list its models.
 fn slow_listing_state(root: &Path, key: &str, models_ms: u64) -> DaemonState {
-    slow_listing_state_dark_after(root, key, models_ms, Duration::from_secs(1))
-}
-
-/// [`slow_listing_state`] with the Station dark after `dark` of silence.
-fn slow_listing_state_dark_after(
-    root: &Path,
-    key: &str,
-    models_ms: u64,
-    dark: Duration,
-) -> DaemonState {
     let agents = format!(
         "[agent.009]\n[[agent.009.route]]\nhandler = \"mock-program\"\nmodel = \"slow\"\n\
          handler_settings = {{ models_ms = {models_ms}, key = \"{key}\" }}\n"
@@ -628,7 +625,7 @@ fn slow_listing_state_dark_after(
     limits.accounts.model_probe_timeout = TimeLimit::UNBOUNDED;
     state.station = state.station.clone().with_limits(limits);
     let mut registry = RegistryLimits::default();
-    registry.stations.gone_dark_after = Seconds(dark);
+    registry.stations.gone_dark_after = Seconds(Duration::from_secs(1));
     state.intake = Arc::new(FileRegistry::open(root.join("registry")).with_limits(registry));
     state
 }
@@ -636,55 +633,65 @@ fn slow_listing_state_dark_after(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_model_listing_slower_than_going_dark_leaves_the_check_ins_on_time() {
     let root = tempfile::tempdir().unwrap();
-    // The listing outlasts going dark by far, so a beat it blocked goes about 7 s stale, while
-    // a loaded machine delays an unblocked 100 ms beat by about 2 s at most.
-    let state =
-        slow_listing_state_dark_after(root.path(), "slow-beat", 7_000, Duration::from_secs(3));
+    let key = "slow-beat";
+    let state = slow_listing_state(root.path(), key, 0);
+    HELD.lock().unwrap().insert(key.to_owned());
     let running = tokio::spawn(scheduler_loop(state.clone()));
-    let started = Instant::now();
-    let mut stalest = 0.0_f64;
-    let mut found = false;
-    while started.elapsed() < Duration::from_secs(20) && !found {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Some(record) = state
+    // Counted, not timed: while the listing is held, check-ins must keep coming. A check-in the
+    // listing blocked would never advance, and this would stop at the deadline.
+    let seen = |state: &DaemonState| {
+        state
             .intake
             .stations(Duration::MAX)
             .unwrap()
             .into_iter()
             .find(|record| record.station() == "test")
-        {
-            stalest = stalest.max(unix_now() - record.seen());
+            .map(|record| record.seen())
+    };
+    let mut beats = 0;
+    let mut last = None;
+    let waiting = tokio::time::timeout(Duration::from_secs(120), async {
+        while counts(key, |counts| counts.listing) == 0 || beats < 5 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if counts(key, |counts| counts.listing) == 0 {
+                continue;
+            }
+            let now = seen(&state);
+            if now.is_some() && now != last {
+                if last.is_some() {
+                    beats += 1;
+                }
+                last = now;
+            }
         }
-        found = state
+    })
+    .await;
+    let listing = counts(key, |counts| counts.listing);
+    let found = state.models.found().len();
+    HELD.lock().unwrap().remove(key);
+    waiting.expect("the check-ins kept coming while the models were listed");
+    assert_eq!(listing, 1, "the listing was still in flight");
+    assert_eq!(found, 0, "and had not finished");
+    tokio::time::timeout(Duration::from_secs(120), async {
+        while !state
             .models
             .found()
             .iter()
-            .any(|found| found.agent.as_deref() == Some("009"));
-    }
+            .any(|found| found.agent.as_deref() == Some("009"))
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the look finished once the listing was released");
     state.stopping.store(true, Ordering::Release);
     let _ = running.await;
-    assert!(found, "the look finished");
-    assert!(
-        started.elapsed() >= Duration::from_secs(7),
-        "the listing took its seven seconds"
-    );
-    let dark = state
-        .intake
-        .limits()
-        .stations
-        .gone_dark_after
-        .0
-        .as_secs_f64();
-    assert!(
-        stalest < dark,
-        "the check-in went {stalest:.2} s stale while the models were listed"
-    );
 }
 
 #[test]
 fn a_listing_that_does_not_answer_in_time_keeps_what_was_found_before() {
     let root = tempfile::tempdir().unwrap();
-    let mut state = slow_listing_state(root.path(), "slow-kept", 400);
+    let mut state = slow_listing_state(root.path(), "slow-kept", 0);
     models::look(&state);
     let before = state.models.found();
     assert_eq!(before.len(), 1);
@@ -693,21 +700,21 @@ fn a_listing_that_does_not_answer_in_time_keeps_what_was_found_before() {
     let mut limits = state.station.limits().clone();
     limits.accounts.model_probe_timeout = TimeLimit::at(Duration::from_millis(50));
     state.station = state.station.clone().with_limits(limits);
-    let asked = std::time::Instant::now();
+    // Held until `look` has returned, so returning is not waiting for the listing.
+    HELD.lock().unwrap().insert("slow-kept".to_owned());
     models::look(&state);
-    assert!(
-        asked.elapsed() < Duration::from_millis(400),
-        "it did not wait"
-    );
+    HELD.lock().unwrap().remove("slow-kept");
     assert_eq!(state.models.found(), before, "the list it had is kept");
 
     // Nothing found before, and nothing in time: unknown, saying so.
     let other = tempfile::tempdir().unwrap();
-    let mut fresh = slow_listing_state(other.path(), "slow-unknown", 400);
+    let mut fresh = slow_listing_state(other.path(), "slow-unknown", 0);
     let mut limits = fresh.station.limits().clone();
     limits.accounts.model_probe_timeout = TimeLimit::at(Duration::from_millis(50));
     fresh.station = fresh.station.clone().with_limits(limits);
+    HELD.lock().unwrap().insert("slow-unknown".to_owned());
     models::look(&fresh);
+    HELD.lock().unwrap().remove("slow-unknown");
     let found = fresh.models.found();
     assert!(!found[0].listing.known);
     assert!(
