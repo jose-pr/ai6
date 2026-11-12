@@ -2478,6 +2478,25 @@ fn publish_station_check_in(state: &DaemonState) {
         })
         .map(|operation| operation.id.clone())
         .collect::<Vec<_>>();
+    // Every Operation this Station may place a Mission of: its `stations` list admits it and
+    // any Theater it is bound to is one of this Station's. `operations` above is narrower (a
+    // checkout here) and placement reads it as such.
+    let runnable = if state.station.roles.contains(&StationRole::Execution) {
+        state
+            .roster
+            .operations()
+            .filter(|operation| {
+                (operation.stations.is_empty() || operation.stations.contains(&state.station_id))
+                    && operation
+                        .theater
+                        .as_deref()
+                        .is_none_or(|id| state.station.theaters.find(id).is_some())
+            })
+            .map(|operation| operation.id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let roles = state
         .station
         .roles
@@ -2527,6 +2546,10 @@ fn publish_station_check_in(state: &DaemonState) {
         serde_json::json!(state.resource_limits()),
     );
     info.insert("operations".to_owned(), serde_json::json!(operations));
+    info.insert(
+        "runnable_operations".to_owned(),
+        serde_json::json!(runnable),
+    );
     // Every roster Operation's ancestors, nearest first, so Universal Exports can authorize
     // down the tree of Operations without a roster of its own.
     let lineage: BTreeMap<&str, Vec<&str>> = state
@@ -3381,10 +3404,7 @@ fn place_request(
     let stations: Vec<StationFacts> = records
         .iter()
         .map(|record| {
-            let load = leases
-                .iter()
-                .filter(|lease| lease.station() == record.station())
-                .count();
+            let load = station_load(state, leases, record.station());
             StationFacts::from_record(
                 record,
                 now,
@@ -3402,6 +3422,48 @@ fn place_request(
         return Ok(choice.clone());
     }
     Err(unplaced_reason(&placed, &request, &stations))
+}
+
+/// How many of `leases` take up a place at `station`. A Mission of this Station whose harness
+/// is not running (verifying, held, or blocked with its Session closed) waits for a person, not
+/// for a place, so its lease does not count; the Station cannot see another Station's Missions,
+/// so that Station's leases all do.
+fn station_load(state: &DaemonState, leases: &[Lease], station: &str) -> usize {
+    let live: BTreeSet<String> = match (state.starting.lock(), state.sessions.lock()) {
+        (Ok(starting), Ok(sessions)) => starting
+            .iter()
+            .cloned()
+            .chain(sessions.keys().cloned())
+            .collect(),
+        _ => return leases.iter().filter(|l| l.station() == station).count(),
+    };
+    let missions = state.missions.lock().ok();
+    leases
+        .iter()
+        .filter(|lease| lease.station() == station)
+        .filter(|lease| {
+            if station != state.station_id {
+                return true;
+            }
+            let Some(mission_id) = lease
+                .meta()
+                .get("mission_id")
+                .and_then(serde_json::Value::as_str)
+            else {
+                return true;
+            };
+            let waiting = missions
+                .as_ref()
+                .and_then(|missions| missions.get(mission_id))
+                .is_some_and(|mission| {
+                    matches!(
+                        mission.state,
+                        MissionState::Verifying | MissionState::Held | MissionState::Blocked
+                    )
+                });
+            !(waiting && !live.contains(mission_id))
+        })
+        .count()
 }
 
 /// Why placement found nothing that can take a request, one clause per thing it ruled out. A
@@ -11369,6 +11431,90 @@ queue = 1
             "every Station is at its published capacity"
         );
         assert_eq!(state.intake.list_new().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_mission_with_no_harness_running_does_not_take_the_stations_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            dir.path(),
+            "",
+            "[agent.007]
+handler = \"mock-agent\"
+",
+        );
+        state.max_concurrent_missions = 1;
+        publish_station_check_in(&state);
+        let first = queue_brief(&state, "first", Some("007"));
+        assert!(schedule_intake_once(&state));
+        assert_eq!(
+            state.intake.lease(&first).unwrap().unwrap().station(),
+            "test"
+        );
+
+        // Leased and queued: the place is taken.
+        let second = queue_brief(&state, "second", Some("007"));
+        assert!(schedule_intake_once(&state));
+        assert!(state.intake.lease(&second).unwrap().is_none());
+
+        // Its harness has ended and it waits for someone to decide it: the place is free.
+        {
+            let mut missions = state.missions.lock().unwrap();
+            missions
+                .transition("manual--first", MissionState::Working)
+                .unwrap();
+            missions
+                .transition("manual--first", MissionState::Verifying)
+                .unwrap();
+        }
+        assert!(schedule_intake_once(&state));
+        assert_eq!(
+            state.intake.lease(&second).unwrap().unwrap().station(),
+            "test"
+        );
+    }
+
+    #[test]
+    fn the_check_in_lists_every_operation_the_station_may_place_a_mission_of() {
+        use crate::directorates::m::theaters::{Theater, TheaterAccess, TransportAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            dir.path(),
+            "",
+            "[agent.007]
+handler = \"mock-agent\"
+",
+        );
+        // G has a checkout here; R lives on a Theater this Station reaches; S names another
+        // Station; T is bound to a Theater this Station does not have.
+        let path = dir.path().join("operations.toml");
+        let mut operations = fs::read_to_string(&path).unwrap();
+        operations.push_str(
+            "
+[operation.R]
+theater = \"freebsd-box\"
+             [operation.S]
+stations = [\"station-b\"]
+             [operation.T]
+theater = \"other-box\"
+",
+        );
+        fs::write(&path, operations).unwrap();
+        state.roster = Arc::new(Roster::load(dir.path()).unwrap());
+        state
+            .station
+            .theaters
+            .insert(Theater::new(
+                "freebsd-box",
+                TheaterAccess::Transport(TransportAccess::new("mock-dir")),
+            ))
+            .unwrap();
+        publish_station_check_in(&state);
+        let info = state.intake.stations(DEFAULT_LEASE).unwrap()[0]
+            .info()
+            .clone();
+        assert_eq!(info["operations"], serde_json::json!(["G"]));
+        assert_eq!(info["runnable_operations"], serde_json::json!(["G", "R"]));
     }
 
     fn require<T>(result: Result<T, ApiErrorResponse>, message: &str) -> T {

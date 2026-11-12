@@ -126,6 +126,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Verify, verdict, probe and the Mission controls answered 404 for an Operation bound to a remote
+  Theater or with no local checkout: the gateway only knew Operations a Station holds a checkout of.
+  A Station's check-in now also lists the Operations it may place a Mission of (`runnable_operations`),
+  and the gateway accepts those.
+- A Mission waiting for a decision (verifying, held, or blocked with its harness closed) no longer takes
+  up a place in its Station's capacity: with `max_concurrent_missions = 1` the Station starts the next
+  Mission instead of waiting for someone to decide the first.
+
 - The Mission board no longer forgets ended and verifying Sessions when the gateway restarts. It reads
   the Registry's Session records (state, reason, Station, exposure) and lays the lifecycle frames
   received since over them; `[gateway] board_sessions` bounds how many recorded Sessions it lists, the
