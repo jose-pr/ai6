@@ -618,6 +618,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_operation_on_a_remote_theater_is_accepted_and_one_no_station_can_run_is_not() {
+        let roles = r#"
+            [role.checker]
+            actions = ["mission.read", "mission.verify"]
+
+            [[rule]]
+            subject = "person:operator-007"
+            scope = "operation:R"
+            role = "checker"
+
+            [[rule]]
+            subject = "person:operator-007"
+            scope = "operation:N"
+            role = "checker"
+        "#;
+        let served = served_with(roles).await;
+        // Station `station-b` has no checkout of R: it runs it on a Theater it reaches. N is
+        // listed by no Station at all.
+        served
+            .registry
+            .check_in(
+                "station-b",
+                std::collections::BTreeMap::from([
+                    ("operations".to_owned(), serde_json::json!([])),
+                    ("runnable_operations".to_owned(), serde_json::json!(["R"])),
+                ]),
+            )
+            .unwrap();
+        for operation in ["R", "N"] {
+            let opened = served
+                .registry
+                .open_session(
+                    NewSession::new(
+                        format!("{operation}-1"),
+                        format!("{operation}-mission"),
+                        "w",
+                    )
+                    .with_operation(operation),
+                    Duration::from_secs(60),
+                )
+                .unwrap();
+            served
+                .registry
+                .update_session(
+                    &opened.session_id,
+                    "w",
+                    opened.fence,
+                    SessionUpdate::default().result(SessionResult::new("verifying")),
+                )
+                .unwrap();
+        }
+        let probe = |operation: &'static str| {
+            let served = &served;
+            async move {
+                reqwest::Client::new()
+                    .post(format!(
+                        "{}/v1/user/operations/{operation}/missions/{operation}-mission/probe",
+                        served.base
+                    ))
+                    .bearer_auth(&served.operator)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+                    .as_u16()
+            }
+        };
+        assert_eq!(probe("R").await, 200);
+        assert_eq!(probe("N").await, 404);
+    }
+
+    #[tokio::test]
     async fn a_probe_is_asked_for_by_a_person_with_mission_verify_on_a_verifying_attempt() {
         let served = served_with(ROLES).await;
         ended(&served, "m-verifying", "verifying");

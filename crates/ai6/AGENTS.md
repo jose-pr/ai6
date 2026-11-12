@@ -2398,7 +2398,7 @@ the host's `resources` (sysinfo: CPU count, CPU percent from the second sample o
 one-minute load average except on Windows, total and available memory; in this crate's own
 tests every check-in repeats the process's first sample), its `resource_limits` (Registry
 settings, else the defaults), each Theater's running `sessions`,
-local Operation paths, available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
+local Operation paths (`operations`: the Operations with a checkout here, which placement reads), every Operation it may place a Mission of (`runnable_operations`: its `stations` list admits it and any Theater it names is one of this Station's, which Universal Exports reads to accept an Operation bound to a remote Theater), available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
 placement policy (`operation_policies`, omitted with a log line when over 512 KiB), every
 roster Operation's ancestors nearest first (`operation_lineage`: `{"G": ["P", "ROOT"],
 "ROOT": []}`, omitted with a log line when over 512 KiB), the

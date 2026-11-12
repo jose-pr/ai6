@@ -4668,6 +4668,8 @@ async fn put_user_station_settings(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Refuses an Operation no Station lists, as a checkout (`operations`) or as one it may place
+/// Missions of (`runnable_operations`, which covers Operations on a remote Theater).
 async fn ensure_operation_registered(
     registry: &Arc<dyn RegistryBackend>,
     operation_id: &OperationId,
@@ -4679,14 +4681,18 @@ async fn ensure_operation_registered(
             .stations(Duration::MAX)
             .map(|stations| {
                 stations.iter().any(|station| {
-                    station
-                        .info()
-                        .get("operations")
-                        .and_then(serde_json::Value::as_array)
-                        .is_some_and(|operations| {
-                            operations
-                                .iter()
-                                .any(|value| value.as_str() == Some(&operation_id))
+                    ["operations", "runnable_operations"]
+                        .into_iter()
+                        .any(|key| {
+                            station
+                                .info()
+                                .get(key)
+                                .and_then(serde_json::Value::as_array)
+                                .is_some_and(|operations| {
+                                    operations
+                                        .iter()
+                                        .any(|value| value.as_str() == Some(&operation_id))
+                                })
                         })
                 })
             })
