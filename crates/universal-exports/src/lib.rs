@@ -6,6 +6,8 @@
 mod access_admin;
 mod accounts;
 mod agents;
+#[cfg(test)]
+mod board_tests;
 mod compartments;
 mod controls;
 #[cfg(test)]
@@ -990,29 +992,140 @@ impl Gateway {
             .ok_or(GatewayError::Conflict)
     }
 
-    /// Returns the current provider Sessions, their latest lifecycle states and the Agent of
-    /// each one's Mission brief.
+    /// Returns the provider Sessions, their latest lifecycle states and the Agent of each one's
+    /// Mission.
+    ///
+    /// The Registry's Session records say what ended or is waiting to be checked, which no
+    /// Station sends again after the gateway restarts; the lifecycle frames received since say
+    /// what is happening now and win while their sequence is above zero, unless the record has
+    /// closed. Records past `[gateway] board_sessions`, the least recently updated, are left out.
     pub async fn board_sessions(&self) -> Vec<BoardSession> {
-        let inner = self.inner.lock().await;
-        let mut sessions = inner
-            .sessions
-            .iter()
-            .map(|(session_id, session)| BoardSession {
-                operation_id: session.operation_id.to_string(),
-                mission_id: session.mission_id.to_string(),
-                session_id: session_id.to_string(),
-                state: session.lifecycle_state.clone(),
-                reason: session.lifecycle_reason.clone(),
-                sequence: session.lifecycle_sequence,
-                updated_at: session.lifecycle_at,
-                exposure: Vec::new(),
-                station_id: None,
-                agent: inner
-                    .missions
-                    .get(&(session.operation_id.clone(), session.mission_id.clone()))
-                    .and_then(|brief| brief.agent_id.clone()),
-            })
-            .collect::<Vec<_>>();
+        let (mut live, briefs) = {
+            let inner = self.inner.lock().await;
+            let briefs: HashMap<(String, String), String> = inner
+                .missions
+                .iter()
+                .filter_map(|((operation, mission), brief)| {
+                    Some((
+                        (operation.to_string(), mission.to_string()),
+                        brief.agent_id.clone()?,
+                    ))
+                })
+                .collect();
+            let live: BTreeMap<String, BoardSession> = inner
+                .sessions
+                .iter()
+                .map(|(session_id, session)| {
+                    let operation_id = session.operation_id.to_string();
+                    let mission_id = session.mission_id.to_string();
+                    let agent = briefs
+                        .get(&(operation_id.clone(), mission_id.clone()))
+                        .cloned();
+                    (
+                        session_id.to_string(),
+                        BoardSession {
+                            operation_id,
+                            mission_id,
+                            session_id: session_id.to_string(),
+                            state: session.lifecycle_state.clone(),
+                            reason: session.lifecycle_reason.clone(),
+                            sequence: session.lifecycle_sequence,
+                            updated_at: session.lifecycle_at,
+                            exposure: Vec::new(),
+                            station_id: None,
+                            agent,
+                        },
+                    )
+                })
+                .collect();
+            (live, briefs)
+        };
+        let keep = self.config.unex().gateway.board_sessions.or_max();
+        let recorded = match self.registry.clone() {
+            Some(registry) => tokio::task::spawn_blocking(move || registry.sessions())
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        // A later attempt may resume the provider's Session: the board lists it once, as the
+        // latest attempt stands.
+        let mut latest = HashMap::<String, ai6::SessionRecord>::new();
+        for record in recorded {
+            let Some(provider) = record.provider_session_id.clone() else {
+                continue;
+            };
+            if latest
+                .get(&provider)
+                .is_none_or(|held| held.attempt <= record.attempt)
+            {
+                latest.insert(provider, record);
+            }
+        }
+        let mut recorded: Vec<(ai6::SessionRecord, String)> = latest
+            .into_iter()
+            .map(|(provider, record)| (record, provider))
+            .collect();
+        recorded.sort_by(|(left, _), (right, _)| {
+            record_updated_at(right)
+                .partial_cmp(&record_updated_at(left))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        let mut sessions = Vec::new();
+        for (record, provider) in recorded {
+            let overlaid = live.remove(&provider);
+            if sessions.len() >= keep && overlaid.is_none() {
+                continue;
+            }
+            let Some(operation_id) = record
+                .operation
+                .clone()
+                .or_else(|| overlaid.as_ref().map(|live| live.operation_id.clone()))
+                .or_else(|| {
+                    briefs
+                        .keys()
+                        .find(|(_, mission)| *mission == record.mission_id)
+                        .map(|(operation, _)| operation.clone())
+                })
+            else {
+                continue;
+            };
+            let from_record = BoardSession {
+                agent: briefs
+                    .get(&(operation_id.clone(), record.mission_id.clone()))
+                    .cloned()
+                    .or_else(|| {
+                        record
+                            .launch
+                            .as_ref()
+                            .and_then(|launch| launch.agent.clone())
+                    }),
+                operation_id,
+                mission_id: record.mission_id.clone(),
+                session_id: provider,
+                state: record.result.as_ref().map(|result| result.state.clone()),
+                reason: record
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.reason.clone()),
+                sequence: 0,
+                updated_at: Some(record_updated_at(&record)).filter(|at| *at > 0.0),
+                exposure: record.exposure.iter().map(|e| e.source.clone()).collect(),
+                station_id: Some(record.station.clone()),
+            };
+            sessions.push(match overlaid {
+                Some(frames) if frames.sequence > 0 && !record.status.is_closed() => BoardSession {
+                    exposure: from_record.exposure,
+                    station_id: from_record.station_id,
+                    ..frames
+                },
+                _ => from_record,
+            });
+        }
+        // Sessions the Registry has not recorded (yet), or has no Registry for.
+        sessions.extend(live.into_values());
         sessions.sort_by(|left, right| {
             (&left.operation_id, &left.mission_id, &left.session_id).cmp(&(
                 &right.operation_id,
@@ -3071,36 +3184,29 @@ async fn authorized_board_sessions(
     let person = resolve_user(gateway, bearer(headers)?).await?;
     let authorizer = gateway.authorizer()?;
     let sessions = gateway.board_sessions().await;
-    let registry = gateway.registry.clone();
     let tree = operation_tree(gateway).await?;
     let visible = tokio::task::spawn_blocking(move || {
-        // Exposure and the holding Station live in the shared Session records, keyed by the
-        // provider's Session ID.
-        let records: BTreeMap<String, (String, Vec<String>)> = registry
-            .and_then(|registry| registry.sessions().ok())
-            .into_iter()
-            .flatten()
-            .filter_map(|record| {
-                let sources = record.exposure.into_iter().map(|e| e.source).collect();
-                Some((record.provider_session_id?, (record.station, sources)))
-            })
-            .collect();
         let mut visible = Vec::new();
-        for mut session in sessions {
-            if let Some((station, sources)) = records.get(&session.session_id) {
-                session.station_id = Some(station.clone());
-                session.exposure.clone_from(sources);
-            }
-            let decision = authorizer
-                .authorize(operation_request(
-                    person.clone(),
-                    "mission.read",
-                    &session.operation_id,
-                    &tree,
-                ))
-                .map_err(|_| ())?;
+        // One decision per Operation, not per Session.
+        let mut readable = HashMap::<String, bool>::new();
+        for session in sessions {
+            let allowed = match readable.get(&session.operation_id) {
+                Some(allowed) => *allowed,
+                None => {
+                    let decision = authorizer
+                        .authorize(operation_request(
+                            person.clone(),
+                            "mission.read",
+                            &session.operation_id,
+                            &tree,
+                        ))
+                        .map_err(|_| ())?;
+                    readable.insert(session.operation_id.clone(), decision.allowed);
+                    decision.allowed
+                }
+            };
             // A compartment may cover this Mission alone, not its Operation.
-            if decision.allowed
+            if allowed
                 || authorizer.allows_mission(
                     &person,
                     ai6::CompartmentAction::MissionRead,
@@ -3117,6 +3223,12 @@ async fn authorized_board_sessions(
     .map_err(|_| ApiError::internal())?
     .map_err(|_| ApiError::internal())?;
     Ok(visible)
+}
+
+/// When a Session record last changed in a way the board shows, as Unix seconds: its close, or
+/// else its opening; zero when it recorded neither.
+fn record_updated_at(record: &ai6::SessionRecord) -> f64 {
+    record.closed_at.or(record.opened_at).unwrap_or(0.0)
 }
 
 fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {

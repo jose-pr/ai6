@@ -2628,6 +2628,7 @@ pub fn ai6::directorates::m::unex_limits::TextLimits::default() -> Self
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::UnexGatewayLimits::board_sessions: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::client_slots: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::clients_per_session: ai6::bounds::Limit
@@ -14166,6 +14167,7 @@ pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6:
 pub ai6::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
 pub ai6::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
 pub ai6::UnexGatewayLimits::attach_token_ttl: ai6::bounds::Seconds
+pub ai6::UnexGatewayLimits::board_sessions: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::buffer_budget_bytes: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::client_slots: ai6::bounds::Limit
 pub ai6::UnexGatewayLimits::clients_per_session: ai6::bounds::Limit

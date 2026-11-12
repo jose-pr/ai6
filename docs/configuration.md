@@ -1005,6 +1005,7 @@ pending_per_station = 8
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `sessions` | 16 | **Live Sessions.** Live provider Sessions. |
+| `board_sessions` | 2,000 | **Sessions on the Mission board.** Sessions the Mission board lists from the Registry's records, the most recently updated ones; a Session still live is always listed. |
 | `clients_per_session` | 12 | **Browser connections per Session.** Simultaneous browser connections to one provider Session. |
 | `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per provider Session for a client that joins late. |
 | `frame_bytes` | 256 KiB | **Largest frame.** Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit. |

@@ -1037,6 +1037,57 @@ pub(crate) mod tests {
         }
     }
 
+    /// A gateway started afresh over the Registry of `served`: it has received no lifecycle
+    /// frame, as after a restart.
+    pub(crate) struct Restarted {
+        pub(crate) base: String,
+        pub(crate) gateway: Gateway,
+        server: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for Restarted {
+        fn drop(&mut self) {
+            self.server.abort();
+        }
+    }
+
+    pub(crate) async fn restarted(served: &Served) -> Restarted {
+        restarted_with(served, ai6::UnexLimits::default()).await
+    }
+
+    /// As [`restarted`], under `limits`.
+    pub(crate) async fn restarted_with(served: &Served, limits: ai6::UnexLimits) -> Restarted {
+        let authorizer = access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap();
+        let gateway = Gateway::with_access(
+            GatewayConfig::new(
+                "https://localhost",
+                STATION_TOKEN,
+                GatewayLimits::default(),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap()
+            .with_unex_limits(limits),
+            Arc::new(served.registry.clone()),
+            AccessProviders::new(Arc::new(People), Arc::new(People), Arc::new(authorizer)),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let router = gateway.clone().router();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await;
+        });
+        Restarted {
+            base,
+            gateway,
+            server,
+        }
+    }
+
     pub(crate) async fn ask(
         served: &Served,
         token: &str,

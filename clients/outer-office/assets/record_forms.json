@@ -6922,6 +6922,26 @@
               "description": "Live provider Sessions.",
               "default": 16
             },
+            "board_sessions": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Sessions on the Mission board",
+              "description": "Sessions the Mission board lists from the Registry's records, the most recently updated ones; a Session still live is always listed.",
+              "default": 2000
+            },
             "clients_per_session": {
               "anyOf": [
                 {
@@ -7221,6 +7241,7 @@
           "description": "`[gateway]`: live Sessions, connections and frames.",
           "default": {
             "sessions": 16,
+            "board_sessions": 2000,
             "clients_per_session": 12,
             "scrollback_events": 64,
             "frame_bytes": 262144,

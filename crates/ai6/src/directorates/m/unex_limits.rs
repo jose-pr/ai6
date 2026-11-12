@@ -39,6 +39,11 @@ pub struct UnexGatewayLimits {
     #[schema(title = "Live Sessions")]
     #[map(default = UnexGatewayLimits::default().sessions)]
     pub sessions: Limit,
+    /// Sessions the Mission board lists from the Registry's records, the most recently updated
+    /// ones; a Session still live is always listed.
+    #[schema(title = "Sessions on the Mission board")]
+    #[map(default = UnexGatewayLimits::default().board_sessions)]
+    pub board_sessions: Limit,
     /// Simultaneous browser connections to one provider Session.
     #[schema(title = "Browser connections per Session")]
     #[map(default = UnexGatewayLimits::default().clients_per_session)]
@@ -133,6 +138,7 @@ impl Default for UnexGatewayLimits {
     fn default() -> Self {
         Self {
             sessions: Limit::at(16),
+            board_sessions: Limit::at(2_000),
             clients_per_session: Limit::at(12),
             scrollback_events: Limit::at(64),
             frame_bytes: Limit::at(256 * KIB),
