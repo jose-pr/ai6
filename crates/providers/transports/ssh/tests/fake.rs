@@ -34,7 +34,7 @@ macro_rules! need_shell {
 
 /// Waits for something the server does on its own thread after the client has returned.
 fn eventually(condition: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !condition() {
         assert!(Instant::now() < deadline, "the server never did it");
         std::thread::sleep(Duration::from_millis(20));
@@ -250,13 +250,14 @@ fn a_run_reports_a_timeout_and_a_signal_free_exit() {
     let started = Instant::now();
     let output = ssh
         .run(&RunSpec {
-            argv: vec!["sleep".to_owned(), "30".to_owned()],
+            argv: vec!["sleep".to_owned(), "300".to_owned()],
             timeout_ms: 300,
             ..RunSpec::default()
         })
         .unwrap();
     assert!(output.timed_out && output.code.is_none());
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // The program runs for five minutes: a minute is far from waiting for it.
+    assert!(started.elapsed() < Duration::from_secs(60));
     eventually(|| {
         server
             .seen

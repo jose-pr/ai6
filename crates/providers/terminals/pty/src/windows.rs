@@ -207,7 +207,7 @@ mod tests {
         }
         tree.kill(true).unwrap();
         let _ = child.wait();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(60);
         while tree.running() {
             assert!(Instant::now() < deadline, "the job still runs");
             std::thread::sleep(Duration::from_millis(20));

@@ -771,6 +771,8 @@ mod tests {
     use std::io::ErrorKind;
     use std::net::{SocketAddr, TcpListener};
     use std::process::Command;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::JoinHandle;
     use std::time::Instant;
 
@@ -795,22 +797,28 @@ mod tests {
 
     /// How long a test's stalled remote waits for its one connection.
     const REMOTE_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
-    /// How long it holds that connection without answering.
-    const REMOTE_HOLD: Duration = Duration::from_secs(5);
+    /// The most it holds a connection without answering if the test never releases it.
+    const REMOTE_HOLD: Duration = Duration::from_secs(120);
 
-    /// A remote that takes one connection and never answers. Its thread returns whether anything
-    /// connected before `accept_for` passed: a clone stopped early never connects, and a blocking
-    /// `accept` would then outlive it, and the test joining the thread, for good.
-    fn stalled_remote(accept_for: Duration) -> (SocketAddr, JoinHandle<bool>) {
+    /// A remote that takes one connection and never answers until the returned flag is set. Its
+    /// thread returns whether anything connected before `accept_for` passed: a clone stopped
+    /// early never connects, and a blocking `accept` would then outlive it, and the test joining
+    /// the thread, for good.
+    fn stalled_remote(accept_for: Duration) -> (SocketAddr, JoinHandle<bool>, Arc<AtomicBool>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
+        let release = Arc::new(AtomicBool::new(false));
+        let released = Arc::clone(&release);
         let remote = std::thread::spawn(move || {
             let deadline = Instant::now() + accept_for;
             loop {
                 match listener.accept() {
                     Ok(held) => {
-                        std::thread::sleep(REMOTE_HOLD);
+                        let until = Instant::now() + REMOTE_HOLD;
+                        while !released.load(Ordering::Acquire) && Instant::now() < until {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
                         drop(held);
                         return true;
                     }
@@ -823,7 +831,7 @@ mod tests {
                 }
             }
         });
-        (address, remote)
+        (address, remote, release)
     }
 
     fn spec(source: &str, target: &Path, create: bool) -> SafeHouseSpec {
@@ -1486,7 +1494,7 @@ mod tests {
         assert!(refused.contains("more than 65536 bytes"), "{refused}");
         assert!(!root.path().join("three").exists(), "nothing is left");
 
-        let (address, stalled) = stalled_remote(REMOTE_ACCEPT_DEADLINE);
+        let (address, stalled, release) = stalled_remote(REMOTE_ACCEPT_DEADLINE);
         let mut silent = spec(
             &format!("http://{address}/eve.git"),
             &root.path().join("four"),
@@ -1495,13 +1503,13 @@ mod tests {
         if let Some(clone) = silent.clone.as_mut() {
             clone.timeout_secs = Some(1);
         }
-        let started = std::time::Instant::now();
+        // The remote answers nothing until this returns, so returning at all is not waiting on it.
         let timed_out = open(&silent).unwrap_err();
+        release.store(true, Ordering::Release);
         assert!(
             timed_out.contains("timed out after 1 seconds"),
             "{timed_out}"
         );
-        assert!(started.elapsed() < REMOTE_HOLD);
         assert!(!root.path().join("four").exists(), "nothing is left");
         // On a busy machine the time can run out before git connects, which times out all the same.
         stalled.join().unwrap();
@@ -1509,15 +1517,7 @@ mod tests {
 
     #[test]
     fn a_stalled_remote_nobody_connects_to_gives_up_at_its_deadline() {
-        let (_address, remote) = stalled_remote(Duration::from_millis(100));
-        let started = Instant::now();
-        while !remote.is_finished() {
-            assert!(
-                started.elapsed() < REMOTE_ACCEPT_DEADLINE,
-                "the remote still waits for a connection"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let (_address, remote, _release) = stalled_remote(Duration::from_millis(100));
         assert!(!remote.join().unwrap(), "nothing connected");
     }
 

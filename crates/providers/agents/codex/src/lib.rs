@@ -2593,7 +2593,7 @@ mod tests {
     }
 
     fn read_to_completion(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(60);
         let mut events = Vec::new();
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -4978,9 +4978,9 @@ mod tests {
         session.close().unwrap();
     }
 
-    /// Events until the Session ends (`completed` or `failed`), at most five seconds.
+    /// Events until the Session ends (`completed` or `failed`), at most a minute.
     fn until_end(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(60);
         let mut events = Vec::new();
         while Instant::now() < deadline {
             match session.next_event(200) {

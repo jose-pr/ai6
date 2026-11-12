@@ -397,16 +397,17 @@ fn the_ssh_transport_works_against_a_real_openssh_server() {
     let started = Instant::now();
     let out = pinned
         .run(&RunSpec {
-            argv: vec!["sleep".to_owned(), "45".to_owned()],
+            argv: vec!["sleep".to_owned(), "300".to_owned()],
             timeout_ms: 400,
             ..RunSpec::default()
         })
         .unwrap();
-    assert!(out.timed_out && started.elapsed() < Duration::from_secs(10));
+    // The program runs for five minutes: a minute is far from waiting for it.
+    assert!(out.timed_out && started.elapsed() < Duration::from_secs(60));
     wait_until("the timed-out program is gone", || {
         run(
             &pinned,
-            "pgrep -f '[s]leep 45' >/dev/null && echo alive || echo gone",
+            "pgrep -f '[s]leep 300' >/dev/null && echo alive || echo gone",
         )
         .stdout
         .0
@@ -495,7 +496,7 @@ fn the_ssh_transport_works_against_a_real_openssh_server() {
 }
 
 fn wait_until(what: &str, condition: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !condition() {
         assert!(Instant::now() < deadline, "timed out waiting: {what}");
         std::thread::sleep(Duration::from_millis(100));

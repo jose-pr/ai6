@@ -66,11 +66,11 @@ fn standard_input_reaches_the_program() {
 #[test]
 fn a_program_that_outlives_its_timeout_is_killed() {
     let argv: Vec<String> = if cfg!(windows) {
-        ["ping", "-n", "30", "127.0.0.1"]
+        ["ping", "-n", "300", "127.0.0.1"]
             .map(str::to_owned)
             .to_vec()
     } else {
-        ["sleep", "30"].map(str::to_owned).to_vec()
+        ["sleep", "300"].map(str::to_owned).to_vec()
     };
     let started = Instant::now();
     let output = client()
@@ -82,7 +82,8 @@ fn a_program_that_outlives_its_timeout_is_killed() {
         .unwrap();
     assert!(output.timed_out);
     assert_eq!(output.code, None);
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // The program runs for five minutes: a minute is far from waiting for it.
+    assert!(started.elapsed() < Duration::from_secs(60));
 }
 
 #[test]

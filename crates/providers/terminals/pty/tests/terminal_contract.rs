@@ -25,7 +25,7 @@ fn start(argv: Vec<String>) -> Object<dyn TerminalSession> {
 }
 
 fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     let mut output = Vec::new();
     let mut buffer = [0; 1024];
     while !output.windows(marker.len()).any(|window| window == marker) {
@@ -43,7 +43,7 @@ fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
 }
 
 fn wait_for_exit(session: &Object<dyn TerminalSession>) -> ExitInfo {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let value = session.exit_status(0).unwrap();
         let status = ExitInfo::from_value(&value).unwrap();

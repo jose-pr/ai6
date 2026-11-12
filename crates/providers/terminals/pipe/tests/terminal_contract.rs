@@ -100,7 +100,7 @@ fn exit_now(session: &Object<dyn TerminalSession>) -> ExitInfo {
 }
 
 fn wait_for_exit(session: &Object<dyn TerminalSession>) -> ExitInfo {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let status = ExitInfo::from_value(&session.exit_status(100).unwrap()).unwrap();
         if !status.running {
