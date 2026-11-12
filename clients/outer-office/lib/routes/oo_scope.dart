@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../main.dart' show ReadForbidden;
 import '../shell/oo_link.dart';
 import 'oo_route.dart';
 
@@ -39,7 +40,8 @@ class OoScope {
 
 /// Reads [load] for every Operation of [operations] at once. Rows come back with the Operation
 /// they were read in; an Operation whose read fails keeps its rows from [previous] and is named
-/// in `failed` with the reason.
+/// in `failed` with the reason. Among several Operations, one the account may not read
+/// (`ReadForbidden`) is left out without a word.
 Future<({List<(String, T)> rows, Map<String, String> failed})> readEach<T>(
   List<String> operations,
   Future<List<T>> Function(String operation) load,
@@ -49,8 +51,15 @@ Future<({List<(String, T)> rows, Map<String, String> failed})> readEach<T>(
     for (final operation in operations)
       load(operation).then<(String, List<T>?, String?)>(
         (rows) => (operation, rows, null),
-        onError: (Object error) =>
-            (operation, null, error is StateError ? error.message : '$error'),
+        onError: (Object error) => (
+          operation,
+          null,
+          error is ReadForbidden && operations.length > 1
+              ? null
+              : error is StateError
+              ? error.message
+              : '$error',
+        ),
       ),
   ]);
   return (

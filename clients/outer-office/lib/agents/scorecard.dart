@@ -185,6 +185,50 @@ class ScorecardSummary {
       windowDays == 0 ? 'every attempt on record' : 'the last $windowDays days';
 }
 
+/// The scorecards of [operations] under one collapsed heading, so the table below keeps the
+/// page. Opened, they scroll within a bounded height; each names the Operation it is for.
+class ScorecardsArea extends StatelessWidget {
+  const ScorecardsArea({
+    required this.board,
+    required this.operations,
+    super.key,
+  });
+
+  final MissionBoard board;
+  final List<String> operations;
+
+  @override
+  Widget build(BuildContext context) {
+    if (operations.isEmpty) return const SizedBox.shrink();
+    return Card(
+      child: ExpansionTile(
+        title: const Text('Scorecards'),
+        subtitle: Text(
+          operations.length == 1
+              ? operations.single
+              : '${operations.length} Operations',
+        ),
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final operation in operations)
+                  ScorecardSection(
+                    key: ValueKey(operation),
+                    board: board,
+                    operation: operation,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The scorecard of an Operation's Agents, routes and models, with every number opening the
 /// Missions behind it.
 class ScorecardSection extends StatefulWidget {
@@ -204,6 +248,7 @@ class ScorecardSection extends StatefulWidget {
 class _ScorecardSectionState extends State<ScorecardSection> {
   ScorecardSummary? _card;
   String? _error;
+  bool _forbidden = false;
 
   @override
   void initState() {
@@ -229,6 +274,9 @@ class _ScorecardSectionState extends State<ScorecardSection> {
         _card = card;
         _error = null;
       });
+    } on ReadForbidden {
+      // The account lacks the action here: nothing to show, nothing wrong.
+      if (mounted) setState(() => _forbidden = true);
     } on StateError catch (error) {
       if (mounted) setState(() => _error = error.message);
     }
@@ -236,11 +284,12 @@ class _ScorecardSectionState extends State<ScorecardSection> {
 
   @override
   Widget build(BuildContext context) {
+    if (_forbidden) return const SizedBox.shrink();
     final card = _card;
     final theme = Theme.of(context);
     return Card(
       child: ExpansionTile(
-        title: const Text('Scorecard'),
+        title: Text('Scorecard · ${widget.operation}'),
         subtitle: Text(
           card == null
               ? (_error ?? 'Reading the Sessions…')

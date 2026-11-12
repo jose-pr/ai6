@@ -282,7 +282,7 @@ void main() {
       final without = <http.Request>[];
       await openAgents(tester, signedIn(without, ['agent.read']));
       expect(
-        find.text('Scorecard'),
+        find.text('Scorecards'),
         findsNothing,
         reason: 'roster.read is needed',
       );
@@ -296,7 +296,9 @@ void main() {
         tester,
         signedIn(requests, ['agent.read'], roster: ['roster.read']),
       );
-      await tester.tap(find.text('Scorecard'));
+      await tester.tap(find.text('Scorecards'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Scorecard · G'));
       await tester.pumpAndSettle();
       expect(
         find.text('4 judged · 25 % failed · small sample: not ranked'),

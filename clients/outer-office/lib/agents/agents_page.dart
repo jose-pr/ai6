@@ -684,9 +684,14 @@ class _AgentsPageState extends State<AgentsPage>
                 )
               : Column(
                   children: [
-                    for (final group in shown)
-                      if (widget.board.canReadScorecard(group) && named == null)
-                        ScorecardSection(board: widget.board, operation: group),
+                    if (named == null)
+                      ScorecardsArea(
+                        board: widget.board,
+                        operations: [
+                          for (final group in shown)
+                            if (widget.board.canReadScorecard(group)) group,
+                        ],
+                      ),
                     Expanded(
                       child: OoDataTable<OoGrouped<AgentSummary>>(
                         rows: groupByEntity(agents, (agent) => agent.agent),
