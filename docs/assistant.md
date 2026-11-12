@@ -1147,7 +1147,7 @@ times it ran; while she is still answering the row reads **Checking sources… (
 first call was. A refused tool, a question, a proposal and a view stay where they came, since
 they ask something of the person. Above the composer a **scope chip** says what the next
 message is about: by default the page the person is on (**Operation · guatiao**,
-**Mission · m-7**, **Station · gungnir**), which is the route sent with the message. The chip's
+**Mission · m-7**, **Station · station-b**), which is the route sent with the message. The chip's
 button removes the scope (**All accessible Operations**, no route sent), its menu pins an
 Operation, and once the scope is pinned or removed a page the person moves to is offered as
 **Ask about … instead** and never taken by itself; **Follow the page** goes back. With the chat

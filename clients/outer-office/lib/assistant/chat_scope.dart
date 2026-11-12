@@ -17,7 +17,7 @@ enum ChatScopeMode {
 }
 
 /// What a route is about, in the words the scope chip shows: "Mission · m-7",
-/// "Operation · guatiao", "Station · gungnir", else the page.
+/// "Operation · guatiao", "Station · station-b", else the page.
 String scopeLabel(OoRoute? route) {
   if (route == null) return 'All accessible Operations';
   for (final (field, word) in const [

@@ -567,7 +567,7 @@ pub(crate) async fn read(
         }
         // Past refusals, from the audit log, against what the Station reports now.
         let mut shown: BTreeSet<String> = BTreeSet::new();
-        for record in refusals.iter().filter(|record| {
+        for record in refusals.iter().map(|entry| &entry.record).filter(|record| {
             record.action == REFUSED_ACTION
                 && record.resource.as_deref() == Some(scope.as_str())
                 && limits
