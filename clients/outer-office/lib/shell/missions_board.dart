@@ -82,13 +82,14 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
     return true;
   }
 
-  double updated(MissionGroup mission) => mission.sessions
-      .map((session) => session.updatedAt ?? 0)
-      .reduce((a, b) => a > b ? a : b);
-  // The board holds no creation time: the earliest update it holds stands in for one.
-  double created(MissionGroup mission) => mission.sessions
-      .map((session) => session.updatedAt ?? 0)
-      .reduce((a, b) => a < b ? a : b);
+  double updated(MissionGroup mission) => mission.updatedAt ?? 0;
+  // The board holds no creation time: the earliest update it holds stands in for one, and a
+  // Mission with no Session has only the time the Registry last said where it stands.
+  double created(MissionGroup mission) => mission.sessions.isEmpty
+      ? mission.pending?.at ?? 0
+      : mission.sessions
+            .map((session) => session.updatedAt ?? 0)
+            .reduce((a, b) => a < b ? a : b);
   final sort = route['sort'] ?? 'updated';
   final Comparable<Object> Function(MissionGroup) key = switch (sort) {
     'created' => created,

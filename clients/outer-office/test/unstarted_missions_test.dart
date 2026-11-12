@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/mission_detail.dart';
+import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/missions_table.dart';
 import 'package:outer_office/shell/oo_freshness.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;
@@ -204,6 +205,28 @@ void main() {
     expect(find.text('Failed before it started'), findsOneWidget);
     expect(find.text('no PATH'), findsOneWidget);
   });
+
+  test(
+    'the board sorts Missions with and without Sessions by either time',
+    () async {
+      final board = await _board();
+      for (final sort in ['updated', 'created']) {
+        for (final order in ['asc', 'desc']) {
+          final route = OoRoute(OoPage.missions)
+              .withField('sort', sort)
+              .withField('order', order);
+          final sorted = routeMissions(board, route);
+          expect(
+            sorted.length,
+            board.missionGroups().length,
+            reason: '$sort $order',
+          );
+          expect(sorted.any((group) => group.sessions.isEmpty), isTrue);
+          expect(sorted.any((group) => group.sessions.isNotEmpty), isTrue);
+        }
+      }
+    },
+  );
 
   testWidgets('a Mission that failed before it started opens its detail', (
     tester,
