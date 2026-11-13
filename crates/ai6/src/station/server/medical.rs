@@ -55,8 +55,7 @@ pub(super) fn record_usage(
     let delta = tracker.observe(reported);
     super::accounts::record_usage(state, mission_id, delta.tokens());
     let operation_id = operation_of(state, mission_id);
-    let run =
-        run_hold(state, mission_id).map_or_else(|| mission_id.to_owned(), |hold| hold.id);
+    let run = run_hold(state, mission_id).map_or_else(|| mission_id.to_owned(), |hold| hold.id);
     match state.intake.record_usage(
         operation_id.as_deref(),
         mission_id,
@@ -315,10 +314,7 @@ pub(super) fn persist_exposure(state: &DaemonState, mission_id: &str, exposures:
         hold.fence,
         RunUpdate::default().exposed(exposures.to_vec()),
     ) {
-        eprintln!(
-            "ai6: exposure of Run {:?} not recorded: {error}",
-            hold.id
-        );
+        eprintln!("ai6: exposure of Run {:?} not recorded: {error}", hold.id);
     }
 }
 
@@ -336,8 +332,7 @@ pub(super) fn stop_for_budget(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            runs
-                .remove(mission_id)
+            runs.remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
             None

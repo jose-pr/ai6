@@ -754,10 +754,7 @@ impl fmt::Display for RunError {
             Self::Exists => f.write_str("a Run record with this ID already exists"),
             Self::Ended => f.write_str("the Run has ended"),
             Self::Unsettled(state) => {
-                write!(
-                    f,
-                    "the latest run has no outcome to judge: it is {state}"
-                )
+                write!(f, "the latest run has no outcome to judge: it is {state}")
             }
             Self::HeldBy(station) => write!(f, "Station {station:?} holds the Run lease"),
             Self::Stale => f.write_str("the Run lease or fencing token is stale"),
@@ -850,8 +847,7 @@ impl FileRegistry {
         super::store::validate_station_id(station)?;
         let _lock = self.lock()?;
         let path = self.run_path(id);
-        let mut record =
-            read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+        let mut record = read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
         take(&mut record, station, ttl, now, || self.headquarters_term())?;
         self.write_run(&path, &record)?;
         Ok(record)
@@ -869,8 +865,7 @@ impl FileRegistry {
         validate_run_id(id, &self.limits.runs)?;
         let _lock = self.lock()?;
         let path = self.run_path(id);
-        let mut record =
-            read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+        let mut record = read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
         apply_fenced(
             &mut record,
             station,
@@ -893,8 +888,7 @@ impl FileRegistry {
         validate_run_id(id, &self.limits.runs)?;
         let _lock = self.lock()?;
         let path = self.run_path(id);
-        let mut record =
-            read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+        let mut record = read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
         lose(
             &mut record,
             reason,
@@ -1189,10 +1183,7 @@ pub(super) fn apply_probe_request(record: &mut RunRecord, at: f64) -> Result<(),
 }
 
 /// Checks a final report's bounds before it is stored.
-pub(super) fn validate_final_report(
-    report: &FinalReport,
-    limits: &RunLimits,
-) -> io::Result<()> {
+pub(super) fn validate_final_report(report: &FinalReport, limits: &RunLimits) -> io::Result<()> {
     validate_run_id(&report.run_id, limits)?;
     if !limits.final_report_bytes.allows(report.text.len()) {
         return Err(io::Error::new(
@@ -1267,12 +1258,7 @@ pub trait RunStore {
     /// # Errors
     ///
     /// `NotFound`, `Ended`, `HeldBy` while another Station's lease is live, or `Io`.
-    fn take_run(
-        &self,
-        id: &str,
-        station: &str,
-        ttl: Duration,
-    ) -> Result<RunRecord, RunError>;
+    fn take_run(&self, id: &str, station: &str, ttl: Duration) -> Result<RunRecord, RunError>;
 
     /// Extends the lease `station` holds on a Run, if it still holds it with `fence`.
     ///
@@ -1398,12 +1384,7 @@ impl RunStore for FileRegistry {
         self.runs_locked()
     }
 
-    fn take_run(
-        &self,
-        id: &str,
-        station: &str,
-        ttl: Duration,
-    ) -> Result<RunRecord, RunError> {
+    fn take_run(&self, id: &str, station: &str, ttl: Duration) -> Result<RunRecord, RunError> {
         self.take_run_at(id, station, ttl, unix_time()?)
     }
 
@@ -1544,10 +1525,7 @@ impl FileRegistry {
     }
 }
 
-fn read_run(
-    path: &std::path::Path,
-    limits: &RunLimits,
-) -> io::Result<Option<RunRecord>> {
+fn read_run(path: &std::path::Path, limits: &RunLimits) -> io::Result<Option<RunRecord>> {
     match fs::read(path) {
         Ok(bytes) => parse_run(&bytes, limits).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -1641,16 +1619,12 @@ mod tests {
         registry.open_run_at(new_run(), TTL, NOW).unwrap();
         let next = registry
             .open_run_at(
-                NewRun::new("s-2", "mission-1", "station-a")
-                    .with_number(2, Some("s-1".to_owned())),
+                NewRun::new("s-2", "mission-1", "station-a").with_number(2, Some("s-1".to_owned())),
                 TTL,
                 NOW,
             )
             .unwrap();
-        assert_eq!(
-            (next.number, next.predecessor.as_deref()),
-            (2, Some("s-1"))
-        );
+        assert_eq!((next.number, next.predecessor.as_deref()), (2, Some("s-1")));
     }
 
     fn a_stale_fencing_token_is_refused(store: &dyn Store) {
@@ -2075,8 +2049,7 @@ mod tests {
         registry.open_run_at(new_run(), TTL, NOW).unwrap();
         registry
             .open_run_at(
-                NewRun::new("s-0", "mission-1", "station-b")
-                    .with_number(2, Some("s-1".to_owned())),
+                NewRun::new("s-0", "mission-1", "station-b").with_number(2, Some("s-1".to_owned())),
                 TTL,
                 NOW,
             )

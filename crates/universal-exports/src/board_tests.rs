@@ -63,13 +63,7 @@ fn states<'a>(missions: &'a Value, mission: &str) -> Vec<&'a str> {
 #[tokio::test]
 async fn a_restarted_gateway_lists_ended_verifying_and_live_runs_from_the_registry() {
     let served = served().await;
-    record(
-        &served.registry,
-        "m-ended",
-        "G",
-        "done",
-        RunStatus::Ended,
-    );
+    record(&served.registry, "m-ended", "G", "done", RunStatus::Ended);
     record(
         &served.registry,
         "m-verifying",
@@ -77,13 +71,7 @@ async fn a_restarted_gateway_lists_ended_verifying_and_live_runs_from_the_regist
         "verifying",
         RunStatus::Active,
     );
-    record(
-        &served.registry,
-        "m-other",
-        "L",
-        "done",
-        RunStatus::Ended,
-    );
+    record(&served.registry, "m-other", "L", "done", RunStatus::Ended);
     let again = restarted(&served).await;
 
     let listed = get(&again.base, &served.viewer, "/v1/missions").await;
@@ -142,13 +130,7 @@ async fn live_frames_win_over_a_record_unless_it_has_closed() {
         "verifying",
         RunStatus::Active,
     );
-    record(
-        &served.registry,
-        "m-ended",
-        "G",
-        "done",
-        RunStatus::Ended,
-    );
+    record(&served.registry, "m-ended", "G", "done", RunStatus::Ended);
     let again = restarted(&served).await;
     for (mission, run) in [
         ("m-verifying", "run-m-verifying"),
@@ -187,12 +169,7 @@ async fn live_frames_win_over_a_record_unless_it_has_closed() {
     }
 
     let board = again.gateway.board_runs().await;
-    let find = |run: &str| {
-        board
-            .iter()
-            .find(|entry| entry.run_id == run)
-            .unwrap()
-    };
+    let find = |run: &str| board.iter().find(|entry| entry.run_id == run).unwrap();
     let live = find("run-m-verifying");
     assert_eq!(live.state.as_deref(), Some("working"));
     assert_eq!(live.sequence, 4);
@@ -204,13 +181,7 @@ async fn live_frames_win_over_a_record_unless_it_has_closed() {
 #[tokio::test]
 async fn the_board_keeps_the_most_recently_updated_records_within_its_bound() {
     let served = served().await;
-    record(
-        &served.registry,
-        "m-ended",
-        "G",
-        "done",
-        RunStatus::Ended,
-    );
+    record(&served.registry, "m-ended", "G", "done", RunStatus::Ended);
     let mut limits = ai6::UnexLimits::default();
     limits.gateway.board_runs = ai6::Limit::at(1);
     let again = restarted_with(&served, limits).await;
@@ -221,13 +192,7 @@ async fn the_board_keeps_the_most_recently_updated_records_within_its_bound() {
 #[tokio::test]
 async fn a_recorded_mission_is_not_also_listed_as_pending() {
     let served = served().await;
-    record(
-        &served.registry,
-        "m-ended",
-        "G",
-        "done",
-        RunStatus::Ended,
-    );
+    record(&served.registry, "m-ended", "G", "done", RunStatus::Ended);
     served
         .registry
         .check_in(

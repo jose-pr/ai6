@@ -321,12 +321,14 @@ async fn known_mission(
         (registry.clone(), mission.to_owned(), operation.to_string());
     let on_board = {
         let inner = gateway.inner.lock().await;
-        inner.runs.values().any(|run| {
-            run.mission_id.as_str() == mission && run.operation_id == *operation
-        }) || inner
-            .missions
-            .keys()
-            .any(|(held, id)| held == operation && id.as_str() == mission)
+        inner
+            .runs
+            .values()
+            .any(|run| run.mission_id.as_str() == mission && run.operation_id == *operation)
+            || inner
+                .missions
+                .keys()
+                .any(|(held, id)| held == operation && id.as_str() == mission)
     };
     let known = blocking(move || {
         let linked = store

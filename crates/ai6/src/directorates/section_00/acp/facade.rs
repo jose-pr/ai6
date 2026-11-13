@@ -211,12 +211,7 @@ fn handle_notification(inner: &Arc<Inner>, message: &UntypedMessage) {
         return;
     };
     std::thread::spawn(move || {
-        if let Some(run) = operation
-            .run
-            .lock()
-            .ok()
-            .and_then(|run| run.clone())
-        {
+        if let Some(run) = operation.run.lock().ok().and_then(|run| run.clone()) {
             let _ = run.interrupt();
         }
         answer_all(&operation, |responder| {
@@ -259,11 +254,7 @@ fn authenticate(inner: &Inner, authenticated: &AtomicBool, params: &Value) -> Re
     }
 }
 
-fn new_run(
-    inner: &Arc<Inner>,
-    params: &Value,
-    cx: &ConnectionTo<Client>,
-) -> Result<Value, Error> {
+fn new_run(inner: &Arc<Inner>, params: &Value, cx: &ConnectionTo<Client>) -> Result<Value, Error> {
     let launch: LaunchMeta = meta_of(params)?;
     let cwd = params
         .get("cwd")
@@ -325,11 +316,7 @@ fn send_or_start(
     operation: &Arc<Operation>,
     text: String,
 ) -> Result<(), Error> {
-    let existing = operation
-        .run
-        .lock()
-        .ok()
-        .and_then(|run| run.clone());
+    let existing = operation.run.lock().ok().and_then(|run| run.clone());
     if let Some(run) = existing {
         return run
             .send_message(AgentMessage { text })
@@ -423,11 +410,7 @@ fn close(inner: &Arc<Inner>, params: &Value, responder: Responder<Value>) {
     let inner = inner.clone();
     std::thread::spawn(move || {
         operation.stop.store(true, Ordering::SeqCst);
-        let run = operation
-            .run
-            .lock()
-            .ok()
-            .and_then(|run| run.clone());
+        let run = operation.run.lock().ok().and_then(|run| run.clone());
         let closed = run.map_or(Ok(()), |run| run.close());
         if let Ok(mut operations) = inner.operations.lock() {
             operations.remove(&operation.id);

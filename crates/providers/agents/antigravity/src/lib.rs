@@ -358,10 +358,7 @@ impl AgentHandler for AntigravityHandler {
     }
 
     /// agy keeps each conversation's transcript under its home directory.
-    fn run_record(
-        &self,
-        query: RunRecordQuery,
-    ) -> Result<Option<RunRecordFile>, ProviderError> {
+    fn run_record(&self, query: RunRecordQuery) -> Result<Option<RunRecordFile>, ProviderError> {
         Ok(antigravity_record(&query))
     }
 
@@ -478,13 +475,7 @@ impl AgentHandler for AntigravityHandler {
             "",
             &request.overlays,
         )?;
-        let argv = self.argv(
-            &launch,
-            &plan,
-            &files,
-            None,
-            Some(request.run_id.as_str()),
-        );
+        let argv = self.argv(&launch, &plan, &files, None, Some(request.run_id.as_str()));
         let environment = self.environment(&request.environment);
         let run = spawn(
             &terminal,

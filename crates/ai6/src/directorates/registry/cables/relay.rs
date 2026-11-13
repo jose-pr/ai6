@@ -1762,8 +1762,7 @@ impl CableRelay {
             .get_cable(cable_id)
             .map_err(|_| CableRelayError::RegistryUnavailable)?
             .ok_or(CableRelayError::Unavailable)?;
-        if cable.sender_agent() != principal.agent
-            || cable.run_id() != principal.run_id.as_deref()
+        if cable.sender_agent() != principal.agent || cable.run_id() != principal.run_id.as_deref()
         {
             return Err(CableRelayError::Unavailable);
         }
@@ -2415,9 +2414,7 @@ impl CableRelay {
         for endpoint in candidates {
             // A recipient with no Run would be read by any Run of that Agent, in an
             // Operation the compartment may not cover.
-            if in_compartment
-                && (endpoint.run_id.is_none() || endpoint.run_id == sender.run_id)
-            {
+            if in_compartment && (endpoint.run_id.is_none() || endpoint.run_id == sender.run_id) {
                 continue;
             }
             let crosses = endpoint.operation != sender.operation;

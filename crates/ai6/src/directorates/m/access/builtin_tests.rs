@@ -96,12 +96,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
     operator.sort_unstable();
     let mut auditor: Vec<&str> = [
         &read[..],
-        &[
-            "access.read",
-            "audit.read",
-            "mission.verify",
-            "run.context",
-        ][..],
+        &["access.read", "audit.read", "mission.verify", "run.context"][..],
     ]
     .concat();
     auditor.sort_unstable();

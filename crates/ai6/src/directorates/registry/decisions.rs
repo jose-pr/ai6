@@ -89,10 +89,7 @@ impl<'a> VerifyingDecision<'a> {
 /// # Errors
 ///
 /// `NotFound` for no run or another Operation's; `Unsettled` with its state otherwise.
-pub fn check_verifying(
-    latest: &Option<RunRecord>,
-    operation: &str,
-) -> Result<(), RunError> {
+pub fn check_verifying(latest: &Option<RunRecord>, operation: &str) -> Result<(), RunError> {
     match latest {
         Some(record) if record.operation.as_deref() == Some(operation) => {
             let state = record

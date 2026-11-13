@@ -4,6 +4,7 @@
 pub mod access;
 pub mod approvals;
 pub mod assistant;
+pub mod charges;
 pub mod compartments;
 pub mod config;
 pub mod cover;
@@ -29,4 +30,3 @@ pub mod stewardship;
 pub mod theaters;
 pub mod unex_limits;
 pub mod vetting;
-pub mod charges;

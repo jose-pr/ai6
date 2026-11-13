@@ -214,12 +214,7 @@ mod tests {
         let request = PlacementRequest::default();
         let without_runner = adopter(&policy(), &request, &stations, &run("box", false));
         assert!(without_runner.unwrap_err().contains("no runner"));
-        let local = adopter(
-            &policy(),
-            &request,
-            &stations,
-            &run(LOCAL_THEATER, true),
-        );
+        let local = adopter(&policy(), &request, &stations, &run(LOCAL_THEATER, true));
         assert!(local.unwrap_err().contains("own host"));
     }
 

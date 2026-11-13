@@ -166,11 +166,7 @@ impl AgentHandler for MockAuthorHandler {
         request: AgentResume,
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        if !REPORTED
-            .lock()
-            .unwrap()
-            .contains(request.run_id.as_str())
-        {
+        if !REPORTED.lock().unwrap().contains(request.run_id.as_str()) {
             return Err(refused("no conversation found with that Run ID"));
         }
         AUTHOR_RESUMES.lock().unwrap().push(request.clone());
@@ -280,11 +276,7 @@ impl AgentHandler for MockReviewerHandler {
         request: AgentResume,
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        if !REPORTED
-            .lock()
-            .unwrap()
-            .contains(request.run_id.as_str())
-        {
+        if !REPORTED.lock().unwrap().contains(request.run_id.as_str()) {
             return Err(refused("no conversation found with that Run ID"));
         }
         Ok(ScriptRun::new(request.run_id, true, answer("pass", "")).into_object())

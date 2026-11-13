@@ -14,6 +14,9 @@ mod cable_wakes;
 #[cfg(feature = "cables-mcp")]
 mod cables_mcp;
 #[cfg(test)]
+mod charge_tests;
+mod charges;
+#[cfg(test)]
 mod check_in_cost_tests;
 #[cfg(feature = "cables-mcp")]
 mod compartments;
@@ -60,9 +63,6 @@ mod usage_watch;
 mod verdicts;
 mod verification;
 mod vetting;
-#[cfg(test)]
-mod charge_tests;
-mod charges;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -2318,10 +2318,7 @@ fn current_handle(state: &DaemonState, mission_id: &str) -> String {
 /// another Station wrote, for a Mission this Station knows of no earlier run at.
 fn open_run(state: &DaemonState, mut run: NewRun) -> Result<RunRecord, RunError> {
     loop {
-        match state
-            .intake
-            .open_run(run.clone(), state.mission_lease())
-        {
+        match state.intake.open_run(run.clone(), state.mission_lease()) {
             Err(RunError::Exists) => {
                 run = run.next_run().ok_or(RunError::Exists)?;
             }
@@ -2335,10 +2332,7 @@ fn run_error(error: RunError) -> ApiErrorResponse {
         RunError::HeldBy(station) => {
             conflict(&format!("Station {station:?} holds this Run's lease"))
         }
-        RunError::Stale
-        | RunError::Ended
-        | RunError::Exists
-        | RunError::NotFound => {
+        RunError::Stale | RunError::Ended | RunError::Exists | RunError::NotFound => {
             conflict("the Run's Registry lease is no longer available to this Station")
         }
         error => runtime_error(error),
@@ -2460,11 +2454,7 @@ fn publish_station_check_in(state: &DaemonState) {
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "localhost".to_owned());
-    let active_runs = state
-        .runs
-        .lock()
-        .map(|runs| runs.len())
-        .unwrap_or_default();
+    let active_runs = state.runs.lock().map(|runs| runs.len()).unwrap_or_default();
     let mut labels = BTreeMap::from([
         ("station".to_owned(), state.station_id.clone()),
         ("host".to_owned(), host.clone()),
@@ -2976,16 +2966,9 @@ fn runner_run(
     reach: ReachWatch,
     cables: Option<Arc<dyn crate::directorates::section_00::acp::ExtensionHandler>>,
 ) -> guatiao::library::Object<dyn AgentSession> {
-    RemoteRun::drive(
-        link,
-        key,
-        run,
-        run_id,
-        attachment.detached.clone(),
-        reach,
-    )
-    .with_cables(cables)
-    .into_object()
+    RemoteRun::drive(link, key, run, run_id, attachment.detached.clone(), reach)
+        .with_cables(cables)
+        .into_object()
 }
 
 /// Whether the harness of Mission `mission_id` on `theater_id` reaches its Cable endpoint. Only
@@ -5778,12 +5761,11 @@ async fn start_mission(
                 .map(|record| (record.number, record.id.clone()))
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
-    let mut new_run =
-        NewRun::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
-            .with_handle(current_handle(&state, mission_id.as_str()))
-            .with_theater(theater_id.as_str())
-            .with_number(attempt, predecessor)
-            .with_exposure(exposure.exposures());
+    let mut new_run = NewRun::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
+        .with_handle(current_handle(&state, mission_id.as_str()))
+        .with_theater(theater_id.as_str())
+        .with_number(attempt, predecessor)
+        .with_exposure(exposure.exposures());
     if let Some(run) = &window_run {
         new_run = new_run.with_window(run.window.as_str());
     }
@@ -5804,8 +5786,7 @@ async fn start_mission(
         .ok()
         .and_then(|missions| missions.operation(&mission_id))
     {
-        new_run =
-            new_run.with_launch(recovery::launch_of(&manifest, mission.agent_id.as_deref()));
+        new_run = new_run.with_launch(recovery::launch_of(&manifest, mission.agent_id.as_deref()));
     }
     let hold = match open_run(&state, new_run) {
         Ok(record) => RunHold {
@@ -6314,11 +6295,7 @@ async fn resume_mission(
     }
     let run_id = stored_run_id
         .or_else(|| mission.run_ids.last().cloned())
-        .or_else(|| {
-            reattach
-                .as_ref()
-                .and_then(|report| report.run_id.clone())
-        })
+        .or_else(|| reattach.as_ref().and_then(|report| report.run_id.clone()))
         .ok_or_else(|| conflict("Provider has not issued a Run ID yet"))?;
     acquire_run_hold(&state, &mission, &run_id)?;
     let exposure = medical::open_gate(&state, &mission);
@@ -7139,8 +7116,7 @@ fn spawn_event_pump(
         .lock()
         .ok()
         .and_then(|runs| {
-            runs
-                .get(&mission_id)
+            runs.get(&mission_id)
                 .map(|operation| operation.watchdog.clone())
         })
         .unwrap_or_default();
@@ -7195,14 +7171,9 @@ fn spawn_event_pump_with_monitor(
             }
             gate.yield_to_operator();
             let result = (|| {
-                let run = run
-                    .lock()
-                    .map_err(|_| "Run lock was poisoned".to_owned())?;
-                let event = run
-                    .next_event(1_000)
-                    .map_err(|error| error.to_string())?;
-                let run_id =
-                    provider_id(run.session_id()).map_err(|error| error.to_string())?;
+                let run = run.lock().map_err(|_| "Run lock was poisoned".to_owned())?;
+                let event = run.next_event(1_000).map_err(|error| error.to_string())?;
+                let run_id = provider_id(run.session_id()).map_err(|error| error.to_string())?;
                 Ok::<_, String>((event, run_id))
             })();
             if !is_current_run(&state, &mission_id, &run) {
@@ -7544,8 +7515,7 @@ fn is_current_run(
         .lock()
         .ok()
         .and_then(|runs| {
-            runs
-                .get(mission_id)
+            runs.get(mission_id)
                 .map(|operation| Arc::ptr_eq(&operation.run, run))
         })
         .unwrap_or(false)
@@ -7666,8 +7636,7 @@ fn stop_run_keeping_mission(
     run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
     let operation = state.runs.lock().ok().and_then(|mut runs| {
-        runs
-            .get(mission_id)
+        runs.get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
             .then(|| runs.remove(mission_id))
             .flatten()
@@ -8003,8 +7972,7 @@ fn handle_limit(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            runs
-                .remove(mission_id)
+            runs.remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
             None
@@ -8117,8 +8085,7 @@ fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
             hold.fence,
             RunUpdate::default()
                 .result(
-                    RunResult::new("abandoned")
-                        .with_reason(Some(RunResult::HANDED_OFF.to_owned())),
+                    RunResult::new("abandoned").with_reason(Some(RunResult::HANDED_OFF.to_owned())),
                 )
                 .status(RunStatus::Ended),
         );
@@ -8249,8 +8216,7 @@ fn finish_operation(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            runs
-                .remove(mission_id)
+            runs.remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
             None
@@ -8424,8 +8390,7 @@ fn stop_operation(
             .get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            runs
-                .remove(mission_id)
+            runs.remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
             None
@@ -8520,12 +8485,10 @@ async fn finalize_mission_resources(
             .lock()
             .map_err(|_| "Run lock was poisoned".to_owned())?;
         if interrupt {
-            run
-                .interrupt()
+            run.interrupt()
                 .map_err(|error| format!("provider interrupt failed: {error}"))?;
         }
-        run
-            .close()
+        run.close()
             .map_err(|error| format!("provider close failed: {error}"))?;
         drop(run);
         operation
@@ -8698,8 +8661,7 @@ async fn start_failure_with_run(
     safe_house: Option<SafeHouse>,
 ) -> ApiErrorResponse {
     let mut message = error.to_string();
-    match tokio::task::spawn_blocking(move || run.close().map_err(|error| error.to_string()))
-        .await
+    match tokio::task::spawn_blocking(move || run.close().map_err(|error| error.to_string())).await
     {
         Ok(Ok(())) => {}
         Ok(Err(error)) => message.push_str(&format!("; provider close failed: {error}")),
@@ -10419,10 +10381,7 @@ queue = 1
         assert_eq!(record.mission_id, "mission-1");
         assert_eq!(record.station, "test");
         assert_eq!(record.theater.as_deref(), Some(LOCAL_THEATER));
-        assert_eq!(
-            record.provider_id.as_deref(),
-            Some("provider-id-007")
-        );
+        assert_eq!(record.provider_id.as_deref(), Some("provider-id-007"));
         assert_eq!((record.number, record.predecessor), (1, None));
         assert_eq!(record.fence, hold.fence);
 
@@ -11177,10 +11136,7 @@ queue = 1
         schedule_queued_once(&state).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
         let run = state.intake.latest_run(&mission_id).unwrap().unwrap();
-        assert_eq!(
-            run.provider_id.as_deref(),
-            Some("provider-id-007")
-        );
+        assert_eq!(run.provider_id.as_deref(), Some("provider-id-007"));
 
         {
             let mut missions = state.missions.lock().unwrap();
@@ -12089,12 +12045,7 @@ theater = \"other-box\"
             },
         );
 
-        spawn_event_pump_with_monitor(
-            state.clone(),
-            mission_id.to_string(),
-            run,
-            monitor.clone(),
-        );
+        spawn_event_pump_with_monitor(state.clone(), mission_id.to_string(), run, monitor.clone());
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if state
@@ -12169,12 +12120,7 @@ theater = \"other-box\"
         );
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
-                if !state
-                    .runs
-                    .lock()
-                    .unwrap()
-                    .contains_key(mission_id.as_str())
-                {
+                if !state.runs.lock().unwrap().contains_key(mission_id.as_str()) {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -12293,8 +12239,7 @@ theater = \"other-box\"
         let stop = Arc::new(AtomicBool::new(false));
         let polls = Arc::new(AtomicUsize::new(0));
         let poller = {
-            let (run, gate, stop, polls) =
-                (run.clone(), gate.clone(), stop.clone(), polls.clone());
+            let (run, gate, stop, polls) = (run.clone(), gate.clone(), stop.clone(), polls.clone());
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Acquire) {
                     gate.yield_to_operator();
@@ -12423,11 +12368,7 @@ theater = \"other-box\"
                 .state,
             MissionState::Stalled,
             "events seen: {events:?}; Run still registered: {}; Mission: {:?}",
-            state
-                .runs
-                .lock()
-                .unwrap()
-                .contains_key(mission_id.as_str()),
+            state.runs.lock().unwrap().contains_key(mission_id.as_str()),
             state.missions.lock().unwrap().get(mission_id.as_str())
         );
         assert!(
@@ -13276,10 +13217,7 @@ theater = \"other-box\"
             .unwrap()
             .clone();
         assert_eq!(mission.blocked_reason.as_deref(), Some("budget"));
-        assert!(
-            state.runs.lock().unwrap().is_empty(),
-            "the Run is stopped"
-        );
+        assert!(state.runs.lock().unwrap().is_empty(), "the Run is stopped");
         let mut notices = Vec::new();
         while let Some(event) = pop_event(&state, "mission-1") {
             if event.kind == "budget" {
@@ -14902,7 +14840,7 @@ theater = \"other-box\"
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_run_on_a_runner_outlives_its_station_and_a_restarted_station_replays_what_it_missed()
-     {
+    {
         let root = tempfile::tempdir().unwrap();
         let runner_dir = root.path().join("runner");
         let _runner = start_test_runner(&runner_dir).await;
@@ -14930,10 +14868,7 @@ theater = \"other-box\"
             .unwrap()
             .operation("mission-1")
             .unwrap();
-        let key = manifest
-            .runner
-            .clone()
-            .expect("the runner Run is recorded");
+        let key = manifest.runner.clone().expect("the runner Run is recorded");
         assert_eq!(manifest.terminal_provider, "mock-terminal");
         let mut seen = Vec::new();
         while ticks(&seen).0.len() < 5 {

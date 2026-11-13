@@ -151,8 +151,7 @@ fn a_long_line_arrives_whole_and_the_output_is_exact() {
         "pipe_child",
         &[("AI6_PIPE_CHILD", "1".to_owned())],
     );
-    run
-        .write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
+    run.write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
         .unwrap();
     let output = read_to_end(&run);
     let report = format!("{{\"read\":{INPUT},\"stdin_tty\":false,\"stdout_tty\":false}}\n");

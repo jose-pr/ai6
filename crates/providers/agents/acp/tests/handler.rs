@@ -116,10 +116,7 @@ fn the_runs_environment_and_the_settings_reach_the_agent() {
         "env = { WHO = \"from the settings\", UNUSED = \"x\" }\n",
     );
     let said = text(&events);
-    assert!(
-        said.contains("env:from the run"),
-        "the Run wins: {said}"
-    );
+    assert!(said.contains("env:from the run"), "the Run wins: {said}");
     assert!(
         said.contains("You are 007") && said.contains("Find the leak"),
         "{said}"

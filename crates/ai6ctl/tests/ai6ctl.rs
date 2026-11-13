@@ -297,12 +297,7 @@ async fn health_stations_missions_and_run_commands_use_the_public_gateway() {
             .contains("provider-id-007")
     );
 
-    let missing = ai6ctl(
-        server.clone(),
-        Some(access_token),
-        &["run", "not-a-run"],
-    )
-    .await;
+    let missing = ai6ctl(server.clone(), Some(access_token), &["run", "not-a-run"]).await;
     assert_eq!(missing.status.code(), Some(1));
     assert!(
         String::from_utf8(missing.stderr)
@@ -1808,12 +1803,7 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
         String::from_utf8(decided.stdout).unwrap(),
         format!("{key} run 1: redispatch by viewer-007\n")
     );
-    let verdict = registry
-        .latest_run(key)
-        .unwrap()
-        .unwrap()
-        .verdict
-        .unwrap();
+    let verdict = registry.latest_run(key).unwrap().unwrap().verdict.unwrap();
     assert_eq!(verdict.verdict, ai6::OutcomeVerdict::Redispatch);
     assert_eq!(verdict.note.as_deref(), Some("no branch on the remote"));
     assert_eq!(verdict.amendment.as_deref(), Some("Push the branch."));

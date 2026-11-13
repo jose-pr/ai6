@@ -1429,10 +1429,7 @@ deny = ["git push --force"]
     fn the_env_type_reads_and_writes_as_a_table_for_any_record_that_holds_one() {
         use crate::guatiao::{FromValue, ToValue};
         let env = RunEnv::from(BTreeMap::from([("PATH".to_owned(), "/bin".to_owned())]));
-        assert_eq!(
-            RunEnv::from_value(&env.to_value().unwrap()).unwrap(),
-            env
-        );
+        assert_eq!(RunEnv::from_value(&env.to_value().unwrap()).unwrap(), env);
         let by_serde: RunEnv = toml::from_str::<toml::Table>("PATH = \"/bin\"\n")
             .unwrap()
             .try_into()

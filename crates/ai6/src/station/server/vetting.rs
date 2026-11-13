@@ -1462,8 +1462,8 @@ pub(super) mod testing {
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             STARTED.lock().unwrap().push(request.clone());
             let started = STARTS.fetch_add(1, Ordering::Relaxed);
-            let run = RunId::try_new(format!("provider-id-verdict-{started}"))
-                .map_err(|error| {
+            let run =
+                RunId::try_new(format!("provider-id-verdict-{started}")).map_err(|error| {
                     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
                 })?;
             let event = AgentEvent {

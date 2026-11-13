@@ -359,8 +359,7 @@ fn has_live_run(state: &DaemonState, mission: &Mission) -> bool {
 /// Closes a Mission's live Run and leaves its safe house for the next run.
 async fn stop_live_run(state: &DaemonState, mission_id: &str) {
     let operation = state.runs.lock().ok().and_then(|mut runs| {
-        runs
-            .remove(mission_id)
+        runs.remove(mission_id)
             .inspect(|operation| operation.gate.close())
     });
     if let Some(operation) = operation {
@@ -637,11 +636,7 @@ mod tests {
         blocked_mission(&state).await;
         let hold = run_hold(&state, "mission-1").unwrap();
 
-        let outcome = apply(
-            &state,
-            &on_run(control("mission-1", ControlAction::Cancel)),
-        )
-        .await;
+        let outcome = apply(&state, &on_run(control("mission-1", ControlAction::Cancel))).await;
         assert_eq!(outcome, ControlOutcome::applied("abandoned"));
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.state, MissionState::Abandoned);
@@ -755,10 +750,7 @@ mod tests {
         assert_eq!(record.number, 2);
         assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
         assert_eq!(record.station, "test");
-        assert_eq!(
-            record.provider_id.as_deref(),
-            Some("provider-id-spend")
-        );
+        assert_eq!(record.provider_id.as_deref(), Some("provider-id-spend"));
         let ids = mission_state(&state, "mission-1").run_ids;
         assert_eq!(
             ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
@@ -844,11 +836,7 @@ mod tests {
             .unwrap()
             .handler_provider = "no-such-handler".to_owned();
 
-        let refused = apply(
-            &state,
-            &on_run(control("mission-1", ControlAction::Resume)),
-        )
-        .await;
+        let refused = apply(&state, &on_run(control("mission-1", ControlAction::Resume))).await;
 
         assert_eq!(refused.outcome, "rejected");
         assert_eq!(refused.state, Some("blocked"));

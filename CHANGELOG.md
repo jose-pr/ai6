@@ -92,6 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A Session is a Run, a watch is a charge, and a Mission's attempt is its next Run. The word Session stays only
+  where another protocol or product owns it: ACP's `sessionId`, the Claude Code and Codex CLIs' own session ids,
+  a person's sign-in session and its cookie, MCP's `Mcp-Session-Id`. A Run has one UUID AI6 makes (`id`) and
+  keeps the harness's own id apart as `provider_id`; a Mission's runs are `<handle>.<n>`, the run's counter is
+  its `number`, and a Mission's history lists them. The names change in the Rust API, the Registry's tables and
+  files, DipTel's frames, the gateway's routes (`/v1/station/runs`, `/v1/user/operations/{id}/runs`,
+  `/v1/user/roster/charges`), the access actions (`run.read`, `run.input`, ...), `[charge.<scope>]`, the
+  `charge` record family, `ai6ctl`, Outer Office and the docs. `ai6ctl exec <MISSION|RUN>` starts a Mission's
+  next Run or resumes a Run that ran. A deployed database is moved once by a script that refuses a second run.
 - The coqui crates are on one revision set built on coqui-builder (guatiao, the peer family, coqui-access,
   coqui-acp, coqui-agentic-peer and coqui-a2a). The Station TLS policy and the access providers' settings
   read a no-bound as `none` (`null` is a key that is not given) and a duration as `30`, `30s` or `250ms`

@@ -2053,11 +2053,7 @@ async fn run() -> Result<(), String> {
             control_verdict(&status)?;
         }
         Command::Run {
-            control:
-                Some(RunCommand::Interrupt {
-                    run_id,
-                    request,
-                }),
+            control: Some(RunCommand::Interrupt { run_id, request }),
             ..
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -2254,10 +2250,7 @@ async fn run() -> Result<(), String> {
             let run_id = run_id.ok_or_else(|| "a Run ID is required".to_owned())?;
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let runs = board(&client, &server, &token).await?;
-            let Some(run) = runs
-                .into_iter()
-                .find(|run| run.run_id == run_id)
-            else {
+            let Some(run) = runs.into_iter().find(|run| run.run_id == run_id) else {
                 return Err("Run was not found".to_owned());
             };
             print_runs(std::iter::once(run));
@@ -2308,11 +2301,7 @@ fn access_token(value: Option<String>) -> Result<String, String> {
         .ok_or_else(|| format!("set {ACCESS_TOKEN_ENV} to a Universal Exports user bearer token"))
 }
 
-async fn board(
-    client: &Client,
-    server: &Url,
-    access_token: &str,
-) -> Result<Vec<BoardRun>, String> {
+async fn board(client: &Client, server: &Url, access_token: &str) -> Result<Vec<BoardRun>, String> {
     let response = board_request(client, server, access_token)
         .send()
         .await
@@ -4207,15 +4196,11 @@ fn print_mission(mission: &BoardMission) {
         println!(
             "{}\t{}\t{}\t{}\t{}",
             plain(&run.run_id),
-            run
-                .state
+            run.state
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
-            run
-                .reason
-                .as_deref()
-                .map_or_else(|| "-".to_owned(), plain),
+            run.reason.as_deref().map_or_else(|| "-".to_owned(), plain),
             run.sequence,
             exposure_column(&run.exposure)
         );
@@ -4230,8 +4215,7 @@ fn print_runs(runs: impl IntoIterator<Item = BoardRun>) {
             plain(&run.operation_id),
             plain(&run.mission_id),
             plain(&run.run_id),
-            run
-                .state
+            run.state
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
@@ -4570,8 +4554,7 @@ mod tests {
             }
         ));
         let interrupt =
-            Cli::try_parse_from(["ai6ctl", "run", "interrupt", "provider-id-007"])
-                .unwrap();
+            Cli::try_parse_from(["ai6ctl", "run", "interrupt", "provider-id-007"]).unwrap();
         assert!(matches!(
             interrupt.command,
             Command::Run {

@@ -12,8 +12,8 @@ use guatiao::library::Object;
 use super::super::accounts::{Holder, Site};
 use super::super::{DaemonState, credentials, routes};
 use super::Live;
-use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::m::charges::{Charge, ChargeScope};
+use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::registry::charges::{ChargeLogEntry, ChargeRecord};
 use crate::directorates::section_00::agent::{AgentResume, AgentStart};
@@ -316,9 +316,8 @@ fn start(
         .plugins
         .terminal(provider, None)
         .map_err(|error| error.to_string())?;
-    let run =
-        crate::station::acp::start(built, TerminalBridge::agent_terminal(terminal), request)
-            .map_err(|error| format!("the harness did not start: {error}"))?;
+    let run = crate::station::acp::start(built, TerminalBridge::agent_terminal(terminal), request)
+        .map_err(|error| format!("the harness did not start: {error}"))?;
     super::super::log_harness_start(who, "started", handler, provider);
     Ok((
         Harnessed {
@@ -423,10 +422,7 @@ pub(super) fn take(
     };
     let mut log = Vec::new();
     let now = super::unix_now();
-    let previous = record
-        .handler
-        .clone()
-        .zip(record.provider_id.clone());
+    let previous = record.handler.clone().zip(record.provider_id.clone());
     let mut opened = None;
     if let Some(kept) = harness.as_ref()
         && kept
@@ -447,9 +443,7 @@ pub(super) fn take(
                         "resumed",
                         format!(
                             "Run {} resumed",
-                            previous
-                                .as_ref()
-                                .map_or("", |(_, run)| run.as_str())
+                            previous.as_ref().map_or("", |(_, run)| run.as_str())
                         ),
                         now,
                     ),

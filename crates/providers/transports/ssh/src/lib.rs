@@ -26,8 +26,8 @@ use std::sync::Mutex;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
 use ai6::{
-    Capabilities, ForwardSpec, ReadSpec, RunSpec, Spec, TerminalRun, Transport,
-    TransportForward, WriteSpec,
+    Capabilities, ForwardSpec, ReadSpec, RunSpec, Spec, TerminalRun, Transport, TransportForward,
+    WriteSpec,
 };
 use tokio::runtime::{Builder, Runtime};
 

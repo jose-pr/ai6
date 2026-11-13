@@ -260,9 +260,7 @@ pub(crate) async fn read(
             missions
         }
         Read::NotPermitted => {
-            runs_read
-                .not_permitted
-                .push(scope_of(wanted.as_deref()));
+            runs_read.not_permitted.push(scope_of(wanted.as_deref()));
             Vec::new()
         }
         Read::Unavailable => {
@@ -417,22 +415,17 @@ pub(crate) async fn read(
                 continue;
             }
             let green = run.reason.as_deref() == Some("green-ink");
-            if green && asked.contains(&(mission.operation_id.clone(), run.run_id.clone()))
-            {
+            if green && asked.contains(&(mission.operation_id.clone(), run.run_id.clone())) {
                 continue;
             }
             let handle = plain(&mission.handle);
             let title = if green {
-                format!(
-                    "Run {} of Mission {handle} waits for green ink",
-                    run.run_id
-                )
+                format!("Run {} of Mission {handle} waits for green ink", run.run_id)
             } else {
                 format!(
                     "Run {} of Mission {handle} is blocked{}",
                     run.run_id,
-                    run
-                        .reason
+                    run.reason
                         .as_deref()
                         .map(|reason| format!(": {}", plain(reason)))
                         .unwrap_or_default()
@@ -451,10 +444,7 @@ pub(crate) async fn read(
                 station_id: run.station_id.clone(),
             };
             found.push(item(
-                format!(
-                    "blocked_run:{}:{}",
-                    mission.operation_id, run.run_id
-                ),
+                format!("blocked_run:{}:{}", mission.operation_id, run.run_id),
                 "blocked_run",
                 Condition::Current,
                 title,

@@ -232,11 +232,7 @@ impl ReportFiler {
                 run,
                 mission,
             } => vec![agent, run, mission],
-            Self::Charge {
-                agent,
-                scope,
-                run,
-            } => vec![agent, scope, run],
+            Self::Charge { agent, scope, run } => vec![agent, scope, run],
             Self::Person { person } => vec![person],
             Self::Probe { probe } => vec![probe],
             Self::Review { mission } => vec![mission],

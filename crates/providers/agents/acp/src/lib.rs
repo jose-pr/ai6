@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, STREAM_COLS, Spec, TerminalRun};
 use ai6::directorates::section_00::acp::{
-    AcpOptions, AcpRun, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, Exchange,
-    GateDecider, TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
+    AcpOptions, AcpRun, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, Exchange, GateDecider,
+    TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, clearance_runs_commands,
@@ -527,11 +527,13 @@ impl AgentHandler for AcpHandler {
     /// AI6 does not choose an ACP agent's tools, so it cannot keep commands from a `desk` Run.
     fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
         let settings = self.settings()?;
-        Ok((!clearance_runs_commands(&clearance) && !settings.unconfined_desk).then(|| {
-            "AI6 does not choose an ACP agent's tools, so it cannot keep commands from a Run \
+        Ok(
+            (!clearance_runs_commands(&clearance) && !settings.unconfined_desk).then(|| {
+                "AI6 does not choose an ACP agent's tools, so it cannot keep commands from a Run \
              at this clearance, and the route's unconfined_desk is not set"
-                .to_owned()
-        }))
+                    .to_owned()
+            }),
+        )
     }
 
     /// `unconfined_desk`: a `desk` Run runs with the agent's own tools.
@@ -672,10 +674,8 @@ unconfined_desk = true
             "a shortage of capacity is no quota"
         );
         assert!(
-            run(
-                "Internal error: API error (status 402 Payment Required): \
-                 personal-team-blocked:spending-limit: You have run out of credits"
-            ),
+            run("Internal error: API error (status 402 Payment Required): \
+                 personal-team-blocked:spending-limit: You have run out of credits"),
             "Grok out of credits is a limit"
         );
         let own = handler("command = \"x\"\nlimit_phrases = [\"out of credits\"]\n");

@@ -34,10 +34,10 @@ use super::{DaemonState, StationRole, unix_now};
 use crate::directorates::m::charges::{Charge, ChargeScope};
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::cables::CablePrincipal;
-use crate::directorates::registry::runs::RunRecord;
 use crate::directorates::registry::charges::{
-    TURN_WINDOW_SECS, ChargeError, ChargeLogEntry, ChargeRecord, ChargeUpdate,
+    ChargeError, ChargeLogEntry, ChargeRecord, ChargeUpdate, TURN_WINDOW_SECS,
 };
+use crate::directorates::registry::runs::RunRecord;
 
 /// How far back M's charge looks for Stations that checked in and went dark, in seconds.
 const DARK_WINDOW_SECS: u64 = 86_400;
@@ -771,7 +771,11 @@ async fn write_log(state: &DaemonState, live: &Arc<Live>, entry: ChargeLogEntry)
 
 /// Writes `update` to the record of `live` under its lease, renewing it; a lease another took
 /// stops the charge here.
-async fn write(state: &DaemonState, live: &Arc<Live>, update: ChargeUpdate) -> Option<ChargeRecord> {
+async fn write(
+    state: &DaemonState,
+    live: &Arc<Live>,
+    update: ChargeUpdate,
+) -> Option<ChargeRecord> {
     let (intake, station, scope, fence, ttl) = (
         state.intake.clone(),
         state.station_id.clone(),

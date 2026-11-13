@@ -412,8 +412,7 @@ pub(super) fn end_turn_waiting(
         return false;
     }
     let operation = state.runs.lock().ok().and_then(|mut runs| {
-        runs
-            .get(mission_id)
+        runs.get(mission_id)
             .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
             .then(|| runs.remove(mission_id))
             .flatten()
@@ -484,8 +483,7 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
             })
             .collect::<Vec<_>>();
         let live = state.runs.lock().ok().and_then(|runs| {
-            runs
-                .get(mission_id)
+            runs.get(mission_id)
                 .map(|operation| (operation.run.clone(), operation.gate.clone()))
         });
         for request in &rearmed {
@@ -889,9 +887,7 @@ mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.runs.lock().unwrap()[mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[mission_id].environment.clone();
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
                 .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),
@@ -1194,9 +1190,7 @@ mod tests {
             .unwrap();
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let environment = state.runs.lock().unwrap()[&mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[&mission_id].environment.clone();
         // The hook runs in the Agent's checkout: a repository on `main` with a Mission branch.
         let checkout = tempfile::tempdir().unwrap();
         let path = checkout.path().to_string_lossy().into_owned();
@@ -1379,9 +1373,7 @@ mod tests {
             .unwrap();
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let environment = state.runs.lock().unwrap()[&mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[&mission_id].environment.clone();
         let checkout = tempfile::tempdir().unwrap();
         let path = checkout.path().to_string_lossy().into_owned();
         for args in [

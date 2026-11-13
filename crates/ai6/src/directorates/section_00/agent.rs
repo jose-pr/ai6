@@ -501,10 +501,7 @@ pub trait AgentHandler: Send + Sync {
     /// Where the harness keeps its own record of the Run `query` names, when it keeps one
     /// and the file is there; the Station reads it as that Run's context. The default:
     /// none, and the Station keeps its event stream instead.
-    fn run_record(
-        &self,
-        query: RunRecordQuery,
-    ) -> Result<Option<RunRecordFile>, ProviderError> {
+    fn run_record(&self, query: RunRecordQuery) -> Result<Option<RunRecordFile>, ProviderError> {
         let _ = query;
         Ok(None)
     }

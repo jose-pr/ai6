@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use ai6::directorates::m::assistant::SKILLS_PLUGIN;
 use ai6::directorates::m::identity::RunId;
 use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
-    TerminalRun, exit_code_text,
+    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalRun,
+    exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, RunOverlays,
@@ -244,10 +244,7 @@ impl AgentHandler for ClaudeHandler {
     /// Claude Code keeps each Run as `projects/<directory>/<run>.jsonl` under its
     /// configuration directory (`CLAUDE_CONFIG_DIR`, else `~/.claude`), one JSON object per
     /// line.
-    fn run_record(
-        &self,
-        query: RunRecordQuery,
-    ) -> Result<Option<RunRecordFile>, ProviderError> {
+    fn run_record(&self, query: RunRecordQuery) -> Result<Option<RunRecordFile>, ProviderError> {
         Ok(claude_record(&query))
     }
 
@@ -2561,10 +2558,8 @@ mod tests {
     fn process_run_restarts_and_resumes_with_the_same_provider_id() {
         let terminal = ProcessTerminal::new();
         let run_id = RunId::try_new("claude-process-session-42").unwrap();
-        let environment = BTreeMap::from([(
-            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
-            run_id.to_string(),
-        )]);
+        let environment =
+            BTreeMap::from([("CLAUDE_FIXTURE_RUN_ID".to_owned(), run_id.to_string())]);
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-process-fixture".to_owned(),
             ..ClaudeConfig::default()
@@ -3071,9 +3066,8 @@ mod tests {
     fn resume_rejects_a_different_run_reported_by_claude() {
         let terminal = ResumeTerminal {
             spec: Arc::new(Mutex::new(None)),
-            input:
-                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"different-run\"}\n"
-                    .to_vec(),
+            input: b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"different-run\"}\n"
+                .to_vec(),
             writes: Arc::new(Mutex::new(Vec::new())),
         };
         let handler = ClaudeHandler::try_from(ClaudeConfig {
@@ -3108,10 +3102,7 @@ mod tests {
             Err(error) => error.to_string(),
         };
         assert!(error.contains("different Run"), "{error}");
-        assert_eq!(
-            run.session_id().unwrap().as_deref(),
-            Some("different-run")
-        );
+        assert_eq!(run.session_id().unwrap().as_deref(), Some("different-run"));
     }
 
     /// Claude Code with stream-json input writes nothing until it has read a message, so a

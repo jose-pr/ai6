@@ -21,12 +21,7 @@ pub(crate) const POSTGRES_URL_ENV: &str = "AI6_TEST_POSTGRES_URL";
 
 /// A Registry with the clock-explicit Run hooks the Run cases drive.
 pub(crate) trait TestRegistry: RegistryBackend {
-    fn open_run_at(
-        &self,
-        new: NewRun,
-        ttl: Duration,
-        now: f64,
-    ) -> Result<RunRecord, RunError>;
+    fn open_run_at(&self, new: NewRun, ttl: Duration, now: f64) -> Result<RunRecord, RunError>;
 
     fn take_run_at(
         &self,
@@ -46,12 +41,7 @@ pub(crate) trait TestRegistry: RegistryBackend {
         update: RunUpdate,
     ) -> Result<RunRecord, RunError>;
 
-    fn lose_run_at(
-        &self,
-        id: &str,
-        reason: &str,
-        now: f64,
-    ) -> Result<RunRecord, RunError>;
+    fn lose_run_at(&self, id: &str, reason: &str, now: f64) -> Result<RunRecord, RunError>;
 
     /// Puts `record` into the queue under `key` the way an integration with write access
     /// does: a file in `new/`, or a row, without going through the Registry's API.
@@ -92,12 +82,7 @@ macro_rules! clocked_runs {
                 <$registry>::write_fenced(self, id, station, fence, now, renew, update)
             }
 
-            fn lose_run_at(
-                &self,
-                id: &str,
-                reason: &str,
-                now: f64,
-            ) -> Result<RunRecord, RunError> {
+            fn lose_run_at(&self, id: &str, reason: &str, now: f64) -> Result<RunRecord, RunError> {
                 <$registry>::lose_run_at(self, id, reason, now)
             }
 

@@ -387,10 +387,7 @@ mod tests {
 
     async fn publish(served: &Served, path: &str, body: Vec<u8>, json: bool) {
         let mut request = reqwest::Client::new()
-            .post(format!(
-                "{}/v1/station/runs/run-g/{path}",
-                served.base
-            ))
+            .post(format!("{}/v1/station/runs/run-g/{path}", served.base))
             .bearer_auth(STATION_TOKEN)
             .body(body);
         if json {

@@ -489,10 +489,7 @@ static READ_TOOLS: &[Tool] = &[
                         "station_id",
                         text("Only Missions with a Run on this Station."),
                     ),
-                    (
-                        "agent",
-                        text("Only Missions with a Run for this Agent."),
-                    ),
+                    ("agent", text("Only Missions with a Run for this Agent.")),
                     (
                         "text",
                         text(

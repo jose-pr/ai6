@@ -1288,12 +1288,7 @@ pub trait BriefStore {
     /// # Errors
     ///
     /// Returns an error when Registry records cannot be read or written.
-    fn recover(
-        &self,
-        lease: &Lease,
-        max_runs: u32,
-        by: &str,
-    ) -> io::Result<Option<LeaseRecovery>>;
+    fn recover(&self, lease: &Lease, max_runs: u32, by: &str) -> io::Result<Option<LeaseRecovery>>;
 
     /// Gives an unchanged expired lease to another Station, which carries on the same claim:
     /// the brief stays claimed and the run count is unchanged. `meta` entries are added
@@ -2115,12 +2110,7 @@ impl BriefStore for FileRegistry {
             .collect())
     }
 
-    fn recover(
-        &self,
-        lease: &Lease,
-        max_runs: u32,
-        by: &str,
-    ) -> io::Result<Option<LeaseRecovery>> {
+    fn recover(&self, lease: &Lease, max_runs: u32, by: &str) -> io::Result<Option<LeaseRecovery>> {
         validate_registry_key(lease.key())?;
         let _registry_lock = self.lock()?;
         if self.lease(lease.key())?.as_ref() != Some(lease) || lease.expires >= unix_time()? {
@@ -3872,12 +3862,8 @@ mod tests {
                 CableTarget::try_new(CableScope::Agent, Some("008".into())).unwrap(),
                 body.into(),
                 vec![
-                    CableRecipient::try_new(
-                        "008".into(),
-                        Some(run_id.into()),
-                        CableState::Queued,
-                    )
-                    .unwrap(),
+                    CableRecipient::try_new("008".into(), Some(run_id.into()), CableState::Queued)
+                        .unwrap(),
                 ],
                 key.into(),
                 id.into(),
@@ -4682,9 +4668,7 @@ mod tests {
                 .unwrap();
             let key = lease.key().to_owned();
             assert_eq!(
-                registry
-                    .recover(&lease, max_runs, "operation-02")
-                    .unwrap(),
+                registry.recover(&lease, max_runs, "operation-02").unwrap(),
                 None
             );
 

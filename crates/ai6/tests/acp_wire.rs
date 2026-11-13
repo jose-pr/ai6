@@ -270,10 +270,7 @@ fn a_handler_runs_through_the_facade_with_every_event_verbatim() {
     let run = connect_facade(&facade, options_for(&begun), None).unwrap();
     let seen = until(&run, &["completed"]);
     assert_eq!(seen, script);
-    assert_eq!(
-        run.session_id().unwrap().unwrap().as_str(),
-        "provider-1"
-    );
+    assert_eq!(run.session_id().unwrap().unwrap().as_str(), "provider-1");
     // The handler got the AgentStart the Station built, prompt and working directory included.
     assert_eq!(*log.starts.lock().unwrap(), vec![begun]);
 }
@@ -293,11 +290,10 @@ fn messages_interrupts_and_close_reach_the_handler() {
     let closed = Arc::new(AtomicBool::new(false));
     let run = connect_facade(&facade, options_for(&start()), Some(closed.clone())).unwrap();
     until(&run, &["text"]);
-    run
-        .send_message(AgentMessage {
-            text: "and then?".to_owned(),
-        })
-        .unwrap();
+    run.send_message(AgentMessage {
+        text: "and then?".to_owned(),
+    })
+    .unwrap();
     run.interrupt().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while log.interrupts.load(Ordering::SeqCst) == 0 || log.messages.lock().unwrap().is_empty() {

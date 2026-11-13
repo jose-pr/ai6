@@ -15,7 +15,7 @@ use guatiao::Bytes;
 use guatiao::Status;
 use guatiao::library::{Object, ProviderError};
 
-use super::{Launch, RunnerHandoff, SETTINGS_FILE, RunReport};
+use super::{Launch, RunReport, RunnerHandoff, SETTINGS_FILE};
 use crate::directorates::m::identity::RunId;
 use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
 use crate::directorates::q::terminal::{STREAM_COLS, Spec, TerminalRun};
@@ -448,8 +448,7 @@ impl RunnerLink {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
-            run_id: provider_id(run.session_id())
-                .map_err(|error| error.to_string())?,
+            run_id: provider_id(run.session_id()).map_err(|error| error.to_string())?,
             ended: false,
             last: info
                 .get("last")

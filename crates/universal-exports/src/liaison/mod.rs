@@ -680,9 +680,7 @@ impl Liaison {
             .as_ref()
             .and_then(|earlier| earlier.conversation_id().map(str::to_owned))
             .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
-        let affinity = earlier
-            .as_ref()
-            .and_then(|earlier| self.bound_run(earlier));
+        let affinity = earlier.as_ref().and_then(|earlier| self.bound_run(earlier));
         let endpoint = CableEndpoint::try_new(
             agent.clone(),
             operation.clone(),

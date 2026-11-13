@@ -7,9 +7,7 @@ use super::{DaemonState, is_terminal_state, run_hold};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::vetting::sleeper_of;
 use crate::directorates::registry::bona_fides::Origin;
-use crate::directorates::registry::runs::{
-    RunRecord, RunResult, RunStatus, RunUpdate,
-};
+use crate::directorates::registry::runs::{RunRecord, RunResult, RunStatus, RunUpdate};
 use crate::directorates::registry::sleepers::{window_label, window_of};
 use crate::directorates::registry::store::{AuditRecord, Brief};
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -84,10 +82,7 @@ pub(super) fn resume_from(
     let (action, detail) = match &found {
         Some(id) => (
             "resumed",
-            format!(
-                "the window resumes the last run's Run {}",
-                id.as_str()
-            ),
+            format!("the window resumes the last run's Run {}", id.as_str()),
         ),
         None => (
             "started",
@@ -344,10 +339,9 @@ async fn supersede(state: &DaemonState, attempt: Stalled) {
         let update = RunUpdate::default()
             .result(RunResult::new("abandoned").with_reason(Some(SUPERSEDED.to_owned())))
             .status(RunStatus::Ended);
-        if let Err(error) =
-            state
-                .intake
-                .update_run(&hold.id, &state.station_id, hold.fence, update)
+        if let Err(error) = state
+            .intake
+            .update_run(&hold.id, &state.station_id, hold.fence, update)
         {
             eprintln!("ai6: Run record {:?} not updated: {error}", hold.id);
         }
@@ -446,10 +440,9 @@ pub(super) mod testing {
                 request.mission_id.as_str().to_owned(),
                 request.initial_context.clone(),
             ));
-            let run =
-                RunId::try_new(format!("provider-standing-{started}")).map_err(|error| {
-                    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
-                })?;
+            let run = RunId::try_new(format!("provider-standing-{started}")).map_err(|error| {
+                ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+            })?;
             let first = FIRST_DONE
                 .lock()
                 .unwrap()
@@ -488,10 +481,7 @@ pub(super) mod testing {
                 ));
             }
             let run = if message.contains("resume-dead") {
-                MockRun::with_event(
-                    request.run_id,
-                    event("failed", "no conversation found"),
-                )
+                MockRun::with_event(request.run_id, event("failed", "no conversation found"))
             } else {
                 MockRun::new(request.run_id, "completed")
             };
@@ -627,10 +617,7 @@ mod tests {
                 (3, Some("G-nightly-1.3"), Some(labels[2].as_str())),
             ]
         );
-        assert_eq!(
-            runs[1].predecessor.as_deref(),
-            Some(runs[0].id.as_str())
-        );
+        assert_eq!(runs[1].predecessor.as_deref(), Some(runs[0].id.as_str()));
         assert!(
             testing::RESUMED
                 .lock()
@@ -806,10 +793,7 @@ mod tests {
         assert_eq!(run_window(&state, FIRST + DAY, &mut warned).await, mission);
         let runs = runs(&state, &mission);
         assert_eq!(runs.len(), 2);
-        let first = runs[0]
-            .provider_id
-            .clone()
-            .expect("a Run");
+        let first = runs[0].provider_id.clone().expect("a Run");
         assert_eq!(runs[1].provider_id.as_deref(), Some(first.as_str()));
         assert_eq!(
             testing::RESUMED

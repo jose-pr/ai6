@@ -1382,10 +1382,8 @@ mod tests {
             ["registry.limits.runs.records none is looser than the default 100000"]
         );
         assert!(
-            crate::directorates::m::records::from_toml::<RegistryLimits>(
-                "[runs]\nrecordz = 1\n"
-            )
-            .is_err()
+            crate::directorates::m::records::from_toml::<RegistryLimits>("[runs]\nrecordz = 1\n")
+                .is_err()
         );
     }
 }

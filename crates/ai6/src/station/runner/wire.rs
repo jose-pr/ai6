@@ -564,11 +564,8 @@ fn feed(connection: &Arc<Connection>, binding: &Arc<Binding>, hosted: &Arc<Hoste
                     let _ = binding.cx.send_notification(message);
                 }
             };
-            let provider = |hosted: &Hosted| {
-                lock_of(&hosted.run_id)
-                    .as_ref()
-                    .map(ToString::to_string)
-            };
+            let provider =
+                |hosted: &Hosted| lock_of(&hosted.run_id).as_ref().map(ToString::to_string);
             send(json!({
                 "sessionId": binding.key,
                 "providerId": provider(&hosted),

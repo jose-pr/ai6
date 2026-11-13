@@ -165,8 +165,7 @@ pub(super) fn enforce_clearances(state: &DaemonState) {
     let running: Vec<_> = state.runs.lock().map_or_else(
         |_| Vec::new(),
         |runs| {
-            runs
-                .iter()
+            runs.iter()
                 .map(|(mission_id, operation)| {
                     (
                         mission_id.clone(),

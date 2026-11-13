@@ -564,10 +564,7 @@ pub(crate) async fn request_control(
         if elsewhere {
             return Err(ApiError::not_found());
         }
-        inner
-            .runs
-            .values()
-            .any(|run| run.mission_id == mission)
+        inner.runs.values().any(|run| run.mission_id == mission)
             || inner
                 .missions
                 .contains_key(&(operation.clone(), mission.clone()))
@@ -583,10 +580,7 @@ pub(crate) async fn request_control(
                 .iter()
                 .any(|record| record.station() == station);
             Ok(if known {
-                Routing::To(Target {
-                    station,
-                    run: None,
-                })
+                Routing::To(Target { station, run: None })
             } else {
                 Routing::Unknown
             })
@@ -983,10 +977,8 @@ pub(crate) mod tests {
             Some(roster) => gateway.with_roster(roster),
             None => gateway,
         };
-        for (operation, mission, run) in [
-            ("G", "mission-g", "run-g"),
-            ("L", "mission-l", "run-l"),
-        ] {
+        for (operation, mission, run) in [("G", "mission-g", "run-g"), ("L", "mission-l", "run-l")]
+        {
             gateway
                 .register_run(
                     STATION_TOKEN,

@@ -295,8 +295,7 @@ fn person_decides(state: &DaemonState, tag: &str, mission: &str, verdict: Outcom
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_its_next_run_runs()
- {
+async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_its_next_run_runs() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d1";
     let state = station_for(root.path(), tag);
@@ -414,10 +413,7 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
     start_mission_by_id(&state, &mission).await;
     wait_for_verifying(&state, &mission).await;
     let second = attempt(&state, &mission, 2);
-    assert_eq!(
-        second.predecessor.as_deref(),
-        Some(first.id.as_str())
-    );
+    assert_eq!(second.predecessor.as_deref(), Some(first.id.as_str()));
     assert!(second.verdict.is_none());
     charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);

@@ -989,8 +989,7 @@ impl CompiledOne {
         resource: &CompartmentResource,
         lineage: &Lineage,
     ) -> bool {
-        self.clears(&principal.clearance)
-            && Self::asks(&self.field, run, action, resource, lineage)
+        self.clears(&principal.clearance) && Self::asks(&self.field, run, action, resource, lineage)
     }
 
     /// Every resource the covers name, Operations expanded down the tree.
@@ -1141,9 +1140,9 @@ impl CompiledCompartments {
         resource: &CompartmentResource,
     ) -> bool {
         let run = run_person(principal, &self.lineage);
-        self.compiled.get(id).is_some_and(|one| {
-            one.field_allows(principal, &run, action, resource, &self.lineage)
-        })
+        self.compiled
+            .get(id)
+            .is_some_and(|one| one.field_allows(principal, &run, action, resource, &self.lineage))
     }
 
     /// The first compartment, in ID order, that gives `person` `action` on `resource`.

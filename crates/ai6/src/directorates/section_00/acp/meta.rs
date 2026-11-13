@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::directorates::m::identity::{MissionId, RunId};
-use crate::directorates::section_00::agent::{
-    AgentResume, AgentStart, AssistantMode, RunOverlays,
-};
+use crate::directorates::section_00::agent::{AgentResume, AgentStart, AssistantMode, RunOverlays};
 
 /// The handler provider a field runner starts, by id and Guatiao configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

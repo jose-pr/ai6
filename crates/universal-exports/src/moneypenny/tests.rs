@@ -1905,10 +1905,7 @@ async fn run_in_state(served: &Served, mission: &str, run: &str, state: &str) {
         .unwrap();
     assert_eq!(registered.status(), StatusCode::CREATED);
     let reported = client
-        .post(format!(
-            "{}/v1/station/runs/{run}/lifecycle/1",
-            served.base
-        ))
+        .post(format!("{}/v1/station/runs/{run}/lifecycle/1", served.base))
         .bearer_auth(STATION_TOKEN)
         .json(&json!({"operation_id": "G", "mission_id": mission, "state": state}))
         .send()

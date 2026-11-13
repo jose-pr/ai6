@@ -348,9 +348,7 @@ async fn a_request_for_green_ink_is_one_item_with_its_blocked_run() {
 async fn an_operation_filter_narrows_the_scope_and_says_so() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));
-    fixture
-        .lifecycle("G", "mission-g", "run-g", "budget")
-        .await;
+    fixture.lifecycle("G", "mission-g", "run-g", "budget").await;
     let (status, summary) = fixture
         .get(
             &fixture.served.operator,
@@ -385,9 +383,7 @@ async fn an_operation_filter_narrows_the_scope_and_says_so() {
 async fn a_blocked_run_read_through_a_compartment_is_listed_and_the_crossing_is_audited() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));
-    fixture
-        .lifecycle("L", "mission-l", "run-l", "budget")
-        .await;
+    fixture.lifecycle("L", "mission-l", "run-l", "budget").await;
     // The viewer holds no rule on L.
     let before = fixture.summary(&fixture.served.viewer).await;
     assert!(items(&before, "blocked_run").is_empty(), "{before}");

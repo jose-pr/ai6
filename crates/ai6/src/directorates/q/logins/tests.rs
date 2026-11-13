@@ -333,10 +333,7 @@ fn an_older_renewed_copy_never_replaces_a_newer_one(store: &dyn Store) {
         login_text("new-b", "refresh-b", NOW + 5_000.0),
     )
     .unwrap();
-    assert_eq!(
-        run_a.sync(&a, Some(1), NOW).unwrap(),
-        Synced::Renewed(2)
-    );
+    assert_eq!(run_a.sync(&a, Some(1), NOW).unwrap(), Synced::Renewed(2));
     let synced = run_b.sync(&b, Some(2), NOW).unwrap();
     assert!(matches!(synced, Synced::Restored(2, _)), "{synced:?}");
     assert_eq!(refresh_in_home(&home_b), "refresh-a");
@@ -351,10 +348,7 @@ fn an_older_renewed_copy_never_replaces_a_newer_one(store: &dyn Store) {
         "{\"access_token\":\"y\",\"refresh_token\":\"r3\"}",
     )
     .unwrap();
-    assert_eq!(
-        run_a.sync(&a, Some(2), NOW).unwrap(),
-        Synced::Renewed(3)
-    );
+    assert_eq!(run_a.sync(&a, Some(2), NOW).unwrap(), Synced::Renewed(3));
     let synced = run_b.sync(&b, Some(3), NOW).unwrap();
     assert!(matches!(synced, Synced::Restored(3, _)), "{synced:?}");
     assert_eq!(refresh_in_home(&home_b), "r2");
@@ -406,10 +400,7 @@ fn a_station_that_died_with_a_copy_made_stale_loses_it(store: &dyn Store) {
         login_text("new-b", "refresh-b", NOW + 9_000.0),
     )
     .unwrap();
-    assert_eq!(
-        run_b.sync(&b, Some(1), NOW).unwrap(),
-        Synced::Renewed(2)
-    );
+    assert_eq!(run_b.sync(&b, Some(1), NOW).unwrap(), Synced::Renewed(2));
 
     let mut recalled = RunLogin::recall(&home).unwrap();
     let synced = recalled.sync(&a, Some(2), NOW + 1.0).unwrap();

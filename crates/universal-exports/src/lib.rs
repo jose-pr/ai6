@@ -390,9 +390,7 @@ impl GatewayConfig {
             .and_then(|history| fanout_budget.and_then(|fanout| history.checked_add(fanout)))
             .and_then(|buffers| buffers.checked_add(input_bytes.unwrap_or(usize::MAX)))
             .and_then(|buffers| socket_budget.and_then(|sockets| buffers.checked_add(sockets)));
-        let client_slots = limits
-            .max_runs
-            .checked_mul(limits.max_clients_per_run);
+        let client_slots = limits.max_runs.checked_mul(limits.max_clients_per_run);
         if authority.is_empty()
             || authority.contains(['/', '?', '#', '@'])
             || !limits.origin_bytes.allows(public_origin.len())
@@ -985,12 +983,8 @@ impl Gateway {
     ) -> Result<u64, GatewayError> {
         self.authenticate_station(station_token)?;
         let inner = self.inner.lock().await;
-        let run = inner
-            .runs
-            .get(run_id)
-            .ok_or(GatewayError::NotFound)?;
-        run
-            .last_sequence
+        let run = inner.runs.get(run_id).ok_or(GatewayError::NotFound)?;
+        run.last_sequence
             .checked_add(1)
             .ok_or(GatewayError::Conflict)
     }
@@ -1162,10 +1156,7 @@ impl Gateway {
     async fn enrich_missions(&self, mut missions: Vec<BoardMission>) -> Vec<BoardMission> {
         if let Some(registry) = self.registry.clone() {
             missions = tokio::task::spawn_blocking(move || {
-                let mut attempts = registry
-                    .runs()
-                    .map(runs_by_mission)
-                    .unwrap_or_default();
+                let mut attempts = registry.runs().map(runs_by_mission).unwrap_or_default();
                 for mission in &mut missions {
                     mission.usage = registry
                         .mission_usage(Some(&mission.operation_id), &mission.mission_id)
@@ -1200,8 +1191,7 @@ impl Gateway {
         event: LifecycleEvent,
     ) -> Result<(), GatewayError> {
         let (schema, value) = lifecycle_frames(&event).map_err(|_| GatewayError::InvalidFrame)?;
-        self.ingest(station_token, &event.run_id, 0, schema)
-            .await?;
+        self.ingest(station_token, &event.run_id, 0, schema).await?;
         self.ingest(station_token, &event.run_id, event.sequence, value)
             .await
     }
@@ -1214,17 +1204,12 @@ impl Gateway {
         sequence: u64,
         bytes: Vec<u8>,
     ) -> Result<(), GatewayError> {
-        let terminal = TerminalData::new(
-            run_id.clone(),
-            sequence,
-            TerminalDirection::Output,
-            bytes,
-        )
-        .map_err(|_| GatewayError::TooLarge)?;
+        let terminal =
+            TerminalData::new(run_id.clone(), sequence, TerminalDirection::Output, bytes)
+                .map_err(|_| GatewayError::TooLarge)?;
         let (schema, value) = terminal_frames(&terminal).map_err(|_| GatewayError::InvalidFrame)?;
         self.ingest(station_token, &run_id, 0, schema).await?;
-        self.ingest(station_token, &run_id, sequence, value)
-            .await
+        self.ingest(station_token, &run_id, sequence, value).await
     }
 
     /// The most terminal output that fits one frame of `run_id` at any sequence, and that the
@@ -1323,12 +1308,8 @@ impl Gateway {
         if &timed.grant.run_id != run_id {
             return Err(GatewayError::Forbidden);
         }
-        let run = inner
-            .runs
-            .get_mut(run_id)
-            .ok_or(GatewayError::NotFound)?;
-        if run.operation_id != timed.grant.operation_id
-            || run.mission_id != timed.grant.mission_id
+        let run = inner.runs.get_mut(run_id).ok_or(GatewayError::NotFound)?;
+        if run.operation_id != timed.grant.operation_id || run.mission_id != timed.grant.mission_id
         {
             return Err(GatewayError::Forbidden);
         }
@@ -1337,10 +1318,7 @@ impl Gateway {
         }
         let now = Instant::now();
         if timed.grant.mode == AttachMode::Write
-            && run
-                .lease
-                .as_ref()
-                .is_some_and(|lease| lease.expires > now)
+            && run.lease.as_ref().is_some_and(|lease| lease.expires > now)
         {
             return Err(GatewayError::Conflict);
         }
@@ -1418,10 +1396,7 @@ impl Gateway {
         sequence: u64,
         frame: Vec<u8>,
     ) -> Result<Option<timeline::Transition>, GatewayError> {
-        let run = inner
-            .runs
-            .get_mut(run_id)
-            .ok_or(GatewayError::NotFound)?;
+        let run = inner.runs.get_mut(run_id).ok_or(GatewayError::NotFound)?;
         let mut receiver = guatiao::value::wire::channel::Receiver::new();
         for schema in run.schemas.values() {
             receiver
@@ -1597,10 +1572,7 @@ impl Gateway {
         }
         connection.input_window_count += 1;
         connection.last_input_sequence = input_sequence;
-        let run = inner
-            .runs
-            .get(run_id)
-            .ok_or(GatewayError::NotFound)?;
+        let run = inner.runs.get(run_id).ok_or(GatewayError::NotFound)?;
         let input = AgentInput {
             operation_id: run.operation_id.clone(),
             mission_id: run.mission_id.clone(),
@@ -2497,8 +2469,7 @@ async fn mission_detail(
     let runs = visible
         .into_iter()
         .filter(|run| {
-            run.operation_id == operation_id.as_str()
-                && run.mission_id == mission_id.as_str()
+            run.operation_id == operation_id.as_str() && run.mission_id == mission_id.as_str()
         })
         .collect::<Vec<_>>();
     let mut mission = match group_missions(runs).into_iter().next() {
@@ -5855,8 +5826,7 @@ async fn issue_attach_token(
                     .map_err(|_| ApiError::bad_request())?,
                 mission_id: MissionId::new(request.mission_id)
                     .map_err(|_| ApiError::bad_request())?,
-                run_id: RunId::new(request.run_id)
-                    .map_err(|_| ApiError::bad_request())?,
+                run_id: RunId::new(request.run_id).map_err(|_| ApiError::bad_request())?,
                 mode,
             },
         )
@@ -5960,9 +5930,7 @@ async fn websocket_attach(
         .max_frame_size(gateway.config.limits.max_frame_bytes)
         .max_write_buffer_size(max_write_buffer)
         .protocols(["ai6.guatiao"])
-        .on_upgrade(move |socket| {
-            serve_socket(socket, gateway, attachment, run_id, socket_origin)
-        }))
+        .on_upgrade(move |socket| serve_socket(socket, gateway, attachment, run_id, socket_origin)))
 }
 
 async fn serve_socket(
@@ -5983,9 +5951,7 @@ async fn serve_socket(
     let (mut sender, mut receiver) = socket.split();
     for frame in replay {
         if sender.send(Message::Binary(frame.into())).await.is_err() {
-            gateway
-                .disconnect_connection(&run_id, &connection_id)
-                .await;
+            gateway.disconnect_connection(&run_id, &connection_id).await;
             return;
         }
     }
@@ -6030,9 +5996,7 @@ async fn serve_socket(
             }
         }
     }
-    gateway
-        .disconnect_connection(&run_id, &connection_id)
-        .await;
+    gateway.disconnect_connection(&run_id, &connection_id).await;
 }
 
 fn close_policy() -> Message {
@@ -6228,11 +6192,7 @@ fn prune_expired(inner: &mut Inner) {
         .connection_tickets
         .retain(|_, timed| timed.expires > now);
     for run in inner.runs.values_mut() {
-        if run
-            .lease
-            .as_ref()
-            .is_some_and(|lease| lease.expires <= now)
-        {
+        if run.lease.as_ref().is_some_and(|lease| lease.expires <= now) {
             run.lease = None;
         }
     }
@@ -6247,9 +6207,7 @@ fn pending_credential_capacity(config: &GatewayConfig) -> usize {
 }
 
 fn client_slots_or_max(limits: GatewayLimits) -> usize {
-    limits
-        .max_runs
-        .saturating_mul(limits.max_clients_per_run)
+    limits.max_runs.saturating_mul(limits.max_clients_per_run)
 }
 
 /// Whether `left` and `right` are equal, in time that does not depend on where they differ.
@@ -6262,8 +6220,8 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 fn validate_input_frame(run_id: &RunId, frame: &[u8]) -> Result<u64, GatewayError> {
     let template = TerminalData::new(run_id.clone(), 1, TerminalDirection::Input, Vec::new())
         .map_err(|_| GatewayError::InvalidFrame)?;
-    let resize_template = TerminalResize::new(run_id.clone(), 1, 80, 24)
-        .map_err(|_| GatewayError::InvalidFrame)?;
+    let resize_template =
+        TerminalResize::new(run_id.clone(), 1, 80, 24).map_err(|_| GatewayError::InvalidFrame)?;
     let (terminal_schema, _) =
         terminal_frames(&template).map_err(|_| GatewayError::InvalidFrame)?;
     let (resize_schema, _) =
@@ -6287,9 +6245,7 @@ fn validate_input_frame(run_id: &RunId, frame: &[u8]) -> Result<u64, GatewayErro
         {
             Ok(data.sequence())
         }
-        IncomingFrame::Resize(resize)
-            if resize.run_id() == run_id && resize.sequence() > 0 =>
-        {
+        IncomingFrame::Resize(resize) if resize.run_id() == run_id && resize.sequence() > 0 => {
             Ok(resize.sequence())
         }
         IncomingFrame::Terminal(_) | IncomingFrame::Resize(_) => Err(GatewayError::Forbidden),
@@ -6642,10 +6598,7 @@ mod tests {
         let second_token = grant(&gateway, AttachMode::Write).await;
         let second_cookie = gateway.exchange_attach_token(&second_token).await.unwrap();
         assert_eq!(
-            gateway
-                .attach(&run, &second_cookie, 0)
-                .await
-                .unwrap_err(),
+            gateway.attach(&run, &second_cookie, 0).await.unwrap_err(),
             GatewayError::Conflict
         );
         gateway.disconnect(attachment).await;
@@ -6726,41 +6679,21 @@ mod tests {
         let (_, _, run) = register(&gateway).await;
         let (schema, first) = output(&run, 1);
         gateway
-            .ingest(
-                "m-token-that-is-long-enough-for-testing",
-                &run,
-                0,
-                schema,
-            )
+            .ingest("m-token-that-is-long-enough-for-testing", &run, 0, schema)
             .await
             .unwrap();
         gateway
-            .ingest(
-                "m-token-that-is-long-enough-for-testing",
-                &run,
-                1,
-                first,
-            )
+            .ingest("m-token-that-is-long-enough-for-testing", &run, 1, first)
             .await
             .unwrap();
         let (_, second) = output(&run, 2);
         gateway
-            .ingest(
-                "m-token-that-is-long-enough-for-testing",
-                &run,
-                2,
-                second,
-            )
+            .ingest("m-token-that-is-long-enough-for-testing", &run, 2, second)
             .await
             .unwrap();
         let (_, third) = output(&run, 3);
         gateway
-            .ingest(
-                "m-token-that-is-long-enough-for-testing",
-                &run,
-                3,
-                third,
-            )
+            .ingest("m-token-that-is-long-enough-for-testing", &run, 3, third)
             .await
             .unwrap();
 
@@ -6966,12 +6899,7 @@ mod tests {
         let (_, _, run) = register(&gateway).await;
         let (schema, value) = output(&run, 1);
         gateway
-            .ingest(
-                "m-token-that-is-long-enough-for-testing",
-                &run,
-                0,
-                schema,
-            )
+            .ingest("m-token-that-is-long-enough-for-testing", &run, 0, schema)
             .await
             .unwrap();
         let token = grant(&gateway, AttachMode::Read).await;
@@ -7005,13 +6933,8 @@ mod tests {
         let reader_ticket = gateway.exchange_attach_token(&reader_token).await.unwrap();
         let reader = gateway.attach(&run, &reader_ticket, 0).await.unwrap();
 
-        let input = TerminalData::new(
-            run.clone(),
-            1,
-            TerminalDirection::Input,
-            vec![0xff, 0x00],
-        )
-        .unwrap();
+        let input =
+            TerminalData::new(run.clone(), 1, TerminalDirection::Input, vec![0xff, 0x00]).unwrap();
         let (_, input_frame) = terminal_frames(&input).unwrap();
         let resize = TerminalResize::new(run.clone(), 2, 120, 40).unwrap();
         let (_, resize_frame) = resize_frames(&resize).unwrap();
@@ -7051,8 +6974,7 @@ mod tests {
         assert_eq!(queued_resize.run_id, run);
         assert!(!queued_resize.frame.is_empty());
 
-        let stale_resize =
-            TerminalResize::new(queued_resize.run_id.clone(), 1, 80, 24).unwrap();
+        let stale_resize = TerminalResize::new(queued_resize.run_id.clone(), 1, 80, 24).unwrap();
         let (_, stale_resize_frame) = resize_frames(&stale_resize).unwrap();
         assert_eq!(
             gateway
@@ -7144,9 +7066,7 @@ mod tests {
         assert_eq!(brief.station_id, "station-a");
 
         let lifecycle = client
-            .post(format!(
-                "{base}/v1/station/runs/provider-id-a/lifecycle/1"
-            ))
+            .post(format!("{base}/v1/station/runs/provider-id-a/lifecycle/1"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -7162,9 +7082,7 @@ mod tests {
         assert_eq!(board.status(), StatusCode::UNAUTHORIZED);
 
         let terminal = client
-            .post(format!(
-                "{base}/v1/station/runs/provider-id-a/terminal/2"
-            ))
+            .post(format!("{base}/v1/station/runs/provider-id-a/terminal/2"))
             .bearer_auth(token)
             .body(vec![0xff, 0x00, 0x80])
             .send()
@@ -7191,9 +7109,7 @@ mod tests {
 
         // A Run a provider limit paused is a board state of its own.
         let parked = client
-            .post(format!(
-                "{base}/v1/station/runs/provider-id-a/lifecycle/3"
-            ))
+            .post(format!("{base}/v1/station/runs/provider-id-a/lifecycle/3"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -7207,9 +7123,7 @@ mod tests {
         let run = observer.board_missions().await.remove(0).runs.remove(0);
         assert_eq!(run.state.as_deref(), Some("parked"));
         let unknown = client
-            .post(format!(
-                "{base}/v1/station/runs/provider-id-a/lifecycle/4"
-            ))
+            .post(format!("{base}/v1/station/runs/provider-id-a/lifecycle/4"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -7222,9 +7136,7 @@ mod tests {
         assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
 
         let denied = client
-            .post(format!(
-                "{base}/v1/station/runs/provider-id-a/lifecycle/4"
-            ))
+            .post(format!("{base}/v1/station/runs/provider-id-a/lifecycle/4"))
             .json(&serde_json::json!({
                 "operation_id": "station-a",
                 "mission_id": "mission-a",
@@ -8850,10 +8762,7 @@ mod tests {
             .with_proxy_secret(PROXY_TEST_SECRET, 32)
             .unwrap(),
         );
-        for (station, mission, run) in [
-            ("G", "mission-g", "run-g"),
-            ("L", "mission-l", "run-l"),
-        ] {
+        for (station, mission, run) in [("G", "mission-g", "run-g"), ("L", "mission-l", "run-l")] {
             gateway
                 .register_run(
                     "m-token-that-is-long-enough-for-testing",
@@ -9781,10 +9690,7 @@ mod tests {
         );
         assert_eq!(mission_detail["usage"]["total"]["input"], 120);
         assert_eq!(mission_detail["usage"]["total"]["cost_micro_usd"], 4_500);
-        assert_eq!(
-            mission_detail["usage"]["runs"]["run-g"]["output"],
-            30
-        );
+        assert_eq!(mission_detail["usage"]["runs"]["run-g"]["output"], 30);
         assert_eq!(
             mission_detail["brief"]["prompt"],
             "Review the requested change"
@@ -10175,9 +10081,7 @@ mod tests {
             (2, terminal_value.clone()),
         ] {
             let ingested = client
-                .post(format!(
-                    "{base}/v1/station/runs/{run}/events/{sequence}"
-                ))
+                .post(format!("{base}/v1/station/runs/{run}/events/{sequence}"))
                 .bearer_auth("m-token-that-is-long-enough-for-testing")
                 .body(frame)
                 .send()

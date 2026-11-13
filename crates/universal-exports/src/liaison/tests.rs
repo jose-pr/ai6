@@ -17,8 +17,8 @@ use ai6::directorates::registry::cables::{
 use ai6::directorates::registry::store::FileRegistry;
 use ai6::guatiao::library::ProviderError;
 use ai6::{
-    Attempt, Authenticator, Directory, Lookup, MemoryProvider, NewRun, Operation, Person,
-    Roster, RunStatus, RunUpdate, Verdict, access_from_toml,
+    Attempt, Authenticator, Directory, Lookup, MemoryProvider, NewRun, Operation, Person, Roster,
+    RunStatus, RunUpdate, Verdict, access_from_toml,
 };
 use coqui_a2a::error::{A2aError, ErrorKind};
 use coqui_a2a::model::{
@@ -294,13 +294,9 @@ impl World {
         let record = self
             .registry
             .open_run(
-                NewRun::new(
-                    format!("record-{run}"),
-                    format!("mission-{run}"),
-                    STATION,
-                )
-                .with_operation("G")
-                .with_provider_id(run),
+                NewRun::new(format!("record-{run}"), format!("mission-{run}"), STATION)
+                    .with_operation("G")
+                    .with_provider_id(run),
                 Duration::from_secs(600),
             )
             .unwrap();

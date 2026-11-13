@@ -1426,12 +1426,7 @@ mod tests {
         let second = open(2, &renamed.handle).unwrap();
         assert_eq!(second.handle.as_deref(), Some("G-fix.2"));
         assert_eq!(
-            registry
-                .run(&first.id)
-                .unwrap()
-                .unwrap()
-                .handle
-                .as_deref(),
+            registry.run(&first.id).unwrap().unwrap().handle.as_deref(),
             Some("G-1.1"),
             "a run keeps the handle it opened with"
         );

@@ -1241,11 +1241,7 @@ mod tests {
                 .unwrap()
             })
             .collect();
-        assert_eq!(
-            picks,
-            ["a", "b", "c", "a"],
-            "b is full after its one Run"
-        );
+        assert_eq!(picks, ["a", "b", "c", "a"], "b is full after its one Run");
 
         let ranked = AccountPool::new("ranked", "claude")
             .strategy(PoolStrategy::Priority)

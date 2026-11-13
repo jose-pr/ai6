@@ -18,12 +18,12 @@ use std::time::{Duration, Instant};
 
 use ai6::directorates::m::identity::RunId;
 use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
-    TerminalRun, exit_code_text,
+    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalRun,
+    exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
-    RunRecordFile, RunRecordQuery, clearance_reads_only, clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, RunRecordFile,
+    RunRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::directorates::section_00::listing;
@@ -211,10 +211,7 @@ impl AgentHandler for CodexHandler {
     }
 
     /// Codex keeps each thread as a rollout file, one JSON object per line.
-    fn run_record(
-        &self,
-        query: RunRecordQuery,
-    ) -> Result<Option<RunRecordFile>, ProviderError> {
+    fn run_record(&self, query: RunRecordQuery) -> Result<Option<RunRecordFile>, ProviderError> {
         Ok(codex_record(&query))
     }
 
@@ -1740,10 +1737,7 @@ fn check_sandbox_config(
 }
 
 /// Closes `run` and returns `error` when `checked` failed.
-fn close_unless<T>(
-    run: &CodexRun,
-    checked: Result<T, ProviderError>,
-) -> Result<T, ProviderError> {
+fn close_unless<T>(run: &CodexRun, checked: Result<T, ProviderError>) -> Result<T, ProviderError> {
     checked.inspect_err(|_| {
         let _ = run.close();
     })
@@ -2075,12 +2069,7 @@ mod tests {
     #[test]
     fn a_threads_rollout_is_found_under_codex_home() {
         let home = tempfile::tempdir().unwrap();
-        let day = home
-            .path()
-            .join("runs")
-            .join("2026")
-            .join("11")
-            .join("04");
+        let day = home.path().join("runs").join("2026").join("11").join("04");
         std::fs::create_dir_all(&day).unwrap();
         let file = day.join("rollout-2026-11-04T10-00-00-0195-thread.jsonl");
         std::fs::write(&file, "{}\n").unwrap();
@@ -2833,18 +2822,16 @@ mod tests {
             .lock()
             .unwrap()
             .push(ai6::ActionScope::try_new("push", "origin:main").unwrap());
-        run
-            .send_message(AgentMessage {
-                text: "run: git push origin main".to_owned(),
-            })
-            .unwrap();
+        run.send_message(AgentMessage {
+            text: "run: git push origin main".to_owned(),
+        })
+        .unwrap();
         assert_eq!(texts_until_completed(&run), ["decision: accept"]);
 
-        run
-            .send_message(AgentMessage {
-                text: "run: cargo test --workspace".to_owned(),
-            })
-            .unwrap();
+        run.send_message(AgentMessage {
+            text: "run: cargo test --workspace".to_owned(),
+        })
+        .unwrap();
         assert_eq!(texts_until_completed(&run), ["decision: accept"]);
 
         // The gate cannot see what these run, so they are declined and the Agent told why.
@@ -2852,11 +2839,10 @@ mod tests {
             ("stdin: git push origin main", "input to a running command"),
             ("nameless", "names no command"),
         ] {
-            run
-                .send_message(AgentMessage {
-                    text: text.to_owned(),
-                })
-                .unwrap();
+            run.send_message(AgentMessage {
+                text: text.to_owned(),
+            })
+            .unwrap();
             let declined = texts_until_completed(&run);
             assert_eq!(declined[0], "decision: decline", "{text}: {declined:?}");
             assert!(declined[1].contains(why), "{text}: {declined:?}");

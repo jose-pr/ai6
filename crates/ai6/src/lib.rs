@@ -51,6 +51,7 @@ pub use directorates::m::assistant::{
     AssistantPageLimits, AssistantSettings, AssistantViewLimits, NetworkPolicy, PageNetwork,
     RepoKind, SharedRepo, SkillEntry,
 };
+pub use directorates::m::charges::{Charge, ChargeDefinition, ChargeScope};
 pub use directorates::m::compartments::{
     Compartment, CompartmentAction, CompartmentCover, CompartmentLimits, CompartmentResource,
     CompartmentSettings, Compartments, CompiledCompartments, CoverTarget, FieldPrincipal,
@@ -99,9 +100,9 @@ pub use directorates::m::roster::{
     RouteRef, Workspace,
 };
 pub use directorates::m::scorecard::{
-    AgentCard, RunRef, DEFAULT_SMALL_SAMPLE, DEFAULT_WINDOW_DAYS, Judgment, ModelCard,
-    RouteCard, Scorecard, ScorecardDefinition, ScorecardPolicy, Standing,
-    from_registry as scorecard_from, judge,
+    AgentCard, DEFAULT_SMALL_SAMPLE, DEFAULT_WINDOW_DAYS, Judgment, ModelCard, RouteCard, RunRef,
+    Scorecard, ScorecardDefinition, ScorecardPolicy, Standing, from_registry as scorecard_from,
+    judge,
 };
 pub use directorates::m::stewardship::{
     HOLD_KIND, PREFER_KIND, Proposal, Step as ProposedStep, StewardshipPolicy, hold_target,
@@ -122,7 +123,6 @@ pub use directorates::m::vetting::{
     VettingPolicy, VettingScope, VettingVerdict, content_digest, is_review, is_untrusted,
     read_review, review_brief, review_target, vet, work_title,
 };
-pub use directorates::m::charges::{Charge, ChargeDefinition, ChargeScope};
 pub use directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_REGISTRY_DROP, BRIEF_SOURCE, DEFAULT_EXPOSING_TOOLS, Exposure,
     ExposureDefinition, ExposureGate, ExposurePolicy, ExposurePreset, REVIEW, Restriction,
@@ -166,10 +166,10 @@ pub use directorates::q::{
     PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
 };
 pub use directorates::q::{
-    Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, SandboxError, SandboxProfile,
+    Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, RunEnv, SandboxError, SandboxProfile,
     SandboxRequest, SecretBroker, SecretDefinition, SecretError, SecretFields, SecretInstance,
     SecretKeeper, SecretLease, SecretLeaseRequest, SecretProvider, SecretSource, SecretValue,
-    RunEnv, claude_mcp_config,
+    claude_mcp_config,
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
@@ -190,7 +190,7 @@ pub use directorates::registry::assistant_log::{
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore,
     AssistantLogStore, AuditStore, BriefStore, CableStore, ClearanceStore, Limited, LogbookStore,
-    QuarantineStore, RegistryBackend, SealedStore, RunContextStore, RunStore, SleeperStore,
+    QuarantineStore, RegistryBackend, RunContextStore, RunStore, SealedStore, SleeperStore,
     SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{

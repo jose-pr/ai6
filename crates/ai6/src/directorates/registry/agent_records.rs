@@ -612,11 +612,7 @@ mod tests {
         assert_eq!(tally.last(AgentOutcome::Done), Some(20.0));
         assert_eq!(record.by_clearance["field"].done, 2);
         assert_eq!(record.last_mission_at, Some(20.0));
-        assert_eq!(
-            tally.failure_rate(),
-            Some(0.0),
-            "a lost Run is no failure"
-        );
+        assert_eq!(tally.failure_rate(), Some(0.0), "a lost Run is no failure");
 
         // Another Operation's work stays in its own record.
         registry

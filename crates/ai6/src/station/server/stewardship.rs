@@ -347,9 +347,7 @@ mod tests {
     use super::*;
     use crate::directorates::m::stewardship::{HOLD_KIND, PREFER_KIND};
     use crate::directorates::registry::approvals::Ruling;
-    use crate::directorates::registry::runs::{
-        NewRun, RunLaunch, RunResult, RunStatus, RunUpdate,
-    };
+    use crate::directorates::registry::runs::{NewRun, RunLaunch, RunResult, RunStatus, RunUpdate};
     use std::time::Duration;
 
     const SETTINGS: &str = "clearance = \"00\"\n";

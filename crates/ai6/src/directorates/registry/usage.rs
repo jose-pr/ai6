@@ -121,11 +121,7 @@ pub(super) fn add_usage(
     limits: &UsageLimits,
 ) {
     usage.total.add(delta);
-    usage
-        .runs
-        .entry(run.to_owned())
-        .or_default()
-        .add(delta);
+    usage.runs.entry(run.to_owned()).or_default().add(delta);
     if delta.cost_micro_usd > 0 {
         let day = usage.daily_cost_micro_usd.entry(utc_day(now)).or_default();
         *day = day.saturating_add(delta.cost_micro_usd);

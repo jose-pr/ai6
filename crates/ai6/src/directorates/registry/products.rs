@@ -113,8 +113,7 @@ pub fn mission_product(registry: &dyn RegistryBackend, filed: &FiledBrief, limit
     {
         refs.insert("branch".to_owned(), json!(branch));
     }
-    if let Some(checkpoint) = latest_run(registry, &key).and_then(|run| run.checkpoint)
-    {
+    if let Some(checkpoint) = latest_run(registry, &key).and_then(|run| run.checkpoint) {
         refs.insert("branch".to_owned(), json!(checkpoint.branch));
         refs.insert("commit".to_owned(), json!(checkpoint.commit));
     }

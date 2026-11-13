@@ -357,11 +357,7 @@ mod tests {
             source: BRIEF_SOURCE.to_owned(),
             at: 1.0,
         }];
-        let gate = ExposureGate::new(
-            ExposurePolicy::default(),
-            inherited,
-            &RunLimits::default(),
-        );
+        let gate = ExposureGate::new(ExposurePolicy::default(), inherited, &RunLimits::default());
         assert!(gate.is_exposed());
         assert_eq!(gate.take_changes(), None);
         assert!(Restriction::ALL.into_iter().all(|r| gate.restricts(r)));

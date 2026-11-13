@@ -611,9 +611,8 @@ impl AgentTerminal for TerminalBridge {
         #[cfg(feature = "publisher")]
         if let Some(telemetry) = &self.telemetry {
             if self.raw_input {
-                telemetry.attach_terminal_target(Arc::new(TerminalInputBridge {
-                    run: run.clone(),
-                }));
+                telemetry
+                    .attach_terminal_target(Arc::new(TerminalInputBridge { run: run.clone() }));
             }
             return Ok(TerminalRunBridge {
                 run,
@@ -647,9 +646,7 @@ struct TerminalInputBridge {
 #[cfg(feature = "publisher")]
 impl TerminalInputTarget for TerminalInputBridge {
     fn write(&self, data: &[u8]) -> Result<(), &'static str> {
-        self.run
-            .write(data)
-            .map_err(|_| "terminal input failed")
+        self.run.write(data).map_err(|_| "terminal input failed")
     }
 
     fn resize(&self, rows: i64, cols: i64) -> Result<(), &'static str> {

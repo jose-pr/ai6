@@ -723,9 +723,8 @@ impl FrameReceiver {
                 let bytes = TryAsRef::<[u8]>::try_as_ref(value)
                     .ok_or_else(|| FrameDecodeError("terminal bytes have the wrong type".into()))?
                     .to_vec();
-                let data =
-                    TerminalData::new(run_id, number(&map, "sequence")?, direction, bytes)
-                        .map_err(|error| FrameDecodeError(error.to_string()))?;
+                let data = TerminalData::new(run_id, number(&map, "sequence")?, direction, bytes)
+                    .map_err(|error| FrameDecodeError(error.to_string()))?;
                 Ok(Some(IncomingFrame::Terminal(data)))
             }
             Received::Value { channel, value } if channel == RESIZE_CHANNEL => {
@@ -848,12 +847,7 @@ pub struct TerminalResize {
 
 impl TerminalResize {
     /// Creates a resize request, rejecting zero-sized terminals.
-    pub fn new(
-        run_id: RunId,
-        sequence: u64,
-        columns: u16,
-        rows: u16,
-    ) -> Result<Self, InvalidSize> {
+    pub fn new(run_id: RunId, sequence: u64, columns: u16, rows: u16) -> Result<Self, InvalidSize> {
         if columns == 0 || rows == 0 {
             return Err(InvalidSize);
         }
@@ -939,13 +933,8 @@ mod tests {
     #[test]
     fn terminal_data_preserves_binary_and_enforces_bound() {
         let run = RunId::new("provider-id").unwrap();
-        let data = TerminalData::new(
-            run.clone(),
-            1,
-            TerminalDirection::Output,
-            vec![0xff, 0x00],
-        )
-        .unwrap();
+        let data =
+            TerminalData::new(run.clone(), 1, TerminalDirection::Output, vec![0xff, 0x00]).unwrap();
         assert_eq!(data.bytes(), [0xff, 0x00]);
         assert!(format!("{data:?}").contains("[REDACTED; 2 bytes]"));
         assert!(!format!("{data:?}").contains("ff00"));
@@ -1269,8 +1258,7 @@ mod tests {
             vec![0xff, 0x00, 0x80],
         )
         .unwrap();
-        let resize =
-            TerminalResize::new(RunId::new("run-3").unwrap(), 6, 120, 40).unwrap();
+        let resize = TerminalResize::new(RunId::new("run-3").unwrap(), 6, 120, 40).unwrap();
         let lifecycle_frames = lifecycle_frames(&event).unwrap();
         let terminal_frames = terminal_frames(&terminal).unwrap();
         let resize_frames = resize_frames(&resize).unwrap();

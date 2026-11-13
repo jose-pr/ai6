@@ -126,8 +126,7 @@ impl Notifier {
     fn of(run: &Arc<Session>) -> Self {
         let run = Arc::downgrade(run);
         Self::new(move |method, params| {
-            run
-                .upgrade()
+            run.upgrade()
                 .is_some_and(|run| run.notify(method, params).is_ok())
         })
     }
@@ -385,11 +384,7 @@ impl AcpRun {
         let opened = Self {
             reader: Mutex::new(()),
             state: Mutex::new(State {
-                provider_id: if events_capability {
-                    None
-                } else {
-                    run.id()
-                },
+                provider_id: if events_capability { None } else { run.id() },
                 ..State::default()
             }),
             run: Arc::new(run),

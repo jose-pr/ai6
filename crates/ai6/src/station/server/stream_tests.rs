@@ -169,13 +169,7 @@ impl StreamRun {
 
 impl AgentSession for StreamRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(self
-            .stream
-            .lock()
-            .unwrap()
-            .run_id
-            .clone()
-            .map(String::from))
+        Ok(self.stream.lock().unwrap().run_id.clone().map(String::from))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -200,10 +194,9 @@ impl AgentSession for StreamRun {
                     .is_some_and(|read| read.elapsed() >= FIRST_LINE_AFTER);
             if first_line_due && !stream.initialized {
                 stream.initialized = true;
-                stream.run_id =
-                    Some(RunId::try_new(self.reports.clone()).map_err(|error| {
-                        ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
-                    })?);
+                stream.run_id = Some(RunId::try_new(self.reports.clone()).map_err(|error| {
+                    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+                })?);
                 if self.turn == "complete" {
                     stream
                         .queue
@@ -266,16 +259,13 @@ async fn wait_until(what: &str, mut holds: impl FnMut() -> bool) {
 }
 
 async fn wait_for_run(state: &DaemonState, mission_id: &str, wanted: &str) {
-    wait_until(
-        "the Mission records the Run its stream reported",
-        || {
-            mission_state(state, mission_id)
-                .run_ids
-                .last()
-                .map(RunId::as_str)
-                == Some(wanted)
-        },
-    )
+    wait_until("the Mission records the Run its stream reported", || {
+        mission_state(state, mission_id)
+            .run_ids
+            .last()
+            .map(RunId::as_str)
+            == Some(wanted)
+    })
     .await;
 }
 

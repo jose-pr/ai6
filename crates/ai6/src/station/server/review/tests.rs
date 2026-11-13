@@ -315,11 +315,7 @@ async fn a_redo_goes_back_on_the_authors_run_with_the_reasons_then_passes() {
         .cloned()
         .expect("the author was resumed");
     let reported = mission(&state, "rv-redo").unwrap().run_ids;
-    assert_eq!(
-        reported.len(),
-        1,
-        "one Run, the one its stream reported"
-    );
+    assert_eq!(reported.len(), 1, "one Run, the one its stream reported");
     assert_eq!(resumed.run_id, reported[0]);
     let message = resumed.message.expect("the reasons");
     assert!(message.contains("the goals are not met"), "{message}");

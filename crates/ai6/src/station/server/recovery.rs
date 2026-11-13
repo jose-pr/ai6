@@ -16,8 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{
-    DaemonState, credentials, ensure_leased_mission, queue_event, runner_link, run_hold,
-    unix_now,
+    DaemonState, credentials, ensure_leased_mission, queue_event, run_hold, runner_link, unix_now,
 };
 use crate::directorates::m::mission::{LaunchManifest, MissionState, RunHold};
 use crate::directorates::m::placement::{OperationPolicy, PlacementRequest, StationFacts};
@@ -26,9 +25,7 @@ use crate::directorates::m::roster::OnLost;
 use crate::directorates::m::theaters::TheaterAccess;
 use crate::directorates::q::safehouse::{CheckpointSpec, SafeHouseCheckpoint};
 use crate::directorates::registry::limits::RunLimits;
-use crate::directorates::registry::runs::{
-    RunError, RunLaunch, RunRecord, RunStatus, RunUpdate,
-};
+use crate::directorates::registry::runs::{RunError, RunLaunch, RunRecord, RunStatus, RunUpdate};
 use crate::directorates::registry::store::{Lease, LeaseRecovery};
 use crate::station::reach::ReachWatch;
 use crate::{MissionId, RunId};
@@ -110,8 +107,7 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
     }
     let why = match adoption_choice(state, lease, &record) {
         Ok(station) => {
-            let meta =
-                BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.id))]);
+            let meta = BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.id))]);
             match state
                 .intake
                 .hand_over(lease, &station, state.mission_lease(), meta)
@@ -182,9 +178,9 @@ pub(super) fn give_up(
     reason: &str,
 ) {
     let operation = state.runs.lock().ok().and_then(|mut runs| {
-        let current = runs.get(mission_id).is_some_and(|operation| {
-            run.is_none_or(|run| Arc::ptr_eq(&operation.run, run))
-        });
+        let current = runs
+            .get(mission_id)
+            .is_some_and(|operation| run.is_none_or(|run| Arc::ptr_eq(&operation.run, run)));
         if current {
             runs.remove(mission_id)
         } else {
@@ -256,10 +252,7 @@ pub(super) fn give_up(
 fn lose_held(state: &DaemonState, hold: &RunHold, reason: &str) {
     let station = state.station_id.as_str();
     for _ in 0..state.station.limits().recovery.give_up_tries {
-        match state
-            .intake
-            .renew_run(&hold.id, station, hold.fence, LAPSE)
-        {
+        match state.intake.renew_run(&hold.id, station, hold.fence, LAPSE) {
             Ok(_) => {}
             // Ended, or another Station holds it now: it is not this Station's to lose.
             Err(RunError::Ended | RunError::Stale | RunError::HeldBy(_)) => return,
@@ -536,18 +529,17 @@ pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
             return Adoption::Pending;
         }
     };
-    let record =
-        match state
-            .intake
-            .take_run(run_id, &state.station_id, state.mission_lease())
-        {
-            Ok(record) => record,
-            Err(RunError::Ended | RunError::NotFound) => return Adoption::NotAsked,
-            Err(error) => {
-                eprintln!("ai6: Run {run_id:?} not adopted yet: {error}");
-                return Adoption::Pending;
-            }
-        };
+    let record = match state
+        .intake
+        .take_run(run_id, &state.station_id, state.mission_lease())
+    {
+        Ok(record) => record,
+        Err(RunError::Ended | RunError::NotFound) => return Adoption::NotAsked,
+        Err(error) => {
+            eprintln!("ai6: Run {run_id:?} not adopted yet: {error}");
+            return Adoption::Pending;
+        }
+    };
     if let Err(error) = ensure_leased_mission(state, lease) {
         eprintln!("ai6: Mission {mission_id:?} not adopted: {error}");
         return Adoption::Pending;
@@ -740,10 +732,7 @@ pub(super) fn record_launch(state: &DaemonState, mission_id: &str) {
         .intake
         .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
-        eprintln!(
-            "ai6: Run record {:?} launch not recorded: {error}",
-            hold.id
-        );
+        eprintln!("ai6: Run record {:?} launch not recorded: {error}", hold.id);
     }
 }
 
@@ -821,10 +810,7 @@ impl Notes {
             .update_run(&hold.id, &state.station_id, hold.fence, update)
         {
             Ok(_) | Err(RunError::Ended) => {}
-            Err(error) => eprintln!(
-                "ai6: Run record {:?} notes not written: {error}",
-                hold.id
-            ),
+            Err(error) => eprintln!("ai6: Run record {:?} notes not written: {error}", hold.id),
         }
         self.changed = false;
         self.written = Some(Instant::now());
@@ -842,8 +828,7 @@ pub(super) fn checkpoint_due(state: &DaemonState) {
         .runs
         .lock()
         .map(|runs| {
-            runs
-                .iter()
+            runs.iter()
                 .filter_map(|(mission_id, operation)| {
                     let house = operation.safe_house.clone()?;
                     house.is_isolated().then(|| (mission_id.clone(), house))
@@ -1295,9 +1280,7 @@ mod tests {
         assert_eq!(after, (after[0]..=DRIP_TICKS).collect::<Vec<_>>());
 
         // One harness ran from start to end: nothing was launched again.
-        let launched = std::fs::read_dir(runner_dir.join("runs"))
-            .unwrap()
-            .count();
+        let launched = std::fs::read_dir(runner_dir.join("runs")).unwrap().count();
         assert_eq!(launched, 1, "the runner kept one Run");
         assert!(link.status(&key).unwrap().unwrap().ended);
         let record = b.intake.run(&first.id).unwrap().unwrap();
@@ -1437,7 +1420,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runner_that_dies_under_a_live_station_loses_its_run_and_the_mission_is_tried_again()
-     {
+    {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
         let runner_dir = root.path().join("runner");

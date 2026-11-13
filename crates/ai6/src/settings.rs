@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::bootstrap::Bootstrap;
 use crate::directorates::m::assistant::AssistantSettings;
+use crate::directorates::m::charges::ChargeDefinition;
 use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::{StationRuntime, UnexRecord};
 use crate::directorates::m::cover::CoverDefinition;
@@ -19,7 +20,6 @@ use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
-use crate::directorates::m::charges::ChargeDefinition;
 
 /// A declaration's schema as JSON. A derive that cannot build its schema is a defect a test holds
 /// every root to, so it reads as an empty schema here.

@@ -50,10 +50,9 @@ impl AgentHandler for MockWakeHandler {
             request.mission_id.to_string(),
             request.initial_context.clone(),
         ));
-        let run_id =
-            RunId::try_new(format!("wake-{}", request.mission_id)).map_err(|error| {
-                ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &error.to_string())
-            })?;
+        let run_id = RunId::try_new(format!("wake-{}", request.mission_id)).map_err(|error| {
+            ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &error.to_string())
+        })?;
         Ok(WakeRun::waiting(run_id, request.environment, terminal).into_object())
     }
 
@@ -129,9 +128,7 @@ impl AgentSession for WakeRun {
             let said = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map(|runtime| {
-                    runtime.block_on(answer(&url, &token, &message.text, &body, &run))
-                })
+                .map(|runtime| runtime.block_on(answer(&url, &token, &message.text, &body, &run)))
                 .unwrap_or_else(|error| format!("answer failed: {error}"));
             let mut events = events.lock().unwrap();
             events.push_back(event("text", Some(said)));

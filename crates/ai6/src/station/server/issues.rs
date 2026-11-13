@@ -1077,8 +1077,7 @@ impl IssueDesk {
             .lock()
             .ok()
             .and_then(|runs| {
-                runs
-                    .get(&caller.mission)
+                runs.get(&caller.mission)
                     .map(|run| run.environment.values().cloned().collect())
             })
             .unwrap_or_default();
@@ -1512,8 +1511,7 @@ fn waits_for_issue(mission: &crate::directorates::m::mission::Mission) -> bool {
 /// Returns whether it was delivered.
 async fn tell(state: &DaemonState, mission_id: &str, text: String, resume_if_ended: bool) -> bool {
     let live = state.runs.lock().ok().and_then(|runs| {
-        runs
-            .get(mission_id)
+        runs.get(mission_id)
             .map(|operation| (operation.run.clone(), operation.gate.clone()))
     });
     match live {
@@ -1547,8 +1545,7 @@ fn expose(state: &DaemonState, mission_id: &str, tracker: &str, now: f64) {
     let limit = state.intake.limits().runs.exposure_source_bytes;
     let source = issue_source(tracker, limit);
     let live = state.runs.lock().ok().and_then(|runs| {
-        runs
-            .get(mission_id)
+        runs.get(mission_id)
             .map(|operation| operation.exposure.clone())
     });
     match live {
@@ -2454,9 +2451,7 @@ mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.runs.lock().unwrap()[mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[mission_id].environment.clone();
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
                 .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),

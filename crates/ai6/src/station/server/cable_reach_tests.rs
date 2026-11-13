@@ -43,12 +43,9 @@ impl AgentHandler for MockCablesHandler {
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        let run_id =
-            RunId::try_new(format!("provider-id-cables-{}", request.mission_id)).map_err(
-                |error| {
-                    ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &error.to_string())
-                },
-            )?;
+        let run_id = RunId::try_new(format!("provider-id-cables-{}", request.mission_id)).map_err(
+            |error| ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &error.to_string()),
+        )?;
         let events: Arc<Mutex<VecDeque<AgentEvent>>> = Arc::default();
         let (environment, queue) = (request.environment, events.clone());
         std::thread::spawn(move || {

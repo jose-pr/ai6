@@ -667,7 +667,8 @@ async fn a_family_the_person_holds_no_action_on_is_refused_naming_it() {
         let ran = ai6ctl(&deployment, &deployment.guest, &args, None, &[]).await;
         assert!(!ran.ok, "{args:?}");
         assert!(
-            ran.err.contains("the charge family needs config.") && ran.err.contains("config:charge"),
+            ran.err.contains("the charge family needs config.")
+                && ran.err.contains("config:charge"),
             "{args:?}: {}",
             ran.err
         );

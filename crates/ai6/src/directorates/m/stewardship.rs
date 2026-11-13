@@ -348,9 +348,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::directorates::m::scorecard::{
-        AgentCard, RunRef, Judgment, RouteCard, Scorecard,
-    };
+    use crate::directorates::m::scorecard::{AgentCard, Judgment, RouteCard, RunRef, Scorecard};
 
     fn standing(done: usize, failed: usize) -> Standing {
         let mut attempts = BTreeMap::new();

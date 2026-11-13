@@ -9,8 +9,7 @@ use guatiao::library::{Object, ProviderError};
 
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::section_00::acp::{
-    AcpFacade, AcpOptions, AcpRun, LAUNCH_META_KEY, LaunchMeta, ResumeMeta, UNBOUNDED_MS,
-    duplex,
+    AcpFacade, AcpOptions, AcpRun, LAUNCH_META_KEY, LaunchMeta, ResumeMeta, UNBOUNDED_MS, duplex,
 };
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 use coqui_acp_provider::AgentSession;

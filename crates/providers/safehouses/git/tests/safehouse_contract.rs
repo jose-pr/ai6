@@ -62,23 +62,22 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
     assert_eq!(info.branch.as_deref(), Some("main"));
     fs::write(target.join("notes.md"), "notes\n").unwrap();
     let saved = SafeHouseCheckpoint::from_value(
-        &run
-            .checkpoint(
-                &CheckpointSpec {
-                    remote: "origin".to_owned(),
-                    message: "moneypenny: notes".to_owned(),
-                    author_name: Some("Eve".to_owned()),
-                    author_email: Some("eve@example.invalid".to_owned()),
-                    branch: Some("main".to_owned()),
-                    fallback: None,
-                    files: None,
-                    exclude: None,
-                    max_bytes: None,
-                }
-                .to_value()
-                .unwrap(),
-            )
+        &run.checkpoint(
+            &CheckpointSpec {
+                remote: "origin".to_owned(),
+                message: "moneypenny: notes".to_owned(),
+                author_name: Some("Eve".to_owned()),
+                author_email: Some("eve@example.invalid".to_owned()),
+                branch: Some("main".to_owned()),
+                fallback: None,
+                files: None,
+                exclude: None,
+                max_bytes: None,
+            }
+            .to_value()
             .unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(saved.branch, "main");

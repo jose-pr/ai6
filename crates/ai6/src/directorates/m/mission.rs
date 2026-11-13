@@ -398,11 +398,7 @@ impl MissionStore {
 
     /// Records the Registry Run lease this Station holds for the Mission.
     #[cfg(feature = "daemon")]
-    pub(crate) fn set_hold(
-        &mut self,
-        mission_id: &str,
-        hold: RunHold,
-    ) -> Result<(), MissionError> {
+    pub(crate) fn set_hold(&mut self, mission_id: &str, hold: RunHold) -> Result<(), MissionError> {
         let mut operations = self.operations.clone();
         operations
             .get_mut(mission_id)
@@ -1006,11 +1002,7 @@ impl MissionStore {
     }
 
     /// Associates a provider ID with the Mission that operation serves.
-    pub fn attach_run(
-        &mut self,
-        mission_id: &str,
-        run_id: RunId,
-    ) -> Result<Mission, MissionError> {
+    pub fn attach_run(&mut self, mission_id: &str, run_id: RunId) -> Result<Mission, MissionError> {
         let mut next = self.missions.clone();
         let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
         if matches!(
@@ -1394,11 +1386,8 @@ mod tests {
             )
             .unwrap();
             book.transition("mission-1", MissionState::Working).unwrap();
-            book.attach_run(
-                "mission-1",
-                RunId::try_new("provider-id-9").unwrap(),
-            )
-            .unwrap();
+            book.attach_run("mission-1", RunId::try_new("provider-id-9").unwrap())
+                .unwrap();
             book.set_operation(
                 "mission-1",
                 LaunchManifest {

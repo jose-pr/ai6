@@ -1423,8 +1423,8 @@ mod tests {
     use super::super::routes;
     use super::super::tests::{limited_state, start_mission_by_id, wait_for_done, wait_for_state};
     use super::super::{
-        StartMission, publish_station_check_in, schedule_intake_once, schedule_parked_once,
-        schedule_queued_once, run_hold, start_mission,
+        StartMission, publish_station_check_in, run_hold, schedule_intake_once,
+        schedule_parked_once, schedule_queued_once, start_mission,
     };
 
     const START: i64 = POOLED_RESET - 3_600;
@@ -1664,18 +1664,9 @@ priority = 2
         until_released(state).await;
     }
 
-    fn launch_of(
-        state: &DaemonState,
-        id: &str,
-    ) -> crate::directorates::registry::runs::RunLaunch {
+    fn launch_of(state: &DaemonState, id: &str) -> crate::directorates::registry::runs::RunLaunch {
         let hold = run_hold(state, id).unwrap();
-        state
-            .intake
-            .run(&hold.id)
-            .unwrap()
-            .unwrap()
-            .launch
-            .unwrap()
+        state.intake.run(&hold.id).unwrap().unwrap().launch.unwrap()
     }
 
     fn report_use(state: &DaemonState, pool: &str, name: &str, used: u16) {

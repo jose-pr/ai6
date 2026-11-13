@@ -295,9 +295,7 @@ impl RunContextStore for FileRegistry {
     }
 
     fn run_context(&self, run: &str) -> io::Result<Option<RunContext>> {
-        let path = self
-            .contexts_root()
-            .join(format!("{}.json", run_key(run)));
+        let path = self.contexts_root().join(format!("{}.json", run_key(run)));
         let Some(mut record) = read_record(&path)? else {
             return Ok(None);
         };
@@ -372,11 +370,7 @@ mod tests {
             .unwrap();
         let newer = mission("provider-1", "{\"a\":1}\n{\"b\":2}\n", 2.0);
         registry.file_run_context(&newer).unwrap();
-        let read = store
-            .handle()
-            .run_context("provider-1")
-            .unwrap()
-            .unwrap();
+        let read = store.handle().run_context("provider-1").unwrap().unwrap();
         assert_eq!(read, newer);
         assert_eq!(read.operation(), Some("G"));
         assert!(registry.run_context("provider/1").unwrap().is_none());
@@ -397,10 +391,7 @@ mod tests {
             .file_run_context(&mission("s-4", "x", 40.0))
             .unwrap();
         let mine = registry.conversation_contexts("c-1").unwrap();
-        let runs: Vec<_> = mine
-            .iter()
-            .map(|context| context.run.as_str())
-            .collect();
+        let runs: Vec<_> = mine.iter().map(|context| context.run.as_str()).collect();
         assert_eq!(runs, ["s-1", "s-2"]);
         assert_eq!(mine[0].source, ContextSource::Events);
         assert!(mine[0].content.contains("\"kind\":\"text\""));

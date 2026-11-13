@@ -303,10 +303,7 @@ fn a_run_gets_the_root_bin_on_path_and_a_desk_one_no_bin() {
     let desk = case
         .deliver(&prepared, &[("PATH", base.as_str())], false, "codex")
         .unwrap();
-    assert_eq!(
-        desk.environment["PATH"], base,
-        "a desk Run gets no bin/"
-    );
+    assert_eq!(desk.environment["PATH"], base, "a desk Run gets no bin/");
     assert_eq!(desk.environment["SHIP_TOOLS_OVERLAY_ROOT"], root);
     assert!(desk.context.unwrap().contains("ship-tools"));
 }

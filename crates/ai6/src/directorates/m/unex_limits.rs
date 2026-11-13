@@ -528,10 +528,7 @@ mod tests {
         assert!(read("[gateway]\nno_such = 1\n").is_err());
         let mut zero = UnexLimits::default();
         zero.gateway.runs = Limit::at(0);
-        assert_eq!(
-            zero.validate(),
-            Err("gateway.runs: at least 1".to_owned())
-        );
+        assert_eq!(zero.validate(), Err("gateway.runs: at least 1".to_owned()));
         let mut token = UnexLimits::default();
         token.gateway.access_token_ttl = Seconds::new(0);
         assert_eq!(

@@ -339,7 +339,10 @@ fn invalid_input(message: impl Into<String>) -> io::Error {
 
 /// Checks a scope as the Registry keys it.
 pub(super) fn validate_scope(scope: &str) -> io::Result<()> {
-    scope.parse::<ChargeScope>().map(drop).map_err(invalid_input)
+    scope
+        .parse::<ChargeScope>()
+        .map(drop)
+        .map_err(invalid_input)
 }
 
 fn validate_agent(agent: &str) -> io::Result<()> {
@@ -703,10 +706,7 @@ mod tests {
         let other_agent = registry
             .claim_charge("operation:G", "M", "station-b", LONG)
             .unwrap();
-        assert_eq!(
-            other_agent.provider_id, None,
-            "another Agent's Run"
-        );
+        assert_eq!(other_agent.provider_id, None, "another Agent's Run");
         assert!(registry.claim_charge("theater:x", "00", "a", LONG).is_err());
         assert_eq!(
             registry
@@ -765,7 +765,13 @@ mod tests {
             "a turn older than the hour is not kept"
         );
         assert!(matches!(
-            registry.update_charge("m", "elsewhere", record.fence, None, ChargeUpdate::default()),
+            registry.update_charge(
+                "m",
+                "elsewhere",
+                record.fence,
+                None,
+                ChargeUpdate::default()
+            ),
             Err(ChargeError::Stale)
         ));
         assert!(matches!(

@@ -597,10 +597,7 @@ fn valid_key(key: &str) -> bool {
 
 /// The Runs in the state directory. One that was live when its runner stopped ends now,
 /// with an event saying why; ended ones older than `limits.keep_ended` are removed.
-fn load_runs(
-    state_dir: &Path,
-    limits: &RunnerLimits,
-) -> io::Result<BTreeMap<String, Arc<Hosted>>> {
+fn load_runs(state_dir: &Path, limits: &RunnerLimits) -> io::Result<BTreeMap<String, Arc<Hosted>>> {
     let mut runs = BTreeMap::new();
     let now = unix_seconds();
     for entry in fs::read_dir(state_dir.join(RUNS_DIR))? {
@@ -612,9 +609,7 @@ fn load_runs(
         }
         let Ok(file) = fs::read(dir.join(RUN_FILE))
             .map_err(io::Error::other)
-            .and_then(|bytes| {
-                serde_json::from_slice::<RunFile>(&bytes).map_err(io::Error::other)
-            })
+            .and_then(|bytes| serde_json::from_slice::<RunFile>(&bytes).map_err(io::Error::other))
         else {
             continue;
         };
@@ -686,10 +681,7 @@ impl Hosted {
         if let Ok(bytes) = serde_json::to_vec_pretty(&file)
             && let Err(error) = write_atomically(&self.dir.join(RUN_FILE), &bytes)
         {
-            eprintln!(
-                "ai6 runner: Run {:?} record not written: {error}",
-                self.key
-            );
+            eprintln!("ai6 runner: Run {:?} record not written: {error}", self.key);
         }
     }
 
@@ -714,10 +706,7 @@ impl Hosted {
 
     fn append(&self, event: AgentEvent) {
         if let Err(error) = lock_of(&self.spool).append(event) {
-            eprintln!(
-                "ai6 runner: Run {:?} event not spooled: {error}",
-                self.key
-            );
+            eprintln!("ai6 runner: Run {:?} event not spooled: {error}", self.key);
         }
     }
 
@@ -1354,15 +1343,11 @@ mod tests {
         tokio::task::spawn_blocking(move || {
             let run = AcpRun::connect(transport, options, None).unwrap();
             assert_eq!(texts(&events_until(&run, 1)), ["hello work"]);
-            assert_eq!(
-                run.session_id().unwrap().unwrap().as_str(),
-                "stream-run-1"
-            );
-            run
-                .send_message(AgentMessage {
-                    text: "a".to_owned(),
-                })
-                .unwrap();
+            assert_eq!(run.session_id().unwrap().unwrap().as_str(), "stream-run-1");
+            run.send_message(AgentMessage {
+                text: "a".to_owned(),
+            })
+            .unwrap();
             assert_eq!(texts(&events_until(&run, 1)), ["echo:a"]);
             // The connection drops in the middle of the turn.
             drop(run);

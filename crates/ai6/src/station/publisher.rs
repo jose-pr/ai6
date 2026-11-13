@@ -167,7 +167,9 @@ enum Command {
     },
     /// A holder of the Run's telemetry has gone: once none is left and what came before this
     /// is out, the Run is not registered again.
-    Forget { run_id: RunId },
+    Forget {
+        run_id: RunId,
+    },
 }
 
 impl Command {
@@ -239,8 +241,7 @@ impl Outbox {
                 if waiting.commands.len() >= room {
                     if let Command::Lifecycle { run_id, .. } = &command {
                         let earlier = waiting.commands.iter().position(|queued| {
-                            matches!(queued, Command::Lifecycle { .. })
-                                && queued.run_id() == run_id
+                            matches!(queued, Command::Lifecycle { .. }) && queued.run_id() == run_id
                         });
                         if let Some(earlier) = earlier {
                             waiting.commands.remove(earlier);
@@ -511,11 +512,7 @@ impl Publisher {
         );
     }
 
-    fn unregister_input_target(
-        &self,
-        run_id: &RunId,
-        target: &Arc<dyn TerminalInputTarget>,
-    ) {
+    fn unregister_input_target(&self, run_id: &RunId, target: &Arc<dyn TerminalInputTarget>) {
         let Ok(mut targets) = self.input_targets.lock() else {
             return;
         };
@@ -1155,21 +1152,21 @@ impl Worker {
                 run_id,
                 mission,
             } => {
-                let run =
-                    self.runs
-                        .entry(run_id.clone())
-                        .or_insert_with(|| Published {
-                            operation_id: operation_id.clone(),
-                            mission_id: mission_id.clone(),
-                            mission: None,
-                            next_sequence: 0,
-                            registered: false,
-                            lifecycle: None,
-                            lifecycle_due: false,
-                            hole: false,
-                            holders: 0,
-                            terminal_bytes: None,
-                        });
+                let run = self
+                    .runs
+                    .entry(run_id.clone())
+                    .or_insert_with(|| Published {
+                        operation_id: operation_id.clone(),
+                        mission_id: mission_id.clone(),
+                        mission: None,
+                        next_sequence: 0,
+                        registered: false,
+                        lifecycle: None,
+                        lifecycle_due: false,
+                        hole: false,
+                        holders: 0,
+                        terminal_bytes: None,
+                    });
                 run.holders += 1;
                 run.mission.clone_from(mission);
                 run.registered = false;
@@ -1400,9 +1397,7 @@ impl Worker {
                 if next.is_some_and(|next| next > sequence) {
                     Ok(())
                 } else {
-                    Err(Failure::Refused(
-                        "gateway refused a Run event's sequence",
-                    ))
+                    Err(Failure::Refused("gateway refused a Run event's sequence"))
                 }
             }
         }
@@ -1619,12 +1614,7 @@ fn publish_terminal(
     )
 }
 
-fn run_endpoint(
-    origin: &Url,
-    run_id: &RunId,
-    kind: &str,
-    sequence: u64,
-) -> Result<Url, Publish> {
+fn run_endpoint(origin: &Url, run_id: &RunId, kind: &str, sequence: u64) -> Result<Url, Publish> {
     let invalid = || Publish::Failed(Failure::Refused("invalid Run endpoint"));
     let mut url = origin.join("v1/station/runs/").map_err(|_| invalid())?;
     let mut segments = url.path_segments_mut().map_err(|_| invalid())?;
@@ -1658,10 +1648,7 @@ mod tests {
     struct RecordingTerminal(mpsc::Sender<RecordedInput>);
 
     impl Terminal for RecordingTerminal {
-        fn spawn(
-            &self,
-            _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+        fn spawn(&self, _spec: &guatiao::Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
             Ok(RecordingTerminalRun(self.0.clone()).into_object())
         }
     }
@@ -1707,10 +1694,7 @@ mod tests {
     struct RawOutputTerminal;
 
     impl Terminal for RawOutputTerminal {
-        fn spawn(
-            &self,
-            _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+        fn spawn(&self, _spec: &guatiao::Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
             Ok(RawOutputRun(Mutex::new(false)).into_object())
         }
     }
@@ -1876,8 +1860,7 @@ mod tests {
         fn serve(&mut self, listener: TcpListener) {
             listener.set_nonblocking(true).unwrap();
             let stop = Arc::new(AtomicBool::new(false));
-            let (stopping, runs, stated) =
-                (stop.clone(), self.runs.clone(), self.stated.clone());
+            let (stopping, runs, stated) = (stop.clone(), self.runs.clone(), self.stated.clone());
             let serving = thread::spawn(move || {
                 while !stopping.load(Ordering::Acquire) {
                     match listener.accept() {
@@ -2000,12 +1983,7 @@ mod tests {
         }
 
         fn lifecycle(&self, run: &str) -> Option<(String, Option<String>)> {
-            self.runs
-                .lock()
-                .unwrap()
-                .get(run)?
-                .lifecycle
-                .clone()
+            self.runs.lock().unwrap().get(run)?.lifecycle.clone()
         }
 
         fn output(&self, run: &str) -> Vec<u8> {
@@ -2097,8 +2075,7 @@ mod tests {
 
         gateway.come_back();
         until("the gateway shows the Run as it is now", || {
-            gateway.lifecycle("run-a")
-                == Some(("blocked".to_owned(), Some("green-ink".to_owned())))
+            gateway.lifecycle("run-a") == Some(("blocked".to_owned(), Some("green-ink".to_owned())))
         });
         until("what was held while it was away arrives", || {
             gateway.output("run-a") == b"while away"
@@ -2290,15 +2267,9 @@ mod tests {
                 }
             })
         );
-        assert_eq!(
-            terminal.path,
-            "/v1/station/runs/run%2Fa/terminal/41"
-        );
+        assert_eq!(terminal.path, "/v1/station/runs/run%2Fa/terminal/41");
         assert_eq!(terminal.body, [0, 255, 10]);
-        assert_eq!(
-            lifecycle.path,
-            "/v1/station/runs/run%2Fa/lifecycle/42"
-        );
+        assert_eq!(lifecycle.path, "/v1/station/runs/run%2Fa/lifecycle/42");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&lifecycle.body).unwrap(),
             serde_json::json!({
@@ -2349,10 +2320,7 @@ mod tests {
         let registration = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(registration.path, "/v1/station/runs");
         let terminal_frame = requests.recv_timeout(Duration::from_secs(60)).unwrap();
-        assert_eq!(
-            terminal_frame.path,
-            "/v1/station/runs/run-a/terminal/41"
-        );
+        assert_eq!(terminal_frame.path, "/v1/station/runs/run-a/terminal/41");
         let lifecycle = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(
             lifecycle.path, "/v1/station/runs/run-a/lifecycle/42",
@@ -2670,11 +2638,7 @@ mod tests {
 
         gateway.come_back();
         until("the latest state and output arrive", || {
-            gateway
-                .lifecycle("run-a")
-                .map(|state| state.0)
-                .as_deref()
-                == Some("working")
+            gateway.lifecycle("run-a").map(|state| state.0).as_deref() == Some("working")
                 && gateway.output("run-a").ends_with(b"eeee")
         });
         let sequences = gateway.sequences("run-a");
@@ -2697,19 +2661,13 @@ mod tests {
         let telemetry = telemetry_of(&publisher, "mission-a");
         telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle_for("blocked", Some("green-ink"));
-        until("the state arrives", || {
-            gateway.lifecycle("run-a").is_some()
-        });
+        until("the state arrives", || gateway.lifecycle("run-a").is_some());
         gateway.go_away();
         gateway.come_back();
-        until(
-            "the gateway shows the Run again, with no new event",
-            || {
-                gateway.lifecycle("run-a")
-                    == Some(("blocked".to_owned(), Some("green-ink".to_owned())))
-                    && gateway.has_brief("run-a")
-            },
-        );
+        until("the gateway shows the Run again, with no new event", || {
+            gateway.lifecycle("run-a") == Some(("blocked".to_owned(), Some("green-ink".to_owned())))
+                && gateway.has_brief("run-a")
+        });
     }
 
     #[test]
@@ -2782,9 +2740,7 @@ mod tests {
         });
         *gateway.stated.lock().unwrap() = Some(100);
         telemetry.publish_terminal(&[7; 950]);
-        until("the output arrives", || {
-            gateway.output("run-a") == [7; 950]
-        });
+        until("the output arrives", || gateway.output("run-a") == [7; 950]);
         assert_eq!(publisher.health().lost_terminal_bytes, 0);
     }
 

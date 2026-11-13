@@ -958,12 +958,7 @@ impl BriefStore for SqlRegistry {
         })
     }
 
-    fn recover(
-        &self,
-        lease: &Lease,
-        max_runs: u32,
-        by: &str,
-    ) -> io::Result<Option<LeaseRecovery>> {
+    fn recover(&self, lease: &Lease, max_runs: u32, by: &str) -> io::Result<Option<LeaseRecovery>> {
         validate_registry_key(lease.key())?;
         self.write(|tx, revision| {
             if lease_in(tx, lease.key())?.as_ref() != Some(lease) || lease.expires >= tx.now()? {

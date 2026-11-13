@@ -688,9 +688,7 @@ pub(super) mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.runs.lock().unwrap()[mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[mission_id].environment.clone();
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
                 .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),
@@ -720,9 +718,7 @@ pub(super) mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.runs.lock().unwrap()[mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[mission_id].environment.clone();
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(environment["AI6_CABLE_MCP_URL"].clone())
                 .auth_header(environment["AI6_CABLE_MCP_TOKEN"].clone()),

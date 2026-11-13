@@ -9,10 +9,10 @@ use super::{SqlRegistry, from_json, to_json};
 use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::registry::limits::RunLimits;
 use crate::directorates::registry::runs::{
-    FinalReport, MissionVerdict, NewRun, RunError, RunRecord, RunStore,
-    RunUpdate, apply_fenced, apply_probe_request, apply_recommendation, apply_verdict, latest,
-    lose, merged_exposure, opened, parse_run, same_run, run_json, take,
-    validate_final_report, validate_new_run, validate_run_id, validate_verdict,
+    FinalReport, MissionVerdict, NewRun, RunError, RunRecord, RunStore, RunUpdate, apply_fenced,
+    apply_probe_request, apply_recommendation, apply_verdict, latest, lose, merged_exposure,
+    opened, parse_run, run_json, same_run, take, validate_final_report, validate_new_run,
+    validate_run_id, validate_verdict,
 };
 use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
@@ -20,11 +20,7 @@ fn term(tx: &mut Tx<'_>) -> io::Result<u64> {
     Ok(headquarters_in(tx)?.map_or(0, |lease| lease.term()))
 }
 
-fn run_in(
-    tx: &mut Tx<'_>,
-    id: &str,
-    limits: &RunLimits,
-) -> io::Result<Option<RunRecord>> {
+fn run_in(tx: &mut Tx<'_>, id: &str, limits: &RunLimits) -> io::Result<Option<RunRecord>> {
     tx.query_opt(
         "SELECT record FROM ai6_runs WHERE run_id = $1",
         &[id.into()],
@@ -89,8 +85,7 @@ impl SqlRegistry {
     ) -> Result<RunRecord, RunError> {
         validate_run_id(id, &self.limits.runs)?;
         self.write(|tx, revision| {
-            let mut record =
-                run_in(tx, id, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+            let mut record = run_in(tx, id, &self.limits.runs)?.ok_or(RunError::NotFound)?;
             let now = when(tx, at)?;
             change(&mut record, tx, now)?;
             put_run(tx, &record, revision, &self.limits.runs)?;
@@ -237,12 +232,7 @@ impl RunStore for SqlRegistry {
         self.read(|tx| records(tx, None, &self.limits.runs))
     }
 
-    fn take_run(
-        &self,
-        id: &str,
-        station: &str,
-        ttl: Duration,
-    ) -> Result<RunRecord, RunError> {
+    fn take_run(&self, id: &str, station: &str, ttl: Duration) -> Result<RunRecord, RunError> {
         self.take_run_when(id, station, ttl, None)
     }
 
@@ -253,14 +243,7 @@ impl RunStore for SqlRegistry {
         fence: u64,
         ttl: Duration,
     ) -> Result<RunRecord, RunError> {
-        self.write_fenced_when(
-            id,
-            station,
-            fence,
-            None,
-            Some(ttl),
-            RunUpdate::default(),
-        )
+        self.write_fenced_when(id, station, fence, None, Some(ttl), RunUpdate::default())
     }
 
     fn update_run(

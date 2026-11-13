@@ -1319,11 +1319,7 @@ fn a_detached_runner_relays_acp_until_it_stops() {
     assert_eq!(init["result"]["agentInfo"]["name"], "ai6-runner", "{init}");
     assert_eq!(init["result"]["authMethods"][0]["id"], "ai6-runner-token");
     // The runner's refusal is relayed, not hidden: it has no such Run.
-    let missing = ask(
-        2,
-        "_ai6/run_status",
-        serde_json::json!({"key": "nothing"}),
-    );
+    let missing = ask(2, "_ai6/run_status", serde_json::json!({"key": "nothing"}));
     assert_eq!(missing["error"]["code"], -32002, "{missing}");
     drop(stdin);
     drop(stdout);

@@ -2690,9 +2690,7 @@ pub(crate) mod testing {
     use guatiao::library::{Object, ProviderError, Registry};
 
     use super::Plugins;
-    use crate::directorates::q::terminal::{
-        AgentTerminal, HarnessStdio, Terminal, TerminalRun,
-    };
+    use crate::directorates::q::terminal::{AgentTerminal, HarnessStdio, Terminal, TerminalRun};
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use coqui_acp_provider::AgentSession;
 
@@ -2708,10 +2706,7 @@ pub(crate) mod testing {
     pub(crate) struct MockPty;
 
     impl Terminal for MockPty {
-        fn spawn(
-            &self,
-            _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+        fn spawn(&self, _spec: &guatiao::Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
             Err(refused())
         }
     }
@@ -2721,10 +2716,7 @@ pub(crate) mod testing {
     pub(crate) struct MockPipe;
 
     impl Terminal for MockPipe {
-        fn spawn(
-            &self,
-            _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+        fn spawn(&self, _spec: &guatiao::Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
             Err(refused())
         }
 
@@ -2820,10 +2812,7 @@ pub(crate) mod testing {
             request: AgentStart,
             _terminal: Object<dyn AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(
-                StreamRun::new("stream-run-1", format!("hello {}", request.prompt))
-                    .into_object(),
-            )
+            Ok(StreamRun::new("stream-run-1", format!("hello {}", request.prompt)).into_object())
         }
 
         fn resume(

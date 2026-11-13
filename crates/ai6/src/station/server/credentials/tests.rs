@@ -41,10 +41,7 @@ struct TestVault;
 
 impl From<TestVaultConfig> for TestVault {
     fn from(config: TestVaultConfig) -> Self {
-        RUNS
-            .lock()
-            .unwrap()
-            .push(config.run.expose().clone());
+        RUNS.lock().unwrap().push(config.run.expose().clone());
         Self
     }
 }
@@ -285,8 +282,5 @@ fn the_built_ins_are_registered_first_and_appear_with_their_schemas() {
     let file = plugins.config_schema("file").unwrap();
     assert!(file["properties"].get("dir").is_some(), "{file}");
     let vault = plugins.config_schema("test-vault").unwrap();
-    assert_eq!(
-        vault["properties"]["run"]["x-sensitive"], true,
-        "{vault}"
-    );
+    assert_eq!(vault["properties"]["run"]["x-sensitive"], true, "{vault}");
 }

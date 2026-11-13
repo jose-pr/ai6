@@ -597,8 +597,7 @@ pub fn forget_entry(
                 summary: current.header.summary.clone(),
                 content: String::new(),
                 compartments: None,
-                source: MemorySource::new(caller.by(), caller.run())
-                    .exposed_by(caller.exposures()),
+                source: MemorySource::new(caller.by(), caller.run()).exposed_by(caller.exposures()),
                 at: caller.now(),
             };
             match propose(store, caller, proposal)? {

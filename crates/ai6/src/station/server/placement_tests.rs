@@ -82,8 +82,8 @@ impl AgentHandler for MockProgramHandler {
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         counts(&self.key, |counts| counts.starts += 1);
-        let run = RunId::try_new(format!("provider-id-{}", request.mission_id))
-            .map_err(|error| {
+        let run =
+            RunId::try_new(format!("provider-id-{}", request.mission_id)).map_err(|error| {
                 ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
             })?;
         Ok(MockRun::new(run, "blocked").into_object())
@@ -531,10 +531,7 @@ async fn a_mission_ai6_failed_is_not_taken_for_a_lost_run_to_try_again() {
         )
         .unwrap();
     loop {
-        match state
-            .intake
-            .lose_run("lost-run", "its Station went dark")
-        {
+        match state.intake.lose_run("lost-run", "its Station went dark") {
             Ok(_) => break,
             Err(RunError::HeldBy(_)) => std::thread::sleep(Duration::from_millis(5)),
             Err(error) => panic!("{error}"),

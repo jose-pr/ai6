@@ -139,8 +139,7 @@ fn a_child_waiting_for_its_input_answers_without_help() {
             .unwrap(),
         )
         .unwrap();
-    run
-        .write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
+    run.write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
         .unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(20);

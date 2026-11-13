@@ -10,6 +10,7 @@ use guatiao_serde::{Serializable, from_serde};
 use serde::Serialize;
 
 use crate::directorates::m::assistant::AssistantSettings;
+use crate::directorates::m::charges::ChargeDefinition;
 use crate::directorates::m::compartments::CompartmentSettings;
 use crate::directorates::m::config::ConfigRecord;
 use crate::directorates::m::cover::CoverDefinition;
@@ -21,7 +22,6 @@ use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
-use crate::directorates::m::charges::ChargeDefinition;
 
 /// `T` from a value.
 pub(crate) fn from_value<T: FromValue>(value: &guatiao::Value) -> Result<T, String> {

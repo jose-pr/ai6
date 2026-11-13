@@ -469,9 +469,7 @@ pub(crate) async fn scorecard(
                 usage.extend(ledger.runs);
             }
         }
-        Ok::<_, ApiError>(Scorecard::build(
-            &operation, &runs, &usage, &policy, now,
-        ))
+        Ok::<_, ApiError>(Scorecard::build(&operation, &runs, &usage, &policy, now))
     })
     .await
     .map_err(|_| ApiError::internal())??;
@@ -1308,10 +1306,7 @@ mod tests {
         assert_eq!(standing["failure_rate"], 0.5);
         assert_eq!(standing["small_sample"], false);
         assert_eq!(standing["runs"]["failed"][0]["mission_id"], "m2");
-        assert_eq!(
-            standing["runs"]["withdrawn"].as_array().unwrap().len(),
-            1
-        );
+        assert_eq!(standing["runs"]["withdrawn"].as_array().unwrap().len(), 1);
         assert_eq!(
             standing["runs"]["waiting_on_person"]
                 .as_array()

@@ -8,9 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::m::identity::{MissionId, RunId};
-use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, TerminalRun,
-};
+use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, TerminalRun};
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, AssistantNetwork, McpServerRef,
 };
@@ -150,10 +148,7 @@ impl AgentTerminal for Fake {
         self.spawn(value)
     }
 
-    fn spawn(
-        &self,
-        value: &ai6::guatiao::Value,
-    ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+    fn spawn(&self, value: &ai6::guatiao::Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let spec = Spec::from_value(value).unwrap();
         let at = spec.argv.iter().position(|a| a == "--add-dir").unwrap();
         let run_dir = PathBuf::from(&spec.argv[at + 1]);
@@ -168,10 +163,7 @@ impl AgentTerminal for Fake {
         #[cfg(unix)]
         let mode_private = {
             use std::os::unix::fs::PermissionsExt;
-            let dir = std::fs::metadata(&run_dir)
-                .unwrap()
-                .permissions()
-                .mode();
+            let dir = std::fs::metadata(&run_dir).unwrap().permissions().mode();
             let config = std::fs::metadata(dot.join("mcp_config.json"))
                 .map_or(0o600, |meta| meta.permissions().mode());
             dir & 0o077 == 0 && config & 0o077 == 0
@@ -807,11 +799,7 @@ fn a_restricted_run_that_calls_anything_else_is_ended() {
             "{tool}"
         );
         assert_eq!(fake.kills(), 1, "{tool}");
-        assert_eq!(
-            run.next_event(10).unwrap(),
-            None,
-            "nothing read after that"
-        );
+        assert_eq!(run.next_event(10).unwrap(), None, "nothing read after that");
     }
 }
 
@@ -972,10 +960,7 @@ fn mcp_servers_reach_it_by_a_private_file_and_never_by_a_flag() {
             .contains("inheritMcp: true")
     );
     run.close().unwrap();
-    assert!(
-        !launch.run_dir.exists(),
-        "the token goes with the Run"
-    );
+    assert!(!launch.run_dir.exists(), "the token goes with the Run");
 }
 
 #[test]
@@ -986,12 +971,7 @@ fn the_runs_directory_sorts_after_the_checkout_so_commands_run_in_the_checkout()
     let launch = fake.launch();
     assert_eq!(launch.spec.cwd.as_deref(), Some(wd.as_str()));
     assert!(launch.run_dir.to_string_lossy().as_ref() > wd.as_str());
-    assert!(
-        launch
-            .run_dir
-            .to_string_lossy()
-            .starts_with(wd.as_str())
-    );
+    assert!(launch.run_dir.to_string_lossy().starts_with(wd.as_str()));
 }
 
 #[test]
@@ -1218,11 +1198,10 @@ fn an_interrupt_ends_agy_reports_the_turn_and_the_next_message_goes_on_the_conve
         "{:?}",
         kinds(&events)
     );
-    run
-        .send_message(AgentMessage {
-            text: "and then?".to_owned(),
-        })
-        .unwrap();
+    run.send_message(AgentMessage {
+        text: "and then?".to_owned(),
+    })
+    .unwrap();
     let launch = fake.launch();
     assert!(launch.has(&format!("--conversation={CONV}")));
     assert!(!launch.spec.argv.iter().any(|a| a.starts_with("--agent=")));
@@ -1250,11 +1229,10 @@ fn a_second_message_is_a_second_turn_in_the_same_process() {
     ]);
     let run = started(&fake, start_request(&wd, "field"), "");
     events_until(&run, &["completed"]);
-    run
-        .send_message(AgentMessage {
-            text: "again".to_owned(),
-        })
-        .unwrap();
+    run.send_message(AgentMessage {
+        text: "again".to_owned(),
+    })
+    .unwrap();
     events_until(&run, &["completed"]);
     assert_eq!(fake.0.lock().unwrap().launches.len(), 1);
     assert_eq!(fake.received(), ["the task", "again"]);

@@ -31,6 +31,7 @@ mod issue_tools;
 mod memory_tools;
 mod report_tools;
 
+use super::charges::decide::DecisionDesk;
 use super::compartments::CompartmentDesk;
 use super::green_ink::{Asked, Checked, Desk};
 use super::head_of_station;
@@ -39,7 +40,6 @@ use super::memories::MemoryDesk;
 use super::reports::ReportDesk;
 use super::review;
 use super::unix_now;
-use super::charges::decide::DecisionDesk;
 use crate::bounds::{Limit, TimeLimit};
 use crate::directorates::m::assistant::AssistantDeskLimits;
 use crate::directorates::m::identity::{MissionId, RunId};
@@ -513,10 +513,7 @@ mod tests {
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].parent_mission_id.as_str(), "parent-mission");
         assert_eq!(proposals[0].proposer_agent_id, "coordinator");
-        assert_eq!(
-            proposals[0].proposer_run_id.as_str(),
-            "provider-id"
-        );
+        assert_eq!(proposals[0].proposer_run_id.as_str(), "provider-id");
         client.cancel().await.unwrap();
     }
 
@@ -2160,8 +2157,7 @@ impl CableTools {
         let Ok(principal) = self.principal() else {
             return "Green ink identity is unavailable".to_owned();
         };
-        let (Some(mission), Some(run)) = (principal.mission_id(), principal.run_id())
-        else {
+        let (Some(mission), Some(run)) = (principal.mission_id(), principal.run_id()) else {
             return "Green ink requires a bound Run".to_owned();
         };
         let asked = Asked {

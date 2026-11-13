@@ -18,8 +18,8 @@ use axum::extract::{Path, State};
 use super::{
     AgentEvent, AgentSession, ApiErrorResponse, DaemonState, FinishOutcome, MissionState,
     ResumeMission, TransitionMission, audit_cover, publish_finished_event, publish_lifecycle,
-    queue_event, reopen_left_safe_house, resume_mission, stop_run_keeping_mission,
-    sync_run_record, transition_mission, vetting,
+    queue_event, reopen_left_safe_house, resume_mission, stop_run_keeping_mission, sync_run_record,
+    transition_mission, vetting,
 };
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::review::{
@@ -206,12 +206,11 @@ fn material(state: &DaemonState, mission: &Mission, submitted: Option<&str>) -> 
         material.branch.clone_from(&report.branch);
         material.base.clone_from(&report.base);
     }
-    let house = state.runs.lock().ok().and_then(|runs| {
-        runs
-            .get(mission.mission_id.as_str())?
-            .safe_house
-            .clone()
-    });
+    let house = state
+        .runs
+        .lock()
+        .ok()
+        .and_then(|runs| runs.get(mission.mission_id.as_str())?.safe_house.clone());
     let Some(house) = house else {
         material.diff_note =
             Some("this work has no safe house the Station can read a change from".to_owned());

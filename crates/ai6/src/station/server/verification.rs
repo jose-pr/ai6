@@ -743,10 +743,7 @@ mod tests {
         wait_for_verifying(&state, &again).await;
         let second = latest(&state, &again);
         assert_eq!(second.number, 2);
-        assert_eq!(
-            second.predecessor.as_deref(),
-            Some(first.id.as_str())
-        );
+        assert_eq!(second.predecessor.as_deref(), Some(first.id.as_str()));
         assert!(second.verdict.is_none(), "the next run starts clean");
         stop(&state);
     }

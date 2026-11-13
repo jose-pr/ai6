@@ -47,14 +47,7 @@ pub(crate) const STATES: [&str; 10] = [
 ];
 
 const MISSION_SORTS: &[&str] = &["updated", "created", "state", "operation", "mission"];
-const RUN_SORTS: &[&str] = &[
-    "updated",
-    "created",
-    "state",
-    "operation",
-    "mission",
-    "run",
-];
+const RUN_SORTS: &[&str] = &["updated", "created", "state", "operation", "mission", "run"];
 const ORDERS: &[&str] = &["asc", "desc"];
 const AGENT_SORTS: &[&str] = &["agent", "handler", "model", "done"];
 const POOL_SORTS: &[&str] = &["pool", "handler", "kind"];
@@ -421,9 +414,7 @@ impl Route {
             Field::States(states) => Some(states),
             Field::Text(_) | Field::List(_) => None,
         });
-        let runs = mission["runs"]
-            .as_array()
-            .map_or(&[][..], Vec::as_slice);
+        let runs = mission["runs"].as_array().map_or(&[][..], Vec::as_slice);
         let Some(latest) = runs.iter().reduce(|left, right| {
             // `None` orders below every number, so a Run with no time is the oldest.
             if right["updated_at"].as_f64() > left["updated_at"].as_f64() {

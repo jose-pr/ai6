@@ -9,9 +9,7 @@
 //! done, redispatch as the next run, or failed), each with its reason.
 
 use ai6::directorates::registry::decisions::{self, VerifyingDecision};
-use ai6::{
-    AuditRecord, MissionVerdict, OutcomeVerdict, RunError, RunRecord, TimelineEvent,
-};
+use ai6::{AuditRecord, MissionVerdict, OutcomeVerdict, RunError, RunRecord, TimelineEvent};
 use ai6_diptel::OperationId;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -309,8 +307,7 @@ mod tests {
                 NewRun::new(format!("{mission}-1"), mission, "worker")
                     .with_operation("G")
                     .with_launch(
-                        RunLaunch::new("claude", "pipe", "/w")
-                            .with_agent(Some("007".to_owned())),
+                        RunLaunch::new("claude", "pipe", "/w").with_agent(Some("007".to_owned())),
                     ),
                 Duration::from_secs(60),
             )
@@ -425,12 +422,7 @@ mod tests {
         let denied = verdict(&served, &served.viewer, "m-done", body.clone()).await;
         assert_eq!(denied.status(), 403);
         assert_eq!(
-            served
-                .registry
-                .run("m-done-1")
-                .unwrap()
-                .unwrap()
-                .verdict,
+            served.registry.run("m-done-1").unwrap().unwrap().verdict,
             None
         );
 

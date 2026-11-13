@@ -19,9 +19,9 @@ use super::tests::test_state;
 use super::*;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::registry::cables::{CableAction, CableGrant, CablePolicy, CableScope};
+use crate::directorates::registry::charges::ChargeRecord;
 use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::runs::{NewRun, RunResult, RunUpdate};
-use crate::directorates::registry::charges::ChargeRecord;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 
 /// What the stand-in was asked: `start`, `resume` or `message`, under which Run name, on which
@@ -518,10 +518,7 @@ async fn a_charge_takes_one_turn_per_wake_and_is_no_mission() {
         1,
         "{all:?}"
     );
-    assert!(
-        messages.iter().all(|call| call.run == provider),
-        "one Run"
-    );
+    assert!(messages.iter().all(|call| call.run == provider), "one Run");
     assert!(messages[0].text.contains("\"verifying\"") && messages[0].text.contains("V-1"));
     #[cfg(feature = "cables-mcp")]
     assert!(
@@ -628,10 +625,7 @@ async fn a_charge_that_cannot_resume_starts_fresh_with_its_logbook() {
             .unwrap_or_else(|| panic!("{mode}: no logbook in {:?}", fresh.context));
         assert!(logbook.contains("woke for control"), "{mode}: {logbook}");
         let kept = record(&after, tag);
-        assert_eq!(
-            kept.provider_id.as_deref(),
-            Some(fresh.run.as_str())
-        );
+        assert_eq!(kept.provider_id.as_deref(), Some(fresh.run.as_str()));
         assert!(
             kept.logbook.iter().any(|entry| entry.kind == "fresh"),
             "{mode}: {:?}",
@@ -677,10 +671,7 @@ async fn a_charge_moves_to_another_station_when_its_station_goes_dark() {
         "{resumed:?}\n{:?}",
         record(&second, tag).logbook
     );
-    assert_eq!(
-        resumed[0].run, provider,
-        "b resumes a's Run"
-    );
+    assert_eq!(resumed[0].run, provider, "b resumes a's Run");
 
     // a comes back, finds b holds the charge, and lets it go.
     charges::tend(&first, false, true).await;

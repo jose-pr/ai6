@@ -26,6 +26,7 @@ pub use super::agent_records::AgentRecordStore;
 pub use super::api_keys::ApiKeyStore;
 pub use super::approvals::ApprovalStore;
 pub use super::assistant_log::AssistantLogStore;
+pub use super::charges::ChargeStore;
 pub use super::clearance::ClearanceStore;
 pub use super::contexts::RunContextStore;
 pub use super::holds::HoldStore;
@@ -36,8 +37,8 @@ pub use super::principals::PrincipalStore;
 pub use super::quarantine::QuarantineStore;
 pub use super::reports::ReportStore;
 pub use super::reviews::MissionReviewStore;
-pub use super::sealed::SealedStore;
 pub use super::runs::RunStore;
+pub use super::sealed::SealedStore;
 pub use super::sleepers::SleeperStore;
 pub use super::sources::SourceStore;
 pub use super::store::{
@@ -46,7 +47,6 @@ pub use super::store::{
 pub use super::timeline::TimelineStore;
 pub use super::usage::UsageStore;
 pub use super::vetting::VettingStore;
-pub use super::charges::ChargeStore;
 
 /// The bounds a Registry applies to what it keeps and accepts.
 pub trait Limited {

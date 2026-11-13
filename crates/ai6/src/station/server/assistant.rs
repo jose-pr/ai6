@@ -389,13 +389,7 @@ impl CableGate for ExportsGate {
 
 /// A running harness: its Run, flags, token expiry, what it started under
 /// ([`Desk::started_under`]), and its workspace.
-type Running = (
-    SharedRun,
-    Arc<Flags>,
-    f64,
-    String,
-    Option<SharedWorkspace>,
-);
+type Running = (SharedRun, Arc<Flags>, f64, String, Option<SharedWorkspace>);
 
 /// The settings a handler starts with: its route's, or its Agent's.
 type HandlerSettings = serde_json::Map<String, serde_json::Value>;
@@ -935,8 +929,7 @@ impl Desk {
                                 workspace.begin_turn();
                             }
                         }
-                        run
-                            .read()
+                        run.read()
                             .map_err(|_| "assistant Run lock failed".to_owned())?
                             .send_message(AgentMessage { text })
                             .map_err(|error| error.to_string())
@@ -1844,8 +1837,7 @@ impl Desk {
         }
         flags.interrupting.store(true, Ordering::Release);
         let interrupted = tokio::task::spawn_blocking(move || {
-            run
-                .read()
+            run.read()
                 .map_err(|_| "assistant Run lock failed".to_owned())?
                 .interrupt()
                 .map_err(|error| error.to_string())

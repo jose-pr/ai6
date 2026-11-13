@@ -340,10 +340,7 @@ impl ReportDesk {
             && let Some(operation) = report.scope.operation()
             && operation != caller.reader.operation
         {
-            let mark = product_source(
-                operation,
-                state.intake.limits().runs.exposure_source_bytes,
-            );
+            let mark = product_source(operation, state.intake.limits().runs.exposure_source_bytes);
             caller.reader.exposure.mark(&mark, state.clock.now() as f64);
         }
         let source = if seen == ReportSight::Content {

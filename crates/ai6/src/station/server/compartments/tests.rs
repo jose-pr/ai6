@@ -889,9 +889,7 @@ mod over_mcp {
             .unwrap();
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let environment = state.runs.lock().unwrap()[&mission_id]
-            .environment
-            .clone();
+        let environment = state.runs.lock().unwrap()[&mission_id].environment.clone();
         let client = connect(
             &environment["AI6_CABLE_MCP_URL"],
             &environment["AI6_CABLE_MCP_TOKEN"],

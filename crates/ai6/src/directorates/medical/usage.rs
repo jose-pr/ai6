@@ -295,11 +295,7 @@ impl Budget {
         let warn_at =
             f64::from(self.warn_at_permille.unwrap_or(DEFAULT_WARN_AT_PERMILLE)) / 1_000.0;
         [
-            (
-                BudgetScope::RunTokens,
-                self.run_tokens,
-                Some(run.tokens()),
-            ),
+            (BudgetScope::RunTokens, self.run_tokens, Some(run.tokens())),
             (
                 BudgetScope::MissionTokens,
                 self.mission_tokens,

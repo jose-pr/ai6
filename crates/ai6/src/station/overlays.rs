@@ -943,11 +943,7 @@ pub(crate) fn forget_run(site: &Site, mission: &str) -> Result<(), String> {
 }
 
 /// Sets `name` in `environment` back to what `run` holds, or takes it out.
-fn restore(
-    environment: &mut BTreeMap<String, String>,
-    run: &BTreeMap<String, String>,
-    name: &str,
-) {
+fn restore(environment: &mut BTreeMap<String, String>, run: &BTreeMap<String, String>, name: &str) {
     let found = environment
         .keys()
         .find(|key| key.eq_ignore_ascii_case(name))
@@ -955,10 +951,7 @@ fn restore(
     let Some(key) = found else {
         return;
     };
-    match run
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-    {
+    match run.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)) {
         Some((_, value)) => {
             environment.insert(key, value.clone());
         }
@@ -1044,15 +1037,8 @@ impl Prepared {
                 );
             }
         }
-        let (harness_environment, theater_environment) = self.environment(
-            fit,
-            &run,
-            &os,
-            &roots,
-            &packages,
-            &base,
-            &mut weakenings,
-        )?;
+        let (harness_environment, theater_environment) =
+            self.environment(fit, &run, &os, &roots, &packages, &base, &mut weakenings)?;
         let context = self.context(&roots, run.handler, fit, &mut weakenings)?;
         let mut delivered = Delivered {
             environment: harness_environment,

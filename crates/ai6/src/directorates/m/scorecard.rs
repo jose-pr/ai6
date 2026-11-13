@@ -300,9 +300,7 @@ pub struct Standing {
 impl Standing {
     /// How many runs had `judgment`.
     pub fn count(&self, judgment: Judgment) -> u64 {
-        self.runs
-            .get(&judgment)
-            .map_or(0, |list| list.len() as u64)
+        self.runs.get(&judgment).map_or(0, |list| list.len() as u64)
     }
 
     fn add(&mut self, record: &RunRecord, judgment: Judgment, usage: Option<&UsageTotals>) {
@@ -529,13 +527,7 @@ mod tests {
     use super::*;
     use crate::directorates::registry::runs::RunLaunch;
 
-    fn attempt(
-        id: &str,
-        agent: &str,
-        model: &str,
-        state: &str,
-        reason: Option<&str>,
-    ) -> RunRecord {
+    fn attempt(id: &str, agent: &str, model: &str, state: &str, reason: Option<&str>) -> RunRecord {
         RunRecord {
             id: format!("{id}.1"),
             handle: None,
