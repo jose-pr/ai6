@@ -2252,7 +2252,7 @@ pub struct MissionHandle { pub mission_id: String, pub handle: String }  // UID 
 pub fn new_uid() -> String;                        // UUIDv7, lower-case
 pub fn is_uid(text: &str) -> bool;                 // hyphenated lower-case UUID text
 pub fn valid_handle(handle: &str) -> bool;         // [A-Za-z0-9_-], no '-' at either end, <= 240, not a UID
-pub fn run_handle(mission_handle: &str, run: u32) -> String;  // `<handle>.<run>`
+pub fn run_handle(mission_handle: &str, number: u32) -> String;  // `<handle>.<number>`
 pub struct MissionEntry;  // where a brief enters; all of these are the only way a handle is made
 impl MissionEntry {
     pub fn person(operation: Option<&str>) -> Self;              // <operation>-<n>; `mission` with none
@@ -2467,14 +2467,14 @@ impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self;
     pub fn with_clearance(self, Option<String>) -> Self; }
 #[non_exhaustive] pub struct RunRecord {
-    pub run_id: String,                  // AI6's ID, the run's UID (not the provider's)
+    pub id: String,                      // AI6's ID, the run's UID (not the provider's)
     pub mission_id: String,                  // the Mission's UID
     pub handle: Option<String>,              // `<mission handle>.<run>` when it opened; a rename leaves it
     pub operation: Option<String>,           // the Mission's Operation, as the opening Station knew it
     pub provider_id: Option<String>,
     pub station: String,                     // the lease holder
     pub theater: Option<String>,
-    pub run: u32,                        // from 1
+    pub number: u32,                     // from 1
     pub predecessor: Option<String>,         // AI6 ID of the Run this one replaced
     pub status: RunStatus,
     pub parked_until: Option<f64>,           // Unix seconds
@@ -2659,7 +2659,7 @@ pub struct ScorecardDefinition;   // [operation.ID.scorecard]: window_days (0 = 
 impl ScorecardDefinition { pub fn resolve(&self) -> ScorecardPolicy }
 #[non_exhaustive] pub struct ScorecardPolicy { pub window_days: u64, pub small_sample: u64 }  // Operation.scorecard,
                                   // and OperationPolicy.scorecard in the check-in
-#[non_exhaustive] pub struct RunRef { pub mission_id: String, pub run_id: String, pub run: u32 }
+#[non_exhaustive] pub struct RunRef { pub mission_id: String, pub run_id: String, pub number: u32 }
 #[non_exhaustive] pub struct Standing {
     pub runs: BTreeMap<Judgment, Vec<RunRef>>,   // the numbers are their lengths
     pub judged: u64, pub failure_rate: Option<f64>,      // faults / judged

@@ -182,13 +182,13 @@ pub struct BoardMission {
     pub runs: Vec<BoardRun>,
     pub brief: Option<LaunchManifest>,
     pub usage: Option<MissionUsage>,   // tokens and cost from the Registry ledger
-    pub runs: Vec<MissionRun>, // every run, first first, from the Run records
+    pub history: Vec<MissionRun>, // every run, first first, from the Run records
 }
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MissionRun {
-    pub run: u32,
+    pub number: u32,
     pub run_id: String,                  // AI6's Run ID, the run's UID
     pub handle: Option<String>,              // the run's `<mission handle>.<run>` when it opened
     pub provider_id: Option<String>,

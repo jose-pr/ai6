@@ -253,6 +253,9 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   prints `SLEEPER STATE`. Needs `mission.control`.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
+- `ai6ctl exec <MISSION_ID|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` executes a Mission or a
+  Run through the same controls: a Run ID found on the board resumes (`resume`, `--message`), anything else
+  is a Mission and starts its next Run (`retry`, `--agent`). Needs `mission.control`.
 - `ai6ctl run interrupt <RUN_ID>` stops the Run's current turn; it finds the
   Run's Operation and Mission on the board and names the Run, so the request is
   refused (HTTP 409) if the Mission has moved on to another one.
