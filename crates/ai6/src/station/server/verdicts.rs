@@ -283,6 +283,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_report_assessed_mission_closes_when_its_mission_settles_done_after_verifying() {
+        use crate::directorates::registry::assessments::{Assessment, Context, Verdict, assess};
+        use crate::directorates::registry::logbook::Severity;
+        use crate::directorates::registry::reports::{
+            Report, ReportFiler, ReportScope, ReportState,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let state = super::super::placement_tests::empty_book(root.path(), AGENTS);
+        let key = format!("assessed-{}", std::process::id());
+        let mut brief = super::super::placement_tests::pinned_brief(&key, &[]);
+        brief.role = Some("writer".to_owned());
+        state.intake.submit_brief(&brief).unwrap();
+        super::super::schedule_intake_once(&state);
+        let mission_id = brief.key();
+        let scope = ReportScope::Operation("G".to_owned());
+        state
+            .intake
+            .file_report(&Report::new(
+                "r-for-the-mission",
+                scope.clone(),
+                "finding",
+                Severity::Info,
+                "A fault to fix",
+                "It fails.",
+                ReportFiler::Watchdog,
+                1.0,
+            ))
+            .unwrap();
+        let settings = state.config.report_settings().unwrap();
+        let reads = |each: &ReportScope| *each == scope;
+        assess(
+            state.intake.as_ref(),
+            &Assessment::new(
+                "r-for-the-mission",
+                Verdict::Mission {
+                    mission: Some(mission_id.clone()),
+                },
+                "a real fault",
+                "charge:operation:G",
+                2.0,
+            ),
+            &Context::within(&settings, &reads),
+        )
+        .unwrap();
+        let state_of = || {
+            state
+                .intake
+                .report("r-for-the-mission")
+                .unwrap()
+                .unwrap()
+                .state
+        };
+
+        super::super::schedule_queued_once(&state).await;
+        wait_for_verifying(&state, &mission_id).await;
+        super::super::schedule_intake_once(&state);
+        super::super::assessing::settle(&state);
+        assert_eq!(
+            state_of(),
+            ReportState::Assessed,
+            "verifying is not settled"
+        );
+
+        wait_for_done(&state, &mission_id).await;
+        super::super::schedule_intake_once(&state);
+        let report = state.intake.report("r-for-the-mission").unwrap().unwrap();
+        assert_eq!(report.state, ReportState::Closed);
+        assert_eq!(
+            report.resolution.as_ref().unwrap().outcome.as_deref(),
+            Some("mission_done")
+        );
+        stop(&state);
+    }
+
+    #[tokio::test]
     async fn a_role_that_requires_a_decision_holds_a_done_run_that_filed_no_request() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);

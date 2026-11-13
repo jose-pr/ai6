@@ -51,6 +51,26 @@ pub struct ReportSettings {
     #[schema(title = "Priorities, most urgent first")]
     #[map(default = ReportSettings::default().priorities)]
     pub priorities: Vec<String>,
+    /// How many of a source's closed Reports the rule counts before it is rated; until then it
+    /// stays `F`.
+    #[schema(title = "Counted Reports before a source is rated")]
+    #[map(default = ReportSettings::default().rating_min_reports)]
+    pub rating_min_reports: u32,
+    /// The outcomes of a closed Report that count toward its source's rating: `mission_done`,
+    /// `mission_failed`, `decision_approved`, `decision_rejected`, `duplicate`, `related`,
+    /// `no_action`.
+    #[schema(title = "Outcomes that count toward a rating")]
+    #[map(default = ReportSettings::default().rating_counts)]
+    pub rating_counts: Vec<String>,
+    /// The counted outcomes that show the Report was right.
+    #[schema(title = "Counted outcomes that confirm a source")]
+    #[map(default = ReportSettings::default().rating_confirms)]
+    pub rating_confirms: Vec<String>,
+    /// Percent of counted Reports confirmed at which a source is rated `A`, `B`, `C` and `D`,
+    /// highest first; below the last it is `E`.
+    #[schema(title = "Percent confirmed for A, B, C and D")]
+    #[map(default = ReportSettings::default().rating_bands)]
+    pub rating_bands: Vec<u8>,
 }
 
 impl Default for ReportSettings {
@@ -60,6 +80,16 @@ impl Default for ReportSettings {
             classifications: list(&["unclassified", "restricted", "confidential"]),
             handlings: list(&["operation", "compartments", "peers"]),
             priorities: list(&["critical", "high", "normal", "low"]),
+            rating_min_reports: 5,
+            rating_counts: list(&[
+                "mission_done",
+                "mission_failed",
+                "decision_approved",
+                "decision_rejected",
+                "no_action",
+            ]),
+            rating_confirms: list(&["mission_done", "mission_failed", "decision_approved"]),
+            rating_bands: vec![90, 75, 50, 25],
         }
     }
 }
@@ -71,6 +101,35 @@ impl ReportSettings {
         match classification {
             None => Some(0),
             Some(name) => self.classifications.iter().position(|each| each == name),
+        }
+    }
+
+    /// Whether `report` may cross to a place that needs the handling mark `crossing`: the
+    /// Report's mark must be at least as wide in `handlings`. A Report with no mark is the
+    /// narrowest, and a crossing not in the list is refused.
+    ///
+    /// # Errors
+    ///
+    /// Why it may not cross, for the assessor.
+    pub fn permits(&self, report: &Report, crossing: &str) -> Result<(), String> {
+        let rank = |name: &str| self.handlings.iter().position(|each| each == name);
+        let Some(needed) = rank(crossing) else {
+            return Err(format!(
+                "{crossing:?} is not one of the handling marks: {}",
+                self.handlings.join(", ")
+            ));
+        };
+        let held = report.handling.as_deref().and_then(rank).unwrap_or(0);
+        if held >= needed {
+            Ok(())
+        } else {
+            Err(format!(
+                "this report is marked {}: it may not go as far as {crossing}",
+                report
+                    .handling
+                    .as_deref()
+                    .unwrap_or("with the narrowest mark")
+            ))
         }
     }
 

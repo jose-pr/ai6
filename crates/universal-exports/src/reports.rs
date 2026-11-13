@@ -4,8 +4,10 @@
 //! charge's order; `GET /v1/reports/{id}` shows one; `PUT /v1/reports/{id}/markings` changes its
 //! markings; `GET /v1/missions/{id}/reports` lists the Reports tied to a Mission.
 //!
-//! `PUT /v1/reports/{id}/assessment` decides what an open Source item becomes (`mission.control`
-//! on its Operation).
+//! `PUT /v1/reports/{id}/assessment` assesses an open Report as a mission, a duplicate, related,
+//! no action, awaiting, later or a decision (`mission.control` on its Operation);
+//! `POST /v1/reports/{id}/reopen` brings an assessed or closed one back; `GET
+//! /v1/reports/sources/{key}` shows a source's reliability with the Reports behind it.
 //!
 //! `GET /v1/reports/clearances` lists who is cleared for which classification (`access.read`
 //! on `config:reports`); `PUT` and `DELETE /v1/reports/clearances/{subject}` grant and revoke one
@@ -21,15 +23,18 @@
 
 use std::sync::Arc;
 
+use ai6::DEFAULT_REQUEST_TTL;
 use ai6::directorates::m::reports::{
     self, ReportFiling, ReportMarkings, ReportReader, ReportRules, ReportSettings, ReportSight,
     remark, report_json, sight,
+};
+use ai6::directorates::registry::assessments::{
+    self, Assessment, Context, Judgement, Verdict, VerdictParts,
 };
 use ai6::directorates::registry::backend::*;
 use ai6::directorates::registry::reports::{
     ReportClearance, ReportFiler, ReportFilter, ReportScope, ReportState,
 };
-use ai6::directorates::registry::source_items::{ItemDecision, ItemVerdict, decide_item};
 use ai6::{Authorizer, Person};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -433,12 +438,16 @@ pub(crate) async fn mark(
     .await
 }
 
-/// `PUT /v1/reports/{id}/assessment` with `{"assessment", "reason", "of"?, "wait_seconds"?}`: a
-/// person decides what an open Source item becomes (`mission`, `duplicate`, `no_action` or
-/// `later`), as the Operation's charge does. It needs `mission.control` on the Operation and being
-/// able to read the item's content; nothing becomes a Mission by itself, and the Station that
-/// polls the Source queues a `mission` on its next pass. `404` for a Report of a scope the person
-/// may not read or one that is no Source item, `409` for an item already decided.
+/// `PUT /v1/reports/{id}/assessment` with `{"assessment", "reason", ...}`: a person assesses an
+/// open Report as `mission` (naming `mission`, unless it is a Source item, which the Station that
+/// polls the Source queues), `duplicate` or `related` (naming `of`), `no_action`, `awaiting`
+/// (`question`, optionally `ask` and `via`, and `wait_seconds` for its deadline), `later`
+/// (`wait_seconds`, `condition` or both) or `decision` (`question`, filed as green ink of kind
+/// `decision`), as the Operation's charge does. `credibility`, `priority`, `likelihood` and
+/// `confidence` are optional. It needs `mission.control` on the Operation (`station.configure`
+/// on a Station's or M's scope) and being able to read the Report's content; nothing becomes a
+/// Mission by itself. `404` for a Report of a scope the person may not read, `403` without the
+/// action or the content, `409` for a Report that is not open, `400` for anything out of bounds.
 pub(crate) async fn assess(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -449,71 +458,207 @@ pub(crate) async fn assess(
     let registry = registry_of(&gateway)?;
     let at = unix_timestamp()?;
     blocking(move || {
-        let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
-        let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
-        let Some(operation) = report.scope.operation().map(str::to_owned) else {
-            return Err(missing());
+        let report = controlled(registry.as_ref(), &reader, &id)?;
+        let parts = VerdictParts {
+            of: request.of.as_deref(),
+            mission: request.mission.as_deref(),
+            question: request.question.as_deref(),
+            via: request.via.as_deref(),
+            ask: request.ask.as_deref(),
+            condition: request.condition.as_deref(),
+            wait_seconds: request.wait_seconds,
         };
-        if !reader.reads_scope(&report.scope) {
-            return Err(missing());
-        }
-        let verdict = ItemVerdict::parse(
-            &request.assessment,
-            request.of.as_deref(),
-            request.wait_seconds,
-            at,
-        )
-        .map_err(|reason| refused(StatusCode::BAD_REQUEST, reason))?;
-        if !reader.holds("mission.control", format!("operation:{operation}"))
-            || sight(&reader, &report, &reader.rules()) != ReportSight::Content
-        {
-            return Err(refused(
-                StatusCode::FORBIDDEN,
-                "Deciding an item needs mission.control on its Operation and reading its content.",
-            ));
-        }
-        let decided = decide_item(
-            registry.as_ref(),
-            &ItemDecision::new(
-                &operation,
-                &id,
-                verdict,
-                &request.reason,
-                &reader.person.id,
-                at,
-            ),
-        );
-        match decided {
+        let bad = |reason: String| refused(StatusCode::BAD_REQUEST, reason);
+        let verdict = Verdict::parse(&request.assessment, &parts, at).map_err(bad)?;
+        let judgement =
+            Judgement::parse(request.likelihood.as_deref(), request.confidence.as_deref())
+                .map_err(bad)?;
+        let assessment =
+            Assessment::new(&report.id, verdict, &request.reason, &reader.person.id, at)
+                .believed(request.credibility)
+                .prioritised(request.priority.as_deref())
+                .judged(judgement);
+        let reads = |scope: &ReportScope| reader.reads_scope(scope);
+        let context = Context {
+            settings: &reader.settings,
+            reads: &reads,
+            request_ttl: DEFAULT_REQUEST_TTL,
+            agent: "person",
+        };
+        match assessments::assess(registry.as_ref(), &assessment, &context) {
             Ok(report) => Ok(Json(shown(registry.as_ref(), &reader, &report))),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(missing()),
-            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
-                let status = if error.to_string().contains("only an open item") {
-                    StatusCode::CONFLICT
-                } else {
-                    StatusCode::BAD_REQUEST
-                };
-                Err(refused(status, error.to_string()))
-            }
-            Err(_) => Err(Refused::from(ApiError::internal())),
+            Err(error) => Err(store_refusal(&error)),
         }
     })
     .await
 }
 
-/// What a person decides of a Source item.
+/// The Report `id` when the person may assess it: they read its scope, hold the action that
+/// controls it and read its content.
+fn controlled(
+    registry: &dyn RegistryBackend,
+    reader: &PersonReader,
+    id: &str,
+) -> Result<ai6::directorates::registry::reports::Report, Refused> {
+    let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
+    let report = registry.report(id).ok().flatten().ok_or_else(missing)?;
+    if !reader.reads_scope(&report.scope) {
+        return Err(missing());
+    }
+    let holds = match &report.scope {
+        ReportScope::Operation(operation) => {
+            reader.holds("mission.control", format!("operation:{operation}"))
+        }
+        scope => reader.files_in(scope),
+    };
+    if !holds || sight(reader, &report, &reader.rules()) != ReportSight::Content {
+        return Err(refused(
+            StatusCode::FORBIDDEN,
+            "Assessing a report needs mission.control on its Operation (station.configure on a \
+             Station or M) and reading its content.",
+        ));
+    }
+    Ok(report)
+}
+
+/// What a store refusal is to the person.
+fn store_refusal(error: &std::io::Error) -> Refused {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => refused(StatusCode::NOT_FOUND, "No such report."),
+        std::io::ErrorKind::InvalidInput => {
+            let status = if error.to_string().contains("only an open report") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            refused(status, error.to_string())
+        }
+        _ => Refused::from(ApiError::internal()),
+    }
+}
+
+/// What a person assesses a Report as.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssessRequest {
-    /// `mission`, `duplicate`, `no_action` or `later`.
+    /// `mission`, `duplicate`, `related`, `no_action`, `awaiting`, `later` or `decision`.
     assessment: String,
-    /// Why, kept apart from the item's own words.
+    /// Why, kept apart from the Report's own words.
     reason: String,
-    /// For a duplicate: the Mission, Report or item it repeats.
+    /// For duplicate or related: the Report, Mission or evidence.
     #[serde(default)]
     of: Option<String>,
-    /// For later: seconds from now until it comes back.
+    /// For mission: the Mission proposed or amended for it.
+    #[serde(default)]
+    mission: Option<String>,
+    /// For awaiting or decision: what is asked.
+    #[serde(default)]
+    question: Option<String>,
+    /// For awaiting: who or what is asked.
+    #[serde(default)]
+    ask: Option<String>,
+    /// For awaiting: how far the question goes, a handling mark.
+    #[serde(default)]
+    via: Option<String>,
+    /// For later: what it waits for.
+    #[serde(default)]
+    condition: Option<String>,
+    /// For awaiting (its deadline) or later (its date): seconds from now.
     #[serde(default)]
     wait_seconds: Option<u64>,
+    /// `1` to `6`.
+    #[serde(default)]
+    credibility: Option<u8>,
+    /// From the deployment's priorities.
+    #[serde(default)]
+    priority: Option<String>,
+    /// The probability yardstick's word for what the Report says.
+    #[serde(default)]
+    likelihood: Option<String>,
+    /// `high`, `moderate` or `low`.
+    #[serde(default)]
+    confidence: Option<String>,
+}
+
+/// `POST /v1/reports/{id}/reopen` with `{"reason"}`: opens an assessed or closed Report again,
+/// audited: the answer to what it awaited arrived, or the condition it waited for is met. The
+/// same authority as assessing it. `409` for one already open.
+pub(crate) async fn reopen(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<ReopenRequest>,
+) -> Result<Json<Value>, Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let registry = registry_of(&gateway)?;
+    let at = unix_timestamp()?;
+    blocking(move || {
+        controlled(registry.as_ref(), &reader, &id)?;
+        match assessments::reopen(
+            registry.as_ref(),
+            &id,
+            &reader.person.id,
+            &request.reason,
+            at,
+        ) {
+            Ok(report) => Ok(Json(shown(registry.as_ref(), &reader, &report))),
+            Err(error) if error.to_string().contains("open already") => {
+                Err(refused(StatusCode::CONFLICT, error.to_string()))
+            }
+            Err(error) => Err(store_refusal(&error)),
+        }
+    })
+    .await
+}
+
+/// Why a Report comes back.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReopenRequest {
+    reason: String,
+}
+
+/// `GET /v1/reports/sources/{key}`: a source's reliability, how it was earned (the tally and the
+/// deployment's rule) and the closed Reports behind it that the person may read, each as far as
+/// they may see it.
+pub(crate) async fn source(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<Value>, Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let registry = registry_of(&gateway)?;
+    blocking(move || {
+        let standing = assessments::standing(registry.as_ref(), &key).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::InvalidInput {
+                refused(StatusCode::BAD_REQUEST, error.to_string())
+            } else {
+                Refused::from(ApiError::internal())
+            }
+        })?;
+        let behind: Vec<Value> = standing
+            .behind
+            .iter()
+            .filter(|report| reader.reads_scope(&report.scope))
+            .map(|report| shown(registry.as_ref(), &reader, report))
+            .collect();
+        let rule = &reader.settings;
+        Ok(Json(json!({
+            "source": standing.source.key,
+            "reliability": standing.source.reliability.as_str(),
+            "rated": standing.source.rated,
+            "counted": standing.source.counted,
+            "confirmed": standing.source.confirmed,
+            "rule": {
+                "min_reports": rule.rating_min_reports,
+                "counts": rule.rating_counts,
+                "confirms": rule.rating_confirms,
+                "bands": rule.rating_bands,
+            },
+            "reports": behind,
+        })))
+    })
+    .await
 }
 
 /// What grants and revokes a clearance, and what lists them: a clearance hands a person or an

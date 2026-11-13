@@ -138,6 +138,9 @@ impl ReportStore for SqlRegistry {
         if let Some(kind) = &filter.kind {
             bind("r.kind = ?", kind.as_str().into());
         }
+        if let Some(source) = &filter.source {
+            bind("r.source_key = ?", source.as_str().into());
+        }
         if let Some(mission) = &filter.mission {
             bind(
                 "r.id IN (SELECT report_id FROM ai6_report_links WHERE kind = 'mission' AND target = ?)",

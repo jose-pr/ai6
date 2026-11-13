@@ -3,6 +3,8 @@
 //! goes dark, stops at its turn quota, and never becomes a Mission.
 
 #[cfg(feature = "cables-mcp")]
+mod assess;
+#[cfg(feature = "cables-mcp")]
 mod decides;
 mod sources;
 

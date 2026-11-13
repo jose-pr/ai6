@@ -19,6 +19,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use super::assessments::Judgement;
 use super::limits::ReportLimits;
 use super::logbook::{Severity, station_key};
 use super::sources::SourceItem;
@@ -321,6 +322,30 @@ pub struct ReportAssessment {
     /// The assessor's comment, kept apart from the text as it was filed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+    /// How likely the assessor judges what the Report says, and how confident it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgement: Option<Judgement>,
+    /// What `awaiting` asked, or the condition `later` waits for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for: Option<String>,
+    /// When `awaiting` or `later` brings the Report back, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<f64>,
+}
+
+impl ReportAssessment {
+    /// An assessment of `verdict` by `by` at `at`, with no judgement or waiting.
+    pub fn new(verdict: impl Into<String>, by: impl Into<String>, at: f64) -> Self {
+        Self {
+            verdict: verdict.into(),
+            by: by.into(),
+            at,
+            comment: None,
+            judgement: None,
+            waits_for: None,
+            until: None,
+        }
+    }
 }
 
 /// How a Report ended. Kept for the closing that writes it.
@@ -334,6 +359,21 @@ pub struct ReportResolution {
     /// What resolved it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// How it came out, one of [`OUTCOMES`](super::assessments::OUTCOMES): what a source's reliability is earned from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+}
+
+impl ReportResolution {
+    /// A resolution by `by` at `at`, with the note and outcome left unset.
+    pub fn new(by: impl Into<String>, at: f64) -> Self {
+        Self {
+            by: by.into(),
+            at,
+            note: None,
+            outcome: None,
+        }
+    }
 }
 
 /// A sanitised part of a Report, releasable at a lower marking than the Report's own: those
@@ -653,6 +693,22 @@ impl Report {
                 return Err(bad("a tearline's compartments are its report's"));
             }
         }
+        if let Some(assessment) = &self.assessment {
+            let within = |text: &Option<String>| {
+                text.as_deref()
+                    .is_none_or(|text| limits.text_bytes.allows(text.len()))
+            };
+            if !within(&assessment.comment)
+                || !within(&assessment.waits_for)
+                || assessment
+                    .until
+                    .is_some_and(|at| !at.is_finite() || at <= 0.0)
+            {
+                return Err(bad(
+                    "an assessment's words are in the bounds of a report's text",
+                ));
+            }
+        }
         match self.credibility {
             None | Some(2..=6) => {}
             Some(1) => {
@@ -695,6 +751,8 @@ pub struct ReportFilter {
     pub kind: Option<String>,
     /// Only Reports tied to this Mission.
     pub mission: Option<String>,
+    /// Only Reports whose filer carries this source key.
+    pub source: Option<String>,
     /// At most this many; the Registry's `page` bounds it anyway.
     pub limit: Option<usize>,
     /// The deployment's priorities, most urgent first; a Report with another or none comes
@@ -709,6 +767,7 @@ impl Default for ReportFilter {
             state: None,
             kind: None,
             mission: None,
+            source: None,
             limit: None,
             priorities: ReportSettings::default().priorities,
         }
@@ -742,6 +801,13 @@ impl ReportFilter {
         self
     }
 
+    /// Only Reports filed by the source `key` (see [`ReportFiler::source_key`]).
+    #[must_use]
+    pub fn from_source(mut self, key: impl Into<String>) -> Self {
+        self.source = Some(key.into());
+        self
+    }
+
     /// Only `state`.
     #[must_use]
     pub fn in_state(mut self, state: ReportState) -> Self {
@@ -769,6 +835,10 @@ impl ReportFilter {
             .is_none_or(|scope| *scope == report.scope)
             && self.state.is_none_or(|state| state == report.state)
             && self.kind.as_deref().is_none_or(|kind| kind == report.kind)
+            && self
+                .source
+                .as_deref()
+                .is_none_or(|key| key == report.filer.source_key())
             && self
                 .mission
                 .as_deref()
@@ -847,6 +917,12 @@ pub struct ReportSource {
     pub reliability: Reliability,
     /// When it was last rated, as Unix seconds; `0` while it is new.
     pub rated: f64,
+    /// How many of its closed Reports the deployment's rule counts.
+    #[serde(default)]
+    pub counted: u32,
+    /// How many of those counted turned out right.
+    #[serde(default)]
+    pub confirmed: u32,
 }
 
 impl ReportSource {
@@ -856,6 +932,8 @@ impl ReportSource {
             key: key.into(),
             reliability: Reliability::F,
             rated: 0.0,
+            counted: 0,
+            confirmed: 0,
         }
     }
 

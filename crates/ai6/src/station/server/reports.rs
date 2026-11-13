@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -29,8 +30,12 @@ use crate::directorates::m::reports::{
     ReportFiling, ReportReader, ReportRules, ReportSettings, ReportSight, report_json, sight,
 };
 use crate::directorates::medical::exposure::product_source;
+use crate::directorates::registry::assessments::{
+    self, Assessment, Context, Judgement, Verdict, VerdictParts,
+};
 use crate::directorates::registry::reports::{
-    Report, ReportClearance, ReportFiler, ReportFilter, ReportLink, ReportScope, ReportState,
+    Report, ReportClearance, ReportFiler, ReportFilter, ReportLink, ReportLinkKind, ReportScope,
+    ReportState,
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
@@ -122,6 +127,47 @@ fn store_refusal(error: &io::Error) -> String {
         io::ErrorKind::QuotaExceeded | io::ErrorKind::InvalidInput => error.to_string(),
         io::ErrorKind::InvalidData => "the Registry holds as many reports as it may".to_owned(),
         _ => "the report could not be stored".to_owned(),
+    }
+}
+
+/// What a charge says when it assesses a Report.
+#[derive(Debug, Clone, Default)]
+pub(super) struct AssessCall {
+    pub report: String,
+    pub assessment: String,
+    pub reason: String,
+    pub of: Option<String>,
+    pub mission: Option<String>,
+    pub question: Option<String>,
+    pub via: Option<String>,
+    pub ask: Option<String>,
+    pub condition: Option<String>,
+    pub wait_seconds: Option<u64>,
+    pub credibility: Option<u8>,
+    pub priority: Option<String>,
+    pub likelihood: Option<String>,
+    pub confidence: Option<String>,
+}
+
+/// What the assessor is told comes next.
+fn assessed_note(report: &Report) -> &'static str {
+    let verdict = report
+        .assessment
+        .as_ref()
+        .map(|assessment| assessment.verdict.as_str());
+    let tied = report
+        .links
+        .iter()
+        .any(|link| link.kind == ReportLinkKind::Mission);
+    match verdict {
+        Some("mission") if report.item.is_some() && !tied => {
+            "the Station that polls the Source queues the brief on its next pass; vetting and \
+             placement apply as to any brief"
+        }
+        Some("mission") => "it closes when its Mission settles",
+        Some("decision") => "it closes when the green ink request is signed",
+        Some("awaiting" | "later") => "it comes back to you at its time, or when you reopen it",
+        _ => "recorded on the report and audited",
     }
 }
 
@@ -330,6 +376,120 @@ impl ReportDesk {
             Some(_) => answer.to_string(),
             None => fenced("read_report", &answer),
         })
+    }
+
+    /// Assesses the Report the call names, as `by` and under the Operation's own settings: the
+    /// Report must be the Operation's and its content readable by the Run, as it is to read it.
+    /// Answers what the assessment came to, or why it was refused.
+    pub(super) fn assess(
+        &self,
+        reader: &Reader,
+        call: &AssessCall,
+        by: &str,
+        request_ttl: Duration,
+    ) -> Result<String, String> {
+        let answer = self.with_reader(reader, None, |state, caller| {
+            let report = match self.readable(state, caller, &call.report) {
+                Ok(report) => report,
+                Err(refusal) => return refusal,
+            };
+            let now = state.clock.now() as f64;
+            let parts = VerdictParts {
+                of: call.of.as_deref(),
+                mission: call.mission.as_deref(),
+                question: call.question.as_deref(),
+                via: call.via.as_deref(),
+                ask: call.ask.as_deref(),
+                condition: call.condition.as_deref(),
+                wait_seconds: call.wait_seconds,
+            };
+            let verdict = match Verdict::parse(&call.assessment, &parts, now) {
+                Ok(verdict) => verdict,
+                Err(reason) => return refused(reason),
+            };
+            let judgement =
+                match Judgement::parse(call.likelihood.as_deref(), call.confidence.as_deref()) {
+                    Ok(judgement) => judgement,
+                    Err(reason) => return refused(reason),
+                };
+            let assessment = Assessment::new(&report.id, verdict, &call.reason, by, now)
+                .believed(call.credibility)
+                .prioritised(call.priority.as_deref())
+                .judged(judgement);
+            let reads = |scope: &ReportScope| caller.reads_scope(scope);
+            let context = Context {
+                settings: &caller.settings,
+                reads: &reads,
+                request_ttl,
+                agent: &reader.agent,
+            };
+            match assessments::assess(state.intake.as_ref(), &assessment, &context) {
+                Ok(assessed) => json!({
+                    "assessed": assessed.assessment.as_ref().map(|each| each.verdict.as_str()),
+                    "report": assessed.id,
+                    "state": assessed.state.as_str(),
+                    "judgement": assessed
+                        .assessment
+                        .as_ref()
+                        .and_then(|each| each.judgement)
+                        .map(|each| each.statement()),
+                    "note": assessed_note(&assessed),
+                }),
+                Err(error) => refused(store_refusal(&error)),
+            }
+        })?;
+        Ok(answer.to_string())
+    }
+
+    /// Opens an assessed or closed Report of the Run's Operation again, for `why`: the answer to
+    /// what it awaited, or the condition it waited for.
+    pub(super) fn reopen(
+        &self,
+        reader: &Reader,
+        report: &str,
+        why: &str,
+        by: &str,
+    ) -> Result<String, String> {
+        let answer = self.with_reader(reader, None, |state, caller| {
+            let report = match self.readable(state, caller, report) {
+                Ok(report) => report,
+                Err(refusal) => return refusal,
+            };
+            match assessments::reopen(
+                state.intake.as_ref(),
+                &report.id,
+                by,
+                why,
+                state.clock.now() as f64,
+            ) {
+                Ok(opened) => json!({ "reopened": opened.id, "state": opened.state.as_str() }),
+                Err(error) => refused(store_refusal(&error)),
+            }
+        })?;
+        Ok(answer.to_string())
+    }
+
+    /// The Report `id`, when it is the Run's Operation's and the Run reads its content.
+    fn readable(
+        &self,
+        state: &DaemonState,
+        caller: &RunReader<'_>,
+        id: &str,
+    ) -> Result<Report, Value> {
+        let report = match state.intake.report(id) {
+            Ok(Some(report)) => report,
+            Ok(None) | Err(_) => return Err(refused("no such report")),
+        };
+        if report.scope != ReportScope::Operation(caller.reader.operation.clone()) {
+            return Err(refused("no such report"));
+        }
+        let rules = ReportRules::new(&caller.settings, &caller.clearances);
+        if sight(caller, &report, &rules) != ReportSight::Content {
+            return Err(refused(
+                "you are not read in to this report, or not cleared for it",
+            ));
+        }
+        Ok(report)
     }
 
     /// `report` as `caller` may see it; content from another Operation marks the Run.

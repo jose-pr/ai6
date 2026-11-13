@@ -547,9 +547,230 @@ async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audi
         .audit_records()
         .unwrap()
         .into_iter()
-        .filter(|record| record.action == "source.item.decide")
+        .filter(|record| record.action == "report.assess")
         .map(|record| (record.actor, record.target))
         .collect::<Vec<_>>();
     assert_eq!(audited.len(), 2, "{audited:?}");
     assert!(audited.iter().all(|(actor, _)| actor == "operator-007"));
+}
+
+#[tokio::test]
+async fn a_person_assesses_any_report_reopens_it_and_reads_its_sources_standing() {
+    let fixture = fixture_with(CONTROL_ROLES).await;
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    let registry = &fixture.served.registry;
+    let mut ids = Vec::new();
+    for title in ["A", "B", "C", "D", "E", "F"] {
+        let id = format!("report-{}", title.to_lowercase());
+        registry
+            .file_report(&ai6::directorates::registry::reports::Report::new(
+                id.clone(),
+                ai6::directorates::registry::reports::ReportScope::Operation("G".to_owned()),
+                "finding",
+                ai6::directorates::registry::logbook::Severity::Info,
+                title,
+                "What was seen.",
+                ai6::directorates::registry::reports::ReportFiler::Person {
+                    person: "operator-007".to_owned(),
+                },
+                100.0,
+            ))
+            .unwrap();
+        ids.push(id);
+    }
+    let [a, b, c, d, e, f] = &ids[..] else {
+        panic!("six reports");
+    };
+    let assessment = |id: &str| format!("/v1/reports/{id}/assessment");
+
+    // A duplicate links both Reports and states the judgement in the yardstick's words.
+    let (status, duplicate) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &assessment(a),
+            Some(json!({
+                "assessment": "duplicate", "of": b, "reason": "the same fault",
+                "credibility": 3, "priority": "high",
+                "likelihood": "highly likely", "confidence": "moderate",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{duplicate}");
+    assert_eq!(duplicate["state"], "closed");
+    assert_eq!(duplicate["credibility"], 3);
+    assert_eq!(
+        duplicate["assessment"]["judgement"]["likelihood"],
+        "highly_likely"
+    );
+    assert_eq!(
+        duplicate["assessment"]["judgement"]["confidence"],
+        "moderate"
+    );
+    let stored = registry.report(b).unwrap().unwrap();
+    assert!(
+        stored
+            .links
+            .iter()
+            .any(|link| link.kind.as_str() == "report" && link.id == *a),
+        "the report it repeats names it back"
+    );
+    assert_eq!(stored.state.as_str(), "open");
+
+    // Bounds: a likelihood without its confidence, a priority off the list, a mission unnamed.
+    for body in [
+        json!({"assessment": "no_action", "reason": "x", "likelihood": "likely"}),
+        json!({"assessment": "no_action", "reason": "x", "priority": "whenever"}),
+        json!({"assessment": "mission", "reason": "x"}),
+        json!({"assessment": "awaiting", "reason": "x", "question": "q"}),
+        json!({"assessment": "someday", "reason": "x"}),
+    ] {
+        let (status, said) = fixture
+            .call(&operator, Method::PUT, &assessment(c), Some(body.clone()))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {said}");
+    }
+    let (status, _) = fixture
+        .call(
+            &viewer,
+            Method::PUT,
+            &assessment(c),
+            Some(json!({"assessment": "no_action", "reason": "x"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "reading is not assessing");
+
+    // Awaiting waits for its deadline, and a person reopens it with the answer.
+    let (status, waiting) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &assessment(c),
+            Some(json!({
+                "assessment": "awaiting", "reason": "cannot tell",
+                "question": "Which branch?", "ask": "person:lead", "wait_seconds": 3600,
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{waiting}");
+    assert_eq!(waiting["state"], "assessed");
+    assert_eq!(
+        waiting["assessment"]["waits_for"],
+        "Which branch? (asked of person:lead)"
+    );
+    let reopen = format!("/v1/reports/{c}/reopen");
+    let (status, _) = fixture
+        .call(
+            &viewer,
+            Method::POST,
+            &reopen,
+            Some(json!({"reason": "answered"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, opened) = fixture
+        .call(
+            &operator,
+            Method::POST,
+            &reopen,
+            Some(json!({"reason": "answered: main"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    assert_eq!(opened["state"], "open");
+    let (status, _) = fixture
+        .call(
+            &operator,
+            Method::POST,
+            &reopen,
+            Some(json!({"reason": "again"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // A decision is green ink of kind decision waiting for those who may sign it.
+    let (status, asked) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &assessment(d),
+            Some(json!({
+                "assessment": "decision", "reason": "for the owner to say",
+                "question": "May we drop the old API?",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{asked}");
+    let request = asked["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|link| link["kind"] == "decision")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let found = registry.approval("G", &request, 1.0).unwrap().unwrap();
+    assert_eq!(found.request().scope.kind, "decision");
+    assert_eq!(found.name(), "pending");
+
+    // A mission names the Mission proposed for it, and is linked to it.
+    let (status, mission) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &assessment(e),
+            Some(json!({"assessment": "mission", "mission": "mission-g", "reason": "work"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{mission}");
+    assert_eq!(mission["state"], "assessed");
+    assert!(
+        registry
+            .report(e)
+            .unwrap()
+            .unwrap()
+            .about_mission("mission-g")
+    );
+
+    // The source's standing: its tally, the rule it is judged by and the Reports behind it.
+    let (status, _) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &assessment(f),
+            Some(json!({"assessment": "no_action", "reason": "nothing in it"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, standing) = fixture
+        .call(
+            &operator,
+            Method::GET,
+            "/v1/reports/sources/person:operator-007",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{standing}");
+    assert_eq!(standing["reliability"], "F", "too few counted to rate yet");
+    assert_eq!(standing["counted"], 1);
+    assert_eq!(standing["confirmed"], 0);
+    assert_eq!(standing["rule"]["min_reports"], 5);
+    let behind: Vec<&str> = standing["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|report| report["id"].as_str().unwrap())
+        .collect();
+    assert!(behind.contains(&f.as_str()), "{behind:?}");
+    let counted = standing["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|report| report["id"] == *f)
+        .unwrap();
+    assert_eq!(counted["resolution"]["outcome"], "no_action");
 }

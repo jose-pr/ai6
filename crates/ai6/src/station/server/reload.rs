@@ -19,7 +19,6 @@ use crate::directorates::m::compartments::{self, CompiledCompartments};
 use crate::directorates::m::config::{
     ConfigProvider, ConfigRevision, ConfigSnapshot, ConfigStatus,
 };
-#[cfg(feature = "cables-mcp")]
 use crate::directorates::m::reports::{self, ReportSettings};
 use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind};
 use crate::directorates::q::LoadoutCatalog;
@@ -109,7 +108,6 @@ impl LiveConfig {
     /// # Errors
     ///
     /// When the provider cannot be read: the caller refuses, and nothing answers from memory.
-    #[cfg(feature = "cables-mcp")]
     pub(super) fn report_settings(&self) -> Result<ReportSettings, RosterError> {
         match &self.source {
             Some(source) => reports::settings(source.as_ref()),

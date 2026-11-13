@@ -2,6 +2,7 @@
 
 mod accounts;
 mod agents;
+mod assessing;
 #[cfg(feature = "publisher")]
 mod assistant;
 mod bona_fides;
@@ -1799,6 +1800,7 @@ async fn scheduler_loop(base: DaemonState) {
             }
             medical::enforce_quarantines(&tick);
             verdicts::settle_held(&tick);
+            assessing::settle(&tick);
             verification::answer_probe_requests(&tick);
         })
         .await;
@@ -4027,7 +4029,13 @@ fn file_settled_brief(state: &DaemonState, mission_id: &str) -> std::io::Result<
     let outcome = terminal_outcome(state, mission_id, &mission);
     let done = mission.state == MissionState::Done;
     match filed.state.as_str() {
-        "failed" => state.intake.refile_lost(mission_id, &outcome, done),
+        "failed" => {
+            let refiled = state.intake.refile_lost(mission_id, &outcome, done);
+            if matches!(refiled, Ok(true)) {
+                assessing::mission_settled(state, mission_id);
+            }
+            refiled
+        }
         "new" => {
             let meta = BTreeMap::from([("mission_id".to_owned(), serde_json::json!(mission_id))]);
             let Some(lease) = state.intake.claim_with_lease(
@@ -4058,6 +4066,9 @@ fn finish_intake_claim(
         .ok()?;
     if finished && !ok {
         standing::attempt_failed(state, &brief, outcome);
+    }
+    if finished {
+        assessing::mission_settled(state, lease.key());
     }
     finished.then_some(())
 }

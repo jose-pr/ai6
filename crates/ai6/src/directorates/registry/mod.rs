@@ -11,6 +11,7 @@ pub mod accounts;
 pub mod agent_records;
 pub mod api_keys;
 pub mod approvals;
+pub mod assessments;
 pub mod assistant_log;
 pub mod backend;
 pub mod bona_fides;

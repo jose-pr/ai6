@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use super::CableTools;
 use crate::station::server::charges::decide::DecisionDesk;
+use crate::station::server::reports::AssessCall;
 
 #[derive(Deserialize, JsonSchema)]
 struct MissionArgs {
@@ -45,16 +46,47 @@ struct ItemArgs {
 
 #[derive(Deserialize, JsonSchema)]
 struct AssessArgs {
-    /// The item's report ID.
+    /// The report's ID, from reports, source_items or the notice.
     report: String,
-    /// mission, duplicate, no_action or later.
+    /// mission, duplicate, related, no_action, awaiting, later or decision.
     assessment: String,
-    /// Why, from what you read; kept apart from the item's own words.
+    /// Why, from what you read; kept apart from the report's own words.
     reason: String,
-    /// For a duplicate: the Mission, report or item it repeats.
+    /// For duplicate or related: the report, Mission or evidence it repeats or is tied to.
     of: Option<String>,
-    /// For later: seconds from now until the item comes back to you.
+    /// For mission: the Mission proposed or amended for it, by UID or handle. A Source item
+    /// needs none: it is queued as a brief.
+    mission: Option<String>,
+    /// For awaiting: what you asked. For decision: what the people who may sign are asked.
+    question: Option<String>,
+    /// For awaiting: who or what you asked (a Cable channel, a tracker item, a person).
+    ask: Option<String>,
+    /// For awaiting: how far the question goes, a handling mark the report's own must allow.
+    via: Option<String>,
+    /// For later: what it waits for.
+    condition: Option<String>,
+    /// For awaiting (its deadline) or later (its date): seconds from now until it comes back.
     wait_seconds: Option<u64>,
+    /// How far you believe it, 1 (confirmed by other sources: needs a link to a corroborating
+    /// report or evidence) to 6 (cannot be judged).
+    credibility: Option<u8>,
+    /// How urgent it is, from the deployment's priorities (critical, high, normal, low by
+    /// default).
+    priority: Option<String>,
+    /// Your judgement of what it says, in the yardstick's words: remote chance, highly unlikely,
+    /// unlikely, realistic possibility, likely, highly likely or almost certain. Give it with
+    /// confidence.
+    likelihood: Option<String>,
+    /// high, moderate or low: how sure you are of that judgement.
+    confidence: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ReopenArgs {
+    /// The report's ID.
+    report: String,
+    /// Why it comes back: the answer that arrived, the condition now met.
+    reason: String,
 }
 
 impl CableTools {
@@ -159,20 +191,36 @@ impl CableTools {
             .await
     }
 
-    /// Decide what a Source item becomes.
+    /// Assess a report.
     #[tool(
-        description = "Decide what an open Source item of your Operation becomes: mission (it is work: the item is queued as a brief, vetted and placed as any brief is, and its Mission is linked to the item), duplicate (of a Mission, report or item you name in `of`), no_action (nothing to do, with your reason), or later (it comes back to you after wait_seconds). Read the item and look at your Missions first. The decision is audited and kept on the item. A decided item is not decided again. At desk clearance you decide nothing and a person does."
+        description = "Assess an open report of your Operation, one you can read in full, as one of: mission (it is work: a Source item is queued as a brief, vetted and placed as any brief is; any other report names in `mission` the Mission you proposed or amended for it, and it closes when that Mission settles), duplicate (of a report, Mission or evidence you name in `of`: both are linked), related (tied to what you name in `of`, and closed), no_action (nothing to do), awaiting (you asked `question`, of `ask`, and it comes back at the deadline in wait_seconds or when you reopen_report it; `via` says how far the question goes and the report's handling mark must allow it), later (it comes back after wait_seconds, or when its `condition` is met and you reopen_report it), or decision (the people who may sign are asked `question` as green ink of kind decision, and it closes when they sign). Give your reason, which is kept apart from the report's words, and set its credibility, priority and your judgement: likelihood in the probability yardstick's words with a confidence. Read the report and look at your Missions first. Every assessment is audited; an assessed report is not assessed again until it comes back. At desk clearance you assess nothing and a person does."
     )]
     async fn assess_report(&self, Parameters(args): Parameters<AssessArgs>) -> String {
-        self.with_decisions(move |desk| {
-            desk.assess(
-                &args.report,
-                &args.assessment,
-                &args.reason,
-                args.of.as_deref(),
-                args.wait_seconds,
-            )
-        })
-        .await
+        let call = AssessCall {
+            report: args.report,
+            assessment: args.assessment,
+            reason: args.reason,
+            of: args.of,
+            mission: args.mission,
+            question: args.question,
+            via: args.via,
+            ask: args.ask,
+            condition: args.condition,
+            wait_seconds: args.wait_seconds,
+            credibility: args.credibility,
+            priority: args.priority,
+            likelihood: args.likelihood,
+            confidence: args.confidence,
+        };
+        self.with_decisions(move |desk| desk.assess(call)).await
+    }
+
+    /// Open a report again.
+    #[tool(
+        description = "Open an assessed or closed report of your Operation again, with the reason: the answer to what it awaited arrived, the condition it waited for is met, or what closed it did not hold. It then waits for you to assess it. Audited."
+    )]
+    async fn reopen_report(&self, Parameters(args): Parameters<ReopenArgs>) -> String {
+        self.with_decisions(move |desk| desk.reopen(&args.report, &args.reason))
+            .await
     }
 }

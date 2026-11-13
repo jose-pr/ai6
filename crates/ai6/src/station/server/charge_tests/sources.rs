@@ -262,7 +262,7 @@ async fn the_charge_decides_each_item_and_only_a_mission_becomes_a_brief() {
         .audit_records()
         .unwrap()
         .into_iter()
-        .filter(|record| record.action == "source.item.decide")
+        .filter(|record| record.action == "report.assess")
         .collect();
     assert_eq!(audited.len(), 4, "each decision is audited");
 

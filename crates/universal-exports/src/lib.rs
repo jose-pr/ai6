@@ -1690,7 +1690,12 @@ impl Gateway {
                 "/v1/reports/clearances/{subject}",
                 axum::routing::put(reports::grant).delete(reports::revoke),
             )
+            .route("/v1/reports/sources/{key}", get(reports::source))
             .route("/v1/reports/{id}", get(reports::show))
+            .route(
+                "/v1/reports/{id}/reopen",
+                post(reports::reopen),
+            )
             .route(
                 "/v1/reports/{id}/markings",
                 axum::routing::put(reports::mark),

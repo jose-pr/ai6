@@ -264,7 +264,11 @@ fn full_example(record: ConfigRecord) -> Value {
             "reports": {
                 "classifications": ["open", "secret"],
                 "handlings": ["here"],
-                "priorities": ["now", "later"]
+                "priorities": ["now", "later"],
+                "rating_min_reports": 3,
+                "rating_counts": ["mission_done"],
+                "rating_confirms": ["mission_done"],
+                "rating_bands": [80, 60, 40, 20]
             },
             "usage": {"refresh_every": 60, "backoff_factor": 3, "backoff_max": 900}
         }),

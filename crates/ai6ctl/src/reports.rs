@@ -30,25 +30,28 @@ pub(crate) enum ReportsCommand {
         /// Its ID.
         id: String,
     },
-    /// Decide what an open Source item becomes (needs mission.control on its Operation and
-    /// reading the item): `mission` queues it as a brief for vetting and placement, `duplicate`
-    /// names what it repeats, `no_action` closes it, `later` brings it back after a wait.
-    /// Nothing becomes a Mission without this or the Operation's charge deciding it.
-    Assess {
-        /// The item's Report ID.
+    /// Assess an open Report (needs mission.control on its Operation and reading it): `mission`
+    /// (a Source item is queued as a brief; any other names its Mission with --mission),
+    /// `duplicate` or `related` (name what with --of), `no_action`, `awaiting` (--question and
+    /// --wait-seconds, its deadline), `later` (--wait-seconds, --condition or both) or `decision`
+    /// (--question, filed as green ink of kind decision). Nothing becomes a Mission without this
+    /// or the Operation's charge assessing it.
+    Assess(Box<AssessArgs>),
+    /// Open an assessed or closed Report again (the same authority as assessing it): the answer
+    /// to what it awaited arrived, or the condition it waited for is met.
+    Reopen {
+        /// The Report's ID.
         id: String,
-        /// `mission`, `duplicate`, `no_action` or `later`.
-        #[arg(value_parser = ["mission", "duplicate", "no_action", "later"])]
-        assessment: String,
-        /// Why, kept apart from the item's own words.
+        /// Why it comes back.
         #[arg(long)]
         reason: String,
-        /// For a duplicate: the Mission, Report or item it repeats.
-        #[arg(long, required_if_eq("assessment", "duplicate"))]
-        of: Option<String>,
-        /// For later: seconds until it comes back.
-        #[arg(long, required_if_eq("assessment", "later"))]
-        wait_seconds: Option<u64>,
+    },
+    /// A source's reliability, how it was earned and the closed Reports behind it, by the key a
+    /// Report shows as its source (`source:NAME`, `agent:CODENAME`, `person:ID`, `probe:NAME`,
+    /// `review` or `watchdog`).
+    Source {
+        /// The source's key.
+        key: String,
     },
     /// Who is cleared for which classification: list, grant or revoke (access.read, and
     /// access.manage to change, on config:reports). A change holds from the next request.
@@ -74,6 +77,54 @@ pub(crate) enum ClearanceCommand {
         /// person:ID, group:NAME or agent:CODENAME.
         subject: String,
     },
+}
+
+/// What `ai6ctl reports assess` takes.
+#[derive(Debug, Args)]
+pub(crate) struct AssessArgs {
+    /// The Report's ID.
+    id: String,
+    /// What it becomes.
+    #[arg(value_parser = ["mission", "duplicate", "related", "no_action", "awaiting", "later", "decision"])]
+    assessment: String,
+    /// Why, kept apart from the Report's own words.
+    #[arg(long)]
+    reason: String,
+    /// For duplicate or related: the Report, Mission or evidence.
+    #[arg(long, required_if_eq_any([("assessment", "duplicate"), ("assessment", "related")]))]
+    of: Option<String>,
+    /// For mission: the Mission proposed or amended for it.
+    #[arg(long)]
+    mission: Option<String>,
+    /// For awaiting: what is asked. For decision: what those who sign are asked.
+    #[arg(long, required_if_eq_any([("assessment", "awaiting"), ("assessment", "decision")]))]
+    question: Option<String>,
+    /// For awaiting: who or what is asked.
+    #[arg(long)]
+    ask: Option<String>,
+    /// For awaiting: how far the question goes, a handling mark the Report's own allows.
+    #[arg(long)]
+    via: Option<String>,
+    /// For later: what it waits for.
+    #[arg(long)]
+    condition: Option<String>,
+    /// For awaiting (its deadline) and later (its date): seconds until it comes back.
+    #[arg(long, required_if_eq("assessment", "awaiting"))]
+    wait_seconds: Option<u64>,
+    /// How far the information is believed, 1 (confirmed) to 6 (cannot be judged).
+    #[arg(long)]
+    credibility: Option<u8>,
+    /// From the deployment's priorities.
+    #[arg(long)]
+    priority: Option<String>,
+    /// How likely what it says is, in the probability yardstick's words (remote chance,
+    /// highly unlikely, unlikely, realistic possibility, likely, highly likely, almost
+    /// certain); give --confidence with it.
+    #[arg(long, requires = "confidence")]
+    likelihood: Option<String>,
+    /// high, moderate or low.
+    #[arg(long, requires = "likelihood")]
+    confidence: Option<String>,
 }
 
 /// What `ai6ctl reports file` takes.
@@ -242,19 +293,44 @@ pub(crate) async fn run(
             }
             print_listed(&exchange(client, token, Method::GET, url, None, None).await?);
         }
-        ReportsCommand::Assess {
-            id,
-            assessment,
-            reason,
-            of,
-            wait_seconds,
-        } => {
+        ReportsCommand::Assess(args) => {
+            let AssessArgs {
+                id,
+                assessment,
+                reason,
+                of,
+                mission,
+                question,
+                ask,
+                via,
+                condition,
+                wait_seconds,
+                credibility,
+                priority,
+                likelihood,
+                confidence,
+            } = *args;
             let mut body = json!({"assessment": assessment, "reason": reason});
-            if let Some(of) = of {
-                body["of"] = of.into();
+            for (key, value) in [
+                ("of", of),
+                ("mission", mission),
+                ("question", question),
+                ("ask", ask),
+                ("via", via),
+                ("condition", condition),
+                ("priority", priority),
+                ("likelihood", likelihood),
+                ("confidence", confidence),
+            ] {
+                if let Some(value) = value {
+                    body[key] = value.into();
+                }
             }
             if let Some(wait) = wait_seconds {
                 body["wait_seconds"] = wait.into();
+            }
+            if let Some(credibility) = credibility {
+                body["credibility"] = credibility.into();
             }
             let decided = exchange(
                 client,
@@ -271,6 +347,33 @@ pub(crate) async fn run(
                 text(&decided["state"]),
                 text(&decided["assessment"]["verdict"])
             );
+        }
+        ReportsCommand::Reopen { id, reason } => {
+            let opened = exchange(
+                client,
+                token,
+                Method::POST,
+                address(server, &["reports", &id, "reopen"])?,
+                None,
+                Some(json!({"reason": reason})),
+            )
+            .await?;
+            println!("{}\t{}", text(&opened["id"]), text(&opened["state"]));
+        }
+        ReportsCommand::Source { key } => {
+            let source = exchange(
+                client,
+                token,
+                Method::GET,
+                address(server, &["reports", "sources", &key])?,
+                None,
+                None,
+            )
+            .await?;
+            for name in ["source", "reliability", "counted", "confirmed", "rated"] {
+                println!("{name}\t{}", text(&source[name]));
+            }
+            print_listed(&json!({ "reports": source["reports"] }));
         }
         ReportsCommand::Clearance { command } => {
             run_clearance(client, server, token, command).await?;

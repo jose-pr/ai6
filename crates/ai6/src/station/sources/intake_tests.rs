@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use guatiao::library::ProviderError;
 
 use super::*;
+use crate::directorates::m::reports::ReportSettings;
 use crate::directorates::registry::reports::{ReportFilter, ReportScope, ReportState};
 use crate::directorates::registry::source_items::{
     ITEM_KIND, ItemDecision, ItemVerdict, decide_item,
@@ -99,6 +100,7 @@ fn decide(registry: &FileRegistry, report: &str, verdict: ItemVerdict, by: &str)
             by,
             unix_seconds() as f64,
         ),
+        &ReportSettings::default(),
     )
     .unwrap();
 }
@@ -224,7 +226,7 @@ fn a_duplicate_and_a_no_action_leave_no_brief_and_record_the_decision() {
         .audit_records()
         .unwrap()
         .into_iter()
-        .filter(|record| record.action == "source.item.decide")
+        .filter(|record| record.action == "report.assess")
         .count();
     assert_eq!(audited, 2);
 }
@@ -318,7 +320,7 @@ fn with_no_charge_the_items_wait_and_a_persons_decision_applies() {
         .audit_records()
         .unwrap()
         .into_iter()
-        .find(|record| record.action == "source.item.decide")
+        .find(|record| record.action == "report.assess")
         .unwrap();
     assert_eq!(audit.actor, "person-1");
 }
@@ -348,6 +350,7 @@ fn a_deferred_item_is_told_to_the_charge_again_when_it_is_due() {
             "charge:operation:G",
             then,
         ),
+        &ReportSettings::default(),
     )
     .unwrap();
     assert!(told.lock().unwrap().len() == 1, "deciding tells nobody");

@@ -11,15 +11,19 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
+use super::super::compartments::Reader;
+use super::super::reports::{AssessCall, ReportDesk};
 use super::super::{DaemonState, agents, verification};
+use crate::directorates::m::approvals::DEFAULT_REQUEST_TTL;
 use crate::directorates::m::memories::fenced;
 use crate::directorates::m::mission::MissionState;
+use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::decisions::{self, VerifyingDecision};
 use crate::directorates::registry::reports::{
     Report, ReportFiler, ReportFilter, ReportScope, ReportState,
 };
 use crate::directorates::registry::runs::{OutcomeVerdict, RunRecord};
-use crate::directorates::registry::source_items::{self, ITEM_KIND, ItemDecision, ItemVerdict};
+use crate::directorates::registry::source_items::{self, ITEM_KIND};
 use crate::directorates::registry::store::AuditRecord;
 
 /// The prefix of the name a charge's decisions are recorded under.
@@ -280,46 +284,41 @@ impl DecisionDesk {
         Ok(fenced("source_item", &row))
     }
 
-    /// Decides what an open Source item becomes: `mission`, `duplicate` of what `of` names,
-    /// `no_action`, or `later` after `wait_seconds`. A `mission` is queued as a brief by the
-    /// Station that polls the Source, and vetted as any brief is. At `desk` clearance the charge
-    /// decides nothing and a person does.
-    pub(in crate::station::server) fn assess(
-        &self,
-        id: &str,
-        word: &str,
-        reason: &str,
-        of: Option<&str>,
-        wait_seconds: Option<u64>,
-    ) -> Result<String, String> {
-        let at = unix_seconds();
-        let verdict = ItemVerdict::parse(word, of, wait_seconds, at)?;
+    /// Assesses an open Report of the Operation: `mission`, `duplicate`, `related`, `no_action`,
+    /// `awaiting`, `later` or `decision`, as the call says, with the credibility, priority and
+    /// judgement it states. A `mission` of a Source item is queued by the Station that polls the
+    /// Source, vetted as any brief is. At `desk` clearance the charge assesses nothing and a
+    /// person does.
+    pub(in crate::station::server) fn assess(&self, call: AssessCall) -> Result<String, String> {
         let clearance = agents::effective(&self.state, Some(&self.operation), &self.agent)
             .map_err(|error| error.to_string())?
             .clearance;
         if clearance == "desk" {
-            return Err(
-                "your clearance is desk, so a person decides what a Source item becomes".to_owned(),
-            );
+            return Err("your clearance is desk, so a person assesses a report".to_owned());
         }
-        let by = self.by();
-        let report = source_items::decide_item(
-            self.state.intake.as_ref(),
-            &ItemDecision::new(&self.operation, id, verdict, reason, &by, at),
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(json!({
-            "assessed": word,
-            "report": report.id,
-            "state": report.state.as_str(),
-            "note": if word == "mission" {
-                "the Station that polls the Source queues the brief on its next pass; vetting and \
-                 placement apply as to any brief"
-            } else {
-                "recorded on the item and audited"
-            },
-        })
-        .to_string())
+        let ttl = self
+            .state
+            .roster
+            .operation(&self.operation)
+            .map_or(DEFAULT_REQUEST_TTL, |operation| {
+                operation.green_ink.request_ttl()
+            });
+        ReportDesk::new(self.state.clone()).assess(&self.reader(), &call, &self.by(), ttl)
+    }
+
+    /// Opens an assessed or closed Report of the Operation again, for the reason given.
+    pub(in crate::station::server) fn reopen(&self, id: &str, why: &str) -> Result<String, String> {
+        ReportDesk::new(self.state.clone()).reopen(&self.reader(), id, why, &self.by())
+    }
+
+    /// The charge as a reader of its own Operation's Reports.
+    fn reader(&self) -> Reader {
+        Reader {
+            agent: self.agent.clone(),
+            operation: self.operation.clone(),
+            mission: None,
+            exposure: ExposureGate::default(),
+        }
     }
 }
 

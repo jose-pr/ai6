@@ -5215,6 +5215,58 @@
                 "normal",
                 "low"
               ]
+            },
+            "rating_min_reports": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "title": "Counted Reports before a source is rated",
+              "description": "How many of a source's closed Reports the rule counts before it is rated; until then it stays `F`.",
+              "default": 5
+            },
+            "rating_counts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Outcomes that count toward a rating",
+              "description": "The outcomes of a closed Report that count toward its source's rating: `mission_done`, `mission_failed`, `decision_approved`, `decision_rejected`, `duplicate`, `related`, `no_action`.",
+              "default": [
+                "mission_done",
+                "mission_failed",
+                "decision_approved",
+                "decision_rejected",
+                "no_action"
+              ]
+            },
+            "rating_confirms": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Counted outcomes that confirm a source",
+              "description": "The counted outcomes that show the Report was right.",
+              "default": [
+                "mission_done",
+                "mission_failed",
+                "decision_approved"
+              ]
+            },
+            "rating_bands": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "title": "Percent confirmed for A, B, C and D",
+              "description": "Percent of counted Reports confirmed at which a source is rated `A`, `B`, `C` and `D`, highest first; below the last it is `E`.",
+              "default": [
+                90,
+                75,
+                50,
+                25
+              ]
             }
           },
           "additionalProperties": false,
@@ -5236,6 +5288,25 @@
               "high",
               "normal",
               "low"
+            ],
+            "rating_min_reports": 5,
+            "rating_counts": [
+              "mission_done",
+              "mission_failed",
+              "decision_approved",
+              "decision_rejected",
+              "no_action"
+            ],
+            "rating_confirms": [
+              "mission_done",
+              "mission_failed",
+              "decision_approved"
+            ],
+            "rating_bands": [
+              90,
+              75,
+              50,
+              25
             ]
           }
         },

@@ -443,6 +443,7 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
                     }
                     if let Some(operation) = charge.scope.operation() {
                         endpoint.open_green_ink(super::green_ink::Desk::new(state.clone()));
+                        endpoint.open_report_tools(super::reports::ReportDesk::new(state.clone()));
                         endpoint.open_decision_tools(decide::DecisionDesk::new(
                             state.clone(),
                             operation.to_owned(),

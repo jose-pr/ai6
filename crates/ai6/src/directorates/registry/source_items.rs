@@ -13,15 +13,16 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::assessments::{self, Assessment, Context, Verdict, assess};
 use super::backend::RegistryBackend;
 use super::logbook::Severity;
 use super::reports::{
-    Report, ReportAssessment, ReportFiler, ReportFilter, ReportLink, ReportLinkKind,
-    ReportResolution, ReportScope, ReportState,
+    Report, ReportFiler, ReportFilter, ReportLink, ReportLinkKind, ReportScope, ReportState,
 };
 use super::sources::SourceItem;
 use super::store::{AuditRecord, hex_digest, one_line_within};
 use super::timeline::TimelineEvent;
+use crate::directorates::m::reports::ReportSettings;
 
 /// The kind of a Report made from a Source item.
 pub const ITEM_KIND: &str = "source-item";
@@ -152,7 +153,7 @@ pub fn offer(
     let deferred = stored
         .assessment
         .as_ref()
-        .is_some_and(|assessment| assessment.verdict == "later");
+        .is_some_and(|assessment| matches!(assessment.verdict.as_str(), "later" | "awaiting"));
     let reopened =
         stored.state == ReportState::Closed || (stored.state == ReportState::Assessed && deferred);
     let report = store.change_report(&id, &mut |report| {
@@ -284,10 +285,6 @@ impl<'a> ItemDecision<'a> {
     }
 }
 
-fn invalid(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, message.into())
-}
-
 /// The item Report `id` of `operation`, when it is one.
 ///
 /// # Errors
@@ -307,97 +304,45 @@ pub fn item_report(store: &dyn RegistryBackend, operation: &str, id: &str) -> io
 /// Decides an open item: audited, kept on its Report as the assessment, and on the timeline. A
 /// `mission` leaves the Report assessed, and the Station that polls the Source queues the brief
 /// on its next pass; `duplicate` and `no_action` close it, and `later` keeps it until its time.
+/// This is [`assess`] for an item, which any other Report takes as well.
 ///
 /// # Errors
 ///
 /// `NotFound` for no such item, `InvalidInput` for one already decided or for a decision without
 /// its reason, a duplicate that names nothing or a time that is not ahead; an audit that cannot
 /// be written, or a Registry failure.
-pub fn decide_item(store: &dyn RegistryBackend, decision: &ItemDecision<'_>) -> io::Result<Report> {
-    let stored = item_report(store, decision.operation, decision.report)?;
-    if stored.state != ReportState::Open {
-        return Err(invalid(format!(
-            "this item is {}: only an open item is decided",
-            stored.state.as_str()
-        )));
-    }
-    if decision.reason.trim().is_empty() {
-        return Err(invalid("a decision needs its reason"));
-    }
-    match &decision.verdict {
-        ItemVerdict::Duplicate { of } if of.trim().is_empty() => {
-            return Err(invalid("a duplicate names what it repeats"));
-        }
-        ItemVerdict::Later { until } if !until.is_finite() || *until <= decision.at => {
-            return Err(invalid("later needs a time ahead"));
-        }
-        _ => {}
-    }
-    let word = decision.verdict.word();
-    // Audited first: a decision that cannot be audited is not given.
-    store.record_audit(&AuditRecord {
-        id: uuid::Uuid::new_v4().to_string(),
-        actor: decision.by.to_owned(),
-        action: "source.item.decide".to_owned(),
-        operation: decision.operation.to_owned(),
-        resource: Some(format!("operation:{}", decision.operation)),
-        target: format!("{} {word}", decision.report),
-        at: decision.at,
-    })?;
-    let link = match &decision.verdict {
-        ItemVerdict::Duplicate { of } => {
-            let kind = if store.report(of)?.is_some() {
-                ReportLinkKind::Report
-            } else if store.resolve_mission(of)?.is_some() {
-                ReportLinkKind::Mission
-            } else {
-                ReportLinkKind::Evidence
-            };
-            Some(ReportLink::new(kind, of.trim()))
-        }
-        _ => None,
+pub fn decide_item(
+    store: &dyn RegistryBackend,
+    decision: &ItemDecision<'_>,
+    settings: &ReportSettings,
+) -> io::Result<Report> {
+    item_report(store, decision.operation, decision.report)?;
+    let verdict = match &decision.verdict {
+        ItemVerdict::Mission => Verdict::Mission { mission: None },
+        ItemVerdict::Duplicate { of } => Verdict::Duplicate { of: of.clone() },
+        ItemVerdict::NoAction => Verdict::NoAction,
+        ItemVerdict::Later { until } => Verdict::Later {
+            until: Some(*until),
+            condition: None,
+        },
     };
-    let report = store.change_report(decision.report, &mut |report| {
-        if report.state != ReportState::Open {
-            return Err(invalid("this item was decided meanwhile"));
-        }
-        report.assessment = Some(ReportAssessment {
-            verdict: word.to_owned(),
-            by: decision.by.to_owned(),
-            at: decision.at,
-            comment: Some(decision.reason.to_owned()),
-        });
-        report.updated = decision.at.max(report.created);
-        match &decision.verdict {
-            ItemVerdict::Mission => report.state = ReportState::Assessed,
-            ItemVerdict::Later { until } => {
-                report.state = ReportState::Assessed;
-                report.deadline = Some(*until);
-            }
-            ItemVerdict::Duplicate { .. } | ItemVerdict::NoAction => {
-                report.state = ReportState::Closed;
-                report.resolution = Some(ReportResolution {
-                    by: decision.by.to_owned(),
-                    at: decision.at,
-                    note: Some(match &decision.verdict {
-                        ItemVerdict::Duplicate { of } => format!("duplicate of {}", of.trim()),
-                        _ => decision.reason.to_owned(),
-                    }),
-                });
-                if let Some(link) = &link {
-                    report.links.push(link.clone());
-                }
-            }
-        }
-        Ok(())
-    })?;
-    let _ = store.record_event(
-        &TimelineEvent::new("report", word, decision.operation, decision.at).actor(decision.by),
-    );
-    Ok(report)
+    let own = ReportScope::Operation(decision.operation.to_owned());
+    let reads = |scope: &ReportScope| *scope == own;
+    assess(
+        store,
+        &Assessment::new(
+            decision.report,
+            verdict,
+            decision.reason,
+            decision.by,
+            decision.at,
+        ),
+        &Context::within(settings, &reads),
+    )
 }
 
-/// Opens again the items deferred with `later` whose time has come, audited, and returns them.
+/// Opens again the items deferred with `later` (or waiting with `awaiting`) whose time has come,
+/// audited, and returns them.
 ///
 /// # Errors
 ///
@@ -407,38 +352,13 @@ pub fn reopen_due(
     operation: &str,
     now: f64,
 ) -> io::Result<Vec<Report>> {
-    let due = store.reports(
-        &ReportFilter::all()
+    assessments::reopen_due(
+        store,
+        ReportFilter::all()
             .in_scope(ReportScope::Operation(operation.to_owned()))
-            .of_kind(ITEM_KIND)
-            .in_state(ReportState::Assessed),
-    )?;
-    let mut opened = Vec::new();
-    for report in due.into_iter().filter(|report| {
-        report
-            .assessment
-            .as_ref()
-            .is_some_and(|assessment| assessment.verdict == "later")
-            && report.deadline.is_some_and(|until| until <= now)
-    }) {
-        store.record_audit(&AuditRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            actor: "source:clock".to_owned(),
-            action: "source.item.reopen".to_owned(),
-            operation: operation.to_owned(),
-            resource: Some(format!("operation:{operation}")),
-            target: format!("{} later", report.id),
-            at: now,
-        })?;
-        let reopened = store.change_report(&report.id, &mut |report| {
-            report.state = ReportState::Open;
-            report.deadline = None;
-            report.updated = now.max(report.created);
-            Ok(())
-        })?;
-        opened.push(reopened);
-    }
-    Ok(opened)
+            .of_kind(ITEM_KIND),
+        now,
+    )
 }
 
 /// The items decided `mission` whose brief has not been queued: assessed, and tied to no
@@ -584,6 +504,7 @@ mod tests {
             decide_item(
                 store,
                 &ItemDecision::new("G", report, verdict, reason, "charge:operation:G", 200.0),
+                &ReportSettings::default(),
             )
         };
         let closed = decide(
@@ -611,7 +532,7 @@ mod tests {
             Some("a question, not work"),
             "the comment is apart from the item's words"
         );
-        assert_eq!(audits(store, "source.item.decide"), 2);
+        assert_eq!(audits(store, "report.assess"), 2);
         // Decided once: a second decision on a closed item is refused.
         let again = decide(&a, ItemVerdict::NoAction, "again").unwrap_err();
         assert_eq!(again.kind(), io::ErrorKind::InvalidInput);
@@ -631,6 +552,7 @@ mod tests {
         let other = decide_item(
             store,
             &ItemDecision::new("H", &c, ItemVerdict::NoAction, "x", "p", 200.0),
+            &ReportSettings::default(),
         )
         .unwrap_err();
         assert_eq!(other.kind(), io::ErrorKind::NotFound);
@@ -671,6 +593,7 @@ mod tests {
                 "charge:operation:G",
                 200.0,
             ),
+            &ReportSettings::default(),
         )
         .unwrap();
         assert_eq!(later.state, ReportState::Assessed);
@@ -680,6 +603,6 @@ mod tests {
         assert_eq!(opened.len(), 1);
         assert_eq!(opened[0].state, ReportState::Open);
         assert!(reopen_due(store, "G", 600.0).unwrap().is_empty());
-        assert_eq!(audits(store, "source.item.reopen"), 1);
+        assert_eq!(audits(store, "report.reopen"), 1);
     }
 }
