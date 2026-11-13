@@ -53,6 +53,14 @@ const AGENT_SORTS: &[&str] = &["agent", "handler", "model", "done"];
 const POOL_SORTS: &[&str] = &["pool", "handler", "kind"];
 const TIMELINE_SORTS: &[&str] = &["when", "operation", "event", "action"];
 const AUDIT_SORTS: &[&str] = &["when", "actor", "action", "scope"];
+const REPORT_SORTS: &[&str] = &[
+    "priority",
+    "operation",
+    "state",
+    "title",
+    "source",
+    "updated",
+];
 const ACCESS_SORTS: &[&str] = &[
     "priority", "subject", "scope", "role", "name", "groups", "status",
 ];
@@ -111,6 +119,7 @@ pub(crate) enum Page {
     Agents,
     GreenInk,
     Briefings,
+    Reports,
     Roster,
     Pools,
     Timeline,
@@ -122,7 +131,7 @@ pub(crate) enum Page {
 }
 
 impl Page {
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Overview,
         Self::Operations,
         Self::Missions,
@@ -131,6 +140,7 @@ impl Page {
         Self::Agents,
         Self::GreenInk,
         Self::Briefings,
+        Self::Reports,
         Self::Roster,
         Self::Pools,
         Self::Timeline,
@@ -152,6 +162,7 @@ impl Page {
             Self::Agents => "agents",
             Self::GreenInk => "green_ink",
             Self::Briefings => "briefings",
+            Self::Reports => "reports",
             Self::Roster => "roster",
             Self::Pools => "pools",
             Self::Timeline => "timeline",
@@ -230,6 +241,18 @@ impl Page {
                 ("tab", OneOf(BRIEFING_TABS)),
                 ("operation_id", Identifier),
                 ("item_id", Identifier),
+            ],
+            Self::Reports => &[
+                ("report_id", Identifier),
+                ("operation", List),
+                ("state", List),
+                ("origin", List),
+                ("classification", List),
+                ("report_kind", List),
+                ("priority", List),
+                ("text", Text),
+                ("sort", OneOf(REPORT_SORTS)),
+                ("order", OneOf(ORDERS)),
             ],
             Self::Roster => &[("kind", OneOf(ROSTER_KINDS)), ("key", Identifier)],
             Self::Pools => &[

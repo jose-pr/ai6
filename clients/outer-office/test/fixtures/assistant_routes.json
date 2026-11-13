@@ -80,7 +80,13 @@
       "json": {"page": "audit", "actor": ["person:1000"], "action": ["moneypenny.page.opened", "mission.create"], "sort": "when", "order": "desc"},
       "uri": "app:/audit?actor=person%3A1000&action=moneypenny.page.opened,mission.create&sort=when&order=desc"
     },
-    {"json": {"page": "access", "tab": "rules", "subject": ["group", "person"], "sort": "priority"}, "uri": "app:/access?tab=rules&subject=group,person&sort=priority"}
+    {"json": {"page": "access", "tab": "rules", "subject": ["group", "person"], "sort": "priority"}, "uri": "app:/access?tab=rules&subject=group,person&sort=priority"},
+    {"json": {"page": "reports"}, "uri": "app:/reports"},
+    {"json": {"page": "reports", "report_id": "report-0f3a"}, "uri": "app:/reports?report_id=report-0f3a"},
+    {
+      "json": {"page": "reports", "operation": ["G"], "state": ["open", "assessed"], "origin": ["source"], "priority": ["high"], "text": "stale", "sort": "priority", "order": "asc"},
+      "uri": "app:/reports?operation=G&state=open,assessed&origin=source&priority=high&text=stale&sort=priority&order=asc"
+    }
   ],
   "invalid": [
     {"json": ["missions"], "reason": "a route is an object naming its page"},
@@ -119,6 +125,8 @@
     {"json": {"page": "agents", "handler": [""]}, "reason": "handler has an item that is not an identifier"},
     {"json": {"page": "agents", "sort": "state"}, "reason": "sort is one of agent, handler, model, done"},
     {"json": {"page": "missions", "reviews": "hide"}, "reason": "reviews is one of show"},
+    {"json": {"page": "reports", "sort": "reporter"}, "reason": "sort is one of priority, operation, state, title, source, updated"},
+    {"json": {"page": "reports", "state": "open"}, "reason": "state is a list of identifiers"},
     {"uri": "app:/audit?actor=a,a", "reason": "actor lists distinct identifiers"},
     {"uri": "https://example.org/missions", "reason": "a route link starts with app:/"},
     {"uri": "app:/missions/G/mission-7", "reason": "unknown page missions/G/mission-7"},

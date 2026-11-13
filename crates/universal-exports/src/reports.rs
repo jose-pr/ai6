@@ -275,13 +275,19 @@ async fn list_reports(
             .iter()
             .map(|report| shown(registry.as_ref(), &reader, report))
             .collect();
-        Ok(Json(json!({ "reports": shown })))
+        Ok(Json(json!({
+            "reports": shown,
+            "priorities": reader.settings.priorities,
+            "classifications": reader.settings.classifications,
+        })))
     })
     .await
 }
 
-/// `GET /v1/reports?scope=SCOPE|mission=ID[&state][&kind][&limit]`: `{"reports": [...]}`, most
-/// urgent first, each as far as the person may see it.
+/// `GET /v1/reports?scope=SCOPE|mission=ID[&state][&kind][&limit]`: `{"reports": [...],
+/// "priorities": [...], "classifications": [...]}`, the Reports most urgent first, each as far
+/// as the person may see it, and the deployment's priorities (most urgent first) and
+/// classifications (lowest first), which an assessment and the markings choose from.
 pub(crate) async fn list(
     State(gateway): State<Gateway>,
     headers: HeaderMap,

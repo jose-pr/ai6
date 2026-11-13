@@ -385,7 +385,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(OoIconName.values, hasLength(24));
+    expect(OoIconName.values, hasLength(25));
     for (final name in OoIconName.values) {
       final duotone = await tester.runAsync(
         () => vg.loadPicture(SvgAssetLoader(name.duotoneAsset), null),

@@ -67,6 +67,7 @@ void main() {
         'Runs',
         'Green Ink',
         'Briefings',
+        'Reports',
         'PEOPLE AND POLICY',
         'Operations',
         'Agents',
@@ -225,8 +226,8 @@ void main() {
       final drawer = tester.widget<NavigationDrawer>(
         find.byType(NavigationDrawer),
       );
-      // Work holds five, People and policy four in the demo; Stations is next.
-      expect(drawer.selectedIndex, 9);
+      // Work holds six, People and policy four in the demo; Stations is next.
+      expect(drawer.selectedIndex, 10);
     });
   });
 

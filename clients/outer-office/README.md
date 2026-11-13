@@ -396,7 +396,7 @@ pages and may load what they need.
 ## Layout
 
 A top bar, a rail of pages and the page, Overview after sign-in. The rail groups its pages by
-what a person is asking: **Work** (Overview, Missions, Runs, Green Ink, Briefings), **People
+what a person is asking: **Work** (Overview, Missions, Runs, Green Ink, Briefings, Reports), **People
 and policy** (Operations, Agents, Roster, Account Pools, Access), **Machines** (Stations) and
 **Record** (Timeline, Audit). A page shows only with its permission, and a group with no page
 left does not show. From 1200 px wide the rail has labels beside its icons; from 900 px it is

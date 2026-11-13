@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../controls/mission_actions.dart';
 import '../issues/linked_issues.dart';
+import '../reports/mission_reports.dart';
 import '../reviews/mission_reviews.dart';
 import '../main.dart';
 import '../routes/oo_route.dart';
@@ -238,6 +239,17 @@ class MissionDetail extends StatelessWidget {
             missionId: mission.missionId,
           ),
           const SizedBox(height: 16),
+          if (board.reportScopes.contains('operation:$operationId')) ...[
+            MissionReportsSection(
+              // Keyed so that opening another Mission reads its own Reports.
+              key: ValueKey(('reports', operationId, mission.missionId)),
+              board: board,
+              missionId: mission.missionId,
+              pages: pages,
+              onRoute: onRoute,
+            ),
+            const SizedBox(height: 16),
+          ],
           LinkedIssuesSection(
             // Keyed so that opening another Mission reads its own issues.
             key: ValueKey((operationId, mission.missionId)),

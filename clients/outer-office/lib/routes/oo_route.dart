@@ -45,6 +45,14 @@ const _agentSorts = ['agent', 'handler', 'model', 'done'];
 const _poolSorts = ['pool', 'handler', 'kind'];
 const _timelineSorts = ['when', 'operation', 'event', 'action'];
 const _auditSorts = ['when', 'actor', 'action', 'scope'];
+const _reportSorts = [
+  'priority',
+  'operation',
+  'state',
+  'title',
+  'source',
+  'updated',
+];
 const _accessSorts = [
   'priority',
   'subject',
@@ -126,6 +134,18 @@ const _fields = <OoPage, List<_Field>>{
     _Field('tab', _Kind.oneOf, ['proposals', 'held']),
     _Field('operation_id', _Kind.identifier),
     _Field('item_id', _Kind.identifier),
+  ],
+  OoPage.reports: [
+    _Field('report_id', _Kind.identifier),
+    _Field('operation', _Kind.list),
+    _Field('state', _Kind.list),
+    _Field('origin', _Kind.list),
+    _Field('classification', _Kind.list),
+    _Field('report_kind', _Kind.list),
+    _Field('priority', _Kind.list),
+    _Field('text', _Kind.text),
+    _Field('sort', _Kind.oneOf, _reportSorts),
+    _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.roster: [
     _Field('kind', _Kind.oneOf, [

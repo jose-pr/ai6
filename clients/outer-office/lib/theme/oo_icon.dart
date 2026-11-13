@@ -23,6 +23,7 @@ enum OoIconName {
   overview('overview'),
   pause('pause'),
   pools('pools'),
+  reports('reports'),
   resume('resume'),
   roster('roster'),
   search('search'),

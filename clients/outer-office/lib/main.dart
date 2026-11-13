@@ -43,6 +43,8 @@ import 'issues/linked_issues.dart';
 import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
+import 'reports/reports_model.dart';
+import 'reports/reports_page.dart';
 import 'roster/found_libraries.dart';
 import 'roster/record_editor.dart';
 import 'roster/reported_providers.dart';
@@ -1670,6 +1672,221 @@ class MissionBoard extends ChangeNotifier
         HeldBriefSummary.fromJson(held as Map<String, dynamic>),
     ];
   }
+
+  /// The scopes whose Reports this account may read: its Operations (`mission.read`) and its
+  /// Stations (`station.read`).
+  List<String> get reportScopes => [
+    for (final operation in _operationsWith('mission.read'))
+      'operation:$operation',
+    for (final station in userSession?.stations ?? const <UserStationAccess>[])
+      if (station.actions.contains('station.read'))
+        'station:${station.stationId}',
+  ];
+
+  /// Whether this account may assess or reopen a Report of [scope]: `mission.control` on an
+  /// Operation, `station.configure` on a Station.
+  bool controlsReports(String scope) {
+    if (demo) return true;
+    if (scope.startsWith('operation:')) {
+      return _operationsWith('mission.control')
+          .contains(scope.substring('operation:'.length));
+    }
+    if (scope.startsWith('station:')) {
+      final id = scope.substring('station:'.length);
+      return userSession?.stations.any(
+            (station) =>
+                station.stationId == id &&
+                station.actions.contains('station.configure'),
+          ) ??
+          false;
+    }
+    return false;
+  }
+
+  /// What a Reports call says when the gateway refuses: its own words, else [fallback].
+  GatewayRefused _reportsRefused(http.Response response, String fallback) {
+    try {
+      final body = jsonDecode(response.body);
+      if (body is Map<String, dynamic> && body['error'] is String) {
+        final report = body['report'];
+        final marks = report is Map<String, dynamic>
+            ? [
+                if (report['classification'] case final String level) level,
+                if (report['handling'] case final String handling) handling,
+                ...(report['compartments'] as List<dynamic>? ?? const [])
+                    .cast<String>(),
+              ]
+            : const <String>[];
+        return GatewayRefused(
+          response.statusCode,
+          marks.isEmpty
+              ? body['error'] as String
+              : '${body['error']} Its markings: ${marks.join(', ')}.',
+        );
+      }
+    } on FormatException {
+      // The fallback says it.
+    }
+    return GatewayRefused(response.statusCode, fallback);
+  }
+
+  Future<Map<String, dynamic>> _reportsCall(
+    String method,
+    String path,
+    String what, {
+    Object? body,
+  }) async {
+    final response = await _userRequest(method, path, body: body);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _reportsRefused(response, 'The gateway refused $what.');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// Every Report of every scope this account reads.
+  Future<ReportsListing> loadReports() async {
+    if (demo) return _demoReports;
+    final sweep = await _sweep<ReportsRead>(
+      reportScopes,
+      (scope) async => [
+        ReportsRead.fromJson(
+          await _reportsCall(
+            'GET',
+            '/v1/reports?scope=${Uri.encodeQueryComponent(scope)}',
+            'the Reports of $scope',
+          ),
+        ),
+      ],
+    );
+    return ReportsListing(
+      reports: [for (final read in sweep.items) ...read.reports],
+      priorities: sweep.items.firstOrNull?.priorities ?? const [],
+      classifications: sweep.items.firstOrNull?.classifications ?? const [],
+      unread: sweep.unread,
+      refused: sweep.refused,
+    );
+  }
+
+  /// The Reports tied to a Mission, by its UID.
+  Future<ReportsRead> loadMissionReports(String missionId) async {
+    if (demo) {
+      return ReportsRead(
+        reports: [
+          for (final report in _demoReports.reports)
+            if (report.missions.contains(missionId)) report,
+        ],
+        priorities: _demoReports.priorities,
+      );
+    }
+    return ReportsRead.fromJson(
+      await _reportsCall(
+        'GET',
+        '/v1/reports?mission=${Uri.encodeQueryComponent(missionId)}',
+        'the Reports of this Mission',
+      ),
+    );
+  }
+
+  /// One Report as far as this account may see it.
+  Future<ReportSummary> loadReport(String id) async {
+    if (demo) {
+      return _demoReports.reports.firstWhere(
+        (report) => report.id == id,
+        orElse: () => throw const GatewayRefused(404, 'No such report.'),
+      );
+    }
+    return ReportSummary.fromJson(
+      await _reportsCall(
+        'GET',
+        '/v1/reports/${Uri.encodeComponent(id)}',
+        'the report',
+      ),
+    );
+  }
+
+  /// Assesses an open Report; [body] is the PUT's own (`assessment`, `reason` and what that
+  /// assessment takes). Answers the Report as it is now.
+  Future<ReportSummary> assessReport(
+    String id,
+    Map<String, Object?> body,
+  ) async {
+    if (demo) throw StateError('Assessing a report is unavailable in preview.');
+    return ReportSummary.fromJson(
+      await _reportsCall(
+        'PUT',
+        '/v1/reports/${Uri.encodeComponent(id)}/assessment',
+        'the assessment',
+        body: body,
+      ),
+    );
+  }
+
+  /// Opens an assessed or closed Report again, for [reason].
+  Future<ReportSummary> reopenReport(String id, String reason) async {
+    if (demo) throw StateError('Reopening a report is unavailable in preview.');
+    return ReportSummary.fromJson(
+      await _reportsCall(
+        'POST',
+        '/v1/reports/${Uri.encodeComponent(id)}/reopen',
+        'reopening the report',
+        body: {'reason': reason},
+      ),
+    );
+  }
+
+  /// A source's reliability, how it was earned and the closed Reports behind it.
+  Future<ReportSourceStanding> loadReportSource(String key) async => demo
+      ? ReportSourceStanding(
+          source: key,
+          reliability: 'F',
+          rated: false,
+          counted: 0,
+          confirmed: 0,
+          minReports: 5,
+          counts: const [],
+          confirms: const [],
+          bands: const [],
+          reports: const [],
+        )
+      : ReportSourceStanding.fromJson(
+          await _reportsCall(
+            'GET',
+            '/v1/reports/sources/${Uri.encodeComponent(key)}',
+            'the source',
+          ),
+        );
+
+  static final _demoReports = ReportsListing(
+    reports: [
+      ReportSummary.fromJson(const {
+        'id': 'preview-report-001',
+        'scope': 'operation:G',
+        'sight': 'content',
+        'kind': 'finding',
+        'severity': 'warning',
+        'state': 'open',
+        'priority': 'high',
+        'untrusted': true,
+        'title': 'The release notes name an old version',
+        'text': 'The notes in docs/release.md still say 0.3.',
+        'filer': {
+          'type': 'agent',
+          'agent': '007',
+          'run': 'run-1',
+          'mission': 'mission-007',
+        },
+        'source': 'agent:007',
+        'reliability': 'F',
+        'links': [
+          {'kind': 'mission', 'id': 'mission-007'},
+        ],
+        'created': 1700000000.0,
+        'updated': 1700000000.0,
+      }),
+    ],
+    priorities: const ['critical', 'high', 'normal', 'low'],
+    classifications: const ['unclassified', 'restricted', 'confidential'],
+  );
 
   /// Reads one list from each of [operations]; counts the Operations the gateway refused
   /// (403) and those that failed otherwise.
@@ -5618,6 +5835,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         board.classAuthorizationOperations.isNotEmpty)
       OoPage.greenInk,
     if (board.proposalOperations.isNotEmpty) OoPage.briefings,
+    if (board.reportScopes.isNotEmpty) OoPage.reports,
     if (board.canReadAnyRecords) OoPage.roster,
     if (board.poolOperations.isNotEmpty) OoPage.pools,
     if (board.timelineOperations.isNotEmpty) OoPage.timeline,
@@ -5839,6 +6057,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           route: route,
           onRoute: onRoute,
           refreshEvery: board.limits.refresh.pools,
+        ),
+        OoPage.reports => ReportsPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
         ),
         OoPage.timeline => OperationTimelinePage(
           board: board,

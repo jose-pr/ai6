@@ -49,6 +49,12 @@ enum OoPage {
     OoIconName.briefings,
     'Work that waits for your decision before it becomes a Mission.',
   ),
+  reports(
+    'reports',
+    'Reports',
+    OoIconName.reports,
+    'What was reported to each Operation, assessed and closed by what resolves it.',
+  ),
   roster(
     'roster',
     'Roster',
@@ -112,6 +118,7 @@ enum OoRailGroup {
     OoPage.runs,
     OoPage.greenInk,
     OoPage.briefings,
+    OoPage.reports,
   ]),
   peopleAndPolicy('People and policy', [
     OoPage.operations,

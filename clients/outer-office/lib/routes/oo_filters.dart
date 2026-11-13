@@ -28,6 +28,12 @@ const _labels = {
   'action': 'Action',
   'subject': 'Subject',
   'reviews': 'Reviewer turns',
+  'report_id': 'Report',
+  'operation': 'Operation',
+  'origin': 'Filed by',
+  'classification': 'Classification',
+  'report_kind': 'Kind',
+  'priority': 'Priority',
 };
 
 /// Field [key] of [route] as a chip says it, such as `State: failed, blocked`.
@@ -99,6 +105,9 @@ class OoSortMenu extends StatelessWidget {
     'operation': 'Operation',
     'mission': 'Mission',
     'run': 'Run',
+    'priority': 'Priority',
+    'title': 'Title',
+    'source': 'Source',
   };
 
   @override

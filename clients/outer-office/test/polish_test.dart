@@ -118,7 +118,7 @@ void main() {
           .children
           .whereType<NavigationDrawerDestination>()
           .where((entry) => entry.icon is OoTile),
-      hasLength(12),
+      hasLength(13),
     );
     await tester.tap(find.descendant(of: drawer, matching: find.text('Runs')));
     await tester.pumpAndSettle();
