@@ -2,7 +2,7 @@
 //!
 //! A charge is not a Mission, so its Run is recorded here and never among the Run records:
 //! this record names the charge's scope (`m`, `operation:<codename>`, `station:<id>`) where a
-//! Mission's Run record names the Mission. It keeps the provider Run the charge resumes,
+//! Mission's Run record names the Mission. It keeps the Run the charge resumes,
 //! its logbook (what a fresh Run is handed when the old one cannot be resumed), when it last
 //! woke and when each turn of the last hour began, what it has been told of, and the controls
 //! people asked for.
@@ -133,7 +133,7 @@ pub struct ChargeRecord {
     pub lease_expires: f64,
     /// When the record was made, as Unix seconds.
     pub opened_at: f64,
-    /// The provider-issued Run the charge resumes, once a harness has issued one.
+    /// The Run the charge resumes, once a harness has issued one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     /// The handler that issued it: another handler cannot resume it.
@@ -167,7 +167,7 @@ impl ChargeRecord {
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChargeUpdate {
-    /// The provider Run and the handler that issued it; `Some(None)` forgets both.
+    /// The Run and the handler that issued it; `Some(None)` forgets both.
     pub run: Option<Option<(String, String)>>,
     /// When it woke.
     pub last_wake: Option<f64>,
@@ -182,14 +182,14 @@ pub struct ChargeUpdate {
 }
 
 impl ChargeUpdate {
-    /// Records the provider Run `run`, issued by `handler`.
+    /// Records the Run `run`, issued by `handler`.
     #[must_use]
     pub fn run(mut self, handler: impl Into<String>, run: impl Into<String>) -> Self {
         self.run = Some(Some((handler.into(), run.into())));
         self
     }
 
-    /// Forgets the provider Run.
+    /// Forgets the Run.
     #[must_use]
     pub fn forget_run(mut self) -> Self {
         self.run = Some(None);
@@ -273,7 +273,7 @@ pub trait ChargeStore {
     /// Takes the lease on the charge of `scope` for `station` until `ttl` from now, making its
     /// record when there is none, or renews it when `station` holds it already. A lapsed lease of
     /// another Station is taken over with a higher fencing token, which the logbook records. A
-    /// record whose Agent is not `agent` takes `agent` and forgets its provider Run, which
+    /// record whose Agent is not `agent` takes `agent` and forgets its Run, which
     /// was another Agent's.
     ///
     /// # Errors

@@ -72,9 +72,9 @@ The Registry bounds what a charge's record keeps in [`[registry.limits.charges]`
 
 ## One Run, resumed
 
-A charge keeps one provider Run. Its harness stays up between turns; each wake is sent to it
+A charge keeps one Run. Its harness stays up between turns; each wake is sent to it
 as a message. After a Station restarts, or another Station takes the charge over, the next wake
-resumes the recorded provider Run with the wake as its message.
+resumes the recorded Run with the wake as its message.
 
 When the handler cannot resume it (the resume is refused, or the resumed Run fails before it
 answers, as one whose transcript is gone does), the Station starts a fresh Run with the same

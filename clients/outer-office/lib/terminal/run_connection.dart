@@ -14,7 +14,7 @@ import 'socket_connector.dart';
 const missingOutputNotice =
     '\r\n\x1b[2m[AI6: output is missing here]\x1b[0m\r\n';
 
-/// Owns one read-only-by-default attachment to an existing provider Run.
+/// Owns one read-only-by-default attachment to an existing Run.
 /// The socket of [runId] on the gateway's origin, from the output after [after].
 Uri runSocketUri(Uri apiOrigin, String runId, int after) => socketUri(
   apiOrigin,

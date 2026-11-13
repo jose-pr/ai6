@@ -85,7 +85,7 @@ pools = ["claude-team"]    # the account pools its Missions may draw from; defau
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `on_limit` | `rotate` | `rotate` moves the Run to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Run on an environment credential resumes the same provider Run there; a Codex or `config-dir` Run, whose history stays with its account, is tried again as a new run with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same provider Run when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new run in the same safe house, and parks only when there is none |
+| `on_limit` | `rotate` | `rotate` moves the Run to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Run on an environment credential resumes the same Run there; a Codex or `config-dir` Run, whose history stays with its account, is tried again as a new run with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same Run when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new run in the same safe house, and parks only when there is none |
 | `pools` | every pool | The account pools whose own `operations` admit this Operation that its Missions may use; an empty list uses none |
 | `limit_fallback_secs` | `1800` | Seconds to park when the provider reports no reset time (or one already past). Must be above zero |
 
@@ -520,6 +520,6 @@ The source checks the whole roster before it keeps an edit; an accepted edit is 
 `roster.refused`. A configuration directory is listed read-only: its files are edited by
 hand, and every Station using it takes up the change at its next poll.
 
-Missions and provider Runs are visible in Outer Office and through `ai6ctl`. The Mission ID identifies
+Missions and Runs are visible in Outer Office and through `ai6ctl`. The Mission ID identifies
 the work; the provider ID identifies one resumable agent run. See
 [Missions and intake](missions.md) and [Agents and clearance](agents.md).

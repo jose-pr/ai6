@@ -140,7 +140,7 @@ impl CableTools {
         let principal = self.principal().map_err(str::to_owned)?;
         let (Some(mission), Some(run)) = (principal.mission_id(), principal.run_id())
         else {
-            return Err("issues need a bound provider Run".to_owned());
+            return Err("issues need a bound Run".to_owned());
         };
         Ok(Caller {
             operation: principal.operation().to_owned(),

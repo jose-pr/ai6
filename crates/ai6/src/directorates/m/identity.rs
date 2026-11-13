@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use guatiao::value::convert::{FromValue, MapError, ToValue};
 use guatiao::{Alloc, Schema, Value, ValueError};
 
-/// The largest accepted Mission or provider Run identity, in UTF-8 bytes.
+/// The largest accepted Mission or Run identity, in UTF-8 bytes.
 pub const MAX_ID_BYTES: usize = 256;
 
 /// A Mission or Run identifier is empty, over limit, or contains a control character.

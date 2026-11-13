@@ -297,12 +297,12 @@ impl Endpoint {
         Ok(())
     }
 
-    /// Whether the endpoint knows the provider Run it answers for.
+    /// Whether the endpoint knows the Run it answers for.
     pub(super) fn is_bound(&self) -> bool {
         self.registered.is_some()
     }
 
-    /// The provider Run this endpoint answers for, once bound.
+    /// The Run this endpoint answers for, once bound.
     #[cfg(test)]
     pub(super) fn bound_run(&self) -> Option<String> {
         self.registered
@@ -2018,7 +2018,7 @@ impl CableTools {
             return "Station tools identity is unavailable".to_owned();
         };
         let Some(run) = principal.run_id().map(str::to_owned) else {
-            return "Station tools require a bound provider Run".to_owned();
+            return "Station tools require a bound Run".to_owned();
         };
         match tokio::task::spawn_blocking(move || {
             desk.tidy(&run, &args.mission, &args.action, args.reason)
@@ -2125,7 +2125,7 @@ impl CableTools {
             return "Green ink identity is unavailable".to_owned();
         };
         let Some(mission) = principal.mission_id() else {
-            return "Green ink requires a bound provider Run".to_owned();
+            return "Green ink requires a bound Run".to_owned();
         };
         let most = desk.checked_steps();
         if !most.allows(args.steps.len()) {
@@ -2162,7 +2162,7 @@ impl CableTools {
         };
         let (Some(mission), Some(run)) = (principal.mission_id(), principal.run_id())
         else {
-            return "Green ink requires a bound provider Run".to_owned();
+            return "Green ink requires a bound Run".to_owned();
         };
         let asked = Asked {
             operation: principal.operation().to_owned(),
@@ -2227,7 +2227,7 @@ impl CableTools {
                 .or_else(|| self.decision_desk.get().map(DecisionDesk::key)),
             principal.run_id(),
         ) else {
-            return "Mission proposal requires a bound provider Run".to_owned();
+            return "Mission proposal requires a bound Run".to_owned();
         };
         let elsewhere = args
             .operation

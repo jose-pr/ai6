@@ -227,7 +227,7 @@ async fn a_conversation_comes_back_after_a_restart_and_resumes_its_run() {
     assert_ne!(theirs["conversation"], conversation.as_str());
     assert_eq!(theirs["entries"].as_array().unwrap().len(), 0);
 
-    // Its next message resumes the provider Run on the Station that ran it.
+    // Its next message resumes the Run on the Station that ran it.
     say(&mut app, "And now?", None).await;
     let client = reqwest::Client::new();
     let next = loop {

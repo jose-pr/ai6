@@ -308,7 +308,7 @@ impl Drop for StopOnDrop {
     }
 }
 
-/// The Cable identity tools answer to exists only once the endpoint knows the provider Run.
+/// The Cable identity tools answer to exists only once the endpoint knows the Run.
 #[cfg(feature = "cables-mcp")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_fresh_run_is_bound_to_its_cable_endpoint_when_its_stream_reports_it() {

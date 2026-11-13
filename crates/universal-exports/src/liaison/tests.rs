@@ -289,7 +289,7 @@ impl World {
         found
     }
 
-    /// Opens a Registry record for provider Run `run` of Agent 007, as its Station would.
+    /// Opens a Registry record for Run `run` of Agent 007, as its Station would.
     fn open_run(&self, run: &str) -> (String, u64) {
         let record = self
             .registry
@@ -376,7 +376,7 @@ fn station_relay(registry: FileRegistry, run: &str) -> (CableRelay, CablePrincip
     (relay, principal)
 }
 
-/// Agent 007 working in one provider Run on Station `worker`: it reads its Cables, and
+/// Agent 007 working in one Run on Station `worker`: it reads its Cables, and
 /// answers each `re: <body>` when told to.
 struct StandIn {
     stop: Arc<AtomicBool>,

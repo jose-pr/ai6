@@ -35,7 +35,7 @@ pub struct UnexLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct UnexGatewayLimits {
-    /// Live provider Runs.
+    /// Live Runs.
     #[schema(title = "Live Runs")]
     #[map(default = UnexGatewayLimits::default().runs)]
     pub runs: Limit,
@@ -44,11 +44,11 @@ pub struct UnexGatewayLimits {
     #[schema(title = "Runs on the Mission board")]
     #[map(default = UnexGatewayLimits::default().board_runs)]
     pub board_runs: Limit,
-    /// Simultaneous browser connections to one provider Run.
+    /// Simultaneous browser connections to one Run.
     #[schema(title = "Browser connections per Run")]
     #[map(default = UnexGatewayLimits::default().clients_per_run)]
     pub clients_per_run: Limit,
-    /// Value frames kept per provider Run for a client that joins late.
+    /// Value frames kept per Run for a client that joins late.
     #[schema(title = "Frames kept for a late client")]
     #[map(default = UnexGatewayLimits::default().scrollback_events)]
     pub scrollback_events: Limit,

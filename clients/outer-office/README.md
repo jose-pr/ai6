@@ -45,7 +45,7 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
 - Mission brief view: the exact prompt and a sanitized launch manifest (environment
   variable names only, never values).
 - Live terminals: read-only by default; **Request input lease** takes a write lease.
-  Closing a view never stops the provider Run.
+  Closing a view never stops the Run.
 - Mission actions: each Mission card's menu cancels, retries (optionally for another
   Agent), resumes (optionally with a message) or interrupts, offering only what the
   Mission's current state allows and saying why the rest are unavailable; it needs

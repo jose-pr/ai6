@@ -30,7 +30,7 @@ Station takes each conversation's messages in order and different conversations'
 time, so one whose repositories are slow to clone holds up no one else. The Station keeps
 one harness per conversation, so a follow-up reaches it at once; after ten idle minutes
 (`[assistant.desk] idle`) it
-closes, and the next message resumes the same provider Run. A harness that exits or
+closes, and the next message resumes the same Run. A harness that exits or
 fails is closed at once and the conversation shows why, with the harness's exit status and
 its last words; so is one that writes nothing for ten minutes while answering. A Run that
 cannot be resumed is noted in the Station's log, and the conversation starts afresh with a
@@ -100,7 +100,7 @@ key = "/etc/ai6/litellm.key"
   notice, and the next message takes the next route. The same holds for a message that joined a
   turn already being answered.
 - **Her conversation stays on its route while it can.** Universal Exports keeps the route beside the
-  provider Run and sends both with each message. A Run resumes only on its own route, even
+  Run and sends both with each message. A Run resumes only on its own route, even
   if another comes first in order. Otherwise she starts afresh with the conversation's recap, and
   the person is told what she moved from and to.
 - **A route's handler missing on a Station** rules that route out there. With no route left the
@@ -1221,7 +1221,7 @@ arrives: what the person wrote, her text, the tools she named, her views, propos
 change of their status), navigation and page cards, notices and errors. Beside them the log keeps
 what the app never shows: each tool call she made, with its arguments (`tool_call`), and the size,
 status and time of its answer (`tool_result`). Each entry that came from her harness or her tools
-names the turn that ran it: the Station, the provider Run, the Agent, the route (with its
+names the turn that ran it: the Station, the Run, the Agent, the route (with its
 pool), the pool account the harness held, the model, and the tokens the harness reported. A
 failed turn that leaves nothing in either service's journal is in the log, with where it ran.
 
@@ -1236,7 +1236,7 @@ on unix) waits up to 10 seconds (`log_flush_timeout`; `none` waits for all of it
 still queued, and logs how many entries were left if it gives up.
 
 A conversation the gateway no longer holds is rebuilt from the log when its person opens it:
-what the app shows, within the usual bounds, and the Station, provider Run and route of its
+what the app shows, within the usual bounds, and the Station, Run and route of its
 last turn, so the next message resumes there. A proposal that was still waiting shows as expired.
 
 Each Run of hers also has its [context](missions.md#run-context): her harness's own

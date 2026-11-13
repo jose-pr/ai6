@@ -237,7 +237,7 @@ It decides the Operation's Missions that are verifying, takes Cables to the Oper
 proposal inbox, naming the charge's own Run where a Mission's Run would be named. An
 Agent whose clearance is not `00` is refused when the charge is configured. A Mission's own Run
 at `00` clearance keeps `propose_mission` too. AI6 binds the
-proposer, parent Mission, provider Run and Operation; proposals stay outside runnable I
+proposer, parent Mission, Run and Operation; proposals stay outside runnable I
 intake until M explicitly authorizes and promotes them. Universal Exports' authenticated
 `mission.create` review endpoints let an operator inspect, approve and queue, or reject a
 proposal; approval follows M's normal assignment and scheduling path. Headquarters vets each

@@ -2628,7 +2628,7 @@ mod tests {
                 }
             }
         }
-        panic!("fake Codex did not complete the provider Run")
+        panic!("fake Codex did not complete the Run")
     }
 
     #[test]

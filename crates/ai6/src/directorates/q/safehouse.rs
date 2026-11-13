@@ -6,7 +6,7 @@
 //!
 //! A [`SafeHouseProvider`] turns an Operation's source (a Git checkout, a plain
 //! directory, ...) into an isolated working directory for one Mission and hands back a
-//! [`SafeHouseRun`] the caller owns. The provider runs where the Agent's Run
+//! [`SafeHouseRun`] the caller owns. The runs where the Agent's Run
 //! runs, so a Station loads it; the headquarters never does. Slot order is the ABI:
 //! append, never reorder.
 //!

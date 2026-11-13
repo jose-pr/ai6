@@ -1,5 +1,5 @@
 //! A standing Sleeper's runs: each window is a new run of the Sleeper's one Mission, and one
-//! that resumes takes up the provider Run the last run left. A Sleeper's run that fails
+//! that resumes takes up the Run the last run left. A Sleeper's run that fails
 //! says so on the timeline and the board, and a window that finds its order's run stalled
 //! supersedes it.
 
@@ -50,7 +50,7 @@ pub(super) fn of(state: &DaemonState, mission_id: &str) -> Option<WindowRun> {
     })
 }
 
-/// The provider Run a run that resumes takes up: the last run's, when that run ran on
+/// The Run a run that resumes takes up: the last run's, when that run ran on
 /// `handler`, did not fail, and its provider gave it an ID, unless the provider `refused` it this
 /// run. A failed run's Run may be why it failed, and resuming it could fail every
 /// window alike. That it failed is read from its Run record, or `after_failure` from this
@@ -85,7 +85,7 @@ pub(super) fn resume_from(
         Some(id) => (
             "resumed",
             format!(
-                "the window resumes the last run's provider Run {}",
+                "the window resumes the last run's Run {}",
                 id.as_str()
             ),
         ),
@@ -111,7 +111,7 @@ pub(super) fn resume_from(
     found
 }
 
-/// `start` as a resume of the provider Run `run_id`, the window's brief its message.
+/// `start` as a resume of the Run `run_id`, the window's brief its message.
 pub(super) fn resume_request(start: AgentStart, run_id: RunId) -> AgentResume {
     AgentResume {
         mission_id: start.mission_id,
@@ -401,7 +401,7 @@ pub(super) mod testing {
 
     use super::super::tests::MockRun;
 
-    /// Each resume the handler was asked for, as (Mission, provider Run).
+    /// Each resume the handler was asked for, as (Mission, Run).
     pub(in crate::station::server) static RESUMED: Mutex<Vec<(String, String)>> =
         Mutex::new(Vec::new());
     static STARTS: AtomicUsize = AtomicUsize::new(0);
@@ -423,7 +423,7 @@ pub(super) mod testing {
     }
 
     /// A harness that resumes by provider ID, as Claude Code does: each start is a new
-    /// provider Run and each turn completes the Mission. A word in the prompt changes that:
+    /// Run and each turn completes the Mission. A word in the prompt changes that:
     /// `first-run-fails`, `first-run-stalls` and `first-run-blocks` for a Mission's
     /// first start, `resume-refused` and `resume-dead` for every resume.
     #[derive(Default, Provider)]
@@ -809,7 +809,7 @@ mod tests {
         let first = runs[0]
             .provider_id
             .clone()
-            .expect("a provider Run");
+            .expect("a Run");
         assert_eq!(runs[1].provider_id.as_deref(), Some(first.as_str()));
         assert_eq!(
             testing::RESUMED
@@ -994,7 +994,7 @@ mod tests {
         let state = order_state(root.path(), "Tidy the tree.", true);
         let mut warned = BTreeSet::new();
         let mission = run_window(&state, FIRST, &mut warned).await;
-        // Its result may not be written yet; its provider Run is, from when it opened.
+        // Its result may not be written yet; its Run is, from when it opened.
         let done = runs(&state, &mission).remove(0);
         let run = WindowRun {
             window: window_label(FIRST + DAY),

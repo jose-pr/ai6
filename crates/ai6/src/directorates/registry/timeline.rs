@@ -38,7 +38,7 @@ pub struct TimelineEvent {
     /// The Mission involved, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mission: Option<String>,
-    /// The provider Run involved, when there is one.
+    /// The Run involved, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<String>,
     /// Who acted: a person ID or an Agent codename.
@@ -88,7 +88,7 @@ impl TimelineEvent {
         self
     }
 
-    /// Names the provider Run involved.
+    /// Names the Run involved.
     #[must_use]
     pub fn run(mut self, run: impl Into<String>) -> Self {
         self.run = Some(run.into());

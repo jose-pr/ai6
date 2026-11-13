@@ -173,10 +173,10 @@ struct Held {
     kind: AccountKind,
 }
 
-/// Where a Run's harness runs and whether it continues a provider Run.
+/// Where a Run's harness runs and whether it continues a Run.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Site {
-    /// The Run resumes a provider Run rather than starting one.
+    /// The Run resumes a Run rather than starting one.
     pub(super) resuming: bool,
     /// The harness runs on the Station's own host, where a `CODEX_HOME` it makes is visible.
     pub(super) on_station: bool,
@@ -249,7 +249,7 @@ pub(super) fn no_room(pools: &[&AccountPool], states: &[AccountState], now: f64)
     placement::no_account_headroom("", &ids, frees_at(pools, states, now)).reason
 }
 
-/// Whether a provider Run can move to an account of `route`'s pools.
+/// Whether a Run can move to an account of `route`'s pools.
 pub(super) fn route_carries_run(
     state: &DaemonState,
     operation: Option<&str>,
@@ -275,7 +275,7 @@ pub(super) fn route_carries_run(
     )
 }
 
-/// Whether the account `earlier` names is of a kind a provider Run can move away from.
+/// Whether the account `earlier` names is of a kind a Run can move away from.
 pub(super) fn carries_run(state: &DaemonState, earlier: Option<&AccountRef>) -> bool {
     let Some(earlier) = earlier else {
         return false;
@@ -366,7 +366,7 @@ pub(super) fn claim_implicit(
 /// Returns the lease to revoke with the Run's, if the credential is a secret.
 ///
 /// An Agent no pool serves gets nothing here. A pool that may not be used, or no account
-/// with room, fails the start with the reason. A Run that continues a provider Run
+/// with room, fails the start with the reason. A Run that continues a Run
 /// keeps its account when that Run cannot move (Codex, `config-dir`), and moves only to
 /// an account of a kind that carries it.
 #[allow(clippy::too_many_arguments)]
@@ -467,7 +467,7 @@ fn kind_of(catalog: &LoadoutCatalog, earlier: &AccountRef) -> Option<AccountKind
 }
 
 /// Claims the first account with room, pool by pool, preferring the account the Mission's
-/// last Run used. A resumed provider Run keeps an account of a kind that cannot carry
+/// last Run used. A resumed Run keeps an account of a kind that cannot carry
 /// it, and otherwise moves only to accounts of a kind that can.
 fn claim<'a>(
     state: &DaemonState,
@@ -494,7 +494,7 @@ fn claim<'a>(
         return match state.intake.claim_account(&only, now) {
             Ok(Some(chosen)) => Ok((pool, chosen)),
             Ok(None) => Err(format!(
-                "the Mission's provider Run lives with account {earlier}, which has no \
+                "the Mission's Run lives with account {earlier}, which has no \
                  room now"
             )),
             Err(error) => Err(failed(pool, error)),
@@ -967,9 +967,9 @@ pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, buckets: &[Bu
 pub(super) enum Rotation {
     /// The Run holds no pool account.
     Unpooled,
-    /// Another account of a kind that carries the provider Run has room: resume it there.
+    /// Another account of a kind that carries the Run has room: resume it there.
     Resume,
-    /// Another account has room but the provider Run cannot move to it: start a new
+    /// Another account has room but the Run cannot move to it: start a new
     /// run.
     Retry,
     /// No account has room: wait for the limit to reset.
@@ -1278,7 +1278,7 @@ pub(super) mod testing {
     pub(in crate::station::server) static POOLED_CALLS: Mutex<Vec<PooledCall>> =
         Mutex::new(Vec::new());
     static LIMITED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-    /// Each start is a new provider Run.
+    /// Each start is a new Run.
     static STARTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     #[derive(Default, Provider)]
@@ -2227,7 +2227,7 @@ secret = "two-b"
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
             ["start", "resume"],
-            "the same provider Run, since this kind carries it"
+            "the same Run, since this kind carries it"
         );
         assert_eq!(made[1].2["CLAUDE_CODE_OAUTH_TOKEN"], "fake-two-b-0451");
         let launch = launch_of(&state, "route-move");
@@ -2630,7 +2630,7 @@ secret = "rotate-b"
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
             ["start", "resume"],
-            "the same provider Run resumes"
+            "the same Run resumes"
         );
         assert_eq!(
             made[0].2["CLAUDE_CODE_OAUTH_TOKEN"],
@@ -2645,7 +2645,7 @@ secret = "rotate-b"
             .unwrap()
             .run_ids
             .len();
-        assert_eq!(provider_ids, 1, "one provider Run");
+        assert_eq!(provider_ids, 1, "one Run");
         let hold = run_hold(&state, "pooled-rotate").unwrap();
         assert_eq!(
             state.intake.run(&hold.id).unwrap().unwrap().account,

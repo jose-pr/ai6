@@ -347,7 +347,7 @@ pub const EVENT_LIMIT: &str = "limit";
 /// for the next message.
 pub const EVENT_INTERRUPTED: &str = "interrupted";
 /// The Station closed the conversation's harness (idle, closed by request, or stopping). The
-/// provider Run can be resumed by a later job.
+/// Run can be resumed by a later job.
 pub const EVENT_CLOSED: &str = "closed";
 /// Something the person and the assistant should know about her workspace, in `text`: work
 /// saved to a branch of its own because `main` refused it, or a repository that could not be
@@ -639,7 +639,7 @@ pub struct AssistantJob {
     /// When `mcp_token` stops being accepted, as Unix seconds. A harness started with an older
     /// token is restarted (resumed) with this one before the token it has expires.
     pub token_expires_at: f64,
-    /// The provider Run the conversation last ran, which a new harness resumes.
+    /// The Run the conversation last ran, which a new harness resumes.
     #[serde(default)]
     pub run_id: Option<String>,
     /// The route that Run ran on, when its Agent has routes: it resumes only there.
@@ -1010,7 +1010,7 @@ pub struct AssistantReport {
     /// The job the events answer, when they answer one.
     #[serde(default)]
     pub job_id: Option<String>,
-    /// The provider Run the harness runs, once the provider has issued it.
+    /// The Run the harness runs, once the provider has issued it.
     #[serde(default)]
     pub run_id: Option<String>,
     /// The route that Run runs on, when its Agent has routes.

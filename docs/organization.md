@@ -120,8 +120,8 @@ see it, and the credential it needs is leased only against an approval.
 | **Operation** | a global project and its policy (`operations.toml`, `operation_id`) |
 | **Subordinate Operation** | an Operation whose `parent` names another |
 | **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
-| **Run / Run ID** | an agent run of a Mission or a charge, one UUID AI6 makes (`id`; `run_id` elsewhere); executing a Mission starts its next Run, executing a Run starts or resumes it |
-| **Conversation** | a chat with Moneypenny; the agent run behind it is a Run |
+| **Run / Run ID** | an agent run of a Mission or a charge, one UUID AI6 makes (`id`; `run_id` elsewhere); a Mission starts its next Run, a Run starts or resumes: executed |
+| **Conversation** | a chat with Moneypenny; the run behind it is a Run |
 | **Charge** | what an Agent answers for (an Operation's `00`, a Station's Head of Station, M's service); one standing Run ([Charges](charges.md)) |
 | **Session** | only another protocol's word, at its wire (ACP `sessionId`, sign-in sessions, `Mcp-Session-Id`); never a Run |
 | **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |

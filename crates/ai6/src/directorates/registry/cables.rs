@@ -187,7 +187,7 @@ impl CableRecipient {
         &self.agent
     }
 
-    /// Returns the targeted provider Run, if the relay resolved one.
+    /// Returns the targeted Run, if the relay resolved one.
     pub fn run_id(&self) -> Option<&str> {
         self.run_id.as_deref()
     }
@@ -197,7 +197,7 @@ impl CableRecipient {
         self.state
     }
 
-    /// Returns the provider Run that took this recipient's delivery, when it was addressed
+    /// Returns the Run that took this recipient's delivery, when it was addressed
     /// to the Agent as a whole and a Liaison peer sent it: only that Run sees it after.
     pub fn taken_by(&self) -> Option<&str> {
         self.taken_by.as_deref()
@@ -253,7 +253,7 @@ pub struct CableDraft {
     pub idempotency_key: String,
     /// AI6 Mission identity, when applicable.
     pub mission_id: Option<String>,
-    /// Provider-issued Run identity, when applicable.
+    /// Run identity, when applicable.
     pub run_id: Option<String>,
     /// Conversation grouping identity, when applicable.
     pub conversation_id: Option<String>,
@@ -264,7 +264,7 @@ pub struct CableDraft {
     /// The Liaison peer that sent this Cable, when an agent outside AI6 did: its proven key on a
     /// link, or its principal over HTTP.
     pub peer: Option<String>,
-    /// The provider Run its thread is bound to: only that Run receives it, or, once that
+    /// The Run its thread is bound to: only that Run receives it, or, once that
     /// one has ended, the Agent's next Run.
     pub affinity: Option<String>,
     /// Unique Cable identifier supplied by the relay.
@@ -324,7 +324,7 @@ impl CableDraft {
         self
     }
 
-    /// Associates this Cable with the sending provider Run.
+    /// Associates this Cable with the sending Run.
     pub fn with_run(mut self, run_id: impl Into<String>) -> Self {
         self.run_id = Some(run_id.into());
         self
@@ -354,7 +354,7 @@ impl CableDraft {
         self
     }
 
-    /// Binds this Cable to the provider Run its thread is with.
+    /// Binds this Cable to the Run its thread is with.
     pub fn with_affinity(mut self, run: impl Into<String>) -> Self {
         self.affinity = Some(run.into());
         self
@@ -667,7 +667,7 @@ impl Cable {
         self.peer.as_deref()
     }
 
-    /// Returns the provider Run this Cable's thread is bound to, when it is bound.
+    /// Returns the Run this Cable's thread is bound to, when it is bound.
     pub fn affinity(&self) -> Option<&str> {
         self.affinity.as_deref()
     }

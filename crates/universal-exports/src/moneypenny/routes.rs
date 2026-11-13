@@ -409,7 +409,7 @@ impl Route {
     /// test. A state filter looks at the Mission's state: that of its latest Run, the one
     /// with the highest `updated_at`, none counting as oldest and the first of equals winning
     /// (a Run without a state is working). It is never `sequence`, a cursor within one
-    /// provider Run: a long first run would outrank the newer retry after it. A
+    /// Run: a long first run would outrank the newer retry after it. A
     /// Mission ID is its UID or its handle, the handle without regard to case. Station, Agent
     /// and text look at any of its Runs, the text also at the Operation, the Mission, its
     /// handle and the brief's prompt, without regard to case. Any other page shows none.

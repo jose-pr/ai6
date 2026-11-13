@@ -1004,10 +1004,10 @@ pending_per_station = 8
 <!-- schema:record.unex.gateway:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `runs` | 16 | **Live Runs.** Live provider Runs. |
+| `runs` | 16 | **Live Runs.** Live Runs. |
 | `board_runs` | 2,000 | **Runs on the Mission board.** Runs the Mission board lists from the Registry's records, the most recently updated ones; a Run still live is always listed. |
-| `clients_per_run` | 12 | **Browser connections per Run.** Simultaneous browser connections to one provider Run. |
-| `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per provider Run for a client that joins late. |
+| `clients_per_run` | 12 | **Browser connections per Run.** Simultaneous browser connections to one Run. |
+| `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per Run for a client that joins late. |
 | `frame_bytes` | 256 KiB | **Largest frame.** Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit. |
 | `input_frames_per_second` | 40 | **Browser input frames a second.** Browser input frames accepted per connection per second. |
 | `input_queue` | 64 | **Queue to the Stations.** Capacity of the queue between the gateway and its Stations, at least 1. |
@@ -1513,7 +1513,7 @@ report; `unlocked_stale` when the desk starts.
 | `report_queue` | 256 | **Reports waiting to be sent.** Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped. |
 | `report_attempts` | 3 | **Tries to send a report.** Times a report is sent before it counts as lost. |
 | `report_retry` | 0.2 | **Retry a report after.** Seconds between tries of a report that did not reach Universal Exports. |
-| `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose provider Run the desk remembers for a resume. |
+| `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose Run the desk remembers for a resume. |
 | `close_wait` | 10 | **Wait for a closing harness.** Seconds a message waits for the conversation's closing harness. |
 | `limit_fallback` | 1,800 | **Out for this long at a limit with no reset time.** Seconds a route or account stays out when a harness reports a limit with no reset time. |
 | `remove_retry` | 2 | **Retry removing a directory for.** Seconds removing a closed harness's directory is tried again. |

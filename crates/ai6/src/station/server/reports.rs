@@ -180,7 +180,7 @@ impl ReportDesk {
     }
 
     /// Files `filing` against the Run's Operation, linked to its Mission. `run` is the
-    /// provider Run once the harness has reported it.
+    /// Run once the harness has reported it.
     pub(super) fn file(
         &self,
         reader: &Reader,

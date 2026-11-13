@@ -223,7 +223,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<OperationsCommand>,
     },
-    /// Show one Mission and its provider Runs, or cancel, retry or resume it.
+    /// Show one Mission and its Runs, or cancel, retry or resume it.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Mission {
         /// The Mission: its UID, or any handle it had.
@@ -247,14 +247,28 @@ enum Command {
         #[arg(long)]
         state: Option<String>,
     },
-    /// Show one provider Run by its Run ID, or interrupt it.
+    /// Show one Run by its Run ID, or interrupt it.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Run {
-        /// Provider-issued Run ID.
+        /// Run ID.
         #[arg(required = true)]
         run_id: Option<String>,
         #[command(subcommand)]
         control: Option<RunCommand>,
+    },
+    /// Execute a Mission or a Run (needs mission.control): a Mission starts its next Run, queued
+    /// again as a new run; a Run that ran is resumed, with its Mission.
+    Exec {
+        /// A Mission ID, or the Run ID of a Run.
+        id: String,
+        /// For a Mission: the Agent to run it, when not the one it had.
+        #[arg(long)]
+        agent: Option<String>,
+        /// For a Run: what to tell it as it resumes.
+        #[arg(long)]
+        message: Option<String>,
+        #[command(flatten)]
+        target: MissionTarget,
     },
     /// List the steps Agents wait to take, and approve, reject or revoke them (needs
     /// approval.decide on the Operation).
@@ -953,7 +967,7 @@ enum PagesCommand {
 enum RunCommand {
     /// Stop the Run's current turn; its Mission stays, blocked, until resumed.
     Interrupt {
-        /// Provider-issued Run ID.
+        /// Run ID.
         run_id: String,
         #[command(flatten)]
         request: ControlOptions,
@@ -2060,6 +2074,49 @@ async fn run() -> Result<(), String> {
                 (&run.operation_id, &run.mission_id),
                 body,
                 &request,
+            )
+            .await?;
+            print_control(&status);
+            control_verdict(&status)?;
+        }
+        Command::Exec {
+            id,
+            agent,
+            message,
+            target,
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let ran = board(&client, &server, &token)
+                .await?
+                .into_iter()
+                .find(|run| run.run_id == id);
+            let (operation, mission_id, body) = match ran {
+                Some(run) => {
+                    let mut body = serde_json::json!({ "action": "resume" });
+                    if let Some(message) = message {
+                        body["message"] = serde_json::Value::String(message);
+                    }
+                    (run.operation_id, run.mission_id, body)
+                }
+                None => {
+                    let operation = match target.operation {
+                        Some(operation) => operation,
+                        None => mission_operation(&client, &server, &token, &id).await?,
+                    };
+                    let mut body = serde_json::json!({ "action": "retry" });
+                    if let Some(agent) = agent {
+                        body["agent"] = serde_json::Value::String(agent);
+                    }
+                    (operation, id, body)
+                }
+            };
+            let status = control(
+                &client,
+                &server,
+                &token,
+                (&operation, &mission_id),
+                body,
+                &target.request,
             )
             .await?;
             print_control(&status);

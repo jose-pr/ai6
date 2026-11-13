@@ -421,7 +421,7 @@ impl AccountClaimRequest {
         self
     }
 
-    /// Considers `account` alone: a provider Run that cannot move to another account.
+    /// Considers `account` alone: a Run that cannot move to another account.
     #[must_use]
     pub fn only(mut self, account: &str) -> Self {
         self.candidates

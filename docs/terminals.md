@@ -1,7 +1,7 @@
 # Terminals and providers
 
 An AgentHandler runs inside an AI6 terminal Run so the watchdog can observe its output
-and an authorized operator can attach without restarting the provider Run.
+and an authorized operator can attach without restarting the Run.
 
 ## The Station chooses the terminal
 

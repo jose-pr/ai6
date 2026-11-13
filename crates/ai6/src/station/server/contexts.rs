@@ -89,7 +89,7 @@ fn read_tail(path: &Path, limit: Limit) -> io::Result<(String, Option<u64>)> {
     ))
 }
 
-/// Files the context of provider Run `run` for `owner`: the harness's `record` when
+/// Files the context of Run `run` for `owner`: the harness's `record` when
 /// its file can be read, else `tape`. A failure is logged, never fatal to the Run.
 pub(super) fn file(
     state: &DaemonState,

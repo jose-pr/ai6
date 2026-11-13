@@ -909,7 +909,7 @@ async fn which_stations_are_busy_is_answered_through_the_board_tool() {
         "the final answer is not shown twice"
     );
 
-    // A second message goes to the same Station and names the provider Run.
+    // A second message goes to the same Station and names the Run.
     say(&mut app, "And the HQS?", None).await;
     let second = take(&served, "hq").await;
     assert_eq!(second.run_id.as_deref(), Some("provider-assistant-1"));

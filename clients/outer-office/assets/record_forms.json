@@ -1733,7 +1733,7 @@
               "resume": {
                 "type": "boolean",
                 "title": "Resume the last run's Run",
-                "description": "Each window's run resumes the last run's provider Run when its handler can and that run did not fail, else starts a new one, as it does when the resume is refused. Needs `standing`.",
+                "description": "Each window's run resumes the last run's Run when its handler can and that run did not fail, else starts a new one, as it does when the resume is refused. Needs `standing`.",
                 "default": false
               }
             },
@@ -3760,7 +3760,7 @@
                 }
               ],
               "title": "Conversations remembered for a resume",
-              "description": "Conversations whose provider Run the desk remembers for a resume.",
+              "description": "Conversations whose Run the desk remembers for a resume.",
               "default": 1024
             },
             "close_wait": {
@@ -6919,7 +6919,7 @@
                 }
               ],
               "title": "Live Runs",
-              "description": "Live provider Runs.",
+              "description": "Live Runs.",
               "default": 16
             },
             "board_runs": {
@@ -6959,7 +6959,7 @@
                 }
               ],
               "title": "Browser connections per Run",
-              "description": "Simultaneous browser connections to one provider Run.",
+              "description": "Simultaneous browser connections to one Run.",
               "default": 12
             },
             "scrollback_events": {
@@ -6979,7 +6979,7 @@
                 }
               ],
               "title": "Frames kept for a late client",
-              "description": "Value frames kept per provider Run for a client that joins late.",
+              "description": "Value frames kept per Run for a client that joins late.",
               "default": 64
             },
             "frame_bytes": {

@@ -28,7 +28,7 @@ impl std::fmt::Display for SafeHouseError {
 
 impl std::error::Error for SafeHouseError {}
 
-/// A Mission's open safe house: a provider run and what it reported when opened.
+/// A Mission's open safe house: a run and what it reported when opened.
 #[derive(Clone)]
 pub struct SafeHouse {
     run: Arc<Object<dyn SafeHouseRun>>,

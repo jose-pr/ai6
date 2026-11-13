@@ -39,7 +39,7 @@ pub(super) struct Outcome {
     pub(super) ended: String,
     /// The start of what the charge said.
     pub(super) said: String,
-    /// The handler and the provider Run it ran on, once known.
+    /// The handler and the Run it ran on, once known.
     pub(super) run: Option<(String, String)>,
     /// What the logbook is to say of how its Run was opened.
     pub(super) log: Vec<ChargeLogEntry>,
@@ -106,7 +106,7 @@ enum Opened {
     Fresh(String),
 }
 
-/// Opens a harness for `charge`: resumes `previous` (handler, provider Run) when its handler
+/// Opens a harness for `charge`: resumes `previous` (handler, Run) when its handler
 /// is still the Agent's, else starts one, which with `fresh` is given the logbook. The wake's
 /// `prompt` is its first message either way.
 fn open(
@@ -242,7 +242,7 @@ fn open(
                 super::super::log_harness_start(&who, "resumed", &handler, &provider);
                 return Ok((Harnessed { run, handler }, Opened::Resumed));
             }
-            Err(error) => format!("provider Run {run} did not resume: {error}"),
+            Err(error) => format!("Run {run} did not resume: {error}"),
         };
         // The terminal and handler went with the refused resume.
         return start(
@@ -295,7 +295,7 @@ fn open(
     let opened = if record.logbook.is_empty() {
         Opened::Started
     } else {
-        Opened::Fresh("it had no provider Run to resume".to_owned())
+        Opened::Fresh("it had no Run to resume".to_owned())
     };
     Ok((Harnessed { run, handler }, opened))
 }
@@ -446,7 +446,7 @@ pub(super) fn take(
                     Opened::Resumed => ChargeLogEntry::new(
                         "resumed",
                         format!(
-                            "provider Run {} resumed",
+                            "Run {} resumed",
                             previous
                                 .as_ref()
                                 .map_or("", |(_, run)| run.as_str())
@@ -515,7 +515,7 @@ pub(super) fn take(
     }
 }
 
-/// Binds the charge's Cable endpoint and principal to its provider Run `id`, so replies to the
+/// Binds the charge's Cable endpoint and principal to its Run `id`, so replies to the
 /// Cables it sends reach it.
 #[cfg(feature = "cables-mcp")]
 fn bind(live: &Live, id: &str) {

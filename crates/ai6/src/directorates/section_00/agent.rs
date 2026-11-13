@@ -290,7 +290,7 @@ pub(crate) fn provider_id(
         .map_err(|why| ProviderError::new(guatiao::Status::GUATIAO_ERR_BAD_VALUE, &why))
 }
 
-/// How AI6 resumes a provider-issued Run.
+/// How AI6 resumes a Run.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AgentResume {

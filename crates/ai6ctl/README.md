@@ -13,7 +13,7 @@ Station directly. See the [command header](AGENTS.md).
 ## Features
 
 - Reads health, Stations and the Headquarters Station, Operation-scoped Agent roles,
-  Missions and provider Runs.
+  Missions and Runs.
 - Manages the configuration records kubectl-style: `get`, `apply -f` (any documents, all or
   none, `--dry-run`), `edit`, `set`, `unset`, `delete` and `api-resources`, each under the
   person's own actions.
@@ -68,12 +68,13 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `pools --operation <ID>` | Pool accounts the Operation may draw from: Runs, quota used, limited until and tokens today (`pool.read`) |
 | `pools clear-limit <POOL> <ACCOUNT> --operation <ID>` | Lifts an account's provider limit (`pool.manage`, audited) |
 | `missions [--operation <ID>]` | Visible Missions and their Run counts |
-| `mission <MISSION_ID> [--operation <ID>]` | One Mission and its provider Runs; `--operation` disambiguates a repeated ID |
-| `runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized provider Runs, filtered |
-| `run <RUN_ID>` | One provider Run |
+| `mission <MISSION_ID> [--operation <ID>]` | One Mission and its Runs; `--operation` disambiguates a repeated ID |
+| `runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized Runs, filtered |
+| `run <RUN_ID>` | One Run |
 | `mission cancel <MISSION_ID>` | Stops the live Run, if any, and abandons the Mission |
 | `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new run |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |
+| `exec <MISSION_ID\|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` | Executes a Mission or a Run: a Mission starts its next run (`mission retry`); a Run that ran is resumed with its Mission (`mission resume`) |
 | `run interrupt <RUN_ID>` | Stops the Run's current turn; its Mission waits, blocked |
 | `green-ink list --operation <ID> [--expired]` | The steps Agents wait to take with green ink (`approval.decide`), or those that expired undecided |
 | `green-ink rearm <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Opens an expired, undecided step again |

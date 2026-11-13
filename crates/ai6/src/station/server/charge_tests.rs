@@ -25,7 +25,7 @@ use crate::directorates::registry::charges::ChargeRecord;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 
 /// What the stand-in was asked: `start`, `resume` or `message`, under which Run name, on which
-/// provider Run, with what text and, for a start, what context.
+/// Run, with what text and, for a start, what context.
 #[derive(Debug, Clone)]
 struct Call {
     how: &'static str,
@@ -520,7 +520,7 @@ async fn a_charge_takes_one_turn_per_wake_and_is_no_mission() {
     );
     assert!(
         messages.iter().all(|call| call.run == provider),
-        "one provider Run"
+        "one Run"
     );
     assert!(messages[0].text.contains("\"verifying\"") && messages[0].text.contains("V-1"));
     #[cfg(feature = "cables-mcp")]
@@ -679,7 +679,7 @@ async fn a_charge_moves_to_another_station_when_its_station_goes_dark() {
     );
     assert_eq!(
         resumed[0].run, provider,
-        "b resumes a's provider Run"
+        "b resumes a's Run"
     );
 
     // a comes back, finds b holds the charge, and lets it go.

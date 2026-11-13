@@ -148,7 +148,7 @@ const _labels = {
 
 /// The latest of [runs], the one carrying a Mission's current state: the highest `updatedAt`,
 /// none counting as oldest and the first of equals winning. Never `sequence`: that is a cursor
-/// within one provider Run, so a long first run would outrank the newer retry after it.
+/// within one Run, so a long first run would outrank the newer retry after it.
 /// Universal Exports' `Route::shows_mission` decides the same.
 RunSummary? currentRun(Iterable<RunSummary> runs) {
   RunSummary? current;
@@ -395,7 +395,7 @@ class _ControlDialogState extends State<_ControlDialog> {
       ),
       'resume' => (
         'Resume Mission ${widget.missionId}?',
-        'The Mission resumes now on its provider Run.',
+        'The Mission resumes now on its Run.',
         'Resume',
       ),
       _ => (

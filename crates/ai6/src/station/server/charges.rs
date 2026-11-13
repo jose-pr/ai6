@@ -11,7 +11,7 @@
 //! Each wake is one turn, given the waiting events as its input, those carrying outside text
 //! marked untrusted. Turns are counted per hour on the charge's record, so a storm of events waits
 //! (and past `max_waiting_events`, is cut) rather than spending turns. The harness is kept
-//! between turns and its provider Run resumed after a restart or a takeover; when the
+//! between turns and its Run resumed after a restart or a takeover; when the
 //! handler cannot resume it, a fresh Run starts with the charge's logbook.
 //!
 //! A charge is not a Mission: none of this makes a Mission, a brief, a placement or a run.
@@ -147,7 +147,7 @@ pub(super) struct Live {
     /// The logbook has said the hour's turns are spent.
     quota_noted: AtomicBool,
     harness: Mutex<Option<turn::Harnessed>>,
-    /// Who it is to the Cable relay, bound to its provider Run once it has one; `None` for a
+    /// Who it is to the Cable relay, bound to its Run once it has one; `None` for a
     /// charge whose Cables are in no Operation.
     principal: Mutex<Option<CablePrincipal>>,
     #[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
@@ -471,7 +471,7 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
 }
 
 /// Stops running `live` here: its harness is closed and its credentials released; its record and
-/// provider Run stay for whoever runs it next.
+/// Run stay for whoever runs it next.
 async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
     if live.closing.swap(true, Ordering::AcqRel) {
         return;

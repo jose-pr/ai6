@@ -8,7 +8,7 @@ import 'package:xterm2/xterm.dart';
 Stream<String> decodeTerminalOutput(Stream<List<int>> bytes) =>
     const Utf8Decoder(allowMalformed: true).bind(bytes);
 
-/// Renders one existing provider Run; it never starts or resumes a Run.
+/// Renders one existing Run; it never starts or resumes a Run.
 class RunTerminal extends StatefulWidget {
   const RunTerminal({
     required this.output,

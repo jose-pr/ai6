@@ -20,11 +20,11 @@ native windows build their app with `boardThemedApp`.
 
 ## Boundaries
 
-- Universal Exports owns Station, Mission, provider Run and terminal-stream state; the app only presents it.
+- Universal Exports owns Station, Mission, Run and terminal-stream state; the app only presents it.
 - Never pass M's ingress credential to this application.
 - Do not put attach tokens in URLs, browser storage, logs or UI text.
 - Terminal input requires an explicit user-scoped write lease; keep viewing read-only by default.
-- A window closing only closes the view. It never stops or resumes the provider Run.
+- A window closing only closes the view. It never stops or resumes the Run.
 - Treat API fields as untrusted input and keep terminal bytes separate from lifecycle metadata.
 - Moneypenny's views (`lib/assistant/`) are data in the version 1 view schema, rendered with
   the app's own widgets: never render model-written HTML, run a script or follow an outside
@@ -54,7 +54,7 @@ native windows build their app with `boardThemedApp`.
   pop-out is a second copy of the app at `?oo_window=chat` (`lib/assistant/chat_popout*.dart`),
   tied to the page by a `BroadcastChannel`; both sockets are on one conversation.
 - Native desktop windows are a separate, experimental Flutter feature. Opening or closing
-  a Run window must not start, resume or stop its provider Run.
+  a Run window must not start, resume or stop its Run.
 - Every native window (a Run's, Moneypenny's popped-out chat) opens through
   `openAppWindow` (`lib/shell/app_window.dart`). Moneypenny's conversation and layout live
   in one `MoneypennyChat` per sign-in (`lib/assistant/chat_layout.dart`), so every layout

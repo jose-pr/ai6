@@ -2,7 +2,7 @@
 //! it, for troubleshooting and audit, and so a conversation outlives a gateway restart.
 //!
 //! One record per entry: who said it or what it records, its text as sent, its data, and for
-//! what a Station's harness reported, the turn that ran it (Station, provider Run, Agent,
+//! what a Station's harness reported, the turn that ran it (Station, Run, Agent,
 //! route, pool account, model, tokens). Universal Exports keeps no secret in an entry: tool
 //! tokens are never part of one. Retention is the gateway's: [`AssistantLogStore::prune_assistant_log`]
 //! drops entries by age and keeps the newest that fit a size.
@@ -29,7 +29,7 @@ pub struct AssistantTurn {
     /// The Station that ran the harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub station: Option<String>,
-    /// The provider Run of the harness.
+    /// The Run of the harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<String>,
     /// The roster Agent that is Moneypenny.

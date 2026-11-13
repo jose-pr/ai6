@@ -51,7 +51,7 @@ pub struct TimelineItem {
     pub mission_id: Option<String>,
     /// What that Mission is called now.
     pub handle: Option<String>,
-    /// The provider Run involved, when there is one.
+    /// The Run involved, when there is one.
     pub run_id: Option<String>,
     /// Who acted: a person ID or an Agent codename.
     pub actor: Option<String>,

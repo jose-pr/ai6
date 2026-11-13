@@ -6,7 +6,7 @@ an accepted follow-up message resets both inactivity and repeated-output timing.
 
 After ten quiet seconds at a recognized terminal prompt, AI6 moves the Mission to
 `blocked` so an operator can respond. If the Run then remains inactive for five
-minutes, AI6 marks it `stalled`, interrupts and closes the provider Run, and ends
+minutes, AI6 marks it `stalled`, interrupts and closes the Run, and ends
 the active operation. New terminal output moves a blocked Mission back to `working`.
 
 The Rust monitor also detects repeated terminal lines. It strips ANSI control sequences,

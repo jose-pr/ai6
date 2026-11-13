@@ -143,7 +143,7 @@ Infrastructure  Station ──────────────────�
 ```
 
 An **Operation** is a global project and its policy; Stations serve it, none owns it. A
-**Mission** is one brief; a **Run** is one resumable provider run. A **Station** is a
+**Mission** is one brief; a **Run** is one resumable run. A **Station** is a
 node running `ai6 serve`; a **Theater** is the host a Run works on, reached through a
 transport (`local`, `ssh`). The directorates (M, the Registry, Q Branch, 00 Section, Medical) decide; the
 Station runs their decisions; Universal Exports is the only public door. See

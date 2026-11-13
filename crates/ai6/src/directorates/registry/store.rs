@@ -208,7 +208,7 @@ pub(super) fn one_line_within(text: &str, bytes: usize) -> String {
 ///
 /// Proposals are held outside `new/` and are never visible to the scheduler until an
 /// M-controlled path promotes them. The proposal identity is derived from its parent
-/// Mission, provider Run and idempotency key.
+/// Mission, Run and idempotency key.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -221,7 +221,7 @@ pub struct MissionProposal {
     pub parent_mission_id: MissionId,
     /// Authenticated Agent identity supplied by AI6, not by the proposal body.
     pub proposer_agent_id: String,
-    /// Provider-issued Run bound to the authenticated MCP endpoint.
+    /// Run bound to the authenticated MCP endpoint.
     pub proposer_run_id: RunId,
     /// Proposed child Mission brief.
     pub brief: Brief,
@@ -237,7 +237,7 @@ pub struct MissionProposal {
 }
 
 impl MissionProposal {
-    /// Builds a Mission proposal tied to the caller's parent Mission and provider Run.
+    /// Builds a Mission proposal tied to the caller's parent Mission and Run.
     ///
     /// `idempotency_key` is scoped to the parent Mission and Run. The proposed brief's
     /// Operation is set from `operation_id`; its source and ID are reserved by AI6.
@@ -530,7 +530,7 @@ impl StationSettings {
         &self.station
     }
 
-    /// Returns the Station's maximum number of simultaneous provider Runs.
+    /// Returns the Station's maximum number of simultaneous Runs.
     pub fn max_concurrent_missions(&self) -> usize {
         self.max_concurrent_missions
     }
@@ -2704,7 +2704,7 @@ pub trait CableStore {
 
     /// Returns unexpired queued or delivered Cables for an Agent Run.
     ///
-    /// `limit` must be between 1 and 1,000. A recipient with no provider Run is
+    /// `limit` must be between 1 and 1,000. A recipient with no Run is
     /// visible to the Agent's current Run.
     fn cable_inbox(
         &self,

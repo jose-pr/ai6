@@ -164,7 +164,7 @@ pub enum ReportFiler {
     Agent {
         /// The Agent codename.
         agent: String,
-        /// The provider Run, or the Mission's ID until the harness has reported one.
+        /// The Run, or the Mission's ID until the harness has reported one.
         run: String,
         /// The Mission.
         mission: String,
@@ -175,7 +175,7 @@ pub enum ReportFiler {
         agent: String,
         /// The charge's scope (`m`, `operation:P`, `station:S`).
         scope: String,
-        /// The provider Run, or the scope until the harness has reported one.
+        /// The Run, or the scope until the harness has reported one.
         run: String,
     },
     /// A person, by subject.

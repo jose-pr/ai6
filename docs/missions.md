@@ -6,7 +6,7 @@ daemon validates the brief, resolves its Operation and Agent policy, and schedul
 Mission at an eligible Station.
 
 ```text
-source ─► brief ─► Registry ─► AI6 Station ─► AgentHandler ─► provider Run
+source ─► brief ─► Registry ─► AI6 Station ─► AgentHandler ─► Run
                                                 │
                                                 └─► outcome and DipTels to Universal Exports
 ```
@@ -158,7 +158,7 @@ its Station:
 | --- | --- | --- |
 | `cancel` | any state | The live Run is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below), and one that already ended stays as it is and answers `applied` with its state. |
 | `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new run, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
-| `resume` | parked, blocked or stalled | The Mission resumes now on its provider Run, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
+| `resume` | parked, blocked or stalled | The Mission resumes now on its Run, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
 | `interrupt` | working | The Run's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
 
 There is no pause: providers have none. A quarantined Mission is released by an operator
@@ -375,7 +375,7 @@ Its Station then settles the Mission within a scheduler pass:
 | --- | --- | --- |
 | `done` | Becomes `done` | Counts as done on the scorecard |
 | `failed` | Becomes `failed` | Disputed: a failure of that Agent |
-| `redispatch` | Is queued as run N+1 of the same Mission, for the best qualified Agent, in the safe house the last run kept, with a new provider Run told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
+| `redispatch` | Is queued as run N+1 of the same Mission, for the best qualified Agent, in the safe house the last run kept, with a new Run told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
 
 The charge's decision takes this same path: it is audited (`mission.verify`, by `charge:operation:CODENAME`),
 recorded as the run's verdict, put on the timeline and counted on the scorecard, and a redispatch is a
@@ -626,7 +626,7 @@ brief record (in a directory Registry, `provenance/KEY.json`; in a database, a c
 | `operator` | the person, from the gateway's Directory | | Universal Exports (`POST .../missions`) |
 | `source` | the Source provider (`github`) | the item; `item_url` its link | the Headquarters Station's poll |
 | `sleeper` | the sleeper's name | its definition's fingerprint | the Headquarters Station |
-| `proposal` | the proposing Agent | its provider Run | the approval (`universal-exports`) |
+| `proposal` | the proposing Agent | its Run | the approval (`universal-exports`) |
 | `review` | nobody | the review's identity | the Headquarters Station, for a [Chief of Staff review](agents.md#chief-of-staff) |
 | `registry_drop` | nobody | | the Station that took the brief |
 
@@ -732,7 +732,7 @@ lost harness if the runner still has it, so the two never work side by side.
 
 The Station that takes the brief starts the Mission as run N+1, linked to the lost
 Run as its predecessor, with new AI6 and provider IDs (provider transcripts stay
-on the Theater that held them, so the provider Run cannot be resumed). The Agent is told
+on the Theater that held them, so the Run cannot be resumed). The Agent is told
 about the run it continues:
 
 ```text
@@ -778,7 +778,7 @@ parked by a provider that gave no reset time waits the wait the refusal states, 
 `retry-after`, or words such as "try again in 90 seconds"), as it is; a time already past, or none at all,
 waits `limit_fallback_secs` (30 minutes by default) instead of retrying in a loop. The reset time wins over the
 stated wait, and the stated wait over the fallback. The safe house
-stays in place. When the time comes the daemon resumes the **same provider Run** and
+stays in place. When the time comes the daemon resumes the **same Run** and
 tells it to carry on; the Mission returns to `working`. Parking survives a daemon restart,
 and an operator can resume a parked Mission early with the ordinary resume request.
 
@@ -793,7 +793,7 @@ An Operation chooses the response with `on_limit` ([settings](operations.md#prov
   limited until the reset and frees it. When another account of the Agent's pools has
   headroom, a Run whose history goes with it (Claude Code on an environment
   credential, moving to another environment credential) is parked only until the next
-  scheduler pass and resumed, same provider Run, on that account; otherwise (a Codex or
+  scheduler pass and resumed, same Run, on that account; otherwise (a Codex or
   `config-dir` Run, or no environment account with headroom) it is queued again as a new
   run,
   told it continues an earlier one, and starts on the other account. The timeline records
@@ -803,7 +803,7 @@ An Operation chooses the response with `on_limit` ([settings](operations.md#prov
 - `backup` posts the next qualified Agent, as [Organization](organization.md) describes,
   among those whose handler differs from the limited one. The Mission is queued again for
   that Agent as a **new run** (a new Run record whose predecessor is the limited
-  one), starting a new provider Run in the same safe house with a note that an earlier
+  one), starting a new Run in the same safe house with a note that an earlier
   run stopped at a limit. With no such Agent available it parks instead.
 
 The Outer Office board shows `parked` as a Run state, and the stream of Mission events
@@ -1169,7 +1169,7 @@ ai6 sleeper revoke G nightly-deps
   board and scorecards show one Mission with a run history. A window that comes while a run
   is queued, held or running does not fire; it fires when the run settles if it is still the
   latest window and within `catch_up`, and is on the timeline as skipped otherwise.
-  With `resume = true` as well, a run resumes the last run's provider Run when that
+  With `resume = true` as well, a run resumes the last run's Run when that
   run ran on the same handler, did not fail, and its provider gave it an ID, and starts a new
   Run otherwise, as it does when the provider refuses the resume; the timeline says which
   (`sleeper`, `resumed` or `started`, with the window). `resume` without `standing` is refused when
@@ -1177,7 +1177,7 @@ ai6 sleeper revoke G nightly-deps
 - **A failed run.** A failed run leaves the order standing: the next window fires as the
   next run, and the reason is in the run's outcome. The run of any Sleeper that fails
   is on the timeline (`sleeper`, `run-failed`, with the window and the reason, or a line saying
-  the harness's words are in the outcome) and, with a provider Run, on the board (reason
+  the harness's words are in the outcome) and, with a Run, on the board (reason
   `order-run-failed`). It asks for no approval. Cancelling a run is not a failure, and leaves
   the order standing too; `ai6 sleeper revoke` stops it.
 - **A stalled run.** The Station holding a standing Mission's run looks at each check-in:
@@ -1214,7 +1214,7 @@ AI6 refuses the resume.
 
 A Station can publish lifecycle and terminal events to Universal Exports. When
 enabled, it consumes the gateway's authenticated input/resize queue and routes frames to
-the matching live provider Run. Set `[unex] url` and `token` in `ai6.cfg`; without a
+the matching live Run. Set `[unex] url` and `token` in `ai6.cfg`; without a
 token the Station publishes nothing. Events use a
 bounded background worker and finite request timeouts, so a gateway outage does not block
-the provider Run. Terminal bytes remain binary.
+the Run. Terminal bytes remain binary.

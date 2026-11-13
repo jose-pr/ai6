@@ -108,7 +108,7 @@ impl AccountKind {
         !matches!(self, Self::ConfigDir | Self::HarnessLogin)
     }
 
-    /// Whether a provider Run can move to another account of this kind and keep its
+    /// Whether a Run can move to another account of this kind and keep its
     /// history: only the environment kinds, whose history stays where the harness keeps it
     /// whatever the token.
     pub fn carries_run(self) -> bool {

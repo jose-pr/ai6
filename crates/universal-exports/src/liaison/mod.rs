@@ -726,7 +726,7 @@ impl Liaison {
         Ok(cable)
     }
 
-    /// The provider Run a context is bound to: the one that took its first Cable, else the
+    /// The Run a context is bound to: the one that took its first Cable, else the
     /// one that first replied in it.
     fn bound_run(&self, first: &Cable) -> Option<String> {
         if let Some(run) = first.affinity() {

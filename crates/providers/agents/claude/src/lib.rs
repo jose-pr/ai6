@@ -2554,7 +2554,7 @@ mod tests {
                 }
             }
         }
-        panic!("fake Claude did not complete the provider Run")
+        panic!("fake Claude did not complete the Run")
     }
 
     #[test]

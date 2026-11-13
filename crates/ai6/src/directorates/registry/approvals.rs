@@ -39,7 +39,7 @@ pub struct ApprovalRequest {
     pub operation: String,
     /// The Mission whose Agent asked.
     pub mission: MissionId,
-    /// The provider Run that asked, bound to its authenticated tool endpoint.
+    /// The Run that asked, bound to its authenticated tool endpoint.
     pub run: RunId,
     /// The Agent codename, supplied by AI6 rather than the request text.
     pub agent: String,

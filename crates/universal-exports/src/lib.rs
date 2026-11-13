@@ -129,11 +129,11 @@ pub struct GatewayConfig {
 /// Finite state, payload, fanout and input limits for one gateway.
 #[derive(Debug, Clone, Copy)]
 pub struct GatewayLimits {
-    /// Maximum number of live provider Runs.
+    /// Maximum number of live Runs.
     pub max_runs: usize,
-    /// Maximum simultaneous browser connections to one provider Run.
+    /// Maximum simultaneous browser connections to one Run.
     pub max_clients_per_run: usize,
-    /// Number of value frames retained per provider Run.
+    /// Number of value frames retained per Run.
     pub scrollback_events: usize,
     /// Maximum bytes in one guatiao WebSocket or ingress frame.
     pub max_frame_bytes: usize,
@@ -937,7 +937,7 @@ impl Gateway {
         }
     }
 
-    /// Registers one active provider Run after authenticating the Station.
+    /// Registers one active Run after authenticating the Station.
     pub async fn register_run(
         &self,
         station_token: &str,
@@ -995,7 +995,7 @@ impl Gateway {
             .ok_or(GatewayError::Conflict)
     }
 
-    /// Returns the provider Runs, their latest lifecycle states and the Agent of each one's
+    /// Returns the Runs, their latest lifecycle states and the Agent of each one's
     /// Mission.
     ///
     /// The Registry's Run records say what ended or is waiting to be checked, which no
@@ -1139,7 +1139,7 @@ impl Gateway {
         runs
     }
 
-    /// Returns registered Missions grouped by Station with their provider Runs.
+    /// Returns registered Missions grouped by Station with their Runs.
     pub async fn board_missions(&self) -> Vec<BoardMission> {
         self.enrich_missions(group_missions(self.board_runs().await))
             .await
@@ -1193,7 +1193,7 @@ impl Gateway {
         missions
     }
 
-    /// Encodes and publishes one lifecycle event for a registered provider Run.
+    /// Encodes and publishes one lifecycle event for a registered Run.
     pub async fn publish_lifecycle(
         &self,
         station_token: &str,
@@ -5351,7 +5351,7 @@ struct LifecycleRequest {
     reason: Option<String>,
 }
 
-/// One provider Run entry returned by the public board API.
+/// One Run entry returned by the public board API.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardRun {
@@ -5382,7 +5382,7 @@ pub struct BoardRun {
     pub agent: Option<String>,
 }
 
-/// One registered Mission with the provider Runs known to Universal Exports.
+/// One registered Mission with the Runs known to Universal Exports.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardMission {
@@ -5392,7 +5392,7 @@ pub struct BoardMission {
     pub mission_id: String,
     /// What the Mission is called now; its ID when the Registry names it no other way.
     pub handle: String,
-    /// Provider Runs registered for this Mission.
+    /// Runs registered for this Mission.
     pub runs: Vec<BoardRun>,
     /// Exact Mission brief and sanitized launch manifest published by AI6, when known.
     pub brief: Option<LaunchManifest>,

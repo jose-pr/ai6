@@ -363,7 +363,7 @@ pub struct ControlStatus {
     pub control_id: String,
     pub operation_id: String,
     pub mission_id: String,
-    pub run_id: Option<String>,  // provider Run expected to be current
+    pub run_id: Option<String>,  // Run expected to be current
     pub action: String,              // "cancel" | "retry" | "resume" | "interrupt"
     pub agent: Option<String>,       // a retry's Agent
     pub station_id: String,          // the Station asked to act
@@ -383,7 +383,7 @@ Routing: the Station holding the Mission's latest Run record (highest run), else
 the Station holding a brief lease whose `mission_id` matches, else the Headquarters Station;
 Stations whose check-in is older than 45 seconds are passed over, and with none the request
 is refused `503` with `Retry-After: 15`. When the request names `run_id` and the
-Registry knows another provider Run as current, it is refused `409`; otherwise the
+Registry knows another Run as current, it is refused `409`; otherwise the
 current one is attached. The Mission must be known under the Operation of the route: a
 Run record's `operation`, its brief lease's `operation` metadata, its queued brief's
 `operation` or a board entry names it, and none of them names another. Otherwise it is `404`,
@@ -502,7 +502,7 @@ pool account, model and tokens. The person's access token and her tool token are
 `[redacted]` wherever they appear. The log is trimmed every `log_prune_every` (1 hour) to
 `log_age` (90 days) and `log_bytes` (1 GiB), and flushed when `serve_loopback` stops. A conversation asked for in a hello that the
 gateway does not hold is rebuilt from the log when it is that person's, with the Station,
-provider Run and route of its last turn; a proposal that was waiting shows as expired.
+Run and route of its last turn; a proposal that was waiting shows as expired.
 
 The command reads `[assistant.limits]`, `[assistant.gateway]`, `[assistant.views]` and the
 `cables` record at start. Defaults: 20 conversations a person and 2,000 in all (oldest idle one
@@ -516,7 +516,7 @@ calls a conversation per minute; 2 conversations a person with a harness running
 pending. Past that last bound, a new message closes the person's least recently used idle
 harness (a `close` job to its Station, and the conversation's tokens withdrawn); when every
 other one is answering, the message is refused with `busy_elsewhere`. Conversations live in the
-gateway's memory only and are lost when it restarts (the provider Run on the Station
+gateway's memory only and are lost when it restarts (the Run on the Station
 survives, but the app shows a new conversation).
 
 The model runs on a Station, as the roster Agent named here (see `ai6::AssistantJob`), not in
@@ -840,9 +840,9 @@ impl Gateway {
 }
 ```
 
-`BoardMission` groups registered provider Runs by Station and Mission ID.
+`BoardMission` groups registered Runs by Station and Mission ID.
 It reflects Runs known to this gateway; a queued Mission with no registered
-provider Run is not included.
+Run is not included.
 
 `new` creates bounded in-memory state and one bounded M input queue. `authenticate_station`
 compares the presented bearer credential with the configured Station credential. Run

@@ -5551,7 +5551,7 @@ async fn start_mission(
         .await;
         (project.load, project.mcp)
     };
-    // A standing Sleeper's window may take up the provider Run its last run left.
+    // A standing Sleeper's window may take up the Run its last run left.
     let window_run = standing::of(&state, mission_id.as_str());
     let resume_from = window_run.as_ref().and_then(|run| {
         standing::resume_from(
@@ -5736,7 +5736,7 @@ async fn start_mission(
             return Err(start_failure(
                 &state,
                 &mission_id,
-                format!("provider Run identity worker failed: {error}"),
+                format!("Run identity worker failed: {error}"),
                 area.safe_house.clone(),
             )
             .await);
@@ -5839,7 +5839,7 @@ async fn start_mission(
         (|| {
             missions.set_hold(&mission_id, hold.clone())?;
             let working = missions.transition(&mission_id, MissionState::Working)?;
-            // A resumed provider Run is one the Mission already has.
+            // A resumed Run is one the Mission already has.
             let working = match run_id.clone() {
                 Some(run_id) if !working.run_ids.contains(&run_id) => {
                     missions.attach_run(&mission_id, run_id)?
@@ -6868,7 +6868,7 @@ async fn close_replaced(mission_id: &str, replaced: Option<AgentOperation>) {
         let run = replaced
             .run
             .lock()
-            .map_err(|_| "provider Run lock was poisoned".to_owned())?;
+            .map_err(|_| "Run lock was poisoned".to_owned())?;
         // A harness that already exited cannot be interrupted, and need not be.
         let _ = run.interrupt();
         run.close().map_err(|error| error.to_string())
@@ -6928,7 +6928,7 @@ async fn send_message(
     tokio::task::spawn_blocking(move || {
         worker_gate
             .lock(&run)
-            .map_err(|_| "provider Run lock was poisoned".to_owned())?
+            .map_err(|_| "Run lock was poisoned".to_owned())?
             .send_message(AgentMessage { text: request.text })
             .map_err(|error| error.to_string())
     })
@@ -6992,7 +6992,7 @@ async fn interrupt_mission(
     let mission = hold_for_interrupt(&state, &mission_id).map_err(mission_error)?;
     let interrupted = tokio::task::spawn_blocking(move || {
         gate.lock(&run)
-            .map_err(|_| "provider Run lock was poisoned".to_owned())?
+            .map_err(|_| "Run lock was poisoned".to_owned())?
             .interrupt()
             .map_err(|error| error.to_string())
     })
@@ -7197,7 +7197,7 @@ fn spawn_event_pump_with_monitor(
             let result = (|| {
                 let run = run
                     .lock()
-                    .map_err(|_| "provider Run lock was poisoned".to_owned())?;
+                    .map_err(|_| "Run lock was poisoned".to_owned())?;
                 let event = run
                     .next_event(1_000)
                     .map_err(|error| error.to_string())?;
@@ -7733,7 +7733,7 @@ fn attach_observed_run(
     }
 }
 
-/// Binds a Run's Cable endpoint to the provider Run once its stream has reported it: a
+/// Binds a Run's Cable endpoint to the Run once its stream has reported it: a
 /// harness that reports it only after reading its first message starts with an unbound endpoint,
 /// and every tool that answers for the Run refuses until this. The endpoint leaves the
 /// Run's entry for the Registry write, so no other Mission waits on it; a failed bind is tried
@@ -7984,7 +7984,7 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
     }
 }
 
-/// Sent to a resumed provider Run so it carries on after its quota reset; a resumed
+/// Sent to a resumed Run so it carries on after its quota reset; a resumed
 /// harness otherwise waits for input.
 const LIMIT_RESET_MESSAGE: &str =
     "The provider usage limit has reset. Continue the task where you left off.";
@@ -8172,7 +8172,7 @@ fn backup_agent(
     .ok()
 }
 
-/// Resumes parked Missions whose quota reset time has passed, on the same provider Run.
+/// Resumes parked Missions whose quota reset time has passed, on the same Run.
 async fn schedule_parked_once(state: &DaemonState) {
     if !state.station.roles.contains(&StationRole::Execution) {
         return;
@@ -8518,7 +8518,7 @@ async fn finalize_mission_resources(
         let run = operation
             .run
             .lock()
-            .map_err(|_| "provider Run lock was poisoned".to_owned())?;
+            .map_err(|_| "Run lock was poisoned".to_owned())?;
         if interrupt {
             run
                 .interrupt()
@@ -10579,7 +10579,7 @@ queue = 1
         );
         assert!(state.runs.lock().unwrap().is_empty());
 
-        // Once the clock passes the reset the same provider Run resumes.
+        // Once the clock passes the reset the same Run resumes.
         now.store(resume_at, Ordering::SeqCst);
         schedule_parked_once(&state).await;
         wait_for_done(&state, "mission-1").await;
@@ -10708,7 +10708,7 @@ queue = 1
                 .run_ids
                 .len(),
             2,
-            "a new provider Run, not a resume"
+            "a new Run, not a resume"
         );
 
         let _ = transition_mission(
@@ -14738,7 +14738,7 @@ theater = \"other-box\"
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             let hold = request.environment.get("AI6_DRIP_HOLD").cloned();
             RECORDED_STARTS.lock().unwrap().push(request);
-            // Each start is a new provider Run, so a later run can be told apart.
+            // Each start is a new Run, so a later run can be told apart.
             static STARTS: AtomicUsize = AtomicUsize::new(0);
             let start = STARTS.fetch_add(1, Ordering::Relaxed);
             Ok(DripRun::new(

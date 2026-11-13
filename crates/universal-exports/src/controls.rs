@@ -51,7 +51,7 @@ pub struct ControlStatus {
     pub operation_id: String,
     /// The Mission the control acts on.
     pub mission_id: String,
-    /// The provider Run expected to be the Mission's current one, when known.
+    /// The Run expected to be the Mission's current one, when known.
     pub run_id: Option<String>,
     /// `cancel`, `retry`, `resume` or `interrupt`.
     pub action: String,
@@ -323,7 +323,7 @@ pub(crate) struct ControlRequest {
     idempotency_key: String,
 }
 
-/// Where a control goes: the Station holding the Mission, and its current provider Run.
+/// Where a control goes: the Station holding the Mission, and its current Run.
 struct Target {
     station: String,
     run: Option<String>,

@@ -411,7 +411,7 @@ impl MissionStore {
         self.commit_with(self.missions.clone(), operations)
     }
 
-    /// Marks persisted active Missions blocked so an operator can reattach their provider Runs.
+    /// Marks persisted active Missions blocked so an operator can reattach their Runs.
     #[cfg(feature = "daemon")]
     pub(crate) fn recover_working(&mut self) -> Result<usize, MissionError> {
         let mut missions = self.missions.clone();
@@ -963,7 +963,7 @@ impl MissionStore {
     }
 
     /// Queues a Mission that is verifying as its next run for `agent_id`, told `amendment` after
-    /// its brief. The run starts a new provider Run and, like a failed one, does not take
+    /// its brief. The run starts a new Run and, like a failed one, does not take
     /// up the last one; the safe house the last run kept stays.
     pub fn redispatch(
         &mut self,

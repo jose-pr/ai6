@@ -4,7 +4,7 @@
 //! did. A harness that keeps no record of its own gets the Station's event stream instead, and
 //! the record says which it is.
 //!
-//! One record per provider Run, replaced each time it is filed. A context past
+//! One record per Run, replaced each time it is filed. A context past
 //! `[registry.limits.contexts] context_bytes` keeps its newest part, from a line start, and
 //! says how large it was; past `records`, the oldest filed go first.
 
@@ -58,7 +58,7 @@ pub enum ContextSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunContext {
-    /// The provider Run.
+    /// The Run.
     pub run: String,
     /// What it belongs to.
     pub owner: ContextOwner,

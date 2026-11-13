@@ -154,7 +154,7 @@ pub(crate) fn redact_value(value: &Value, secrets: &[String]) -> Value {
 }
 
 /// A conversation as its log left it, for a gateway that no longer holds it: what the app
-/// shows, within `bounds`, and the Station, provider Run and route of its last turn, so
+/// shows, within `bounds`, and the Station, Run and route of its last turn, so
 /// its next message resumes there. A proposal still waiting is shown as expired: the gateway
 /// that held it is gone.
 pub(crate) fn rebuild(

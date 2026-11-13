@@ -29,7 +29,7 @@ pub enum OnLimit {
     #[default]
     #[schema(label = "Move to another account in its pools")]
     Rotate,
-    /// Park the Run and resume the same provider Run when the limit resets.
+    /// Park the Run and resume the same Run when the limit resets.
     #[schema(label = "Wait for the limit to reset")]
     Wait,
     /// Post the next qualified Agent as a new run; park only if there is none.

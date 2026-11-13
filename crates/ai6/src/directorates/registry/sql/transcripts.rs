@@ -1,5 +1,5 @@
 //! Moneypenny's conversation log and each Run's context in SQL: one row per log entry, and
-//! one row per provider Run's context with its content as text.
+//! one row per Run's context with its content as text.
 
 use std::io;
 

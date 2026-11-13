@@ -411,7 +411,7 @@ pub(super) trait Harness: Send + Sync {
         settings: &HandlerSettings,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String>;
-    /// Resumes a provider Run with `handler` and its `settings`.
+    /// Resumes a Run with `handler` and its `settings`.
     fn resume(
         &self,
         handler: &str,
@@ -607,7 +607,7 @@ const BESIDE_MISSIONS: &str = "this Station also runs Missions on its own host, 
      Theater, or one without the `execution` role, or set assistant.allow_beside_local_missions to \
      accept that";
 
-/// The provider Run each conversation last ran, and on which route, by conversation.
+/// The Run each conversation last ran, and on which route, by conversation.
 type Known = Arc<Mutex<BTreeMap<String, (String, Option<RouteRef>)>>>;
 
 /// Frees what was issued to a harness unless it comes to run, when its pump frees it instead.
@@ -1267,7 +1267,7 @@ impl Desk {
         let unavailable = self.arm(&mut mode, job, &reach, &handler, &environment);
         let mission_id = MissionId::try_new(run_key.clone())
             .map_err(|_| "the conversation cannot name a Run".to_owned())?;
-        // A provider Run belongs to the source it ran on.
+        // A Run belongs to the source it ran on.
         let previous = same_route
             .then(|| {
                 job.run_id
@@ -1354,7 +1354,7 @@ impl Desk {
                         resumed,
                     }),
                 )),
-                // A provider Run that cannot be resumed (its transcript gone) starts afresh.
+                // A Run that cannot be resumed (its transcript gone) starts afresh.
                 Err(error) => {
                     report_resume_failure(&conversation, &resumed, &error);
                     harness
@@ -1432,7 +1432,7 @@ impl Desk {
 
     /// The route a job of the routed `agent` runs on, and `agent` as it works there; `agent` as it
     /// is for one handler. Whether it stays on `earlier`, the route the conversation last ran on,
-    /// and so can resume its provider Run. A route counts when its handler can be started
+    /// and so can resume its Run. A route counts when its handler can be started
     /// here and its source has room.
     ///
     /// # Errors
@@ -1987,7 +1987,7 @@ struct Pump {
     known: Known,
     stopping: Arc<AtomicBool>,
     /// For a resumed harness, how to start afresh should it fail before confirming the
-    /// provider Run.
+    /// Run.
     fallback: Option<Fallback>,
     /// The conversation's workspace, whose turn ends with each `completed` and at close.
     workspace: Option<SharedWorkspace>,
@@ -2024,7 +2024,7 @@ struct Fallback {
     handler: String,
     settings: HandlerSettings,
     start: AgentStart,
-    /// The provider Run the harness was asked to resume.
+    /// The Run the harness was asked to resume.
     resumed: String,
 }
 
@@ -2349,7 +2349,7 @@ impl Pump {
         }
     }
 
-    /// Files the context of provider Run `run_id` as it stands: the harness's record
+    /// Files the context of Run `run_id` as it stands: the harness's record
     /// where its handler names one, else the events this harness reported.
     fn file_context(&self, run_id: Option<&RunId>) {
         let Some(run_id) = run_id else {
@@ -2521,11 +2521,11 @@ fn translate(event: &AgentEvent) -> Option<AssistantEvent> {
     Some(translated)
 }
 
-/// Logs that the conversation's provider Run `resumed` could not be resumed and that its
+/// Logs that the conversation's Run `resumed` could not be resumed and that its
 /// harness starts afresh with the conversation's recap.
 fn report_resume_failure(conversation: &str, resumed: &str, error: &str) {
     eprintln!(
-        "ai6: assistant conversation {}: resuming provider Run {resumed} failed, so it \
+        "ai6: assistant conversation {}: resuming Run {resumed} failed, so it \
          starts afresh with its recap: {error}",
         conversation_digest(conversation)
     );
@@ -3544,7 +3544,7 @@ mod tests {
             request: AgentResume,
         ) -> Result<Object<dyn AgentSession>, String> {
             if !self.resumable {
-                return Err("no such provider Run".to_owned());
+                return Err("no such Run".to_owned());
             }
             let message = request.message.clone().unwrap_or_default();
             let run_id = request.run_id.clone();
@@ -4289,7 +4289,7 @@ priority = 1
         assert_eq!(settings["command"], "grok", "the route's own settings");
         assert!(!start.environment.contains_key("ANTHROPIC_BASE_URL"));
         let RoutedAsk::Start(handler, settings, start) = asked[1].clone() else {
-            panic!("a provider Run of another source is not resumed");
+            panic!("a Run of another source is not resumed");
         };
         assert_eq!(handler, "mock-claude");
         assert!(settings.is_empty());

@@ -324,7 +324,7 @@ pub(super) fn persist_exposure(state: &DaemonState, mission_id: &str, exposures:
 
 /// Stops a Run whose budget is spent and blocks its Mission with reason `budget`.
 ///
-/// The safe house and provider Run stay as they are, so an operator who raises the
+/// The safe house and Run stay as they are, so an operator who raises the
 /// limit can resume the same work.
 pub(super) fn stop_for_budget(
     state: &DaemonState,

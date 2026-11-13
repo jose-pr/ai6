@@ -60,7 +60,7 @@ handled by [parking](missions.md#provider-limits-park-and-resume). A negative, f
 Crossing `warn_at` emits a `budget` event on the Mission and writes an audit record
 (`budget.warn`). Reaching a limit writes `budget.limit`, interrupts the Run and moves the
 Mission to `blocked` with `blocked_reason: "budget"`, never `failed`. The safe house and the
-provider Run stay, so an operator who raises the limit can resume the same work. When a
+Run stay, so an operator who raises the limit can resume the same work. When a
 Mission cost limit is set, Claude Code is also started with `--max-budget-usd` for what the
 Mission may still spend, as a second stop.
 

@@ -139,7 +139,7 @@ impl Desk {
     /// Files a report in the Station's logbook: the next check-in publishes it and the next
     /// round reads it. `filing` is the same report as a Report of this Station, linked to the
     /// round's Mission; why it was not stored is the second answer, and leaves the logbook as
-    /// filed. `run` is the round's provider Run once known. Blocks; call from
+    /// filed. `run` is the round's Run once known. Blocks; call from
     /// `spawn_blocking`.
     pub(super) fn file(
         &self,
@@ -255,7 +255,7 @@ impl Desk {
     }
 
     /// Applies `action` (`caches` or `remove`) to the safe house of `target`, within the
-    /// limits [`hygiene`] fixes. `run` is the round's provider Run, which a green ink
+    /// limits [`hygiene`] fixes. `run` is the round's Run, which a green ink
     /// request names. Blocks; call from `spawn_blocking`.
     pub(super) fn tidy(
         &self,

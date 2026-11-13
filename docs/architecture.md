@@ -5,7 +5,7 @@ AI6 has two independent shapes: the **work** (what is being done) and the
 
 ```text
 Work            Operation ──► Mission ──► Run
-                (global)      (brief)     (one provider run, provider ID)
+                (global)      (brief)     (one run, provider ID)
                                              │ placed on
 Infrastructure  Station ──────────────────► Theater
                 (node running `ai6`)         (the host or environment the harness runs in)
@@ -50,7 +50,7 @@ AI6 names.
 **The Station** (`ai6` crate) runs the directorates' decisions. Its private loopback API
 serves provider discovery and the Mission lifecycle; the scheduler leases briefs from the
 Registry, selects an Agent, creates a safe house and starts a Run. Mission records
-persist, so a restarted Station reattaches to provider Runs by their Run ID.
+persist, so a restarted Station reattaches to Runs by their Run ID.
 
 **Universal Exports** (`universal-exports` crate) is the only public entry point. It
 authenticates users (Authenticator and Directory providers, or a trusted reverse-proxy
@@ -74,7 +74,7 @@ README has the details).
 ## How the directorates decouple
 
 1. **00 Section owns the harness boundary.** `AgentHandler`
-   (`ai6::directorates::section_00`) starts or resumes a provider Run, delivers initial
+   (`ai6::directorates::section_00`) starts or resumes a Run, delivers initial
    context, accepts later messages and decodes events. Claude and Codex handlers are
    Guatiao providers in `crates/providers/agents/`.
 2. **Q Branch owns gear.** Terminals (`ai6::directorates::q::terminal`, provider `pty`),
@@ -169,7 +169,7 @@ relay, which carries each request over the runner's connection to the Station; t
 wrapper's harness through a reverse forward ([Agents](agents.md#cables)).
 MCP is the agent-to-tool interface. [A2A](https://a2a-protocol.org/latest/) is the wire format of
 Cables at AI6's boundary, while AI6's relay remains authoritative for local identity and scope
-permissions. [Claude Code's cross-run messaging](https://code.claude.com/docs/en/cross-session-messaging)
+permissions. [Claude Code's cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)
 is a reference for delivered/held/refused outcomes and receiver-side controls, not an AI6
 transport dependency. See the [A2A coding-harness analysis](https://shashikantjagtap.net/a2a-for-coding-harnesses-the-protocol-most-teams-still-build-privately/)
 for the interoperability motivation.

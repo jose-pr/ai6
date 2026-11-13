@@ -144,19 +144,19 @@ origin leaves the public roots alone.
   NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
   once as `password\t…`, to stdout only. Accounts are never deleted through the API.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission (the `missions` row), its
-  runs (`RUN STATUS ROUTE`, `RUN` the run's handle, else its UID) and its provider Runs
+  runs (`RUN STATUS ROUTE`, `RUN` the run's handle, else its UID) and its Runs
   (`RUN STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the Station
   published, such as `permission-denied`, or `-`); `--operation` disambiguates a Mission ID
   used by several Operations.
 - `ai6ctl runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
   authorized `GET /v1/board` response.
-- `ai6ctl run <RUN_ID>` prints one provider Run.
+- `ai6ctl run <RUN_ID>` prints one Run.
 
 Run listings end with an `EXPOSURE` column: the untrusted input the Run read,
 comma separated, or `-`. A Run state is free text from the board and includes
 `queued`, `parked`, `quarantined` and `abandoned`.
 
-Mission lists include only Missions with a provider Run registered at the gateway.
+Mission lists include only Missions with a Run registered at the gateway.
 
 - `ai6ctl missions --compartment <ID>` keeps what that compartment covers;
   `ai6ctl missions products <MISSION_ID>` prints a Mission's outcome, CX report and refs.

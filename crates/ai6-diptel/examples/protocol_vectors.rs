@@ -8,27 +8,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lifecycle = LifecycleEvent {
         operation_id: OperationId::new("station-a")?,
         mission_id: MissionId::new("mission-17")?,
-        run_id: RunId::new("provider-run-3")?,
+        run_id: RunId::new("run-3")?,
         state: RunState::Working,
         reason: None,
         sequence: 4,
     };
     let terminal = TerminalData::new(
-        RunId::new("provider-run-3")?,
+        RunId::new("run-3")?,
         5,
         TerminalDirection::Output,
         vec![0xff, 0x00, 0x80],
     )?;
-    let resize = TerminalResize::new(RunId::new("provider-run-3")?, 6, 120, 40)?;
+    let resize = TerminalResize::new(RunId::new("run-3")?, 6, 120, 40)?;
     let control = MissionControl::new(
         ControlId::new("control-1")?,
         OperationId::new("station-a")?,
         MissionId::new("mission-17")?,
         ControlAction::Retry,
     )
-    .with_run(RunId::new("provider-run-3")?)
+    .with_run(RunId::new("run-3")?)
     .with_agent("008")?;
-    let gap = TerminalGap::new(RunId::new("provider-run-3")?, 0, 5)?;
+    let gap = TerminalGap::new(RunId::new("run-3")?, 0, 5)?;
 
     let quarantined = LifecycleEvent {
         state: RunState::Quarantined,

@@ -877,7 +877,7 @@ fn stored(name: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
-/// `definitions` as the one record of each singleton family, through the checks a provider runs.
+/// `definitions` as the one record of each singleton family, through the checks a runs.
 fn loaded(definitions: Vec<(ConfigRecord, Value)>) -> crate::ConfigSnapshot {
     let layer: crate::directorates::m::config::Layer = definitions
         .into_iter()

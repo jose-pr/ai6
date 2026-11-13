@@ -1079,7 +1079,7 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
             .map(|ids| ids.iter().filter_map(serde_json::Value::as_str).collect())
             .unwrap_or_default();
         if !run_ids.is_empty() {
-            lines.push(format!("Provider Runs: {}", run_ids.join(", ")));
+            lines.push(format!("Runs: {}", run_ids.join(", ")));
         }
     }
     CxReport {

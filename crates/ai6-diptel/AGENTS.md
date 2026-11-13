@@ -77,7 +77,7 @@ withdrew it, and `Held` that it ended done with something its role requires miss
 a person's verdict (reason `no-approval`). `reason` is an optional field of the lifecycle frame: `green-ink` on a
 `Blocked` Run whose Agent waits for a person's approval of an irreversible step,
 `permission-denied` on a `Done` or `Failed` one whose harness refused calls in its last turn.
-The receiver refuses a reason that `valid_reason` rejects. `sequence` is a monotonic cursor for events in one provider Run. A
+The receiver refuses a reason that `valid_reason` rejects. `sequence` is a monotonic cursor for events in one Run. A
 Mission may have multiple Runs; these types do not derive one identity from
 another.
 
@@ -112,7 +112,7 @@ A control is what Universal Exports hands the Station holding a Mission. `Cancel
 the live Run and abandons the Mission, `Retry` queues a stalled or finished Mission
 as a new run (optionally for `agent`), `Resume` resumes a parked, blocked or stalled
 Mission (optionally with `message`) and `Interrupt` stops the current turn. `run_id`
-names the provider Run the requester expects to be current. `with_agent` refuses a
+names the Run the requester expects to be current. `with_agent` refuses a
 blank codename, one over `MAX_ID_BYTES` or one with control characters; `with_message`
 refuses a blank message or one over `MAX_CONTROL_MESSAGE_BYTES` (16 KiB). `Debug`
 redacts the message to its length. `ControlAction` is non-exhaustive.

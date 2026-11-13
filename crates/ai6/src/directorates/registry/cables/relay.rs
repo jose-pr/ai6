@@ -281,7 +281,7 @@ impl CablePrincipal {
         &self.station
     }
 
-    /// Returns the provider-issued Run identity, when bound.
+    /// Returns the Run identity, when bound.
     pub fn run_id(&self) -> Option<&str> {
         self.run_id.as_deref()
     }
@@ -362,7 +362,7 @@ impl CableEndpoint {
         &self.station
     }
 
-    /// Returns the live provider Run identity, or `None` for offline delivery.
+    /// Returns the live Run identity, or `None` for offline delivery.
     pub fn run_id(&self) -> Option<&str> {
         self.run_id.as_deref()
     }
@@ -618,7 +618,7 @@ pub struct CableAuditRecord {
     pub station: String,
     /// Bound Mission identity.
     pub mission_id: Option<String>,
-    /// Bound provider Run identity.
+    /// Bound Run identity.
     pub run_id: Option<String>,
     /// Requested target scope.
     pub target_scope: CableScope,
@@ -654,7 +654,7 @@ pub struct CableCrossing {
 pub struct CableHeldRecipient {
     /// Resolved Agent identity.
     pub agent: String,
-    /// Provider Run the Cable was addressed to, if one was active at send time.
+    /// Run the Cable was addressed to, if one was active at send time.
     pub run_id: Option<String>,
 }
 
@@ -699,7 +699,7 @@ pub struct CableSendRequest {
     to_run: Option<String>,
     /// Narrows a compartment Cable to one Operation it covers.
     operation: Option<String>,
-    /// The provider Run the thread is bound to.
+    /// The Run the thread is bound to.
     affinity: Option<String>,
 }
 
@@ -734,7 +734,7 @@ pub struct CableDelivery {
     pub from_station: String,
     /// AI6 Mission identity, when present.
     pub mission_id: Option<String>,
-    /// Provider Run identity, when present.
+    /// Run identity, when present.
     pub run_id: Option<String>,
     /// Explicit audience from the accepted Cable.
     pub target: CableTarget,
@@ -801,7 +801,7 @@ impl CableSendRequest {
         }
     }
 
-    /// Binds the Cable to the provider Run its thread is with: only that Run reads it,
+    /// Binds the Cable to the Run its thread is with: only that Run reads it,
     /// or, once that Run has ended, the next Run of the Agent opened after it ended.
     #[must_use]
     pub fn with_affinity(mut self, run: impl Into<String>) -> Self {

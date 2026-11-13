@@ -57,7 +57,7 @@ impl std::str::FromStr for Tidy {
     }
 }
 
-/// Who asks: the round's Mission and its provider Run.
+/// Who asks: the round's Mission and its Run.
 pub(super) struct Round<'a> {
     pub(super) mission: &'a Mission,
     pub(super) run: &'a str,

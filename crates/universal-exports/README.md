@@ -136,7 +136,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/board` | Return Runs for Operations permitted by the user's `mission.read` policy. |
 | `GET` | `/v1/stations` | Return authorized Station health, hosted Operations, the Theaters each Station reaches (with the transport's capabilities and the Theater's declared facts), and the current Headquarters Station. |
 | `GET` | `/v1/user/operations/{operation_id}/placement-preview` | Require `mission.read`; return where a Mission for the Operation would run (Station, Theater, Agent, best first) and a reason for every place ruled out. Optional `agent`, `role`, `stations` and `tags` narrow it. |
-| `GET` | `/v1/missions` | Group registered provider Runs by Mission and apply `mission.read` to each Operation; Missions queued, waiting, retrying or failed before a start are listed with `pending`. |
+| `GET` | `/v1/missions` | Group registered Runs by Mission and apply `mission.read` to each Operation; Missions queued, waiting, retrying or failed before a start are listed with `pending`. |
 | `GET` | `/v1/operations/{operation_id}/missions/{mission_id}` | Return one authorized Mission and its AI6-published brief and sanitized launch manifest. |
 | `GET` | `/v1/auth/session` | Validate the bearer access token against the shared Registry and return its person and expiry. |
 | `POST` | `/v1/station/access-tokens` | Issue a person-bound access token after M authenticates the user; the raw token is returned once. Body: `{"person_id":"…","ttl_seconds":600}`. |
@@ -189,7 +189,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/station/controls/next?station=<id>&wait_ms=<n>` | Wait up to `wait_ms` (default 1000, at most 25000) for the next control queued for that Station; `200` with one DipTel control value frame (channel 4) or `204`. |
 | `POST` | `/v1/station/controls/{control_id}/result` | Report a taken control's outcome: `{"station":"…","outcome":"applied"\|"rejected","state":"…","reason":"…"}`; `403` from another Station, `409` once finished. |
 | `POST` | `/v1/attach` | Exchange a token in the request body for a one-connection cookie. |
-| `GET` | `/v1/socket/{run_id}?after={sequence}` | Replay and stream events for one provider Run. |
+| `GET` | `/v1/socket/{run_id}?after={sequence}` | Replay and stream events for one Run. |
 
 `Gateway::with_access` injects identity and authorization providers. Configure
 `--directory` and `--proxy-user-header` to accept identity from the existing

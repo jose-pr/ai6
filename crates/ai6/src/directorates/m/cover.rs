@@ -61,7 +61,7 @@ pub enum Disclosure {
     Hidden,
     /// The work may say AI helped, but not which model or Agent.
     Assisted,
-    /// The Agent, its model and provider Runs may be named.
+    /// The Agent, its model and Runs may be named.
     Full,
 }
 

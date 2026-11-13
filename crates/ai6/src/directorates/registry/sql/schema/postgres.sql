@@ -661,7 +661,7 @@ CREATE INDEX IF NOT EXISTS ai6_assistant_log_conversation ON ai6_assistant_log (
 CREATE INDEX IF NOT EXISTS ai6_assistant_log_person ON ai6_assistant_log (person);
 CREATE INDEX IF NOT EXISTS ai6_assistant_log_order ON ai6_assistant_log (at_micros, id);
 
--- Each provider Run's harness context: the record as JSON, its content as text. conversation is
+-- Each Run's harness context: the record as JSON, its content as text. conversation is
 -- '' for a Mission's Run, operation '' for one of Moneypenny's.
 CREATE TABLE IF NOT EXISTS ai6_run_contexts (
     run TEXT PRIMARY KEY,

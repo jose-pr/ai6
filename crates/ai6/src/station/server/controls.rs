@@ -356,7 +356,7 @@ fn has_live_run(state: &DaemonState, mission: &Mission) -> bool {
         .is_ok_and(|runs| runs.contains_key(mission.mission_id.as_str()))
 }
 
-/// Closes a Mission's live provider Run and leaves its safe house for the next run.
+/// Closes a Mission's live Run and leaves its safe house for the next run.
 async fn stop_live_run(state: &DaemonState, mission_id: &str) {
     let operation = state.runs.lock().ok().and_then(|mut runs| {
         runs
@@ -510,7 +510,7 @@ pub(super) async fn stop_settled(state: &DaemonState) {
     }
 }
 
-/// Publishes the Mission's new state on its latest provider Run, for a control that
+/// Publishes the Mission's new state on its latest Run, for a control that
 /// changed it while no Run was live to report it.
 fn announce(state: &DaemonState, mission: &Mission, after: MissionState) {
     let (Some(publisher), Some(name), Some(operation), Some(run)) = (
@@ -811,7 +811,7 @@ mod tests {
             apply(&state, &resume).await,
             ControlOutcome::applied("working")
         );
-        // The mock's resumed turn completes on the provider Run it was given.
+        // The mock's resumed turn completes on the Run it was given.
         wait_for_done(&state, "mission-1").await;
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.run_ids.len(), 1);

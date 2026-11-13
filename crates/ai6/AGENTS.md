@@ -1911,7 +1911,7 @@ the policy, the Run's pool account is marked limited until the reset (or
 room, parks the Mission until now so the next scheduler pass resumes the same provider
 Run on another account (an account kind that `carries_run`), or queues the Mission
 again for the same Agent as a new run (Codex and `config-dir` kinds); otherwise it waits.
-`Wait` parks the Mission and resumes the same provider Run; `Backup` posts the next
+`Wait` parks the Mission and resumes the same Run; `Backup` posts the next
 qualified Agent whose handler differs from the limited one as a new run, and parks when
 none exists.
 
@@ -2115,7 +2115,7 @@ secret backends.
 #[non_exhaustive] pub struct Provenance {
     pub origin: Origin,
     pub principal: Option<String>,   // person ID | Source provider | sleeper name | proposing Agent; None for a drop
-    pub reference: Option<String>,   // Source item | sleeper fingerprint | proposing provider Run
+    pub reference: Option<String>,   // Source item | sleeper fingerprint | proposing Run
     pub item_url: Option<String>,
     pub received_at: i64,            // Unix seconds
     pub received_by: String,         // Station ID, or "universal-exports"
@@ -2298,7 +2298,7 @@ authorisation of kind `proposal` covers it: proposer Agent (or the role the prop
 at that Agent's clearance, and the proposal's title against `target_pattern`. That approval
 is a green ink request on the parent Mission (`ApprovalStore::approve_by_class`, one use),
 audited as `mission.proposal.approved` with actor `class:ID`; the promoted brief is cleared of
-`review`. Provider Run identity is bound by AI6, never supplied in the proposed brief.
+`review`. Run identity is bound by AI6, never supplied in the proposed brief.
 
 `record_audit` stores a validated metadata-only `AuditRecord` under `audit/` and rejects
 duplicate IDs. Each entry is bounded to 16 KiB and the listing scans at most 10,000
@@ -2351,7 +2351,7 @@ concurrent Mission count of at least 1; `set_station_settings` refuses one above
 reads the validated current value; `set_station_settings(station, settings)` persists it
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
-startup default, and unreadable settings fail closed. Existing provider Runs are not
+startup default, and unreadable settings fail closed. Existing Runs are not
 stopped when the limit is lowered. Every backend stores all four fields; a record missing one
 is invalid.
 
@@ -3694,7 +3694,7 @@ pub struct Sleeper {
     pub stations: Vec<String>,   // narrows its briefs, like Brief.stations; empty adds no limit
     pub each_station: bool,      // one round per eligible Station per window (default false)
     pub standing: bool,          // one Mission, each window a run of it (default false)
-    pub resume: bool,            // needs standing: resume the last run's provider Run
+    pub resume: bool,            // needs standing: resume the last run's Run
 }   // standing and resume are left out of the serialized form when false, so the fingerprint
     // of a Sleeper that sets neither is what it was before they existed
 impl Sleeper {
@@ -3740,7 +3740,7 @@ with `MissionEntry::standing` and every later one through `reenter_brief`: `Alre
 brief is for that window, `InFlight` (logged once per window) when an earlier window's run is
 queued, held or claimed. Its data's `sleeper` object also carries `standing` and `resume`; a
 start whose claimed brief says `resume`, with the Registry's Sleeper provenance, resumes the
-latest run's provider Run when that run had the same handler, and records `sleeper`/
+latest run's Run when that run had the same handler, and records `sleeper`/
 `resumed` or `started` on the timeline. A brief's
 `stations` is the sleeper's, or `[station]` for a round; its data's `sleeper` object names
 `operation`, `name`, `window` and, for a round, `station`. For an `each_station` sleeper the
@@ -3805,7 +3805,7 @@ A charge is one standing Run per scope (`m`, `operation:<codename>`, `station:<i
 the Station the scope names (M's on the Headquarters Station, an Operation's on an execution
 Station it allows, a Station's on itself) and woken by its area's events, one turn per wake. It is
 not a Mission: no Mission record, brief, placement, run or Run record names it. Its record
-(`charges/<hex of scope>.json`, SQL table `ai6_charges`) holds its lease, fence, provider Run
+(`charges/<hex of scope>.json`, SQL table `ai6_charges`) holds its lease, fence, Run
 and handler, logbook, last wake, the turns of the last hour, what it was told, and controls.
 `docs/charges.md` has the behaviour. `Charge`, `ChargeDefinition` and `ChargeScope` are at the crate
 root.
@@ -3851,7 +3851,7 @@ impl ChargeUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(en
 pub trait ChargeStore {
     fn claim_charge(&self, scope, agent, station, ttl: Duration) -> Result<ChargeRecord, ChargeError>;
         // makes, renews (same Station, same fence) or takes over a lapsed lease (fence + 1, logged);
-        // another Agent forgets the provider Run; HeldBy while another's lease is live
+        // another Agent forgets the Run; HeldBy while another's lease is live
     fn update_charge(&self, scope, station, fence: u64, renew: Option<Duration>, update: ChargeUpdate) -> Result<ChargeRecord, ChargeError>;  // Stale unless holder and fence
     fn request_charge_wake(&self, scope, by, note) -> Result<ChargeControl, ChargeError>;   // no lease; NotFound before a first claim
     fn charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>>;
@@ -3886,7 +3886,7 @@ AssistantLogStore::prune_assistant_log(before: Option<f64>, bytes: Limit) -> io:
 
 ## Run contexts (`ai6::directorates::registry::contexts`, also at the crate root)
 
-What a Run's harness kept of it, one record per provider Run, replaced each time it is
+What a Run's harness kept of it, one record per Run, replaced each time it is
 filed. `[registry.limits.contexts]`: `context_bytes` (8 MiB; the newest part is kept, from a line
 start, with `cut_from` the size it had) and `records` (2,000; the oldest filed go). Files
 `contexts/<run>.json` (the record) and `.log` (its content); SQL table `ai6_run_contexts`
@@ -4223,7 +4223,7 @@ are refused with a reason.
 
 `MissionId::try_new(impl Into<String>)` and `RunId::try_new(impl Into<String>)`
 validate non-empty values up to 256 UTF-8 bytes with no control characters. Both also
-implement `FromStr` and `Display`. A Mission can group several provider Runs; a
+implement `FromStr` and `Display`. A Mission can group several Runs; a
 Run ID is issued by the provider and stays stable when that Run resumes.
 
 With `station-tls` (`ai6::station::identity`), a Station's mutual TLS is
@@ -4739,7 +4739,7 @@ peer (`a2a:<peer>` or `a2a:<peer>/<addressee>`, `liaison_peer(name) -> Option<(&
 Option<&str>)>` splits it) and matches no endpoint is addressed to `a2a:<peer>` with no Run,
 waiting in the Registry for Liaison; a principal with a peer cannot send to one. A grant whose
 Agent target is `a2a:<peer>` also covers `a2a:<peer>/<addressee>`.
-`CableSendRequest::with_affinity(run)` binds a Cable to the provider Run its thread is
+`CableSendRequest::with_affinity(run)` binds a Cable to the Run its thread is
 with (`Cable::affinity()`, serde field `affinity`): `inbox` gives it to that Run only, or,
 once the Registry has that Run `Ended` or `Lost`, to a Run of the Agent whose record
 `opened_at` is later than its `closed_at`; a Run the Registry cannot tell about keeps it. A
@@ -5359,7 +5359,7 @@ to run them on its next pass; the findings are appended to `RunRecord::evidence`
 A decision is a verdict on the verifying run (`record_verdict`): `Confirmed` settles the Mission done,
 `Disputed` and `FailedVerification` fail it, `Redispatch` queues its next run: run N+1 of the same
 Mission for the best qualified Agent (`MissionStore::redispatch(id, agent, amendment)`, which keeps the safe
-house and starts a new provider Run), told the person's reason and amendment after its brief
+house and starts a new Run), told the person's reason and amendment after its brief
 (`Mission::task()`). The verified run keeps its verdict and counts against its Agent on the scorecard.
 Nothing else leaves `verifying`.
 
@@ -5457,7 +5457,7 @@ looks at its area (Missions of its Operation in `verifying`, quarantines, dark S
 controls); every round it takes the charge's Cables, adds a `wake_every` timer, and starts one turn
 of waiting events when the hour's `max_turns_per_hour` has room. The harness runs on this host in
 `<state dir>/charges/charge--<scope>`, started as `AgentStart.mission_id = "charge--<scope>"` (no
-Mission has that ID), resumed with the record's provider Run, or started fresh with the
+Mission has that ID), resumed with the record's Run, or started fresh with the
 logbook when the resume is refused or fails before it answers. A Station's charge gets
 `station_report` and `file_report` on its Cable endpoint. Stopping closes every charge's harness.
 
@@ -5546,7 +5546,7 @@ clearance. AI6 drains provider events
 in a background worker and updates Mission state independently of Universal Exports polling;
 `GET .../events/next?timeout_ms=` reads from a bounded daemon event queue. The
 `POST .../messages`, `POST .../interrupt` and `POST .../resume` routes operate the
-provider Run. Resume passes the same provider ID back to its handler
+Run. Resume passes the same provider ID back to its handler
 and rejects a handler that returns a different ID. After a process restart, resume rebuilds
 handler settings from the persisted operation and current Agent roster. The optional
 `environment` map in a resume request supplies fresh, non-persisted values such as new
@@ -5702,7 +5702,7 @@ On graceful shutdown, event workers interrupt and close active Runs and move Wor
 Missions to Blocked while preserving their safe houses; a Run on a runner is left
 running and its Mission stays Working, so the next start re-attaches to it (see Field
 runner below). Mission records persist across
-daemon restarts, and a blocked Mission can reattach to its provider Run through its
+daemon restarts, and a blocked Mission can reattach to its Run through its
 handler. A parked Mission resumes through the same path once `parked_until` passes
 (`POST .../resume` also resumes it early). Recovery is described under Run records and
 Provider limits above. `ai6::directorates::m::roster`
@@ -5785,7 +5785,7 @@ connections may be open. `initialize` advertises `authMethods: [{id: "ai6-runner
   (`HandlerSpec`: id and the Agent's `handler_settings`), `terminal` and `key`) names a Run
   (letters, digits, `.`, `_`, `-`; the ACP run ID is the key); the first `session/prompt`
   starts the harness with that text as the task. `session/resume` with `ResumeMeta` (also
-  `key`, `handler`) resumes a provider Run under a new key. Later prompts are messages.
+  `key`, `handler`) resumes a Run under a new key. Later prompts are messages.
 - `session/load {sessionId: key, _meta: {"dev.coqui.ai6/after": N}}` attaches to a Run the
   runner still holds and replays the events after `N` (the cursor the Station last
   acknowledged when absent), then follows it live. A newer connection to a Run takes it
@@ -5868,7 +5868,7 @@ assistant desk. Without it the built-in public roots alone apply. Redirects are 
 background thread orders Run registration, lifecycle updates and raw terminal chunks
 on one event cursor. A separate authenticated long-poll receives validated Guatiao input
 and resize frames from `/v1/station/inputs/next`; AI6 dispatches them only to the live terminal
-bound to the matching Station, Mission and provider Run. The gateway's user-scoped
+bound to the matching Station, Mission and Run. The gateway's user-scoped
 write grant and lease checks remain the authorization boundary. Requests time out after
 two seconds; outbound writes are not retried, while input polling retries after errors.
 A queue overflow (64 events) or outbound gateway error disables publication and is reported
@@ -5884,7 +5884,7 @@ interrupt) queued for it: a third thread long-polls
 time and posts the outcome to `/v1/station/controls/{id}/result`. The daemon applies it
 only to a Mission in its own book under the control's Operation, while it holds that
 Mission's Run lease with its current fencing token, and, when the control names a
-provider Run, while that Run is still the Mission's latest; otherwise it rejects
+Run, while that Run is still the Mission's latest; otherwise it rejects
 with a reason. It acts through the loopback paths: `cancel` is the `abandoned` transition
 (interrupts and closes the live Run, finishes the safe house keeping the work),
 `retry` closes a live stalled Run, ends its Run record and calls
@@ -5915,12 +5915,12 @@ the harness closes), and the MCP URL `<gateway origin>/v1/moneypenny/mcp` plus t
 in its environment. A later job goes to the running harness as a message, unless its token
 expires within two minutes, when the harness is closed and resumed with the new token; a job
 for a conversation whose harness is still closing waits up to ten seconds for it, then is
-rejected. A harness idle for ten minutes is closed; the next job resumes its provider Run
+rejected. A harness idle for ten minutes is closed; the next job resumes its Run
 (the job's `run_id`, else the one the desk remembers) with the Agent's context and the
 job's `context` again as `AgentResume::initial_context`, or starts afresh with them and the
 job's `recap` when that fails: when `resume` errs, or when the resumed harness fails (a
 `failed` event or a read error) before its `run_id()` is known. Either failure is logged
-(`ai6: assistant conversation <digest>: resuming provider Run <id> failed, …`) and not
+(`ai6: assistant conversation <digest>: resuming Run <id> failed, …`) and not
 reported to the conversation. Handler events `text`, `tool`, `completed`, `failed` and
 `limit` are reported; `failed` and `limit` close the harness at once, freeing its slot, and
 a harness busy answering that reports nothing for ten minutes is closed after a `failed`

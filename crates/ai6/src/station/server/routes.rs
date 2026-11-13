@@ -262,7 +262,7 @@ pub(super) fn choose(
 }
 
 /// The route a conversation of the routed `agent` runs on at `place`: `earlier`, the route it last
-/// ran on, while that has room, which is the one way to keep its provider Run; else the one
+/// ran on, while that has room, which is the one way to keep its Run; else the one
 /// `balance` picks. Whether it stayed.
 ///
 /// # Errors
@@ -295,7 +295,7 @@ pub(super) fn hold(state: &DaemonState, operation: Option<&str>, agent: &Agent) 
 }
 
 /// What a limited Run of the routed `agent` may do next: whether any route has room, and
-/// whether one of `handler` has an account a provider Run can move to.
+/// whether one of `handler` has an account a Run can move to.
 pub(super) fn room_after_limit(
     state: &DaemonState,
     operation: Option<&str>,
@@ -322,7 +322,7 @@ pub(super) fn room_after_limit(
 pub(super) enum ResumeOn {
     /// The route it ran on has room, or it holds its place there.
     Stay(OnRoute),
-    /// Another route of the same handler, whose account the provider Run can move to.
+    /// Another route of the same handler, whose account the Run can move to.
     Move(OnRoute),
     /// No route it can move to has room, but another has: a new run, saying why.
     NewRun(String),

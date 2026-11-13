@@ -31,7 +31,7 @@ use crate::bounds::Limit;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
-    /// The holder is running the provider Run.
+    /// The holder is running the Run.
     Active,
     /// A provider limit paused the Run until `parked_until`.
     Parked,

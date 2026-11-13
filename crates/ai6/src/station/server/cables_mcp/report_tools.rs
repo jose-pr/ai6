@@ -173,7 +173,7 @@ impl FileReportArgs {
 }
 
 impl CableTools {
-    /// The provider Run, once the harness has reported it.
+    /// The Run, once the harness has reported it.
     fn bound_run(&self) -> Option<String> {
         self.principal()
             .ok()

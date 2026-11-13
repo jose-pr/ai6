@@ -43,7 +43,7 @@ use ai6_diptel::{
 let event = LifecycleEvent {
     operation_id: OperationId::new("operation-a")?,
     mission_id: MissionId::new("mission-17")?,
-    run_id: RunId::new("provider-run-3")?,
+    run_id: RunId::new("run-3")?,
     state: RunState::Working,
     reason: None,
     sequence: 4,

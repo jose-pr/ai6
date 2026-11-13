@@ -1,7 +1,7 @@
 //! Conversations with Moneypenny, kept per person in the gateway's memory.
 //!
 //! A conversation remembers what was said (for the app to show again when the person comes
-//! back), which Station runs its harness and which provider Run that harness is, so a
+//! back), which Station runs its harness and which Run that harness is, so a
 //! later message resumes it. It holds the person's access token while the person uses it:
 //! the tools run with it, so they can do no more than the person could, and stop when the
 //! person's sign-in ends.
@@ -78,7 +78,7 @@ pub(crate) struct Conversation {
     pub(crate) entries: VecDeque<Entry>,
     /// The Station that runs (or last ran) the harness.
     pub(crate) station: Option<String>,
-    /// The provider Run of the harness, for a resume.
+    /// The Run of the harness, for a resume.
     pub(crate) run_id: Option<String>,
     /// The route that Run runs on, when the assistant Agent has routes.
     pub(crate) route: Option<ai6::RouteRef>,
@@ -235,7 +235,7 @@ impl Conversation {
     }
 
     /// The turn the harness is on, as far as the gateway knows: the Station reporting now or
-    /// the one running it, its provider Run, route, account and model.
+    /// the one running it, its Run, route, account and model.
     fn turn(&mut self) -> AssistantTurn {
         let (station, tokens) = match &mut self.reporting {
             Some((station, tokens)) => (Some(station.clone()), tokens.take()),

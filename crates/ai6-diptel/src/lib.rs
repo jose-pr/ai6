@@ -276,7 +276,7 @@ impl MissionControl {
         }
     }
 
-    /// Names the provider Run the control expects to be the Mission's current one.
+    /// Names the Run the control expects to be the Mission's current one.
     #[must_use]
     pub fn with_run(mut self, run_id: RunId) -> Self {
         self.run_id = Some(run_id);
@@ -328,7 +328,7 @@ impl MissionControl {
         &self.mission_id
     }
 
-    /// The provider Run expected to be the Mission's current one, when known.
+    /// The Run expected to be the Mission's current one, when known.
     pub fn run_id(&self) -> Option<&RunId> {
         self.run_id.as_ref()
     }
@@ -384,7 +384,7 @@ pub struct LifecycleEvent {
     pub sequence: u64,
 }
 
-/// Terminal input or output associated with a provider Run.
+/// Terminal input or output associated with a Run.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TerminalData {
     /// Provider-issued resumable operation identifier.
@@ -635,15 +635,15 @@ pub fn control_frames(
 /// One validated lifecycle, terminal or control frame received from a gateway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncomingFrame {
-    /// A Mission or provider Run changed lifecycle state.
+    /// A Mission or Run changed lifecycle state.
     Lifecycle(LifecycleEvent),
-    /// Terminal output or input bytes for one provider Run.
+    /// Terminal output or input bytes for one Run.
     Terminal(TerminalData),
     /// A terminal geometry change from an attached viewer.
     Resize(TerminalResize),
     /// An operator control for the Station holding a Mission.
     Control(MissionControl),
-    /// Events of a provider Run the viewer cannot have.
+    /// Events of a Run the viewer cannot have.
     Gap(TerminalGap),
     /// The remote side closed a channel.
     Closed(u64),
@@ -974,7 +974,7 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            run_id: RunId::new("provider-run-3").unwrap(),
+            run_id: RunId::new("run-3").unwrap(),
             state: RunState::Working,
             reason: None,
             sequence: 4,
@@ -995,7 +995,7 @@ mod tests {
         );
         assert_eq!(
             <&str>::try_from(map.required("run_id").unwrap()).unwrap(),
-            "provider-run-3"
+            "run-3"
         );
     }
 
@@ -1004,7 +1004,7 @@ mod tests {
         use guatiao::value::wire::channel::{Received, Receiver};
 
         let event = TerminalData::new(
-            RunId::new("provider-run-3").unwrap(),
+            RunId::new("run-3").unwrap(),
             5,
             TerminalDirection::Output,
             vec![0xff, 0x00, 0x80],
@@ -1035,7 +1035,7 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            run_id: RunId::new("provider-run-3").unwrap(),
+            run_id: RunId::new("run-3").unwrap(),
             state: RunState::Blocked,
             reason: None,
             sequence: 9,
@@ -1075,7 +1075,7 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            run_id: RunId::new("provider-run-3").unwrap(),
+            run_id: RunId::new("run-3").unwrap(),
             state: RunState::Parked,
             reason: None,
             sequence: 4,
@@ -1094,7 +1094,7 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            run_id: RunId::new("provider-run-3").unwrap(),
+            run_id: RunId::new("run-3").unwrap(),
             state: RunState::Quarantined,
             reason: None,
             sequence: 4,
@@ -1122,7 +1122,7 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            run_id: RunId::new("provider-run-3").unwrap(),
+            run_id: RunId::new("run-3").unwrap(),
             state: RunState::Blocked,
             reason: Some("green-ink".to_owned()),
             sequence: 4,
@@ -1154,13 +1154,13 @@ mod tests {
     }
 
     fn sample_gap() -> TerminalGap {
-        TerminalGap::new(RunId::new("provider-run-3").unwrap(), 0, 5).unwrap()
+        TerminalGap::new(RunId::new("run-3").unwrap(), 0, 5).unwrap()
     }
 
     #[test]
     fn a_gap_decodes_as_it_was_made_and_needs_a_sequence_between_its_ends() {
         let gap = sample_gap();
-        assert_eq!(gap.run_id().as_str(), "provider-run-3");
+        assert_eq!(gap.run_id().as_str(), "run-3");
         assert_eq!((gap.after(), gap.before()), (0, 5));
         let (schema, value) = gap_frames(&gap).unwrap();
         let mut receiver = FrameReceiver::new();
@@ -1169,7 +1169,7 @@ mod tests {
             receiver.accept(&value).unwrap(),
             Some(IncomingFrame::Gap(gap))
         );
-        let run = || RunId::new("provider-run-3").unwrap();
+        let run = || RunId::new("run-3").unwrap();
         for (after, before) in [(5, 6), (6, 5), (5, 5), (u64::MAX, u64::MAX)] {
             assert_eq!(
                 TerminalGap::new(run(), after, before),
@@ -1187,7 +1187,7 @@ mod tests {
             MissionId::new("mission-17").unwrap(),
             ControlAction::Retry,
         )
-        .with_run(RunId::new("provider-run-3").unwrap())
+        .with_run(RunId::new("run-3").unwrap())
         .with_agent("008")
         .unwrap()
     }
@@ -1257,20 +1257,20 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            run_id: RunId::new("provider-run-3").unwrap(),
+            run_id: RunId::new("run-3").unwrap(),
             state: RunState::Working,
             reason: None,
             sequence: 4,
         };
         let terminal = TerminalData::new(
-            RunId::new("provider-run-3").unwrap(),
+            RunId::new("run-3").unwrap(),
             5,
             TerminalDirection::Output,
             vec![0xff, 0x00, 0x80],
         )
         .unwrap();
         let resize =
-            TerminalResize::new(RunId::new("provider-run-3").unwrap(), 6, 120, 40).unwrap();
+            TerminalResize::new(RunId::new("run-3").unwrap(), 6, 120, 40).unwrap();
         let lifecycle_frames = lifecycle_frames(&event).unwrap();
         let terminal_frames = terminal_frames(&terminal).unwrap();
         let resize_frames = resize_frames(&resize).unwrap();
