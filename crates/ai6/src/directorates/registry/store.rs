@@ -1398,7 +1398,7 @@ pub(crate) fn newest_first(mut briefs: Vec<FiledBrief>, limit: usize) -> Vec<Fil
 impl FileRegistry {
     /// The runs recorded for `key`.
     fn runs_of(&self, key: &str) -> u32 {
-        fs::read_to_string(self.root.join("attempts").join(format!("{key}.json")))
+        fs::read_to_string(self.root.join("claims").join(format!("{key}.json")))
             .ok()
             .and_then(|text| text.trim().parse().ok())
             .unwrap_or(0)
@@ -1892,7 +1892,7 @@ impl BriefStore for FileRegistry {
         // Queued first: a crash before the old record goes leaves it finished and queued, as a
         // brief finished without a claim is, never neither.
         self.write_brief(&self.root.join("new").join(format!("{key}.json")), &entered)?;
-        match fs::remove_file(self.root.join("attempts").join(format!("{key}.json"))) {
+        match fs::remove_file(self.root.join("claims").join(format!("{key}.json"))) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
@@ -1956,7 +1956,7 @@ impl BriefStore for FileRegistry {
             let key = brief.key();
             let source = self.root.join("new").join(format!("{key}.json"));
             let destination = destination_dir.join(format!("{key}.json"));
-            let attempts_path = self.root.join("attempts").join(format!("{key}.json"));
+            let attempts_path = self.root.join("claims").join(format!("{key}.json"));
             let previous_run = match fs::read_to_string(&attempts_path) {
                 Ok(value) => value
                     .trim()
@@ -5340,7 +5340,7 @@ mod tests {
         assert!(!queue.join("manual--brief-1.json").exists());
         assert!(root.path().join("claimed/manual--brief-1.json").is_file());
         assert_eq!(
-            fs::read_to_string(root.path().join("attempts/manual--brief-1.json")).unwrap(),
+            fs::read_to_string(root.path().join("claims/manual--brief-1.json")).unwrap(),
             "1"
         );
         let stored: serde_json::Value = serde_json::from_slice(

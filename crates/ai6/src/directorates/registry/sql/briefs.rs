@@ -53,7 +53,7 @@ fn stored_record(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Brief>> {
         .transpose()
 }
 
-/// One row of `SELECT brief, provenance, state, runs, outcome`.
+/// One row of `SELECT brief, provenance, state, claims, outcome`.
 fn filed_row(row: &Row) -> io::Result<FiledBrief> {
     let brief = stored_brief(&row.text(0)?, row.opt_text(1)?)?;
     brief.validate()?;
@@ -219,7 +219,7 @@ fn insert_brief(
 
 fn lease_in(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Lease>> {
     let Some(row) = tx.query_opt(
-        "SELECT station, expires, attempt, meta FROM ai6_brief_leases WHERE key = $1",
+        "SELECT station, expires, number, meta FROM ai6_brief_leases WHERE key = $1",
         &[key.into()],
     )?
     else {
@@ -242,10 +242,10 @@ fn lease_in(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Lease>> {
 
 fn put_lease(tx: &mut Tx<'_>, lease: &Lease, revision: i64) -> io::Result<()> {
     tx.execute(
-        "INSERT INTO ai6_brief_leases (key, station, expires, attempt, meta, revision) \
+        "INSERT INTO ai6_brief_leases (key, station, expires, number, meta, revision) \
          VALUES ($1, $2, $3, $4, $5, $6) \
          ON CONFLICT (key) DO UPDATE SET station = excluded.station, expires = excluded.expires, \
-         attempt = excluded.attempt, meta = excluded.meta, revision = excluded.revision",
+         number = excluded.number, meta = excluded.meta, revision = excluded.revision",
         &[
             lease.key.as_str().into(),
             lease.station.as_str().into(),
@@ -761,7 +761,7 @@ impl BriefStore for SqlRegistry {
             entered.enter_as(mission);
             let key = entered.key();
             let Some(row) = tx.query_opt(
-                "SELECT brief, coalesce(provenance, finished_provenance), state, attempts, \
+                "SELECT brief, coalesce(provenance, finished_provenance), state, claims, \
                  outcome FROM ai6_briefs WHERE key = $1",
                 &[key.as_str().into()],
             )?
@@ -774,7 +774,7 @@ impl BriefStore for SqlRegistry {
             }
             tx.execute(
                 "UPDATE ai6_briefs SET state = 'new', brief = $2, provenance = $3, outcome = NULL, \
-                 transcript = NULL, attempts = 0, report_attempts = 0, reported = $4, \
+                 transcript = NULL, claims = 0, report_attempts = 0, reported = $4, \
                  finished_provenance = NULL, cancel_requested_at = NULL, revision = $5 \
                  WHERE key = $1",
                 &[
@@ -822,14 +822,14 @@ impl BriefStore for SqlRegistry {
             };
             let key = brief.key();
             let previous = tx
-                .query_opt("SELECT attempts FROM ai6_briefs WHERE key = $1", &[key.as_str().into()])?
+                .query_opt("SELECT claims FROM ai6_briefs WHERE key = $1", &[key.as_str().into()])?
                 .map_or(Ok(0), |row| row.int(0))?;
             let attempt = u32::try_from(previous)
                 .ok()
                 .and_then(|previous| previous.checked_add(1))
                 .ok_or_else(|| invalid_data("Registry attempt count is exhausted"))?;
             tx.execute(
-                "UPDATE ai6_briefs SET state = 'claimed', attempts = $2, revision = $3 WHERE key = $1",
+                "UPDATE ai6_briefs SET state = 'claimed', claims = $2, revision = $3 WHERE key = $1",
                 &[key.as_str().into(), attempt.into(), revision.into()],
             )?;
             let lease = Lease {
@@ -853,7 +853,7 @@ impl BriefStore for SqlRegistry {
         validate_registry_key(key)?;
         self.read(|tx| {
             tx.query_opt(
-                "SELECT brief, provenance, state, attempts, outcome FROM ai6_briefs WHERE key = $1",
+                "SELECT brief, provenance, state, claims, outcome FROM ai6_briefs WHERE key = $1",
                 &[key.into()],
             )?
             .map(|row| filed_row(&row))
@@ -871,7 +871,7 @@ impl BriefStore for SqlRegistry {
         }
         self.write(|tx, revision| {
             let Some(row) = tx.query_opt(
-                "SELECT brief, provenance, state, attempts, outcome FROM ai6_briefs WHERE key = $1",
+                "SELECT brief, provenance, state, claims, outcome FROM ai6_briefs WHERE key = $1",
                 &[key.into()],
             )?
             else {
@@ -899,7 +899,7 @@ impl BriefStore for SqlRegistry {
         let scan = row_limit(self.limits.briefs.records).saturating_mul(5);
         let rows = self.read(|tx| {
             tx.query(
-                "SELECT brief, provenance, state, attempts, outcome FROM ai6_briefs \
+                "SELECT brief, provenance, state, claims, outcome FROM ai6_briefs \
                  ORDER BY revision DESC LIMIT $1",
                 &[scan.into()],
             )

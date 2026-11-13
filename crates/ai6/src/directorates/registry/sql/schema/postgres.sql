@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS ai6_briefs (
     key TEXT PRIMARY KEY,
     state TEXT NOT NULL,
     brief TEXT NOT NULL,
-    attempts BIGINT NOT NULL DEFAULT 0,
+    claims BIGINT NOT NULL DEFAULT 0,
     outcome TEXT,
     transcript BYTEA,
     report_attempts BIGINT NOT NULL DEFAULT 0,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS ai6_brief_leases (
     key TEXT PRIMARY KEY,
     station TEXT NOT NULL,
     expires DOUBLE PRECISION NOT NULL,
-    attempt BIGINT NOT NULL,
+    number BIGINT NOT NULL,
     meta TEXT NOT NULL,
     revision BIGINT NOT NULL
 );
