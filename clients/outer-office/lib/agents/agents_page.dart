@@ -620,10 +620,7 @@ class _AgentsPageState extends State<AgentsPage>
                     values: [
                       for (final run in widget.board.runs)
                         if (run.agent case final agent?
-                            when shownAgents.contains((
-                              run.operationId,
-                              agent,
-                            )))
+                            when shownAgents.contains((run.operationId, agent)))
                           run.missionId,
                     ],
                   ),

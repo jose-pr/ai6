@@ -87,7 +87,7 @@ Future<(MissionBoard, _Gateway)> _open(
   );
   board.accessToken = 'token';
   board.loading = false;
-  board.userRun = UserRunSummary(
+  board.userSession = UserSessionSummary(
     personId: 'p-1',
     name: 'ada',
     displayName: null,

@@ -26,7 +26,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   // With `subtree`, the Operation and those under it as the person's tree shows them.
   final subtree = switch (route['operation_id']) {
     final operation? when route['subtree'] == 'true' => subtreeIds({
-      for (final access in board.userRun?.operations ?? const [])
+      for (final access in board.userSession?.operations ?? const [])
         access.operationId: access.parent,
     }, operation),
     _ => null,
@@ -281,9 +281,7 @@ String missionOrder(String id) =>
 List<MissionGroup> groupMissions(List<RunSummary> runs) {
   final groups = <(String, String), List<RunSummary>>{};
   for (final run in runs) {
-    groups
-        .putIfAbsent((run.operationId, run.missionId), () => [])
-        .add(run);
+    groups.putIfAbsent((run.operationId, run.missionId), () => []).add(run);
   }
   final result = groups.entries
       .map(
@@ -507,10 +505,7 @@ class MissionFacts extends StatelessWidget {
   Widget build(BuildContext context) {
     final muted = Theme.of(context).textTheme.bodySmall
         ?.copyWith(color: OoTokens.of(context).muted);
-    final attempt = board.currentRun(
-      mission.operationId,
-      mission.missionId,
-    );
+    final attempt = board.currentRun(mission.operationId, mission.missionId);
     final brief = board.missionBrief(mission.operationId, mission.missionId);
     final station = attempt?.station ?? mission.latest?.stationId;
     final agent = brief?.agentId ?? mission.latest?.agent;
@@ -771,11 +766,7 @@ class _RunRow extends StatelessWidget {
   }
 }
 
-void openRunPage(
-  BuildContext context,
-  RunSummary run,
-  MissionBoard board,
-) {
+void openRunPage(BuildContext context, RunSummary run, MissionBoard board) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => RunWindow(run: run, board: board),
@@ -783,20 +774,17 @@ void openRunPage(
   );
 }
 
-void openRunWindow(
-  BuildContext context,
-  RunSummary run,
-  MissionBoard board,
-) => openAppWindow(
-  context,
-  size: const Size(900, 680),
-  title: 'Run ${run.runId} | Outer Office',
-  builder: (_) => boardThemedApp(
-    board,
-    title: 'Run ${run.runId}',
-    home: RunWindow(run: run, board: board),
-  ),
-);
+void openRunWindow(BuildContext context, RunSummary run, MissionBoard board) =>
+    openAppWindow(
+      context,
+      size: const Size(900, 680),
+      title: 'Run ${run.runId} | Outer Office',
+      builder: (_) => boardThemedApp(
+        board,
+        title: 'Run ${run.runId}',
+        home: RunWindow(run: run, board: board),
+      ),
+    );
 
 class RunWindow extends StatelessWidget {
   const RunWindow({required this.run, required this.board, super.key});
@@ -857,9 +845,7 @@ class _RunDetailContent extends StatelessWidget {
     animation: board,
     builder: (context, _) {
       final current =
-          board.runs
-              .where((item) => item.runId == run.runId)
-              .firstOrNull ??
+          board.runs.where((item) => item.runId == run.runId).firstOrNull ??
           run;
       return Padding(
         padding: const EdgeInsets.all(24),
@@ -900,10 +886,7 @@ class _RunDetailContent extends StatelessWidget {
                               ? const _RunPreviewPanel(
                                   message: 'Sign in to Universal Exports to attach to this Run.',
                                 )
-                              : _LiveRunTerminal(
-                                  run: current,
-                                  board: board,
-                                ),
+                              : _LiveRunTerminal(run: current, board: board),
                           board.demo || board.accessToken == null
                               ? const _RunPreviewPanel(
                                   message:
@@ -970,10 +953,8 @@ class _LiveRunTerminalState extends State<_LiveRunTerminal> {
   @override
   void initState() {
     super.initState();
-    _connection = RunConnection(
-      board: widget.board,
-      run: widget.run,
-    )..addListener(_changed);
+    _connection = RunConnection(board: widget.board, run: widget.run)
+      ..addListener(_changed);
     _connection.start();
   }
 

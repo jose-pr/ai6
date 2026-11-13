@@ -309,16 +309,15 @@ void main() {
 
   test('a Station charge names the Run updated last, not the longest', () {
     final board = demoBoard();
-    RunSummary run(String id, int sequence, double updatedAt) =>
-        RunSummary(
-          operationId: 'G',
-          missionId: 'm',
-          runId: id,
-          state: 'working',
-          sequence: sequence,
-          updatedAt: updatedAt,
-          stationId: 'hq',
-        );
+    RunSummary run(String id, int sequence, double updatedAt) => RunSummary(
+      operationId: 'G',
+      missionId: 'm',
+      runId: id,
+      state: 'working',
+      sequence: sequence,
+      updatedAt: updatedAt,
+      stationId: 'hq',
+    );
     board.runs = [run('s-first', 40, 100), run('s-retry', 2, 200)];
     board.missionRuns = {
       ('G', 'm'): const [
@@ -415,10 +414,7 @@ void main() {
         find.text('Checkpointed to branch mission-007-review'),
         findsNWidgets(2),
       );
-      expect(
-        find.text('State from · Run 2 · preview-run-007'),
-        findsOneWidget,
-      );
+      expect(find.text('State from · Run 2 · preview-run-007'), findsOneWidget);
       expect(find.text('Mission brief'), findsOneWidget);
       expect(button('Timeline'), findsOneWidget);
       expect(find.text('Open Run preview-run-007'), findsOneWidget);
@@ -445,10 +441,7 @@ void main() {
       );
       // The Station Watch lists the Mission whose run runs there.
       expect(find.text('RUNS HERE'), findsOneWidget);
-      expect(
-        find.text('G › mission-007 · preview-run-007'),
-        findsOneWidget,
-      );
+      expect(find.text('G › mission-007 · preview-run-007'), findsOneWidget);
       expect(find.text('Online'), findsOneWidget);
 
       await tester.tap(find.text('G › mission-007 · preview-run-007'));

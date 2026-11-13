@@ -88,10 +88,7 @@ class RunConnection extends ChangeNotifier {
     wire.Receiver? receiver;
     WebSocketChannel? channel;
     try {
-      final cookie = await board.prepareRunSocket(
-        run,
-        write: _writeRequested,
-      );
+      final cookie = await board.prepareRunSocket(run, write: _writeRequested);
       if (_disposed || generation != _generation) return;
       channel = connectRunSocket(
         runSocketUri(board.apiOrigin, run.runId, _cursor),

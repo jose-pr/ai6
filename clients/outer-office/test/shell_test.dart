@@ -184,40 +184,24 @@ void main() {
               .dy
               .compareTo(tester.getTopLeft(find.text(b)).dy),
         );
-    expect(order(), [
-      'preview-run-007',
-      'preview-run-008',
-      'preview-run-021',
-    ]);
+    expect(order(), ['preview-run-007', 'preview-run-008', 'preview-run-021']);
     await tester.tap(find.text('Updated'));
     await tester.pumpAndSettle();
-    expect(order(), [
-      'preview-run-008',
-      'preview-run-021',
-      'preview-run-007',
-    ]);
+    expect(order(), ['preview-run-008', 'preview-run-021', 'preview-run-007']);
     expect(find.text('Sorted by: updated'), findsOneWidget);
     await tester.tap(find.text('Updated'));
     await tester.pumpAndSettle();
     expect(order().first, 'preview-run-007');
     await tester.tap(find.text('State'));
     await tester.pumpAndSettle();
-    expect(order(), [
-      'preview-run-007',
-      'preview-run-008',
-      'preview-run-021',
-    ]);
+    expect(order(), ['preview-run-007', 'preview-run-008', 'preview-run-021']);
     // Every column sorts through the route.
     await tester.tap(find.text('Run'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Run'));
     await tester.pumpAndSettle();
     expect(find.text('Sorted by: run'), findsOneWidget);
-    expect(order(), [
-      'preview-run-021',
-      'preview-run-008',
-      'preview-run-007',
-    ]);
+    expect(order(), ['preview-run-021', 'preview-run-008', 'preview-run-007']);
     await tester.tap(find.text('Operation'));
     await tester.pumpAndSettle();
     expect(order().last, 'preview-run-021', reason: 'Operation L after G');

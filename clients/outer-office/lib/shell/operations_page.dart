@@ -88,7 +88,7 @@ class _OperationsPageState extends State<OperationsPage>
 
   @override
   Widget build(BuildContext context) {
-    final open = board.userRun?.operations ?? const [];
+    final open = board.userSession?.operations ?? const [];
     final selected = route['operation_id'];
     final operations = [
       for (final operation in open)

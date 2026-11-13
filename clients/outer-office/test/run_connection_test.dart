@@ -107,7 +107,7 @@ void main() {
       const run = RunSummary(
         operationId: 'operation-a',
         missionId: 'mission-17',
-        runId: 'run-3',
+        runId: 'provider-run-3',
         state: 'working',
         sequence: 3,
       );
@@ -130,7 +130,7 @@ void main() {
         const Duration(seconds: 5),
       );
       await _waitUntilConnected(connection);
-      expect(first.path, '/v1/socket/run-3');
+      expect(first.path, '/v1/socket/provider-run-3');
       expect(first.after, '0');
       expect(first.cookie, 'ai6_attach=ticket-1');
       expect(first.origin, origin.origin);
@@ -175,13 +175,13 @@ void main() {
         const Duration(seconds: 5),
       );
       expect(input, {
-        'run_id': 'run-3',
+        'run_id': 'provider-run-3',
         'sequence': 1,
         'direction': 'input',
         'bytes': Uint8List.fromList([0, 255, 10]),
       });
       expect(resize, {
-        'run_id': 'run-3',
+        'run_id': 'provider-run-3',
         'sequence': 2,
         'columns': 120,
         'rows': 40,
@@ -230,7 +230,7 @@ void main() {
     const run = RunSummary(
       operationId: 'operation-a',
       missionId: 'mission-17',
-      runId: 'run-3',
+      runId: 'provider-run-3',
       state: 'working',
       sequence: 40,
     );
@@ -278,7 +278,7 @@ void main() {
     const run = RunSummary(
       operationId: 'operation-a',
       missionId: 'mission-17',
-      runId: 'run-3',
+      runId: 'provider-run-3',
       state: 'working',
       sequence: 0,
     );

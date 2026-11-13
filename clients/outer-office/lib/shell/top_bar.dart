@@ -304,7 +304,7 @@ class _OoSearchState extends State<OoSearch> {
   /// Everything searchable, as (icon, title, detail, route).
   List<(OoIconName, String, String, OoRoute)> _entries() => [
     for (final operation
-        in widget.board.userRun?.operations ??
+        in widget.board.userSession?.operations ??
             const <UserOperationAccess>[])
       (
         OoIconName.operations,
@@ -461,7 +461,7 @@ class UserChip extends StatelessWidget {
     super.key,
   });
 
-  final UserRunSummary? run;
+  final UserSessionSummary? run;
   final VoidCallback onPressed;
   final bool compact;
 
@@ -553,11 +553,9 @@ class UserChip extends StatelessWidget {
   }
 }
 
-String? _name(UserRunSummary? run) {
+String? _name(UserSessionSummary? run) {
   final displayName = run?.displayName?.trim();
-  final name = displayName?.isNotEmpty == true
-      ? displayName
-      : run?.name.trim();
+  final name = displayName?.isNotEmpty == true ? displayName : run?.name.trim();
   return name == null || name.isEmpty ? null : name;
 }
 

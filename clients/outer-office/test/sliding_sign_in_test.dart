@@ -205,16 +205,16 @@ void main() {
 
   test('a pop-out reports input once until its opener says it renewed', () {
     final popups = FakePopups();
-    final run = PopoutRun(popups, person: 'ana');
-    addTearDown(run.dispose);
+    final session = PopoutSession(popups, person: 'ana');
+    addTearDown(session.dispose);
     final link = popups.links.single;
     int reports() => link.sent.where((m) => m['t'] == 'active').length;
 
-    run.activity();
-    run.activity();
+    session.activity();
+    session.activity();
     expect(reports(), 1);
     link.hear({'t': 'renewed'});
-    run.activity();
+    session.activity();
     expect(reports(), 2);
   });
 
@@ -222,7 +222,7 @@ void main() {
       'question', (tester) async {
     final gateway = FakeGateway(
       idle: _idle,
-      run: const Duration(minutes: 40),
+      session: const Duration(minutes: 40),
     );
     final board = await signedIn(tester, gateway);
     await tester.pump(_wait + const Duration(seconds: 1));

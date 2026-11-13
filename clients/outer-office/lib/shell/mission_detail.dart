@@ -255,7 +255,7 @@ class MissionDetail extends StatelessWidget {
 
 class _RunCard extends StatelessWidget {
   const _RunCard({
-    required this.number,
+    required this.attempt,
     required this.runs,
     required this.pages,
     required this.onRoute,

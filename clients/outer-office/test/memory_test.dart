@@ -213,7 +213,7 @@ MissionBoard signedIn(MemoryGateway gateway, {ScopedGateway? scoped}) {
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userRun = UserRunSummary.fromJson({
+  board.userSession = UserSessionSummary.fromJson({
     'person_id': 'operator-007',
     'name': 'operator-007',
     'groups': <String>[],

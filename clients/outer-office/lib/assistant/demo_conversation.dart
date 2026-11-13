@@ -95,11 +95,7 @@ class DemoAssistantChannel implements AssistantChannel {
         ),
         _entry('navigation', 'The blocked Runs of Operation G', {
           'id': 'demo-nav-blocked',
-          'route': {
-            'page': 'runs',
-            'operation_id': 'G',
-            'state': 'blocked',
-          },
+          'route': {'page': 'runs', 'operation_id': 'G', 'state': 'blocked'},
           'label': 'The blocked Runs of Operation G',
         }),
         _entry('proposal', '', {

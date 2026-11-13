@@ -81,10 +81,8 @@ class OverviewPage extends StatelessWidget {
     final working = active.where((mission) => mission.state == 'working');
     final stations = board.stationBoard.stations;
     final online = stations.where((station) => station.healthy).length;
-    final waiting = board.runs
-        .where((run) => run.state == 'blocked')
-        .toList();
-    final operations = board.userRun?.operations ?? const [];
+    final waiting = board.runs.where((run) => run.state == 'blocked').toList();
+    final operations = board.userSession?.operations ?? const [];
     final busyOperations = active.map((mission) => mission.operationId).toSet();
     final attention = attentionItems(board, tokens);
     final open = [
@@ -450,7 +448,7 @@ class _ActiveOperations extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
-    final operations = board.userRun?.operations ?? const [];
+    final operations = board.userSession?.operations ?? const [];
     final stations = board.stationBoard.stations;
     return OoPanel(
       title: 'OPERATIONS',
@@ -1020,7 +1018,7 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
         : hour < 18
         ? 'afternoon'
         : 'evening';
-    final run = widget.board.userRun;
+    final run = widget.board.userSession;
     final name =
         (run?.displayName?.trim().isNotEmpty == true
                 ? run!.displayName!

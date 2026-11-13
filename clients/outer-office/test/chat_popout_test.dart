@@ -317,7 +317,7 @@ void main() {
   group('the pop-out side', () {
     test('asks its opener, and takes the conversation and draft', () async {
       final popups = FakePopups();
-      final run = PopoutRun(popups, person: 'ana');
+      final run = PopoutSession(popups, person: 'ana');
       addTearDown(run.dispose);
       final link = popups.links.single;
       expect(link.sent, [
@@ -338,7 +338,7 @@ void main() {
 
     test('keeps the draft level with the opener\'s and sends its links', () {
       final popups = FakePopups();
-      final run = PopoutRun(popups, person: 'ana');
+      final run = PopoutSession(popups, person: 'ana');
       addTearDown(run.dispose);
       final chat = MoneypennyChat(
         controller: AssistantController(token: 't', connect: FakeChannel.new),
@@ -360,14 +360,14 @@ void main() {
 
     test('Bring back and Hide tell the opener, and close the window', () {
       final back = FakePopups();
-      final backRun = PopoutRun(back, person: 'ana');
+      final backRun = PopoutSession(back, person: 'ana');
       addTearDown(backRun.dispose);
       backRun.bringBack();
       expect(back.links.single.sent.last, {'t': 'bye', 'why': 'back'});
       expect(back.closedSelf, 1);
 
       final hide = FakePopups();
-      final hideRun = PopoutRun(hide, person: 'ana');
+      final hideRun = PopoutSession(hide, person: 'ana');
       addTearDown(hideRun.dispose);
       hideRun.hide();
       expect(hide.links.single.sent.last, {'t': 'bye', 'why': 'hide'});
@@ -382,7 +382,7 @@ void main() {
 
     test('closing the window tells the opener', () {
       final popups = FakePopups();
-      final run = PopoutRun(popups, person: 'ana');
+      final run = PopoutSession(popups, person: 'ana');
       addTearDown(run.dispose);
       popups.pageHides.add(null);
       expect(popups.links.single.sent.last, {'t': 'bye', 'why': 'closed'});
@@ -390,7 +390,7 @@ void main() {
 
     test('an opener that is gone leaves nothing to show', () {
       final popups = FakePopups()..opener = false;
-      final run = PopoutRun(popups, person: 'ana');
+      final run = PopoutSession(popups, person: 'ana');
       addTearDown(run.dispose);
       expect(run.openerClosed.value, isTrue);
       expect(popups.closedSelf, 1);
@@ -399,7 +399,7 @@ void main() {
 
     test('an opener that reloads or closes sends the window away', () {
       final popups = FakePopups();
-      final run = PopoutRun(popups, person: 'ana');
+      final run = PopoutSession(popups, person: 'ana');
       addTearDown(run.dispose);
       popups.links.single.hear({'t': 'gone'});
       expect(run.openerClosed.value, isTrue);

@@ -99,7 +99,7 @@ class AssistantController extends ChangeNotifier {
   final String token;
   final AssistantChannel Function() _openChannel;
 
-  /// How long the socket may take to say it is ready before the run counts as failed.
+  /// How long the socket may take to say it is ready before the attempt counts as failed.
   final Duration connectTimeout;
   Timer? _connecting;
 

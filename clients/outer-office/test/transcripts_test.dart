@@ -52,15 +52,13 @@ final _claude = [
 
 class _Reads implements TranscriptReads {
   @override
-  Future<Map<String, Object?>> runContext(
-    String operation,
-    String run,
-  ) async => {
-    'run': run,
-    'format': 'claude-code-jsonl',
-    'source': 'harness',
-    'content': _claude,
-  };
+  Future<Map<String, Object?>> runContext(String operation, String run) async =>
+      {
+        'run': run,
+        'format': 'claude-code-jsonl',
+        'source': 'harness',
+        'content': _claude,
+      };
 
   @override
   Future<Map<String, Object?>> conversationLog(String conversation) async => {

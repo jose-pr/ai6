@@ -257,7 +257,7 @@ MissionBoard _signedIn(
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userRun = UserRunSummary(
+  board.userSession = UserSessionSummary(
     personId: 'operator-007',
     name: 'operator-007',
     displayName: null,
@@ -490,10 +490,7 @@ void main() {
       model.setText('budget.run_tokens', '1.5');
       final issues = <String, String>{};
       model.value(issues: issues);
-      expect(
-        issues.keys,
-        unorderedEquals(['priority', 'budget.run_tokens']),
-      );
+      expect(issues.keys, unorderedEquals(['priority', 'budget.run_tokens']));
     });
 
     test('a field shows by what the form says, and hiding reads values', () {

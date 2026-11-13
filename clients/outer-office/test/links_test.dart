@@ -117,11 +117,7 @@ void main() {
         'mission-021',
         '/missions?operation_id=L&mission_id=mission-021',
       ),
-      (
-        '/runs',
-        'station-remote-02',
-        '/stations?station_id=station-remote-02',
-      ),
+      ('/runs', 'station-remote-02', '/stations?station_id=station-remote-02'),
       (
         '/stations',
         'station-remote-02',
@@ -415,7 +411,7 @@ void main() {
       );
       board.accessToken = 't';
       board.loading = false;
-      board.userRun = UserRunSummary(
+      board.userSession = UserSessionSummary(
         personId: 'ana',
         name: 'ana',
         displayName: null,

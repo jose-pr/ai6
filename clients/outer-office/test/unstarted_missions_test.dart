@@ -130,29 +130,24 @@ void main() {
   setUp(() => ooClock = () => _now);
   tearDown(() => ooClock = clock);
 
-  test(
-    'Missions with no Run are listed beside those that have one',
-    () async {
-      final board = await _board();
-      final groups = board.missionGroups();
-      expect(groups.map((group) => group.missionId), ['1', '4', '5', '8']);
-      final byId = {for (final group in groups) group.missionId: group};
-      expect(byId['4']!.pending, isNull);
-      expect(byId['4']!.state, 'working');
-      expect(byId['8']!.state, 'queued');
-      expect(byId['8']!.runs, isEmpty);
-      expect(byId['8']!.updatedAt, 1_799_999_990.0);
-      expect(byId['1']!.state, 'failed');
-      expect(byId['1']!.finished, isTrue);
-      // A filter on a state sees them as it sees the rest.
-      expect(
-        groups
-            .where((group) => group.state == 'queued')
-            .map((g) => g.missionId),
-        ['5', '8'],
-      );
-    },
-  );
+  test('Missions with no Run are listed beside those that have one', () async {
+    final board = await _board();
+    final groups = board.missionGroups();
+    expect(groups.map((group) => group.missionId), ['1', '4', '5', '8']);
+    final byId = {for (final group in groups) group.missionId: group};
+    expect(byId['4']!.pending, isNull);
+    expect(byId['4']!.state, 'working');
+    expect(byId['8']!.state, 'queued');
+    expect(byId['8']!.runs, isEmpty);
+    expect(byId['8']!.updatedAt, 1_799_999_990.0);
+    expect(byId['1']!.state, 'failed');
+    expect(byId['1']!.finished, isTrue);
+    // A filter on a state sees them as it sees the rest.
+    expect(
+      groups.where((group) => group.state == 'queued').map((g) => g.missionId),
+      ['5', '8'],
+    );
+  });
 
   test('a pending Mission says what it is doing and when it tries again', () {
     final now = _now.millisecondsSinceEpoch / 1000;

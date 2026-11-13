@@ -177,7 +177,7 @@ void main() {
       last!.fail();
       await tester.pump();
       served = false;
-      await board.loadUserRun();
+      await board.loadUserSession();
       await tester.pump();
       final before = opened;
       await tester.pump(const Duration(hours: 1));

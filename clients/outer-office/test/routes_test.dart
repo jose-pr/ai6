@@ -134,9 +134,7 @@ void main() {
             ..runs = [
               for (final mission in missions)
                 for (final run in mission['runs'] as List)
-                  RunSummary.fromJson(
-                    (run as Map).cast<String, dynamic>(),
-                  ),
+                  RunSummary.fromJson((run as Map).cast<String, dynamic>()),
             ]
             ..missionBriefs = [
               for (final mission in missions)

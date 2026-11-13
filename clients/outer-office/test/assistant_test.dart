@@ -14,8 +14,7 @@ import 'package:outer_office/assistant/export.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/settings/oo_config.dart' show ChatSettings;
 import 'package:outer_office/shell/oo_shell.dart';
-import 'package:outer_office/terminal/run_connection.dart'
-    show runSocketUri;
+import 'package:outer_office/terminal/run_connection.dart' show runSocketUri;
 
 /// One view of every kind and the views Universal Exports refuses, shared with its tests.
 final Map<String, Object?> fixture = (jsonDecode(
@@ -255,12 +254,7 @@ void main() {
       expect(opened, ['app:/stations?station_id=hq']);
 
       await showView(tester, valid['tree_graph']);
-      for (final node in [
-        'Operation G',
-        'mission-1',
-        'mission-2',
-        'run-1',
-      ]) {
+      for (final node in ['Operation G', 'mission-1', 'mission-2', 'run-1']) {
         expect(find.text(node), findsOneWidget, reason: node);
       }
 

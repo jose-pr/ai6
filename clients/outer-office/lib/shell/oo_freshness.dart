@@ -11,13 +11,13 @@ enum OoFreshness {
   /// Not read yet.
   loading,
 
-  /// Read on the last run.
+  /// Read on the last attempt.
   live,
 
-  /// The last run failed; the data is from an earlier read.
+  /// The last attempt failed; the data is from an earlier read.
   stale,
 
-  /// The last run failed and there is no earlier data.
+  /// The last attempt failed and there is no earlier data.
   unavailable,
 
   /// The gateway refused it (403): the person may not see it, so it is hidden, not empty.

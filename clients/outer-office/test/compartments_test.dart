@@ -79,7 +79,7 @@ MissionBoard _board(
   );
   board.accessToken = 'token';
   board.loading = false;
-  board.userRun = UserRunSummary(
+  board.userSession = UserSessionSummary(
     personId: 'p-1',
     name: 'p-1',
     displayName: null,
@@ -256,7 +256,7 @@ void main() {
         global: const [],
         operations: const [],
       );
-      board.userRun = UserRunSummary(
+      board.userSession = UserSessionSummary(
         personId: 'p-1',
         name: 'p-1',
         displayName: null,

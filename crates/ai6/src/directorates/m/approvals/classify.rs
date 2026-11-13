@@ -7,7 +7,7 @@
 //! turns into a refusal, and so is a governed step with a word only the shell can fill in. Still
 //! best effort: a command named only by a variable, a script a command runs, a `gh` alias, or a
 //! program other than `git` and `gh` that pushes, is not seen. The credential an approval unlocks
-//! is the guarantee; this turns runs into requests early.
+//! is the guarantee; this turns attempts into requests early.
 
 use std::collections::BTreeMap;
 

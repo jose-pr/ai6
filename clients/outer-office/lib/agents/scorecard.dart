@@ -32,11 +32,10 @@ class ScorecardRun {
   final String missionId;
   final String runId;
 
-  factory ScorecardRun.fromJson(Map<String, dynamic> json) =>
-      ScorecardRun(
-        missionId: json['mission_id'] as String,
-        runId: json['run_id'] as String,
-      );
+  factory ScorecardRun.fromJson(Map<String, dynamic> json) => ScorecardRun(
+    missionId: json['mission_id'] as String,
+    runId: json['run_id'] as String,
+  );
 }
 
 /// What a group of runs came to.

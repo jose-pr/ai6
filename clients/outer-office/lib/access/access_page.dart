@@ -14,7 +14,7 @@ import 'rules_editor.dart';
 /// Operation's own; globally, what the profile shows everywhere (the gateway's guard decides
 /// in the end).
 Set<String> heldActions(MissionBoard board, String? operationId) {
-  final run = board.userRun;
+  final run = board.userSession;
   if (board.demo) return {...operationActions, 'station.configure'};
   if (run == null) return const {};
   if (operationId != null) {

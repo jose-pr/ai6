@@ -298,7 +298,7 @@ class _MissionsPageState extends State<MissionsPage> {
                   ? const []
                   : [
                       for (final operation
-                          in board.userRun?.operations ??
+                          in board.userSession?.operations ??
                               const <UserOperationAccess>[])
                         if (board.canCreateMission(operation.operationId))
                           operation.operationId,
@@ -348,8 +348,7 @@ class _MissionsPageState extends State<MissionsPage> {
                   ),
                   onDetails: () => _details(mission),
                   onSelectRun: showRunPane
-                      ? (run) =>
-                            setState(() => _selectedWebRun = run)
+                      ? (run) => setState(() => _selectedWebRun = run)
                       : null,
                 );
               },

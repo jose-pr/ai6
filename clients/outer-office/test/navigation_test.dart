@@ -33,7 +33,7 @@ MissionBoard _board(FakeChannel channel, List<http.BaseRequest> requests) {
   );
   board.accessToken = 'user-token';
   board.loading = false;
-  board.userRun = const UserRunSummary(
+  board.userSession = const UserSessionSummary(
     personId: 'ana',
     moneypenny: true,
     name: 'ana',

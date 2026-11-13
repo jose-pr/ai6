@@ -364,7 +364,7 @@ void main() {
     expect(board.runs, isEmpty);
     expect(board.heldBriefs, isEmpty);
     expect(board.greenInkRequests, isEmpty);
-    expect(board.userRun, isNull);
+    expect(board.userSession, isNull);
     expect(find.text('Continue'), findsOneWidget, reason: 'the sign-in page');
     expect(find.textContaining('run-1'), findsNothing);
     expect(find.textContaining('mission-007'), findsNothing);
@@ -558,7 +558,7 @@ void main() {
   ) async {
     final gateway = Gateway();
     final board = await signedIn(gateway);
-    board.userRun = null;
+    board.userSession = null;
     await openAt(tester, board, '/');
     expect(
       find.text(

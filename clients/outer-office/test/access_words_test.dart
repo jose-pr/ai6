@@ -47,7 +47,7 @@ void main() {
       );
       board.accessToken = 'token';
       board.loading = false;
-      board.userRun = UserRunSummary.fromJson(profile());
+      board.userSession = UserSessionSummary.fromJson(profile());
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

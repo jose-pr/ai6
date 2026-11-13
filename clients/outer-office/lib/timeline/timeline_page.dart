@@ -76,8 +76,7 @@ class TimelineItemSummary {
     ('Operation $operationId', OoLinkTo.operation(operationId)),
     if (missionId case final mission?)
       ('Mission ${handle ?? mission}', OoLinkTo.mission(operationId, mission)),
-    if (runId case final run?)
-      ('Run $run', OoLinkTo.run(operationId, run)),
+    if (runId case final run?) ('Run $run', OoLinkTo.run(operationId, run)),
     if (stationId case final station?)
       ('Station $station', OoLinkTo.station(station)),
     if (target case final target? when target != missionId) (target, null),

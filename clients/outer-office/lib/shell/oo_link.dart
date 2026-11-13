@@ -68,14 +68,11 @@ abstract final class OoLinkTo {
     }
   }
 
-  static OoRoute run(String operation, String run) => _route(
-    OoPage.runs,
-    {'operation_id': operation, 'run_id': run},
-  );
+  static OoRoute run(String operation, String run) =>
+      _route(OoPage.runs, {'operation_id': operation, 'run_id': run});
 
   /// The Runs of a [state], such as those a tile counts.
-  static OoRoute runs({String? state}) =>
-      _route(OoPage.runs, {'state': state});
+  static OoRoute runs({String? state}) => _route(OoPage.runs, {'state': state});
 
   static OoRoute station(String station) =>
       _route(OoPage.stations, {'station_id': station});

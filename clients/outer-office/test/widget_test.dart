@@ -121,11 +121,7 @@ String stationBoardResponse() => jsonEncode({
 
 String userProfileResponse({
   String operationId = 'operation-alpha',
-  List<String> actions = const [
-    'mission.read',
-    'mission.create',
-    'run.read',
-  ],
+  List<String> actions = const ['mission.read', 'mission.create', 'run.read'],
   List<Map<String, Object>> stations = const [],
 }) => jsonEncode({
   'person_id': 'operator-007',
@@ -262,7 +258,7 @@ void main() {
     );
     board.accessToken = 'user-token';
     board.loading = false;
-    board.userRun = UserRunSummary.fromJson(
+    board.userSession = UserSessionSummary.fromJson(
       jsonDecode(userProfileResponse(actions: ['mission.read', 'run.read']))
           as Map<String, dynamic>,
     );
@@ -323,7 +319,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userRun = UserRunSummary.fromJson(
+    board.userSession = UserSessionSummary.fromJson(
       jsonDecode(
         userProfileResponse(
           stations: [
@@ -409,7 +405,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userRun = UserRunSummary.fromJson(
+    board.userSession = UserSessionSummary.fromJson(
       jsonDecode(
         userProfileResponse(
           stations: [
@@ -666,7 +662,7 @@ void main() {
         }),
       );
       board.accessToken = 'operator-token';
-      board.userRun = UserRunSummary.fromJson(
+      board.userSession = UserSessionSummary.fromJson(
         jsonDecode(userProfileResponse()) as Map<String, dynamic>,
       );
       addTearDown(board.dispose);
@@ -692,54 +688,51 @@ void main() {
     },
   );
 
-  test(
-    'operator menu identity uses the authenticated gateway run',
-    () async {
-      final requests = <http.Request>[];
-      final themeWrites = <String>[];
-      final board = MissionBoard(
-        apiOrigin: Uri.parse('https://oo.example'),
-        pollInterval: null,
-        onThemeChanged: (themeId) async => themeWrites.add(themeId),
-        client: MockClient((request) async {
-          requests.add(request);
-          return http.Response(
-            jsonEncode({
-              'person_id': 'operator-007',
-              'name': 'operator',
-              'display_name': 'Operator 007',
-              'groups': ['field'],
-              'expires_at': 1_900_000_000,
-              'operations': [
-                {
-                  'operation_id': 'operation-alpha',
-                  'actions': ['mission.read', 'run.read'],
-                },
-              ],
-            }),
-            200,
-          );
-        }),
-      );
-      board.accessToken = 'operator-token';
-      addTearDown(board.dispose);
+  test('operator menu identity uses the authenticated gateway run', () async {
+    final requests = <http.Request>[];
+    final themeWrites = <String>[];
+    final board = MissionBoard(
+      apiOrigin: Uri.parse('https://oo.example'),
+      pollInterval: null,
+      onThemeChanged: (themeId) async => themeWrites.add(themeId),
+      client: MockClient((request) async {
+        requests.add(request);
+        return http.Response(
+          jsonEncode({
+            'person_id': 'operator-007',
+            'name': 'operator',
+            'display_name': 'Operator 007',
+            'groups': ['field'],
+            'expires_at': 1_900_000_000,
+            'operations': [
+              {
+                'operation_id': 'operation-alpha',
+                'actions': ['mission.read', 'run.read'],
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    board.accessToken = 'operator-token';
+    addTearDown(board.dispose);
 
-      final identity = await board.loadUserRun();
-      expect(identity.personId, 'operator-007');
-      expect(identity.expiresAt, 1_900_000_000);
-      expect(requests.single.url.path, '/v1/user/profile');
-      expect(requests.single.headers['authorization'], 'Bearer operator-token');
-      expect(board.canCreateMission('operation-alpha'), isFalse);
+    final identity = await board.loadUserSession();
+    expect(identity.personId, 'operator-007');
+    expect(identity.expiresAt, 1_900_000_000);
+    expect(requests.single.url.path, '/v1/user/profile');
+    expect(requests.single.headers['authorization'], 'Bearer operator-token');
+    expect(board.canCreateMission('operation-alpha'), isFalse);
 
-      expect(board.themeId, 'night-ops');
-      board.setThemeId('light');
-      expect(board.themeId, 'light');
-      board.setThemeId('dusk-x');
-      expect(board.themeId, 'night-ops');
-      await Future<void>.delayed(Duration.zero);
-      expect(themeWrites, ['light', 'night-ops']);
-    },
-  );
+    expect(board.themeId, 'night-ops');
+    board.setThemeId('light');
+    expect(board.themeId, 'light');
+    board.setThemeId('dusk-x');
+    expect(board.themeId, 'night-ops');
+    await Future<void>.delayed(Duration.zero);
+    expect(themeWrites, ['light', 'night-ops']);
+  });
 
   test(
     'audit request is bearer-authenticated and keeps metadata fields',
@@ -889,9 +882,7 @@ void main() {
     );
   });
 
-  testWidgets('board groups and renders gateway Run snapshots', (
-    tester,
-  ) async {
+  testWidgets('board groups and renders gateway Run snapshots', (tester) async {
     tester.view.physicalSize = const Size(800, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1264,9 +1255,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('preview-run-007'), findsOneWidget);
     expect(
-      board.runs
-          .singleWhere((run) => run.runId == 'preview-run-007')
-          .state,
+      board.runs.singleWhere((run) => run.runId == 'preview-run-007').state,
       'working',
     );
   });
@@ -1370,7 +1359,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userRun = UserRunSummary.fromJson({
+    board.userSession = UserSessionSummary.fromJson({
       'person_id': 'operator-007',
       'name': 'operator',
       'display_name': 'Operator 007',
@@ -1441,7 +1430,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userRun = UserRunSummary.fromJson(
+    board.userSession = UserSessionSummary.fromJson(
       jsonDecode(userProfileResponse(actions: ['mission.read', 'audit.read']))
           as Map<String, dynamic>,
     );

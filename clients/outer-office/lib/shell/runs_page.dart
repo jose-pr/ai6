@@ -19,10 +19,8 @@ List<RunSummary> routeRuns(MissionBoard board, OoRoute route) {
   bool matches(RunSummary run) =>
       (route['operation_id'] == null ||
           run.operationId == route['operation_id']) &&
-      (route['state'] == null ||
-          (run.state ?? 'working') == route['state']) &&
-      (route['station_id'] == null ||
-          run.stationId == route['station_id']) &&
+      (route['state'] == null || (run.state ?? 'working') == route['state']) &&
+      (route['station_id'] == null || run.stationId == route['station_id']) &&
       (route['agent'] == null || run.agent == route['agent']) &&
       (text == null ||
           [
@@ -47,15 +45,14 @@ List<RunSummary> routeRuns(MissionBoard board, OoRoute route) {
   }
 
   // The board holds no creation time: a Run's one update time stands in for it.
-  final Comparable<Object>? Function(RunSummary)? key =
-      switch (route['sort']) {
-        'updated' || 'created' => (run) => run.updatedAt ?? 0,
-        'state' => (run) => boardStates.indexOf(run.state ?? 'working'),
-        'operation' => (run) => run.operationId,
-        'mission' => (run) => run.missionId,
-        'run' => (run) => run.runId,
-        _ => null,
-      };
+  final Comparable<Object>? Function(RunSummary)? key = switch (route['sort']) {
+    'updated' || 'created' => (run) => run.updatedAt ?? 0,
+    'state' => (run) => boardStates.indexOf(run.state ?? 'working'),
+    'operation' => (run) => run.operationId,
+    'mission' => (run) => run.missionId,
+    'run' => (run) => run.runId,
+    _ => null,
+  };
   final runs = board.runs.where(matches).toList()
     ..sort((left, right) {
       final order = key == null ? 0 : key(left)!.compareTo(key(right)!);
@@ -145,8 +142,7 @@ class RunsPage extends StatelessWidget {
     } else if (width < OoBreakpoints.phone) {
       table = _RunList(
         runs: runs,
-        handleOf: (run) =>
-            board.handleOf(run.operationId, run.missionId),
+        handleOf: (run) => board.handleOf(run.operationId, run.missionId),
         onOpen: onOpen,
       );
     } else {
@@ -197,8 +193,7 @@ class RunsPage extends StatelessWidget {
             id: 'state',
             label: 'State',
             flex: 2,
-            sortKey: (run) =>
-                boardStates.indexOf(run.state ?? 'working'),
+            sortKey: (run) => boardStates.indexOf(run.state ?? 'working'),
             cell: (context, run) => Row(
               children: [
                 OoStateMark(run.state ?? 'working', reason: run.reason),
@@ -207,8 +202,7 @@ class RunsPage extends StatelessWidget {
                   child: Text(
                     [
                       run.state ?? 'working',
-                      if (run.reason case final reason?)
-                        reasonWords(reason),
+                      if (run.reason case final reason?) reasonWords(reason),
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -373,10 +367,7 @@ class _RunList extends StatelessWidget {
                           ),
                           (
                             'Mission ${handleOf(run)}',
-                            OoLinkTo.mission(
-                              run.operationId,
-                              run.missionId,
-                            ),
+                            OoLinkTo.mission(run.operationId, run.missionId),
                           ),
                         ]),
                       ],
@@ -388,8 +379,7 @@ class _RunList extends StatelessWidget {
                   Text(
                     [
                       state,
-                      if (run.reason case final reason?)
-                        reasonWords(reason),
+                      if (run.reason case final reason?) reasonWords(reason),
                     ].join(' · '),
                     style: text.labelMedium,
                   ),

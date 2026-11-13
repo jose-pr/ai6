@@ -97,9 +97,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
       final report = attempt?.finalReport;
       final number =
           attempt?.number ??
-          widget.board
-              .currentRun(widget.operationId, widget.missionId)
-              ?.number;
+          widget.board.currentRun(widget.operationId, widget.missionId)?.number;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

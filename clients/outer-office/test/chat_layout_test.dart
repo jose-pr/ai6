@@ -464,7 +464,7 @@ void main() {
     // Ben changes his width; Ana's stays.
     final benChannel = FakeChannel();
     final ben = signedIn(benChannel)
-      ..userRun = const UserRunSummary(
+      ..userSession = const UserSessionSummary(
         personId: 'ben',
         moneypenny: true,
         name: 'ben',

@@ -46,7 +46,7 @@ MissionBoard signedIn(FakeChannel channel) {
   );
   board.accessToken = 'user-token';
   board.loading = false;
-  board.userRun = const UserRunSummary(
+  board.userSession = const UserSessionSummary(
     personId: 'ana',
     moneypenny: true,
     name: 'ana',
@@ -120,9 +120,7 @@ void main() {
           .where((entry) => entry.icon is OoTile),
       hasLength(12),
     );
-    await tester.tap(
-      find.descendant(of: drawer, matching: find.text('Runs')),
-    );
+    await tester.tap(find.descendant(of: drawer, matching: find.text('Runs')));
     await tester.pumpAndSettle();
     expect(find.byType(DataTable), findsNothing);
     expect(find.text('preview-run-007'), findsOneWidget);

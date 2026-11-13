@@ -49,7 +49,7 @@ poll` (default 5, 0 off) `StationConfig::with_config_poll`.
 The access kinds, their models and the first-match role authorizer belong to the shared
 [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) and `coqui-roles` crates
 (their API headers describe every field and method) and are re-exported here and at the
-`ai6` root: `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `Run`, `Lookup`,
+`ai6` root: `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `Attempt`, `Lookup`,
 `Verdict`, `Person`, `AuthorizationRequest`, `AuthorizationDecision`, `AccountInfo`,
 `AccountPut`, `PutOutcome`, `Waiting`, `Description`, `KIND_PREFIX`, `Role`, `Rule`,
 `RolePolicy`, `RolePolicyError`, `RoleAuthorizer` and `RoleAuthorizerBuilder`. The Guatiao
@@ -411,7 +411,7 @@ The `station` record's tables, kept by a Station as it starts (they apply at res
 table derives `ToValue`, `FromValue` and `Schema` with `deny_unknown_fields`; its keys, titles,
 defaults and units are its declaration, which `ai6 config schema record.station.<table>` prints and
 `docs/configuration.md` renders. Counts and sizes are `Limit`, ceilings on durations `TimeLimit`,
-other durations `Seconds`; a queue, page or run count is a plain integer. Not re-exported at
+other durations `Seconds`; a queue, page or attempt count is a plain integer. Not re-exported at
 the crate root: several table names repeat the Registry's (`AccountLimits`, `ApprovalLimits`,
 `AuditLimits`, `SourceLimits`, `StationLimits`).
 
@@ -3453,7 +3453,7 @@ unfenced. `ingest_source_item` gives the item its Mission ID, queues the brief, 
 `new/` when its fingerprint (title, text, labels, `updated`) changed, and leaves a claimed
 (`InFlight`) or finished brief alone. Cursors are stored under `sources/`.
 `unreported_source_briefs` lists finished source briefs without a report mark (at most
-`[registry.limits.sources] report_attempts`, five, runs each); `mark_source_reported`
+`[registry.limits.sources] report_attempts`, five, attempts each); `mark_source_reported`
 records a run. A finished brief from anywhere else is marked as owing no report when it
 finishes.
 
@@ -3548,7 +3548,7 @@ pub enum OutboxKind { Status, Report, Comment, Question, Update, Create, Link }
 pub enum OutboxState { Pending, Held, Sending, Posted, Refused, Failed }
 pub struct OutboxEntry { pub id: String, operation, mission_id, tracker, item: String, kind: OutboxKind,
     actor: String, body: String, payload: serde_json::Value, coalesce: Option<String>, state: OutboxState,
-    runs: u32, result: Option<OutboxResult>, error: Option<String>, at: f64, not_before: f64,
+    attempts: u32, result: Option<OutboxResult>, error: Option<String>, at: f64, not_before: f64,
     sent_at: Option<f64>, fence: Option<u64> }       // OutboxEntry::new(operation, mission, tracker, item, kind, actor, at)
 pub enum QuestionState { Open, Answered, Expired, Withdrawn }
 pub struct IssueQuestion { pub id: String /* q-… when empty */, mission_id, tracker, item, entry: String, asked_at: f64, expires_at: f64, state: QuestionState }
@@ -3560,7 +3560,7 @@ pub struct OutboxResult { pub comment_id: Option<String>, url: Option<String>, c
 // ProposedIssue::mission: Option<Brief>: a person's Mission created with the issue; once the issue
 // exists the Headquarters Station enters it with MissionEntry::source (numbered by the issue) and
 // links it as its source, audited `mission.create.entered`
-pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_runs: u32 } }
+pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_attempts: u32 } }
 pub trait MissionIssueStore {   // on FileRegistry and SqlRegistry; part of RegistryBackend
     fn link_issue(&self, link: &IssueLink) -> io::Result<IssueLink>;      // upsert by (Mission, tracker, item); at most [registry.limits.issues] links_per_mission live ones
     fn issue_links(&self, mission_id: &str) -> io::Result<Vec<IssueLink>>;

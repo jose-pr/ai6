@@ -94,7 +94,7 @@ void main() {
       addTearDown(board.dispose);
       board.accessToken = 't';
       board.loading = false;
-      board.userRun = const UserRunSummary(
+      board.userSession = const UserSessionSummary(
         personId: 'ana',
         name: 'ana',
         displayName: null,

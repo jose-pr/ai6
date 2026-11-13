@@ -96,9 +96,7 @@ List<(MissionGroup, RunSummary?)> runsHere(
     )) {
       continue;
     }
-    final onStation = mission.runs.where(
-      (run) => run.stationId == stationId,
-    );
+    final onStation = mission.runs.where((run) => run.stationId == stationId);
     here.add((mission, currentRun(onStation)));
   }
   return here;
