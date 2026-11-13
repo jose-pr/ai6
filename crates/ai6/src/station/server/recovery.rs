@@ -640,7 +640,7 @@ pub(super) fn predecessor(state: &DaemonState, mission_id: &MissionId) -> Option
         .intake
         .latest_run(mission_id.as_str())
         .unwrap_or_else(|error| {
-            eprintln!("ai6: earlier attempts at Mission {mission_id} unreadable: {error}");
+            eprintln!("ai6: earlier run at Mission {mission_id} unreadable: {error}");
             None
         })
 }
@@ -659,7 +659,7 @@ pub(super) enum WorkFrom {
 /// The brief a new run is given about the lost run it replaces.
 pub(super) fn hand_off(lost: &RunRecord, work: WorkFrom) -> String {
     let mut lines = vec![format!(
-        "This Mission continues attempt {}, which was lost: {}.",
+        "This Mission continues run {}, which was lost: {}.",
         lost.number,
         lost.lost
             .as_deref()
@@ -1056,7 +1056,7 @@ mod tests {
             .find(|start| start.mission_id.as_str() == mission_id)?
             .initial_context
             .iter()
-            .find(|text| text.starts_with("This Mission continues attempt 1, which was lost"))
+            .find(|text| text.starts_with("This Mission continues run 1, which was lost"))
             .cloned()
     }
 
@@ -1411,7 +1411,7 @@ mod tests {
         let hand_off = started
             .initial_context
             .iter()
-            .find(|text| text.starts_with("This Mission continues attempt 1, which was lost"))
+            .find(|text| text.starts_with("This Mission continues run 1, which was lost"))
             .expect("the second attempt is briefed on the first");
         assert!(hand_off.contains(&reason), "{hand_off}");
         assert!(hand_off.contains(&saved.branch), "{hand_off}");
@@ -1481,7 +1481,7 @@ mod tests {
             lost.recent
                 .iter()
                 .any(|line| line.starts_with("text: tick")),
-            "its last events are kept for the next attempt: {:?}",
+            "its last events are kept for the next run: {:?}",
             lost.recent
         );
         assert!(!a.runs.lock().unwrap().contains_key(&mission_id));

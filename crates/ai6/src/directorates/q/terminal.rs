@@ -742,7 +742,7 @@ mod tests {
     // A changed required signature affects every built terminal provider.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(TerminalVtable::FLOOR_HASH, 621856063);
+        assert_eq!(TerminalVtable::FLOOR_HASH, 3690241982);
         assert_eq!(TerminalRunVtable::FLOOR_HASH, 3148381037);
     }
 

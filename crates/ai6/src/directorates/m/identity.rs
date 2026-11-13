@@ -50,10 +50,10 @@ pub struct AccessTokenRecord {
     issued_at: f64,
     expires_at: f64,
     revoked_at: Option<f64>,
-    /// The token ID of the run cookie this token's sign-in holds; revoking either ends both.
+    /// The token ID of the session cookie this token's sign-in holds; revoking either ends both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sign_in: Option<String>,
-    /// This record is a sign-in's run cookie, whose secret is no bearer.
+    /// This record is a sign-in's session cookie, whose secret is no bearer.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     session_cookie: bool,
 }
@@ -99,7 +99,7 @@ impl AccessTokenRecord {
         })
     }
 
-    /// The same record as a sign-in's run cookie. [`find_access_token`] never answers with
+    /// The same record as a sign-in's session cookie. [`find_access_token`] never answers with
     /// one.
     ///
     /// [`find_access_token`]: crate::AccessTokenStore::find_access_token
@@ -110,7 +110,7 @@ impl AccessTokenRecord {
         self
     }
 
-    /// The same record as a bearer token of the sign-in holding the run cookie `sign_in`,
+    /// The same record as a bearer token of the sign-in holding the session cookie `sign_in`,
     /// a token ID: the token stops being accepted when that sign-in is revoked.
     pub fn in_sign_in(mut self, sign_in: impl Into<String>) -> Result<Self, InvalidIdentity> {
         let sign_in = sign_in.into();
@@ -150,12 +150,12 @@ impl AccessTokenRecord {
         })
     }
 
-    /// The run cookie's token ID when this token belongs to such a sign-in.
+    /// The session cookie's token ID when this token belongs to such a sign-in.
     pub fn sign_in(&self) -> Option<&str> {
         self.sign_in.as_deref()
     }
 
-    /// Whether this record is a sign-in's run cookie rather than a bearer token.
+    /// Whether this record is a sign-in's session cookie rather than a bearer token.
     pub fn is_session_cookie(&self) -> bool {
         self.session_cookie
     }

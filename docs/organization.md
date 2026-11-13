@@ -8,11 +8,11 @@ are a convention, not decoration: each one says who owns a decision.
 
 | Name | Here | Owns |
 | --- | --- | --- |
-| **M** | `ai6::directorates::m` | Decisions: the roster, Agent selection, clearance, cover, the Mission lifecycle and the access kinds (shared `coqui-access`, with AI6's scopes and actions) |
-| **Registry** | `ai6::directorates::registry` | The shared record (briefs, leases, check-ins, audit, access tokens) and the Cable relay; real SIS and MI5 usage |
+| **M** | `ai6::directorates::m` | Decisions: the roster, Agent selection, clearance, cover, the Mission lifecycle and the access kinds |
+| **Registry** | `ai6::directorates::registry` | The shared record (briefs, leases, check-ins, audit, access tokens) and the Cable relay |
 | **Q Branch** | `ai6::directorates::q` | Gear: terminals, loadouts, Mission-scoped secret leases, MCP configuration, sandbox arguments |
 | **00 Section** | `ai6::directorates::section_00`, `crates/providers/agents/` | The AgentHandler contract and the Claude and Codex handlers |
-| **Medical** | `ai6::directorates::medical` | Agent health ([Medical](medical.md)): the watchdog for stalls, loops and blocked prompts; token and cost usage and budgets; exposure to untrusted input; quarantine |
+| **Medical** | `ai6::directorates::medical` | Agent health ([Medical](medical.md)): the watchdog for stalls, loops and blocked prompts; token and cost budgets; exposure; quarantine |
 | **Station** | `ai6::station`, `ai6 serve` | A node running the daemon: its server, provider host, safe houses, publisher and identity |
 | **Universal Exports** | `crates/universal-exports` | The public front: the only address operators and clients reach |
 | **Outer Office** | `clients/outer-office` | The operator app (short name OO): board, briefs, terminals, administration, audit |
@@ -35,9 +35,7 @@ Infrastructure  Station ──────────────────�
 - **Operation**: a global project and its policy. Stations serve Operations; they do not
   own them. An Operation's `station_labels` names the Station labels its Missions need.
 - **Mission**: one brief under an Operation; its Mission ID may group several Runs.
-- **Run**: one AI6 agent run of a Mission or a charge, named by one UUID AI6 makes. A Mission or a Run is
-  *executed*: executing a Mission starts its next Run, and executing a Run starts it, or resumes it if it ran.
-  Never call it a Task or a Run.
+- **Run**: one agent run, under one UUID AI6 makes; a Mission or a Run is executed. Never a Task or a Session.
 - **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
   or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
 - **Theater**: the host or environment a Run works on, reached through a transport
@@ -101,8 +99,8 @@ see it, and the credential it needs is leased only against an approval.
 | --- | --- | --- |
 | **Sleepers** | real tradecraft | Standing orders: a schedule wakes an Agent with a set brief, once each authorized by M (`operation.<id>.sleepers`) |
 | **CX report** | real (SIS reporting) | The outcome report a Source receives when its Mission ends: an issue comment, a Jira transition |
-| **Chief of Staff** | novel, film (Bill Tanner) | The `chief-of-staff` role: reviews untrusted briefs before M places them, and can only hold them; the deterministic vetting before it is M's (`operation.<id>.vetting`) |
-| **Head of Station** | novel (*The Man with the Golden Gun*: "Heads of Station"), real (SIS) | The `head-of-station` role: a round of each Station on a schedule, with the Station's logbook, its own tools and fixed unattended limits ([Stations](stations.md#head-of-station)) |
+| **Chief of Staff** | novel, film | The `chief-of-staff` role: reviews untrusted briefs before M places them, and can only hold them; the deterministic vetting before it is M's (`operation.<id>.vetting`) |
+| **Head of Station** | novel and real (SIS) | The `head-of-station` role: a round of each Station on a schedule, with the Station's logbook ([Stations](stations.md#head-of-station)) |
 | **Liaison** | real | A2A, as Cables ([Liaison](liaison.md)) |
 
 ## Planned posts
@@ -122,20 +120,19 @@ see it, and the credential it needs is leased only against an approval.
 | **Operation** | a global project and its policy (`operations.toml`, `operation_id`) |
 | **Subordinate Operation** | an Operation whose `parent` names another |
 | **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
-| **Run / Run ID** | one AI6 agent run of a Mission or a charge, named by one UUID AI6 makes (`id`, and `run_id` where another record points at it); a Mission's runs are shown `<handle>.<n>`; executing a Mission starts its next Run, executing a Run starts or resumes it |
-| **Provider ID** | the id a harness or provider knows a Run by, kept apart from the Run's UUID (`provider_id`); a provider maps the UUID to one it accepts and answers with the UUID |
-| **Conversation** | one chat with Moneypenny; the agent run behind it is a Run |
-| **Charge** | what an Agent answers for: an Operation is its `00` Agent's charge, a Station its Head of Station's, the service M's; it holds one standing Run, resumed after restarts and takeovers (`[charge.<scope>]`, [Charges](charges.md)) |
-| **Run** | only another protocol's own word, kept at that wire: ACP's `sessionId` and `run/*` methods, the Claude Code and Codex CLIs' own run ids and flags, a person's sign-in session and its cookie, and MCP's `Mcp-Session-Id`. It is never an AI6 Run |
+| **Run / Run ID** | an agent run of a Mission or a charge, one UUID AI6 makes (`id`; `run_id` elsewhere); executing a Mission starts its next Run, executing a Run starts or resumes it |
+| **Conversation** | a chat with Moneypenny; the agent run behind it is a Run |
+| **Charge** | what an Agent answers for (an Operation's `00`, a Station's Head of Station, M's service); one standing Run ([Charges](charges.md)) |
+| **Session** | only another protocol's word, at its wire (ACP `sessionId`, sign-in sessions, `Mcp-Session-Id`); never a Run |
 | **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |
 | **Headquarters Station (HQS)** | the control Station holding the current Headquarters lease |
 | **Fallback Station** | a control Station ready to take over when the HQS lease lapses |
 | **Relocation** | Headquarters authority moving to a fallback Station |
 | **Outstation** | an execution-only Station |
 | **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
-| **Extraction** | carrying a Mission on when its Station or runner is lost: another Station adopts a runner's Run, or a lost one is retried with a hand-off (`recovery`; `on_lost`, `lost_after_secs`) |
+| **Extraction** | carrying a Mission on when its Station or runner is lost: another Station adopts a runner's Run, or a lost one is retried with a hand-off (`recovery`) |
 | **Theater** | the host or environment a Run works in (an Operation's `theater`) |
-| **Safe house** | a Mission's isolated workspace, made by a safe-house provider (`SafeHouseProvider`; the `workspace` key on an Operation) |
+| **Safe house** | a Mission's isolated workspace, made by a safe-house provider |
 | **Registry** | the shared store for briefs, leases, check-ins and audit (`RegistryBackend`: `FileRegistry` or `SqlRegistry`) |
 | **Brief / debrief** | a Mission's request / the outcome the Registry files when it ends |
 | **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
@@ -145,7 +142,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |
 | **Compartment** | need-to-know access to other Operations' work; one is **read in** to it and **read out** |
-| **Green ink** | a person's recorded approval of one irreversible step an Agent asked to take (`request_approval`; an Operation's `green_ink` policy) |
+| **Green ink** | a person's recorded approval of one irreversible step an Agent asked to take |
 | **Class authorisation** | a standing approval of a kind of step on matching targets, until it ends or is revoked |
 | **HUMINT / SIGINT** | briefs from people / briefs from signals such as CI failures and alerts |
 | **Exfiltration route** | how work leaves a safe house: with `git`, the kept branch and its commits |

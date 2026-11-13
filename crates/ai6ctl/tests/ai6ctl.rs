@@ -1806,7 +1806,7 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
     );
     assert_eq!(
         String::from_utf8(decided.stdout).unwrap(),
-        format!("{key} attempt 1: redispatch by viewer-007\n")
+        format!("{key} run 1: redispatch by viewer-007\n")
     );
     let verdict = registry
         .latest_run(key)

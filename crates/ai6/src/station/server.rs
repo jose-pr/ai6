@@ -3787,7 +3787,7 @@ fn create_intake_mission(
     if again && !retry {
         missions
             .reopen(mission_id.as_str(), agent_id, brief.prompt(), &digest)
-            .map_err(|error| format!("could not queue the Mission's next attempt: {error:?}"))?;
+            .map_err(|error| format!("could not queue the Mission's next run: {error:?}"))?;
         return missions
             .record_name(
                 mission_id.as_str(),
@@ -5239,7 +5239,7 @@ async fn start_mission(
     }
     if run_hold(&state, &mission_id).is_some() {
         initial_context.push(
-            "This Mission continues an earlier attempt that stopped before finishing. \
+            "This Mission continues an earlier run that stopped before finishing. \
              Its work is in your working directory: inspect it, then continue the task."
                 .to_owned(),
         );
@@ -6004,10 +6004,10 @@ fn resume_route(
         }
         routes::ResumeOn::NewRun(why) => {
             if hand_off(state, mission_id, agent.id.clone()) {
-                eprintln!("ai6: Mission {mission_id:?} starts a new attempt: {why}");
+                eprintln!("ai6: Mission {mission_id:?} starts a new run: {why}");
             }
             Err(conflict(&format!(
-                "a new attempt was queued on another route: {why}"
+                "a new run was queued on another route: {why}"
             )))
         }
         routes::ResumeOn::Wait(why) => Err(conflict(&why)),
@@ -8079,7 +8079,7 @@ fn handle_limit(
         && hand_off(state, mission_id, agent.id.clone())
     {
         eprintln!(
-            "ai6: Mission {mission_id:?} hit a provider limit; posting Agent {:?} as a new attempt",
+            "ai6: Mission {mission_id:?} hit a provider limit; posting Agent {:?} as a new run",
             agent.id
         );
         queue_event(state, mission_id, event);
@@ -11007,6 +11007,7 @@ queue = 1
                 "mock-agent",
                 "mock-author",
                 "mock-cables",
+                "mock-charge",
                 "mock-denied",
                 "mock-drip",
                 "mock-limit",
@@ -11020,7 +11021,6 @@ queue = 1
                 "mock-stream",
                 "mock-verdict",
                 "mock-wake",
-                "mock-charge",
             ])
         );
 
@@ -13002,7 +13002,7 @@ theater = \"other-box\"
         assert_eq!(
             record.handle.as_deref(),
             Some("mission-s.1"),
-            "a run's handle is the Mission's and its attempt"
+            "a run's handle is the Mission's and its run"
         );
         assert_eq!(record.exposure.len(), 1);
 

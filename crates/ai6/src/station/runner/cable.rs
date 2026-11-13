@@ -65,6 +65,7 @@ fn decode(text: &str) -> Option<Vec<u8>> {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Request {
     /// The runner's name for the Run.
+    #[serde(rename = "sessionId")]
     pub(crate) run_id: String,
     /// Unique among this Run's requests.
     pub(crate) id: u64,
@@ -82,6 +83,7 @@ pub(crate) struct Request {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Answer {
+    #[serde(rename = "sessionId")]
     pub(crate) run_id: String,
     pub(crate) id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

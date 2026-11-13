@@ -1379,7 +1379,7 @@
               "minimum": 0,
               "maximum": 18446744073709551615,
               "title": "Window",
-              "description": "Days of attempts a scorecard covers; 0 covers every attempt on record.",
+              "description": "Days of runs a scorecard covers; 0 covers every run on record.",
               "default": 30
             },
             "small_sample": {
@@ -1387,7 +1387,7 @@
               "minimum": 0,
               "maximum": 18446744073709551615,
               "title": "Small sample below",
-              "description": "Judged attempts below which a row says its sample is too small to rank on.",
+              "description": "Judged runs below which a row says its sample is too small to rank on.",
               "default": 5
             },
             "propose": {
@@ -1727,13 +1727,13 @@
               "standing": {
                 "type": "boolean",
                 "title": "One standing Mission",
-                "description": "One standing Mission for the Sleeper (one per Station with `each_station`), each window a new attempt of it, instead of a Mission per window. A window that comes while an attempt is in flight is skipped, unless that attempt has stalled: the window then supersedes it. A failed attempt leaves the order standing.",
+                "description": "One standing Mission for the Sleeper (one per Station with `each_station`), each window a new run of it, instead of a Mission per window. A window that comes while an run is in flight is skipped, unless that run has stalled: the window then supersedes it. A failed run leaves the order standing.",
                 "default": false
               },
               "resume": {
                 "type": "boolean",
-                "title": "Resume the last attempt's Run",
-                "description": "Each window's attempt resumes the last attempt's provider Run when its handler can and that attempt did not fail, else starts a new one, as it does when the resume is refused. Needs `standing`.",
+                "title": "Resume the last run's Run",
+                "description": "Each window's run resumes the last run's provider Run when its handler can and that run did not fail, else starts a new one, as it does when the resume is refused. Needs `standing`.",
                 "default": false
               }
             },
@@ -2525,7 +2525,7 @@
         "require_approval_before_done": {
           "type": "boolean",
           "title": "Require a decision before done",
-          "description": "Whether a Run of this role that ends done with no green ink request decided in that attempt is held for a person's verdict instead of being done.",
+          "description": "Whether a Run of this role that ends done with no green ink request decided in that run is held for a person's verdict instead of being done.",
           "x-advanced": true,
           "default": false
         },
@@ -8373,7 +8373,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Retry a failed send after",
-              "description": "Seconds before a failed send is tried again; each attempt doubles it.",
+              "description": "Seconds before a failed send is tried again; each run doubles it.",
               "default": 30.0
             },
             "replies_read": {

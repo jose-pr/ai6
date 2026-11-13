@@ -545,7 +545,7 @@ fn agent_request(
             );
             respond!(json!({}));
         }
-        "run/set_config_option" => respond!(json!({"configOptions": []})),
+        "session/set_config_option" => respond!(json!({"configOptions": []})),
         "session/close" => respond!(json!({})),
         "session/prompt" => {
             let script = script.clone();
@@ -824,7 +824,7 @@ fn model_and_effort_use_the_agents_options() {
     let calls = seen.calls.lock().unwrap();
     let set = calls
         .iter()
-        .find(|(method, _)| method == "run/set_config_option")
+        .find(|(method, _)| method == "session/set_config_option")
         .expect("the model was set");
     assert_eq!(set.1["configId"], "model");
     assert_eq!(set.1["value"], "haiku");

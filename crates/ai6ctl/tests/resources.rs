@@ -319,7 +319,7 @@ async fn apply_reads_cfg_yaml_and_standard_input_and_stores_all_or_none() {
     .unwrap();
     std::fs::write(
         dir.join("b.cfg"),
-        "#!yaml\nwatch:\n  \"operation:G\":\n    agent: \"007\"\n    max_turns_per_hour: 3\n",
+        "#!yaml\ncharge:\n  \"operation:G\":\n    agent: \"007\"\n    max_turns_per_hour: 3\n",
     )
     .unwrap();
     std::fs::write(dir.join("ignored.txt"), "not a document").unwrap();

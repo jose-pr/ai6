@@ -451,7 +451,7 @@ pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &Missi
     };
     let attempt = run_hold(state, mission_id).map_or(1, |hold| hold.number);
     let mut told = format!(
-        "Attempt {attempt} of this Mission was not accepted by {}: {}",
+        "Run {attempt} of this Mission was not accepted by {}: {}",
         verdict.by,
         verdict.note.as_deref().unwrap_or("no reason was given"),
     );
@@ -726,7 +726,7 @@ mod tests {
         let task = queued.task();
         assert!(
             task.contains(
-                "Attempt 1 of this Mission was not accepted by person-m: no branch on the remote"
+                "Run 1 of this Mission was not accepted by person-m: no branch on the remote"
             ) && task.ends_with("Push the branch."),
             "{task}"
         );
@@ -747,7 +747,7 @@ mod tests {
             second.predecessor.as_deref(),
             Some(first.id.as_str())
         );
-        assert!(second.verdict.is_none(), "the next attempt starts clean");
+        assert!(second.verdict.is_none(), "the next run starts clean");
         stop(&state);
     }
 

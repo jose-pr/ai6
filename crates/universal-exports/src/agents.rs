@@ -1307,13 +1307,13 @@ mod tests {
         assert_eq!(standing["judged"], 2);
         assert_eq!(standing["failure_rate"], 0.5);
         assert_eq!(standing["small_sample"], false);
-        assert_eq!(standing["attempts"]["failed"][0]["mission_id"], "m2");
+        assert_eq!(standing["runs"]["failed"][0]["mission_id"], "m2");
         assert_eq!(
-            standing["attempts"]["withdrawn"].as_array().unwrap().len(),
+            standing["runs"]["withdrawn"].as_array().unwrap().len(),
             1
         );
         assert_eq!(
-            standing["attempts"]["waiting_on_person"]
+            standing["runs"]["waiting_on_person"]
                 .as_array()
                 .unwrap()
                 .len(),

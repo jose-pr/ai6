@@ -151,7 +151,7 @@ async fn a_renamed_mission_reads_under_its_new_handle_its_old_one_and_its_uid() 
         assert_eq!(detail["handle"], "G-build-fix", "{id}");
         assert_eq!(detail["runs"][0]["run_id"], "run-r", "{id}");
         assert_eq!(
-            detail["attempts"][0]["handle"], "G-1.1",
+            detail["history"][0]["handle"], "G-1.1",
             "a run keeps the handle it opened with"
         );
 

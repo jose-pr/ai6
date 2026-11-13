@@ -3368,7 +3368,7 @@ struct LoginRequest {
     secret: String,
     #[serde(default)]
     ttl_seconds: Option<u64>,
-    /// `false` asks a browser's sign-in not to get a run cookie.
+    /// `false` asks a browser's sign-in not to get a session cookie.
     #[serde(default)]
     session_cookie: Option<bool>,
 }
@@ -3625,7 +3625,7 @@ async fn login(
 }
 
 /// The page cookie of a browser's sign-in that `issued` was issued in: it names the sign-in
-/// (`sign_in`, the run cookie's record) when there is one, else the token itself, and lasts as
+/// (`sign_in`, the session cookie's record) when there is one, else the token itself, and lasts as
 /// long as what it names may.
 fn page_cookie_for(
     gateway: &Gateway,
@@ -3688,7 +3688,7 @@ async fn proxy_person(
         .map(Some)
 }
 
-/// `POST /v1/auth/resume`: a fresh access token for the sign-in a run cookie holds, so a
+/// `POST /v1/auth/resume`: a fresh access token for the sign-in a session cookie holds, so a
 /// reloaded page need not ask for the password. The sign-in's time keeps running from when it
 /// was made. It answers as `login` does; a cookie that does not stand is cleared.
 async fn resume(
@@ -3720,7 +3720,7 @@ async fn resume(
     Ok(response)
 }
 
-/// The token a run cookie's value gets, with the ID of its sign-in; `None` when it gets none: the setting is off, the
+/// The token a session cookie's value gets, with the ID of its sign-in; `None` when it gets none: the setting is off, the
 /// value is not a standing cookie, its time is up, its person has left the directory, or a
 /// front proxy now says this browser is someone else.
 async fn resumed_token(
@@ -3881,7 +3881,7 @@ async fn authenticate_password(
     if let Some(wait) = gateway.login_guard.tried(source, &request.name) {
         return Err(ApiError::too_many_attempts(wait));
     }
-    let attempt = Attempt {
+    let attempt = Run {
         name: Some(request.name),
         secret: Some(request.secret),
         peer: Some(source.to_string()),
@@ -3950,7 +3950,7 @@ fn new_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
-/// Stores a new bearer token, of the sign-in holding the run cookie `sign_in` when one is
+/// Stores a new bearer token, of the sign-in holding the session cookie `sign_in` when one is
 /// named.
 async fn store_bearer(
     registry: Arc<dyn RegistryBackend>,
@@ -3999,19 +3999,19 @@ async fn store_bearer(
     })
 }
 
-/// A run cookie just stored: its record's ID and the header that hands it to the browser.
+/// A session cookie just stored: its record's ID and the header that hands it to the browser.
 struct NewSessionCookie {
     sign_in: String,
     header: HeaderValue,
 }
 
-/// Whether a browser's sign-in gets a run cookie: with renewal off the sign-in ends with its
+/// Whether a browser's sign-in gets a session cookie: with renewal off the sign-in ends with its
 /// first token, and there is nothing to come back to.
 fn session_cookies_on(table: &ai6::UnexGatewayLimits) -> bool {
     table.session_cookie && table.session_max.get() != Some(Duration::ZERO)
 }
 
-/// Moves a sign-in's run cookie on to `idle` seconds from `now`, and never past `ends`: the
+/// Moves a sign-in's session cookie on to `idle` seconds from `now`, and never past `ends`: the
 /// cookie stands while the sign-in is used, and a failure to write that down is not the
 /// request's.
 async fn keep_cookie(
@@ -4027,7 +4027,7 @@ async fn keep_cookie(
     let _ = tokio::task::spawn_blocking(move || registry.extend_access_token(&cookie, until)).await;
 }
 
-/// Stores a sign-in's run cookie, which ends `session_max` after `issued_at` and never
+/// Stores a sign-in's session cookie, which ends `session_max` after `issued_at` and never
 /// later, and `idle` seconds after `issued_at` unless the sign-in is renewed.
 async fn store_session_cookie(
     registry: Arc<dyn RegistryBackend>,
@@ -5122,7 +5122,7 @@ async fn user_audit(
     ))
 }
 
-/// `POST /v1/auth/logout`: ends the sign-in of the presented token, of the run cookie when
+/// `POST /v1/auth/logout`: ends the sign-in of the presented token, of the session cookie when
 /// the app's own page sends one, or both. The cookie counts by itself because a token can be over
 /// by then, and signing out must still end what a reload would come back to.
 async fn logout(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Response, ApiError> {
@@ -7642,7 +7642,7 @@ mod tests {
                 .unwrap()
         }
 
-        /// A run cookie of Alice's with these times, returning it as a browser sends it.
+        /// A session cookie of Alice's with these times, returning it as a browser sends it.
         fn cookie(&self, issued_at: f64, expires_at: f64) -> String {
             let value = new_secret();
             let record = AccessTokenRecord::try_new(
@@ -7674,7 +7674,7 @@ mod tests {
             .map(|value| value.to_str().unwrap().to_owned())
     }
 
-    /// Says the response tells the browser to drop the run cookie.
+    /// Says the response tells the browser to drop the session cookie.
     fn assert_clears_cookie(response: &reqwest::Response) {
         let set = set_cookie_of(response).expect("the cookie is cleared");
         assert!(set.starts_with("ai6_session=;"), "{set}");
@@ -9760,17 +9760,17 @@ mod tests {
         assert_eq!(mission_detail.status(), StatusCode::OK);
         let mission_detail: serde_json::Value = mission_detail.json().await.unwrap();
         assert_eq!(
-            mission_detail["attempts"],
+            mission_detail["history"],
             serde_json::json!([
                 {
-                    "attempt": 1, "run_id": "attempt-1", "handle": null,
+                    "number": 1, "run_id": "attempt-1", "handle": null,
                     "provider_id": null,
                     "predecessor": null, "station": "hq", "theater": "local",
                     "status": "lost", "lost": "Station \"hq\" went dark",
                     "checkpoint_branch": null, "route": null, "account": null
                 },
                 {
-                    "attempt": 2, "run_id": "attempt-2", "handle": null,
+                    "number": 2, "run_id": "attempt-2", "handle": null,
                     "provider_id": "run-g",
                     "predecessor": "attempt-1", "station": "worker", "theater": "local",
                     "status": "active", "lost": null, "checkpoint_branch": null,

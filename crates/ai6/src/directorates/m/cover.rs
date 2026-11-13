@@ -327,7 +327,7 @@ impl Default for Covers {
                 suggest: String::new(),
                 model: false,
                 footer: String::new(),
-                forbidden: forbidden(&[r"claude\.ai/code/run"]),
+                forbidden: forbidden(&[r"claude\.ai/code/session"]),
                 announce: false,
             },
         );
@@ -342,7 +342,7 @@ impl Default for Covers {
                 suggest: "Assisted-by: AI".to_owned(),
                 model: false,
                 footer: String::new(),
-                forbidden: forbidden(&[r"claude\.ai/code/run"]),
+                forbidden: forbidden(&[r"claude\.ai/code/session"]),
                 announce: false,
             },
         );
@@ -554,7 +554,7 @@ fn is_attribution_trailer(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
         "co-authored-by" | "generated-by" | "assisted-by" | "ai-assisted" | "written-by"
-    ) || key.to_ascii_lowercase().ends_with("-run")
+    ) || key.to_ascii_lowercase().ends_with("-session")
 }
 
 fn announcement_regex() -> &'static Regex {

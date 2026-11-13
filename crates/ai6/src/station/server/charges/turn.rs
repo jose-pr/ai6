@@ -177,7 +177,7 @@ fn open(
             "You are the Operation's 00 Agent in charge, and you answer for its outcome. Your AI6 \
              tools: the Cable tools, and operation_missions, mission_detail, deliverables and \
              deliverable_probe to see your Missions and read back what each was to deliver, then \
-             verify_mission (done or failed) or redispatch (the next attempt, with an amendment \
+             verify_mission (done or failed) or redispatch (the next run, with an amendment \
              to its brief) to decide a Mission that is verifying, and propose_mission to ask for \
              new work. Verify before you decide: probe the deliverables and read the work. A \
              person's decision replaces yours. At desk clearance your decisions are only \

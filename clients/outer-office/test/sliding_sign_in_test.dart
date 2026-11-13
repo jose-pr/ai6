@@ -11,7 +11,7 @@ import 'package:outer_office/shell/sign_in_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'chat_popout_test.dart' show FakePopups;
-import 'run_renewal_test.dart'
+import 'session_renewal_test.dart'
     show FakeChannel, FakeGateway, close, settle, signedIn;
 import 'shell_navigation.dart';
 

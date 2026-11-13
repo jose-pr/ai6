@@ -155,7 +155,7 @@ async fn queued_waiting_retrying_and_failed_missions_are_listed_with_their_reaso
     assert_eq!(detail.status(), 200);
     let detail: Value = detail.json().await.unwrap();
     assert_eq!(detail["pending"]["kind"], "retrying");
-    assert_eq!(detail["attempts"], json!([]));
+    assert_eq!(detail["history"], json!([]));
     let hidden = get(
         &served.base,
         &served.viewer,

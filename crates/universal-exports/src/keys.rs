@@ -85,7 +85,7 @@ pub(crate) async fn resolve(gateway: &Gateway, token: &str) -> Result<Option<Per
     else {
         return Ok(None);
     };
-    let attempt = Attempt {
+    let attempt = Run {
         secret: Some(token.to_owned()),
         secure: Some(true),
         ..Attempt::default()

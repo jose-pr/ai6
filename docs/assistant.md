@@ -1167,7 +1167,7 @@ condition is listed.
 
 **Pop out** on the web opens a browser window at the app's own address with `?oo_window=chat`,
 from the click, so the browser does not take it for a pop-up nobody asked for. The window is a
-second copy of the app that shows only her chat. It signs in with the run cookie the
+second copy of the app that shows only her chat. It signs in with the session cookie the
 browser already holds, so no token travels between the two pages, and the page it came from says
 "Moneypenny is in her own window" with **Bring back**.
 

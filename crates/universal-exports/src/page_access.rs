@@ -52,7 +52,7 @@ pub(crate) async fn viewer(
     let providers = gateway.access.as_ref().ok_or(NoViewer::Unavailable)?;
     if let Some(authenticator) = providers.page_authenticator.clone() {
         let certificates = certificates.map(|Extension(ClientCertificates(chain))| chain);
-        let attempt = Attempt {
+        let attempt = Run {
             headers: headers
                 .iter()
                 .filter(|(name, _)| *name != COOKIE)

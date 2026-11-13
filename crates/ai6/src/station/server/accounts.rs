@@ -1071,7 +1071,7 @@ pub(super) fn on_limit(
     if let Some(operation) = mission.operation_id.as_deref() {
         let next = match rotation {
             Rotation::Resume => "resume on another account",
-            Rotation::Retry => "new attempt on another account",
+            Rotation::Retry => "new run on another account",
             _ => "wait for the reset",
         };
         record(
@@ -2316,7 +2316,7 @@ secrets = ["second"]
             }
         })
         .await
-        .expect("a new attempt is queued");
+        .expect("a new run is queued");
         let first_route = state
             .intake
             .accounts()
@@ -2344,7 +2344,7 @@ secrets = ["second"]
             made[1]
                 .3
                 .iter()
-                .any(|line| line.contains("continues an earlier attempt")),
+                .any(|line| line.contains("continues an earlier run")),
             "the Agent is told: {:?}",
             made[1].3
         );
@@ -2715,7 +2715,7 @@ secret = "codex-b"
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
             ["start", "start"],
-            "a new attempt, not a resume"
+            "a new run, not a resume"
         );
         let homes: Vec<String> = made
             .iter()
@@ -2727,8 +2727,8 @@ secret = "codex-b"
             made[1]
                 .3
                 .iter()
-                .any(|line| line.contains("continues an earlier attempt")),
-            "the new attempt is told it continues one"
+                .any(|line| line.contains("continues an earlier run")),
+            "the new run is told it continues one"
         );
         assert_eq!(logins.lock().unwrap().homes.len(), 2);
         assert_eq!(
@@ -2744,7 +2744,7 @@ secret = "codex-b"
         );
         assert_eq!(
             events(&state, "limited")[0].detail["next"],
-            "new attempt on another account"
+            "new run on another account"
         );
         until_released(&state).await;
         // The Mission is over: its homes go at the next check-in.
@@ -3213,7 +3213,7 @@ env = "MOCK_CONFIG_DIR"
         wait_for_state(&state, "pooled-mixed", MissionState::Queued).await;
         assert_eq!(
             events(&state, "limited")[0].detail["next"],
-            "new attempt on another account",
+            "new run on another account",
             "b's directory holds none of a's transcript"
         );
     }

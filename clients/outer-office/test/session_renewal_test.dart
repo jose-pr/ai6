@@ -45,16 +45,16 @@ class FakeChannel implements AssistantChannel {
 }
 
 /// A gateway whose clock is the test's: tokens last an hour from when they are asked for, up to
-/// [run] from sign-in.
+/// [session] from sign-in.
 class FakeGateway {
   FakeGateway({
-    this.run = const Duration(hours: 12),
+    this.session = const Duration(hours: 12),
     this.clockAhead = Duration.zero,
     this.idle,
     this.cut = true,
   });
 
-  final Duration run;
+  final Duration session;
 
   /// The gateway's idle limit: a token lasts no longer than this, and says when it ends as
   /// `idle_ends_at`. Without one the answer carries `null`.
@@ -70,7 +70,7 @@ class FakeGateway {
   var moneypenny = false;
   var signIns = 0;
 
-  /// The browser holds a run cookie, as far as this gateway can tell.
+  /// The browser holds a session cookie, as far as this gateway can tell.
   var hasCookie = true;
   var resumes = 0;
   var signOuts = <String>[];
@@ -87,7 +87,7 @@ class FakeGateway {
   late DateTime _signedInAt;
 
   Map<String, Object?> _times() {
-    final cap = _signedInAt.add(run);
+    final cap = _signedInAt.add(session);
     final wanted = ooClock().add(idle != null && idle! < _hour ? idle! : _hour);
     final until = cut && wanted.isAfter(cap) ? cap : wanted;
     return {
@@ -371,7 +371,7 @@ void main() {
   });
 
   testWidgets('warns before the cap, once', (tester) async {
-    final gateway = FakeGateway(run: const Duration(minutes: 90));
+    final gateway = FakeGateway(session: const Duration(minutes: 90));
     final signedInAt = tester.binding.clock.now();
     final board = await signedIn(tester, gateway);
     final strip = find.textContaining('Your sign-in ends at');
@@ -479,7 +479,7 @@ void main() {
     },
   );
 
-  testWidgets('no run cookie shows the sign-in page and no error', (
+  testWidgets('no session cookie shows the sign-in page and no error', (
     tester,
   ) async {
     final gateway = FakeGateway()..hasCookie = false;

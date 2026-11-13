@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(given.status(), 200);
         let given: serde_json::Value = given.json().await.unwrap();
         assert_eq!(given["mission_id"], "m-done");
-        assert_eq!(given["attempt"], 1);
+        assert_eq!(given["number"], 1);
         assert_eq!(given["verdict"], "failed-verification");
         assert_eq!(given["by"], "operator-007", "the signer is the caller");
 
@@ -724,7 +724,7 @@ mod tests {
         let board = act(&served, &served.operator, "mission-g", "probe", None).await;
         assert_eq!(board.status(), 200);
         let asked: serde_json::Value = asked.json().await.unwrap();
-        assert_eq!(asked["attempt"], 1);
+        assert_eq!(asked["number"], 1);
         let requested = served
             .registry
             .run("m-verifying-1")
@@ -780,7 +780,7 @@ mod tests {
             .json()
             .await
             .unwrap();
-        let attempt = &detail["attempts"][0];
+        let attempt = &detail["history"][0];
         assert_eq!(
             attempt["deliverables"][0], "branch:never-pushed",
             "{detail}"
@@ -839,7 +839,7 @@ mod tests {
             .json()
             .await
             .unwrap();
-        let attempt = &detail["attempts"][0];
+        let attempt = &detail["history"][0];
         assert_eq!(attempt["verdict"]["verdict"], "disputed", "{detail}");
         assert_eq!(attempt["verdict"]["note"], "not on main");
         assert_eq!(attempt["final_report"], "All merged.");
@@ -858,7 +858,7 @@ mod tests {
             .unwrap()
             .iter()
             .find(|mission| mission["mission_id"] == "mission-g")
-            .map(|mission| &mission["attempts"][0])
+            .map(|mission| &mission["history"][0])
             .unwrap();
         assert_eq!(listed["verdict"]["verdict"], "disputed", "{board}");
         assert!(

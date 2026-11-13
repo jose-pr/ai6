@@ -756,7 +756,7 @@ impl fmt::Display for RunError {
             Self::Unsettled(state) => {
                 write!(
                     f,
-                    "the latest attempt has no outcome to judge: it is {state}"
+                    "the latest run has no outcome to judge: it is {state}"
                 )
             }
             Self::HeldBy(station) => write!(f, "Station {station:?} holds the Run lease"),

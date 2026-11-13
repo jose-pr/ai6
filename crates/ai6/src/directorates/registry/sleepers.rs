@@ -93,7 +93,7 @@ pub struct Sleeper {
     /// that run did not fail, else starts a new one, as it does when the resume is refused.
     /// Needs `standing`.
     #[serde(default, skip_serializing_if = "is_false")]
-    #[schema(title = "Resume the last attempt's Run")]
+    #[schema(title = "Resume the last run's Run")]
     #[map(default)]
     pub resume: bool,
 }
@@ -820,7 +820,7 @@ pub(super) mod tests {
         assert_eq!(
             fire(takeover.as_ref(), window(1), None),
             Fire::InFlight,
-            "the next window comes while the first attempt is queued"
+            "the next window comes while the first run is queued"
         );
         let first = headquarters.list_new().unwrap().remove(0);
         assert_eq!(first.shown_handle(), "G-deps-1");
@@ -939,7 +939,7 @@ pub(super) mod tests {
         assert_eq!(
             registry.recover(&lapsed, LIMIT, "other").unwrap(),
             Some(LeaseRecovery::Failed),
-            "the limit still bounds the lapses of one attempt"
+            "the limit still bounds the lapses of one run"
         );
     }
 

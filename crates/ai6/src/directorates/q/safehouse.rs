@@ -299,7 +299,7 @@ mod tests {
     // A changed required signature affects every built safe-house provider.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(SafeHouseProviderVtable::FLOOR_HASH, 3612232285);
+        assert_eq!(SafeHouseProviderVtable::FLOOR_HASH, 4168913036);
         assert_eq!(SafeHouseRunVtable::FLOOR_HASH, 1018608612);
     }
 

@@ -1209,7 +1209,7 @@ pub(crate) fn source_link(
 const NOT_AUTHORIZED: &str = "not authorized";
 const DISABLED: &str = "disabled by an operator";
 const SCHEDULER_DOWN: &str = "the scheduler was not running";
-const IN_FLIGHT: &str = "the last attempt was in flight";
+const IN_FLIGHT: &str = "the last run was in flight";
 const PAST_THE_BOUND: &str = "older than its catch-up bound";
 const NO_STATION: &str = "no Station could take it";
 
@@ -1410,7 +1410,7 @@ fn fire_rounds(
                     order.tell(
                         "revised",
                         window_label(window),
-                        Some("authorized again after an edit: this attempt takes the new brief"),
+                        Some("authorized again after an edit: this run takes the new brief"),
                     );
                 }
                 match round {
@@ -1434,7 +1434,7 @@ fn fire_rounds(
                 if warned.insert(skipped) {
                     eprintln!(
                         "ai6: sleeper {name} of Operation {operation} has not fired window {}: \
-                         its standing Mission's last attempt is still in flight",
+                         its standing Mission's last run is still in flight",
                         window_label(window)
                     );
                 }
@@ -2820,14 +2820,14 @@ title = \"Update dependencies\"
         assert_eq!(fire(MARK + DAY + 60, &mut warned), 0);
         assert!(
             skipped(&registry).is_empty(),
-            "it still fires if the attempt settles before the next window"
+            "it still fires if the run settles before the next window"
         );
         assert_eq!(fire(MARK + 2 * DAY + 60, &mut warned), 0);
         assert_eq!(
             skipped(&registry),
             [(
                 window_label(MARK + DAY),
-                "the last attempt was in flight".to_owned()
+                "the last run was in flight".to_owned()
             )]
         );
     }
@@ -3825,7 +3825,7 @@ mod reopen_tests {
                     |record| record.action == "mission.reopened" && record.target.starts_with(&key)
                 )
         );
-        assert_eq!(settle(registry, 1), key, "the same Mission's next attempt");
+        assert_eq!(settle(registry, 1), key, "the same Mission's next run");
     }
 
     fn an_item_that_never_reopens_stays_finished(store: &dyn Store) {

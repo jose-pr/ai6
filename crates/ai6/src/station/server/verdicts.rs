@@ -459,6 +459,6 @@ mod tests {
             .get(earlier.mission_id.as_str())
             .cloned()
             .unwrap();
-        assert!(lacks_decision(&state, &later), "another attempt's decision");
+        assert!(lacks_decision(&state, &later), "another run's decision");
     }
 }

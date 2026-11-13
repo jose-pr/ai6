@@ -104,7 +104,7 @@ impl DecisionDesk {
                 json!({
                     "mission": record.mission_id,
                     "handle": record.handle,
-                    "attempt": record.number,
+                    "number": record.number,
                     "state": record.result.as_ref().map(|result| result.state.as_str()),
                     "agent": record.launch.as_ref().and_then(|launch| launch.agent.as_deref()),
                     "decided": record.verdict.is_some(),
@@ -132,7 +132,7 @@ impl DecisionDesk {
             "deliverables",
             &json!({
                 "mission": record.mission_id,
-                "attempt": record.number,
+                "number": record.number,
                 "deliverables": record.deliverables,
             }),
         ))
@@ -241,8 +241,8 @@ impl DecisionDesk {
         decisions::decide(store, &decision).map_err(|error| error.to_string())?;
         Ok(json!({
             "decided": word,
-            "attempt": record.number,
-            "note": "the Mission's Station settles it, or queues the next attempt, on its next pass",
+            "number": record.number,
+            "note": "the Mission's Station settles it, or queues the next run, on its next pass",
         })
         .to_string())
     }

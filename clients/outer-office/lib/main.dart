@@ -130,7 +130,7 @@ Future<void> _startWeb() async {
     limits: config.limits,
   );
   board.followRuntime(runtime);
-  // Only here: the run cookie is a browser's, and the desktop app's sign-in stays in memory.
+  // Only here: the session cookie is a browser's, and the desktop app's sign-in stays in memory.
   unawaited(board.resumeSignIn());
   try {
     await appearance.restore(board);
@@ -3757,7 +3757,7 @@ class MissionBoard extends ChangeNotifier
         ? null
         : RegExp(r'(?:^|;\s*)ai6_attach=([^;]+)').firstMatch(setCookie);
     if (cookie == null) {
-      throw StateError('The gateway did not issue a Run cookie.');
+      throw StateError('The gateway did not issue a Session cookie.');
     }
     return 'ai6_attach=${cookie.group(1)}';
   }

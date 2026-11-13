@@ -4155,7 +4155,7 @@ impl AcpRun {
 pub struct AcpFacade;            // an AgentHandler served as an ACP agent
 impl AcpFacade {
     pub fn new(handler: Arc<dyn AgentHandler>, terminal: TerminalFactory) -> Self;
-    pub fn with_auth(self, FacadeAuth) -> Self;           // authenticate required before run/*
+    pub fn with_auth(self, FacadeAuth) -> Self;           // authenticate required before session/*
     pub fn serve(&self, transport: impl ConnectTo<Agent> + 'static) -> JoinHandle<()>;
 }
 // NDJSON transports are `coqui_acp::lines::over_io(reader, writer, diagnostic_lines, max_line)`;
@@ -4267,11 +4267,11 @@ state directory).
 `AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest. `into_session_cookie()`
-marks a record as a sign-in's run cookie (`is_session_cookie()`) and `in_sign_in(token_id)` a
+marks a record as a sign-in's session cookie (`is_session_cookie()`) and `in_sign_in(token_id)` a
 bearer token as belonging to that sign-in (`sign_in()`).
 `AccessTokenStore` (`store_access_token`; `find_access_token`, which never answers with a run
 cookie, nor with a token whose sign-in was revoked; `find_session_cookie`, the converse;
-`login_by_id`, an active run cookie or bearer record (whose sign-in stands) by its ID;
+`login_by_id`, an active session cookie or bearer record (whose sign-in stands) by its ID;
 `revoke_access_token`, where a token of a sign-in takes the sign-in with it;
 `extend_access_token`, which moves an active bearer record's expiry later and never earlier);
 `FileRegistry` stores and validates records in the `access-tokens/` and `access-token-digests/`
@@ -5779,7 +5779,7 @@ message per line, on that port; a connection serves any number of Runs and sever
 connections may be open. `initialize` advertises `authMethods: [{id: "ai6-runner-token"}]`,
 `loadSession`, `sessionCapabilities.resume|close` and `_meta["dev.coqui.ai6/events"]`.
 `authenticate` with `_meta.token` (compared in constant time) must come before any
-`run/*` or `_ai6/*` call, and may come before `initialize`. Then:
+`session/*` or `_ai6/*` call, and may come before `initialize`. Then:
 
 - `session/new` with `_meta["dev.coqui.ai6/launch"]` (`LaunchMeta` with `handler`
   (`HandlerSpec`: id and the Agent's `handler_settings`), `terminal` and `key`) names a Run

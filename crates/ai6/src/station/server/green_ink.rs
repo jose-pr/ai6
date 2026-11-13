@@ -1155,7 +1155,7 @@ mod tests {
     ) -> Option<serde_json::Value> {
         use crate::directorates::section_00::gate::{GateClient, pre_tool_use};
         let input = serde_json::json!({
-            "run_id": "claude-run",
+            "session_id": "claude-session",
             "transcript_path": "/tmp/transcript.jsonl",
             "cwd": cwd,
             "permission_mode": "default",

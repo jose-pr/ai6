@@ -85,18 +85,18 @@ pub(super) fn resume_from(
         Some(id) => (
             "resumed",
             format!(
-                "the window resumes the last attempt's provider Run {}",
+                "the window resumes the last run's provider Run {}",
                 id.as_str()
             ),
         ),
         None => (
             "started",
             if refused {
-                "the window starts a new Run: the last attempt's could not be resumed"
+                "the window starts a new Run: the last run's could not be resumed"
             } else if failed {
-                "the window starts a new Run: the last attempt failed, so its is not taken up"
+                "the window starts a new Run: the last run failed, so its is not taken up"
             } else {
-                "the window starts a new Run: the last attempt left none its handler can resume"
+                "the window starts a new Run: the last run left none its handler can resume"
             }
             .to_owned(),
         ),
@@ -153,7 +153,7 @@ pub(super) fn attempt_failed(state: &DaemonState, brief: &Brief, outcome: &serde
         return;
     };
     let reason = if outcome[HARNESS_SAID] == true {
-        "its harness reported a failure; its words are in the attempt's outcome"
+        "its harness reported a failure; its words are in the run's outcome"
     } else {
         outcome["reason"]
             .as_str()
@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(
             fire(FIRST + DAY + 60, &mut warned),
             0,
-            "the next window comes while the first attempt is queued"
+            "the next window comes while the first run is queued"
         );
         let skipped = format!("skipped/G/nightly//{}", window_label(FIRST + DAY));
         assert!(warned.contains(&skipped), "{warned:?}");
@@ -637,7 +637,7 @@ mod tests {
                 .unwrap()
                 .iter()
                 .all(|(resumed, _)| *resumed != mission),
-            "without resume each attempt starts a new Run"
+            "without resume each run starts a new Run"
         );
         assert_eq!(
             state
@@ -891,7 +891,7 @@ mod tests {
             );
         }
         let alerts = told(&state, "attempt-failed");
-        assert_eq!(alerts.len(), 1, "one alert for the attempt");
+        assert_eq!(alerts.len(), 1, "one alert for the run");
         assert_eq!(alerts[0].mission.as_deref(), Some(mission.as_str()));
         assert_eq!(alerts[0].detail["sleeper"], "nightly");
         assert_eq!(alerts[0].detail["window"], window_label(FIRST));
@@ -913,7 +913,7 @@ mod tests {
         assert_eq!(
             run_window(&state, FIRST + DAY, &mut warned).await,
             mission,
-            "the next window fires as the next attempt"
+            "the next window fires as the next run"
         );
         let runs = runs(&state, &mission);
         assert_eq!(
@@ -957,7 +957,7 @@ mod tests {
         assert_ne!(
             super::super::tests::mission_state(&state, &mission).state,
             MissionState::Queued,
-            "the attempt must not keep asking for a Run that cannot resume"
+            "the run must not keep asking for a Run that cannot resume"
         );
         wait_for_done(&state, &mission).await;
         schedule_intake_once(&state);
@@ -1014,7 +1014,7 @@ mod tests {
         );
         let said = told(&state, "started");
         assert!(
-            said.last().unwrap().detail["detail"].contains("the last attempt failed"),
+            said.last().unwrap().detail["detail"].contains("the last run failed"),
             "{said:?}"
         );
         stop(&state);
@@ -1038,7 +1038,7 @@ mod tests {
         assert_eq!(
             filed.outcome.unwrap()["reason"],
             "no conversation found",
-            "the attempt's outcome carries the reason"
+            "the run's outcome carries the reason"
         );
 
         assert_eq!(

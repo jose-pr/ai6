@@ -287,7 +287,7 @@ sign-in](https://jose-pr.github.io/ai6/access/#signing-in-from-a-browser) lists 
 pass. The sign-in page asks `GET /v1/auth/methods` what the gateway accepts and shows its name and
 password form, the button of an organization proxy that vouches for the person, or both, on web
 and desktop alike. The bearer token is kept in memory only, and signing out revokes it. On the web
-a sign-in also gets an HttpOnly run cookie that this code cannot read, nothing else is kept, and
+a sign-in also gets an HttpOnly session cookie that this code cannot read, nothing else is kept, and
 a reload asks `POST /v1/auth/resume` for a new token and goes back to the page the URL names and the
 last conversation. So someone with the browser open on that machine stays signed in while it is used and up to `[gateway]
 session_idle` (thirty minutes) after, until they sign out; `[gateway] session_cookie = false`

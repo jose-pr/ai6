@@ -2441,7 +2441,7 @@ mod tests {
     #[test]
     fn a_parsed_document_takes_its_format_and_a_family_file_is_the_record() {
         let toml = "[charge.\"operation:G\"]\nagent = \"007\"\n";
-        let yaml = "#!yaml\nwatch:\n  \"operation:G\":\n    agent: '007'\n";
+        let yaml = "#!yaml\ncharge:\n  \"operation:G\":\n    agent: '007'\n";
         let json = r#"{"charge": {"operation:G": {"agent": "007"}}}"#;
         let expected = vec![(
             ConfigRecord::Charge,

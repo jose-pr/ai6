@@ -273,7 +273,7 @@ fn quoted_material(
                 comment.body
             ));
         }
-        text.push_str("\n\nComments since the last attempt settled:");
+        text.push_str("\n\nComments since the last run settled:");
         text.push_str(truncate(&said, limits.item_text_bytes.or_max()));
     }
     let mut fence = "=====".to_owned();

@@ -518,7 +518,7 @@ fn run_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
     serde_json::json!({
         "mission": record.mission_id,
         "handle": record.handle,
-        "attempt": record.number,
+        "number": record.number,
         "station": record.station,
         "state": record.result.as_ref().map(|result| result.state.as_str()),
         "agent": record.launch.as_ref().and_then(|launch| launch.agent.as_deref()),

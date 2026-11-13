@@ -419,7 +419,7 @@ static READ_TOOLS: &[Tool] = &[
     Tool {
         name: "mission",
         description: "One Mission: its Runs and states, its brief (the exact prompt and \
-                      launch manifest), its usage (tokens and cost), every attempt, and the \
+                      launch manifest), its usage (tokens and cost), every run, and the \
                       issues it is linked to with what it posted. Needs mission.read.",
         schema: || {
             object(

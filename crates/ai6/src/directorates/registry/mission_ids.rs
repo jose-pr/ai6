@@ -547,7 +547,7 @@ mod tests {
             .claim_with_lease(None, "hq", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .unwrap();
-        assert_eq!(lease.number(), 2, "the first attempt spent its count");
+        assert_eq!(lease.number(), 2, "the first run spent its count");
         let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
         registry
             .finish(&claimed, &serde_json::json!({}), true, None, Some("hq"))
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(
             registry.filed_brief(lease.key()).unwrap().unwrap().runs,
             0,
-            "the next attempt has made no claim yet"
+            "the next run has made no claim yet"
         );
         assert_eq!(
             lapse_claim(registry.as_ref(), 1),
@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(
             (again.key(), again.number()),
             (key.as_str(), 1),
-            "the next attempt counts its claims from one"
+            "the next run counts its claims from one"
         );
         let claimed = registry.read_claimed(again.key()).unwrap().unwrap();
         assert!(crate::directorates::registry::sources::reportable(
@@ -876,7 +876,7 @@ mod tests {
         assert_eq!(
             registry.unreported_source_briefs().unwrap().len(),
             1,
-            "the next attempt owes its own report"
+            "the next run owes its own report"
         );
         assert!(matches!(
             registry.reenter_brief(&reopened, &entry, &|_| false).unwrap(),

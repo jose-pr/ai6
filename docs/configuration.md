@@ -224,8 +224,8 @@ records = "none"                      # keep every audit record; reported as a w
 | `password` | none | **Database password.** The database password, when the location needs one and gives none. |
 | `poll` | 5 | **Between checks for changes.** Seconds between checks for changes; 0 turns reloading off. |
 | `retry_first` | 1 | **First wait before opening again.** Seconds before the first new attempt to open the configuration provider or the Registry at start, when one cannot be reached. 0 tries again at once. |
-| `retry_factor` | 2 | **Growth of the wait between runs.** What each wait is multiplied by after a failed run. |
-| `retry_longest` | 60 | **Longest wait between runs.** Seconds the wait stops growing at. |
+| `retry_factor` | 2 | **Growth of the wait between attempts.** What each wait is multiplied by after a failed attempt. |
+| `retry_longest` | 60 | **Longest wait between attempts.** Seconds the wait stops growing at. |
 | `retry_for` | see meaning | **How long to keep trying to open.** Seconds to keep trying from the first failure before the Station exits with the last error; 0 exits at the first failure. Default: none, and it tries until it opens or is stopped. A refusal retrying cannot fix (a malformed location, a failed certificate check, a wrong password) exits at once whatever this says. |
 | `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together). |
 | `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
@@ -253,7 +253,7 @@ right.
 | --- | --- | --- |
 | `location` | see meaning | **Where the Registry is.** A directory, `sqlite:PATH` or a `postgres://` URL. Default: the provider's database when the provider is SQL, else `registry` in the reading program's state directory. |
 | `password` | see meaning | **Database password.** The database password, when the location needs one and gives none. Default: the provider's, when the Registry is the provider's database. |
-| `headquarters_lease` | 60 | **Headquarters lease.** Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection run after a sixth. |
+| `headquarters_lease` | 60 | **Headquarters lease.** Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection attempt after a sixth. |
 | `sqlite_busy_timeout` | 30 | **SQLite lock wait.** Seconds a SQLite connection waits for another's lock. |
 <!-- schema:registry:end -->
 
@@ -491,8 +491,8 @@ global one.
 | `final_report_bytes` | 64 KiB | **Longest final report.** Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and says so. |
 | `verdict_note_bytes` | 4 KiB | **Longest verdict note.** Bytes of the note a person gives with a verdict on a Mission's outcome. |
 | `amendment_bytes` | 8 KiB | **Longest redispatch amendment.** Bytes of what a redispatch adds to the next run's task. |
-| `deliverables` | 32 | **Deliverables per run.** Deliverables kept on one run. |
-| `evidence_entries` | 64 | **Probe findings per run.** Probe findings kept on one run; the oldest go first. |
+| `deliverables` | 32 | **Deliverables per attempt.** Deliverables kept on one run. |
+| `evidence_entries` | 64 | **Probe findings per attempt.** Probe findings kept on one run; the oldest go first. |
 | `evidence_detail_chars` | 300 | **Longest probe finding.** Characters kept of a probe finding's detail. |
 <!-- schema:registry.limits.runs:end -->
 

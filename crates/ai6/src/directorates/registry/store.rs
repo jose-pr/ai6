@@ -2499,7 +2499,7 @@ pub trait AccessTokenStore {
     /// cookie's, and nothing for a token whose sign-in was revoked.
     fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
-    /// Returns an active run cookie's record by its lowercase SHA-256 digest; a bearer
+    /// Returns an active session cookie's record by its lowercase SHA-256 digest; a bearer
     /// token's digest finds nothing.
     fn find_session_cookie(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
@@ -2507,7 +2507,7 @@ pub trait AccessTokenStore {
     /// cookie, or an active bearer token whose sign-in, when it has one, stands too.
     fn login_by_id(&self, token_id: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
-    /// Revokes a token or run cookie by its public UUID, returning false when unknown or
+    /// Revokes a token or session cookie by its public UUID, returning false when unknown or
     /// already revoked. A token of a sign-in takes that sign-in with it, and so every other
     /// token of it, including one issued a moment later.
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool>;
@@ -2515,7 +2515,7 @@ pub trait AccessTokenStore {
     /// Moves an active token's expiry to `expires_at` (Unix seconds) when that is later, and
     /// answers the record as it now stands; a time no later leaves it as it was. Its value,
     /// issue time and revocation never change. `None` when unknown, revoked or expired. A
-    /// run cookie moves the same way, which is how a sign-in that is used stays signed in.
+    /// session cookie moves the same way, which is how a sign-in that is used stays signed in.
     fn extend_access_token(
         &self,
         token_id: &str,
@@ -5348,7 +5348,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(stored["station"], "operation-01");
-        assert_eq!(stored["attempt"], 1);
+        assert_eq!(stored["number"], 1);
         assert_eq!(stored["meta"]["operation"], "operation-01");
         assert!(stored.get("key").is_none());
     }
