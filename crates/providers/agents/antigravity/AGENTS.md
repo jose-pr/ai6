@@ -33,7 +33,7 @@ record.
 | `usage_wait_ms` | 20000 | How long a read of the account's quota may take in all: a running Session's agy first, then the private `agy acp` with what is left |
 | `context_file_bytes` | 1048576 | Bytes of an assistant's `context_file`; a larger one is refused |
 | `gate_timeout_secs` | 60 | agy's timeout for the green ink hook; past it the command does not run |
-| `mcp_timeout_secs` | 0 | agy's `timeoutSeconds` for AI6's MCP servers: positive replaces its limits, negative turns them off, 0 leaves 300 s to connect and 180 s a call (its documentation) |
+| `mcp_timeout_secs` | 0 | agy's `timeoutSeconds` for AI6's MCP servers: positive replaces its limits, negative turns them off, 0 leaves 300 s to connect and 180 s a call (its documentation), except that the `ai6-theater` server gets the Station's `AI6_THEATER_MCP_TIMEOUT_MS` in seconds, rounded up |
 | `allowed_tools`, `denied_tools` (agent) | empty | Rules added to the allow and deny lists; an Agent sets them in `handler_settings` |
 | `settings` (agent) | empty | Further `settings.json` keys for the Session's `--settings`, never the reserved ones |
 | `auto_update` (agent) | false | Lets agy update itself while a Session starts |

@@ -221,6 +221,9 @@ Mission:
 | `theater_write` | Write or append a UTF-8 file, optionally creating directories. |
 | `theater_list` | List a directory. |
 
+A tool call may take as long as `[theater_tools] max_timeout` (a command asks for less with
+`timeout_secs`); the Station tells the harness's MCP client to wait that long and 30 s more.
+
 Relative paths are resolved against the Mission's working directory on the Theater: the
 Operation's `path` when the Operation is bound to this Theater (its checkout is there), else
 the Theater's `workdir`. An Operation with a `path` that is not bound to a Theater is placed

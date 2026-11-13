@@ -126,6 +126,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A remote-hands command could not run longer than a minute: the harness's MCP client gave up on
+  `theater_run` first (Claude Code and Codex wait 60 s, Antigravity 180 s). The Station now tells the
+  handler the longest call, `[theater_tools] max_timeout` plus 30 s, and each sets its harness to wait
+  that long.
+
 - Verify, verdict, probe and the Mission controls answered 404 for an Operation bound to a remote
   Theater or with no local checkout: the gateway only knew Operations a Station holds a checkout of.
   A Station's check-in now also lists the Operations it may place a Mission of (`runnable_operations`),

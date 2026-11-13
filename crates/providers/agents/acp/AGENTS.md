@@ -45,7 +45,7 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
   The first prompt is `initial_context`, a read-only notice for answer-only/assistant Sessions,
   and the task; `resume` uses `session/resume`, else `session/load`, else fails.
 - MCP servers: `AI6_CABLE_MCP_{URL,TOKEN}` and an assistant's `<prefix>_{URL,TOKEN}` become HTTP
-  `mcpServers`; `AI6_THEATER_MCP_URL` (remote hands) is refused.
+  `mcpServers`; `AI6_THEATER_MCP_URL` (remote hands) is refused, so `AI6_THEATER_MCP_TIMEOUT_MS` is never used.
 - Permissions: `GateDecider` (green ink); restricted Sessions refuse all but reading and the tools
   of their own MCP servers. A tool the agent runs without asking is out of reach of this: on Grok
   an agent profile takes those away (`docs/acp.md`).

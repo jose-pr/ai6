@@ -88,7 +88,8 @@ under both.
 When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
 App-server then also receives overrides for an `ai6-theater` server, its tools approved the
-same way, and `-c features.shell_tool=false`, and `thread/start` and `thread/resume` carry
+same way, `tool_timeout_sec` set to the Station's `AI6_THEATER_MCP_TIMEOUT_MS` in seconds, rounded up
+(Codex waits 60 s for a tool otherwise), and `-c features.shell_tool=false`, and `thread/start` and `thread/resume` carry
 `sandbox = "read-only"` and `approvalPolicy = "never"`. Codex 0.164.0 reports both back from
 `thread/start` (same measurement). Measured through a loopback stand-in on Windows and on Linux with
 bubblewrap: at those settings without the shell setting, `exec_command` is offered, and on Linux a

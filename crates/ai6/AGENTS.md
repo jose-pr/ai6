@@ -1755,6 +1755,9 @@ When a Mission is placed in remote-hands mode, the Station starts a per-Session 
 `theater_write` and `theater_list`, and puts `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN`
 in the handler's environment. A handler that sees both is in remote-hands mode: it must switch
 off its own shell and file tools and register that server (the Claude and Codex handlers do).
+It also puts `AI6_THEATER_MCP_TIMEOUT_MS`, the longest a tool call can take (`[theater_tools]
+max_timeout` plus a 30 s margin, at most `i32::MAX`, which an unlimited `max_timeout` gets): a handler
+sets its harness's MCP tool timeout to it, since the defaults (60 s, 180 s) end a long `theater_run`.
 `theater_run` passes every command (`command`, or `argv` quoted into one line) through the
 green ink gate before running it (`decide` over `classify`, the Theater's repository read with
 `git` over the same transport, the Station's `check_approval` answers): a held command returns

@@ -145,6 +145,9 @@ remote-hands mode: its work is on a remote Theater, reached only through the The
 The handler then registers that server as `ai6-theater` (same placeholder scheme), allows its
 tools (`mcp__ai6-theater`) and keeps Claude's own shell and file tools off (below) so nothing it
 does lands on the Station. This applies to resume as well.
+The handler also sets `MCP_TOOL_TIMEOUT` (milliseconds; Claude Code's default is 60 s) to the
+Station's `AI6_THEATER_MCP_TIMEOUT_MS`, so a long `theater_run` is not cut off; a `MCP_TOOL_TIMEOUT` the
+Agent's own environment sets stands.
 
 A field Session, one neither answer-only nor an assistant, on start and resume gets, by
 `AgentStart::clearance` or `AgentResume::clearance`, each variadic list closed by the next flag. At
