@@ -334,11 +334,14 @@ impl ResourceDesk {
                 asked.kind
             ));
         }
+        let longest = self.state.intake.limits().charges.entry_bytes.or_max();
         let plain = |text: &str| {
-            !text.is_empty() && text.len() <= 256 && !text.chars().any(char::is_control)
+            !text.is_empty() && text.len() <= longest && !text.chars().any(char::is_control)
         };
         if asked.name.as_deref().is_some_and(|name| !plain(name)) {
-            return Err("a name is 1-256 characters without control characters".to_owned());
+            return Err(format!(
+                "a name is 1 to {longest} bytes without control characters"
+            ));
         }
         let station = asked
             .station

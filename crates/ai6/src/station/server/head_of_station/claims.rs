@@ -89,12 +89,7 @@ pub(super) fn surrender(
             .filter(|reason| !reason.is_empty())
             .unwrap_or("no progress")
     );
-    recovery::give_up(state, mission_id, None, &why);
-    let now = state
-        .missions
-        .lock()
-        .ok()
-        .and_then(|missions| missions.get(mission_id).map(|mission| mission.state));
+    // Audited before the Run is stopped: a surrender that is not on record does not happen.
     let record = AuditRecord {
         id: format!(
             "head_of_station.surrendered-{}",
@@ -107,9 +102,16 @@ pub(super) fn surrender(
         target: mission_id.to_owned(),
         at: state.clock.now() as f64,
     };
-    if let Err(error) = state.intake.record_audit(&record) {
-        eprintln!("ai6: Head of Station audit record was not written: {error}");
-    }
+    state
+        .intake
+        .record_audit(&record)
+        .map_err(|error| format!("the surrender was not audited, so the Run goes on: {error}"))?;
+    recovery::give_up(state, mission_id, None, &why);
+    let now = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).map(|mission| mission.state));
     Ok(Surrendered {
         mission: mission_id.to_owned(),
         state: now.unwrap_or(mission.state).as_str().to_owned(),
