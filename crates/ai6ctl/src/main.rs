@@ -4562,6 +4562,14 @@ mod tests {
                 ..
             }
         ));
+        let exec =
+            Cli::try_parse_from(["ai6ctl", "exec", "mission-007", "--agent", "008"]).unwrap();
+        assert!(matches!(
+            exec.command,
+            Command::Exec { id, agent: Some(agent), message: None, .. }
+                if id == "mission-007" && agent == "008"
+        ));
+        assert!(Cli::try_parse_from(["ai6ctl", "exec"]).is_err());
         assert!(Cli::try_parse_from(["ai6ctl", "mission"]).is_err());
     }
 

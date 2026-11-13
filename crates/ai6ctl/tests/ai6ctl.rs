@@ -493,6 +493,47 @@ async fn mission_and_run_controls_reach_the_station_and_report_its_outcome() {
             .contains("\tresume\tmission-007\tstation-01\tapplied\tworking\t-")
     );
 
+    // Executing a Mission starts its next Run (a retry); executing a Run that ran resumes it.
+    let started = ai6ctl(
+        server.clone(),
+        token.clone(),
+        &[
+            "exec",
+            "mission-007",
+            "--agent",
+            "008",
+            "--operation",
+            "station-01",
+        ],
+    )
+    .await;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    assert!(
+        String::from_utf8(started.stdout)
+            .unwrap()
+            .contains("	retry	mission-007	station-01	applied	queued	-")
+    );
+    let resumed = ai6ctl(
+        server.clone(),
+        token.clone(),
+        &["exec", "provider-id-007", "--message", "carry on"],
+    )
+    .await;
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    assert!(
+        String::from_utf8(resumed.stdout)
+            .unwrap()
+            .contains("	resume	mission-007	station-01	applied	working	-")
+    );
+
     let interrupt = ai6ctl(
         server.clone(),
         token.clone(),

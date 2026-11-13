@@ -1258,7 +1258,8 @@ mod tests {
             vec![0xff, 0x00, 0x80],
         )
         .unwrap();
-        let resize = TerminalResize::new(RunId::new("provider-run-3").unwrap(), 6, 120, 40).unwrap();
+        let resize =
+            TerminalResize::new(RunId::new("provider-run-3").unwrap(), 6, 120, 40).unwrap();
         let lifecycle_frames = lifecycle_frames(&event).unwrap();
         let terminal_frames = terminal_frames(&terminal).unwrap();
         let resize_frames = resize_frames(&resize).unwrap();
