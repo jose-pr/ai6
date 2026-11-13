@@ -98,7 +98,7 @@ or on `config:reports`.
 | Route | Answers |
 | --- | --- |
 | `POST /v1/reports` | `{"scope", "title", "text", "kind", "severity", "priority", "deadline", "information_from", "sub_source", "classification", "handling", "compartments", "tearline", "links"}`; `201` with the Report |
-| `GET /v1/reports?scope=S` or `?mission=ID` | `{"reports": [...]}` most urgent first, with `state`, `kind` and `limit` to narrow |
+| `GET /v1/reports?scope=S` or `?mission=ID` | `{"reports": [...], "priorities": [...], "classifications": [...]}`: the Reports most urgent first, with `state`, `kind` and `limit` to narrow, and the deployment's lists an assessment and the markings choose from |
 | `GET /v1/reports/{id}` | The Report, or its tearline; `403` with `report` (its ID and markings) when that is all the person may see; `404` for a scope they may not read |
 | `PUT /v1/reports/{id}/markings` | `{"classification", "handling", "compartments", "tearline"}`, replacing all four |
 | `PUT /v1/reports/{id}/assessment` | `{"assessment", "reason", ...}`: assesses an open Report ([Assessing](#assessing)); needs `mission.control` on its Operation (`station.configure` for a Station's or M's) and reading its content. `404` for a scope the person may not read, `403` without the action or the content, `409` for a Report that is not open, `400` for anything out of bounds |
@@ -161,6 +161,42 @@ outcome (`mission_done`, `mission_failed`, `decision_approved`, `decision_reject
 `related`, `no_action`) counts toward its source if the deployment's rule says so, and the source is
 rated once enough have counted ([Settings](#settings)). `GET /v1/reports/sources/{key}` and
 `ai6ctl reports source` show the rating with the tally, the rule and the closed Reports behind it.
+
+## The Reports page
+
+Outer Office's **Reports** page, under Work, is where a person reads and assesses Reports. It is
+there for anyone who reads an Operation (`mission.read`) or a Station (`station.read`), and lists one
+row per Report across them, most urgent first. Its table has the app's usual sort, search and density,
+and filters by Operation, state, who filed it (a Source, an Agent, a charge or a person),
+classification, kind and priority; **Needs assessment**, **Assessed** and **Closed** are one click.
+A view is a link (`/reports?state=open&operation=G`), and a scope the person cannot read is said in a
+line above the list, so a short list is not taken for a whole one. M's own Reports are not listed.
+
+Selecting a row shows the Report beside the list (under it on a narrow screen): its title and text
+with what renders as nothing spelled out, a note that an Agent's or a Source's words are reported and
+not verified, who filed it, its source with the reliability letter, when the information is from and
+when it was filed, its markings, the assessment (the verdict, the assessor, the judgement in the
+yardstick's words with its band, the assessor's comment, what it waits for and until when), the
+resolution and how it came out, and its links: a Mission and a decision open on their own pages, and
+a Report opens in the list. A Report the person may see only as its tearline, or by its markings
+alone, says so and has no actions.
+
+An open Report has **Assess this Report**, which asks for how it is assessed (`mission`, `duplicate`,
+`related`, `no_action`, `awaiting`, `later` or `decision`), what that takes (an existing Mission, or
+for a Source item none, since the Station that polls the Source queues its brief; the other Report
+to pick; the question and the deadline; what it waits for), a note that is kept as the assessor's
+comment, and optionally the credibility, the priority from the deployment's list, and the likelihood
+with its confidence. An assessed or closed Report has **Reopen this Report**, which asks why. Both
+need `mission.control` on the Operation (`station.configure` on a Station) and are shown disabled
+with that said when the person lacks it; a refusal of the gateway (permission, a handling mark, the
+desk's clearance) is shown in its own words and leaves the dialog open. **Source standing** opens a
+source's reliability, how it was earned and the closed Reports behind it, each of which opens.
+
+A Mission's page has a **Reports** section: those it was begun for or resolves, and those its Agents
+filed while it ran, each opening on this page. It is shown to whoever reads the Operation.
+
+The attention bell and the Overview do not count unassessed Reports: Universal Exports' attention
+summary (`GET /v1/user/attention`) has no Reports section.
 
 ## What files them
 

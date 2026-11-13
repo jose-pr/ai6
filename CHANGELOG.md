@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office has a Reports page under Work: one row per Report across the Operations and Stations the
+  person reads, filtered by Operation, state, who filed it, classification, kind and priority, with the
+  selected Report beside the list (its filer, source reliability, markings, assessment and resolution). A
+  person with `mission.control` assesses an open Report (Mission, duplicate, related, no action, awaiting,
+  later or decision, with a note, credibility, priority and a judgement) or reopens one, sees the gateway's
+  refusal in its own words, and opens a source's standing. A Mission's page lists the Reports it resolves
+  and those filed while it ran. `GET /v1/reports` also answers the deployment's `priorities` and
+  `classifications`, and Moneypenny's `reports` route links to the page.
 - Reports are assessed (`ai6::directorates::registry::assessments`): the Operation's charge
   (`assess_report`, `reopen_report`, and `reports` and `read_report` for it) or a person
   (`PUT /v1/reports/{id}/assessment`, `POST /v1/reports/{id}/reopen`, `ai6ctl reports assess|reopen`)
