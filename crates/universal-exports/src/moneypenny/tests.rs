@@ -160,7 +160,7 @@ const ROLES: &str = r#"
 
     [role.operator]
     actions = [
-        "mission.read", "mission.control", "audit.read", "cable.send", "cable.read",
+        "mission.read", "mission.control", "mission.create", "audit.read", "cable.send", "cable.read",
         "issue.link", "issue.comment", "issue.update", "issue.create", "run.context",
     ]
 
@@ -6640,6 +6640,7 @@ mod ambient;
 mod browser;
 mod handoff;
 mod images;
+mod mission_loop;
 mod opening;
 mod privacy;
 mod sharing;

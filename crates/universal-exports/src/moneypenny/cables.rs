@@ -224,6 +224,7 @@ fn propose(
         created_at: now(),
         run: digest(&conversation.bearer),
         result: None,
+        receipt: None,
         work: None,
         cable: Some(hold),
         evidence: conversation.evidence(),

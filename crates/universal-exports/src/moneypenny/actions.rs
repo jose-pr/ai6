@@ -64,6 +64,9 @@ pub(crate) struct Proposal {
     /// SHA-256 of the access token of the run it was proposed in.
     pub(crate) run: String,
     pub(crate) result: Option<String>,
+    /// The Mission a confirmed `propose_mission` queued, as a Missions route: the receipt
+    /// that reopens it. Set only from the answer of the request the person confirmed.
+    pub(crate) receipt: Option<Value>,
     /// A commit a Station makes once the person confirms, in place of `draft.call`, which then
     /// only describes it.
     pub(crate) work: Option<ai6::AssistantCommit>,
@@ -179,7 +182,13 @@ impl Proposal {
         if !self.evidence.read.is_empty() {
             shown["read"] = json!(self.evidence.read);
         }
-        if let Some(route) = super::routes::opens(self.tool, &self.draft.call) {
+        let receipt = self.receipt.as_ref().and_then(|receipt| {
+            super::routes::Route::from_json(receipt, super::routes::Limits::default()).ok()
+        });
+        if let (Some(receipt), Some(route)) = (&self.receipt, receipt) {
+            shown["receipt"] = receipt.clone();
+            shown["opens"] = Value::from(route.to_uri());
+        } else if let Some(route) = super::routes::opens(self.tool, &self.draft.call) {
             shown["opens"] = Value::from(route.to_uri());
         }
         shown
@@ -904,7 +913,11 @@ static WRITE_TOOLS: &[WriteTool] = &[
     WriteTool {
         name: "propose_mission",
         description: "Propose queuing a new Mission in an Operation, with its title and \
-                      prompt. Nothing changes until the person confirms it in the app. \
+                      prompt. Find the Operation the person means (by its name or ID) and \
+                      ask only for the details still missing first. The app shows the \
+                      brief for them to edit, where it would run, and Confirm; nothing \
+                      changes until they confirm it. You are then told AI6's answer with \
+                      the Mission's ID: read it with `mission` to say how it stands. \
                       Needs mission.create.",
         schema: || {
             object(

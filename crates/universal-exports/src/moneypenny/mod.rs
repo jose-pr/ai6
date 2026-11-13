@@ -1310,6 +1310,7 @@ impl Assistant {
             created_at: now(),
             run: digest(&granted.bearer),
             result: None,
+            receipt: None,
             work: None,
             cable: None,
             evidence: actions::Evidence::default(),
@@ -1387,7 +1388,7 @@ impl Assistant {
             .execute(gateway, conversation_id, person, token, &draft)
             .await;
         let (status, result) = match &outcome {
-            Ok((text, _)) => ("done", text.clone()),
+            Ok((text, _, _)) => ("done", text.clone()),
             Err(text) => ("failed", text.clone()),
         };
         let note = format!(
@@ -1406,11 +1407,14 @@ impl Assistant {
             {
                 proposal.status = status;
                 proposal.result = Some(result);
+                if let Ok((_, _, receipt)) = &outcome {
+                    proposal.receipt = receipt.clone();
+                }
                 let shown = proposal.clone();
                 conversation.show_proposal(&shown);
             }
             // The app, and only the app, is told the new password, once; it is in no entry.
-            if let Ok((_, Some(secret))) = &outcome {
+            if let Ok((_, Some(secret), _)) = &outcome {
                 let _ = conversation.events.send(serde_json::json!({
                     "type": "reveal", "proposal": proposal_id, "secret": secret
                 }));
@@ -1694,7 +1698,7 @@ impl Assistant {
         person: &ai6::Person,
         token: &str,
         proposal: &actions::Proposal,
-    ) -> Result<(String, Option<String>), String> {
+    ) -> Result<(String, Option<String>, Option<Value>), String> {
         let (operation, resource) = match &proposal.draft.scope {
             actions::Scope::Operation(operation) => (operation.clone(), None),
             actions::Scope::Resource(resource) => (String::new(), Some(resource.clone())),
@@ -1726,7 +1730,15 @@ impl Assistant {
                     status.as_u16(),
                     tools::wrap(proposal.tool, &value, self.config.gateway.result_chars)
                 );
-                Ok((shown, secret))
+                // The Mission is named by what AI6 answered, never by what she wrote.
+                let receipt = (proposal.tool == "propose_mission")
+                    .then(|| {
+                        let mission = value.get("mission_id")?.as_str()?;
+                        let operation = value.get("operation_id")?.as_str()?;
+                        Some(json!({"page": "missions", "operation_id": operation, "mission_id": mission}))
+                    })
+                    .flatten();
+                Ok((shown, secret, receipt))
             }
             Ok((status, value)) => Err(tools::refusal(
                 status,
@@ -2089,6 +2101,7 @@ fn commit_proposal(
         created_at: now(),
         run,
         result: None,
+        receipt: None,
         work: Some(commit),
         cable: None,
         evidence: actions::Evidence::default(),
