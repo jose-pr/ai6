@@ -7,7 +7,7 @@
 //! A round also gets the Station's own tools on its Cable endpoint (`station_report`,
 //! `file_report`). They act on this Station only, and every call checks again that its
 //! Mission is still a live round here; what they may change unattended is fixed in Station
-//! code, never in the prompt. The Station's watch (`station:<id>`) reads and reports through the
+//! code, never in the prompt. The Station's charge (`station:<id>`) reads and reports through the
 //! same two tools, each call checking that this Station still runs it.
 
 #[cfg(feature = "cables-mcp")]
@@ -59,11 +59,11 @@ pub(super) fn check_in(state: &DaemonState, info: &mut BTreeMap<String, serde_js
 enum Holder {
     /// A round, by its Mission.
     Round(String),
-    /// This Station's watch, by the Agent that keeps it.
-    Watch(String),
+    /// This Station's charge, by the Agent that keeps it.
+    Charge(String),
 }
 
-/// A round's, or the Station watch's, access to its Station: what its Cable endpoint's Station
+/// A round's, or the Station charge's, access to its Station: what its Cable endpoint's Station
 /// tools call.
 #[cfg(feature = "cables-mcp")]
 #[derive(Clone)]
@@ -81,24 +81,24 @@ impl Desk {
         }
     }
 
-    /// The desk of this Station's watch, kept by `agent`.
-    pub(super) fn for_watch(state: DaemonState, agent: impl Into<String>) -> Self {
+    /// The desk of this Station's charge, kept by `agent`.
+    pub(super) fn for_charge(state: DaemonState, agent: impl Into<String>) -> Self {
         Self {
             state,
-            holder: Holder::Watch(agent.into()),
+            holder: Holder::Charge(agent.into()),
         }
     }
 
     /// The round's Mission, while it is not over and still a round of this Station; `None` for
-    /// the Station's watch while this Station runs it.
+    /// the Station's charge while this Station runs it.
     fn admit_any(&self) -> Result<Option<Mission>, String> {
         match &self.holder {
             Holder::Round(_) => self.admit().map(Some),
-            Holder::Watch(_) => {
-                if self.state.watches.is_live(&station_scope(&self.state)) {
+            Holder::Charge(_) => {
+                if self.state.charges.is_live(&station_scope(&self.state)) {
                     Ok(None)
                 } else {
-                    Err("this Station no longer runs its watch".to_owned())
+                    Err("this Station no longer runs its charge".to_owned())
                 }
             }
         }
@@ -165,13 +165,13 @@ impl Desk {
                     mission.agent_id.clone(),
                 )
             }
-            (None, Holder::Watch(agent)) => {
+            (None, Holder::Charge(agent)) => {
                 report.agent = Some(agent.clone());
                 let operation = state
                     .roster
-                    .watches()
+                    .charges()
                     .get(&station_scope(state))
-                    .and_then(|watch| watch.settings.operation.clone())
+                    .and_then(|charge| charge.settings.operation.clone())
                     .unwrap_or_default();
                 (operation, Some(agent.clone()))
             }
@@ -201,7 +201,7 @@ impl Desk {
         if let Err(error) = state.intake.record_event(&event) {
             eprintln!("ai6: Head of Station report event was not recorded: {error}");
         }
-        // A round files as its Agent on its Mission; a watch has no Mission and files as itself.
+        // A round files as its Agent on its Mission; a charge has no Mission and files as itself.
         let (filer, links) = match (&mission, &self.holder) {
             (Some(mission), _) => {
                 let mission_id = mission.mission_id.to_string();
@@ -214,10 +214,10 @@ impl Desk {
                     vec![ReportLink::mission(mission_id)],
                 )
             }
-            (None, Holder::Watch(agent)) => {
+            (None, Holder::Charge(agent)) => {
                 let scope = station_scope(state);
                 (
-                    ReportFiler::Watch {
+                    ReportFiler::Charge {
                         agent: agent.clone(),
                         run: run.unwrap_or_else(|| scope.clone()),
                         scope,
@@ -292,10 +292,10 @@ impl Desk {
     }
 }
 
-/// The scope of this Station's watch.
+/// The scope of this Station's charge.
 #[cfg(feature = "cables-mcp")]
 fn station_scope(state: &DaemonState) -> String {
-    crate::directorates::m::watches::WatchScope::Station(state.station_id.clone()).to_string()
+    crate::directorates::m::charges::ChargeScope::Station(state.station_id.clone()).to_string()
 }
 
 /// Whether `mission` is a round of this Station: its role is the Head of Station's, and the

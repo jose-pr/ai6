@@ -466,7 +466,7 @@ impl Worktree {
         let limits = Limits {
             timeout: clone.timeout_secs.map_or(run.timeout, Duration::from_secs),
             measure_every: run.measure_every,
-            watch: vec![path.clone(), git_dir.clone()],
+            charge: vec![path.clone(), git_dir.clone()],
             max_bytes: clone.max_bytes,
         };
         let made = |failure: Failure| {

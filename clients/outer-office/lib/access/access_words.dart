@@ -30,7 +30,7 @@ const _areas = <(String, Map<String, String>)>[
   (
     'Runs',
     {
-      'run.read': 'watch',
+      'run.read': 'charge',
       'run.input': 'type into',
       'run.context': 'read the context of',
     },

@@ -353,9 +353,9 @@ found is kept on the attempt as `evidence`, oldest first, up to `[registry.limit
 evidence_entries`. A tracker probe works where the Station holds the tracker's credentials, and an
 `artifact` probe makes a request from the Station to the address the role or brief names.
 
-**The decision.** The Operation's [watch](watches.md#deciding-missions), its 00 Agent in charge,
-verifies and decides; an Operation with no watch leaves the decision to a person. A person with
-`mission.verify` on the Operation can always decide, and their decision replaces a watch's:
+**The decision.** The Operation's [charge](charges.md#deciding-missions), its 00 Agent in charge,
+verifies and decides; an Operation with no charge leaves the decision to a person. A person with
+`mission.verify` on the Operation can always decide, and their decision replaces a charge's:
 
 ```bash
 ai6ctl missions probe "$MISSION"                  # asks the Station to probe, waits, prints the findings
@@ -377,11 +377,11 @@ Its Station then settles the Mission within a scheduler pass:
 | `failed` | Becomes `failed` | Disputed: a failure of that Agent |
 | `redispatch` | Is queued as attempt N+1 of the same Mission, for the best qualified Agent, in the safe house the last attempt kept, with a new provider Run told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
 
-The watch's decision takes this same path: it is audited (`mission.verify`, by `watch:operation:CODENAME`),
+The charge's decision takes this same path: it is audited (`mission.verify`, by `charge:operation:CODENAME`),
 recorded as the attempt's verdict, put on the timeline and counted on the scorecard, and a redispatch is a
-failure of the attempt's Agent. A watch whose clearance has been lowered to `desk` only recommends:
+failure of the attempt's Agent. A charge whose clearance has been lowered to `desk` only recommends:
 the recommendation is audited (`mission.recommend`) and shown as `recommendation` in the Mission's detail and
-by `ai6ctl missions probe`, settles nothing, and a person confirms it by deciding the same way. A watch never
+by `ai6ctl missions probe`, settles nothing, and a person confirms it by deciding the same way. A charge never
 replaces a decision a person has given.
 
 A person who gives a verdict on a `verifying` Mission with `ai6ctl missions verdict` settles it the same
@@ -909,13 +909,13 @@ back through the tracker the work came from. An Operation names its tracker inst
 `sources.<name>` in `operations.toml` ([settings](operations.md#sources)).
 
 ```text
-tracker ─► Source.poll ─► Report ─► Cable to the watch ─► its decision ─► brief (new/) ─► Mission
+tracker ─► Source.poll ─► Report ─► Cable to the charge ─► its decision ─► brief (new/) ─► Mission
                                                                          ─► Tracker.post ─► comment on the item
 ```
 
 A polled item is not work yet. It becomes a [Report](reports.md) in its Operation, and the
-Operation's [watch](watches.md#source-items) is told by Cable; **nothing becomes a Mission until
-the watch, or a person, decides it** ([Items are Reports](#items-are-reports)).
+Operation's [charge](charges.md#source-items) is told by Cable; **nothing becomes a Mission until
+the charge, or a person, decides it** ([Items are Reports](#items-are-reports)).
 
 - **Where it runs.** Only the Station holding the Headquarters lease polls, every
   `interval_secs` per source (default 60, at least 10: the `station` record's `[sources]
@@ -961,13 +961,13 @@ Each polled item is one [Report](reports.md) of kind `source-item` in its Operat
 and labels, and the item as last polled. Its ID is fixed by the Operation, the instance and the
 item, so **one Report per item**, however often it changes.
 
-| Poll finds | The Report | The watch |
+| Poll finds | The Report | The charge |
 | --- | --- | --- |
 | a new item | filed, open | told by Cable (`change: new`) |
 | a changed item | updated in place; open again if it was closed or deferred | told again (`change: changed`) |
 | the same item | left alone | not told |
 
-The Operation's watch Agent is told by a Cable from `source:INSTANCE` (it needs the Cable grant
+The Operation's charge Agent is told by a Cable from `source:INSTANCE` (it needs the Cable grant
 to receive in its Operation, as for any Cable to the Operation), reads the item with `source_item`
 and decides it with `assess_report`; a person decides it with `ai6ctl reports assess` or
 `PUT /v1/reports/{id}/assessment` (`mission.control` on the Operation). Each decision is audited
@@ -979,16 +979,16 @@ timeline:
 | `mission` | The item is work. The Station that polls the Source queues it as a brief on its next pass, vetted by the Chief of Staff and placed as any brief is, and links the Mission to the item and the Report. |
 | `duplicate` | Closed, naming the Mission, Report or item it repeats. No brief. |
 | `no_action` | Closed with the reason. No brief. |
-| `later` | Kept until the time given; then it is open again and the watch is told (`change: due`). |
+| `later` | Kept until the time given; then it is open again and the charge is told (`change: due`). |
 
 Only an open item is decided; a decided item is not decided again. When a decided-`mission` item
 changes, the queued brief follows it as it always has, and a settled one reopens as
-[described below](#reopening-a-settled-item). An Operation with **no watch Agent** holds its
+[described below](#reopening-a-settled-item). An Operation with **no charge Agent** holds its
 items open for a person: nothing becomes a Mission by itself.
 
 `[operation.G] intake = "direct"` keeps the older path, each item queued as a brief at once with
 no one deciding; it is a non-default, listed at start (`ai6: Operation "G": intake = "direct"
-…`) and at check-in (`intake_non_default`). The default is `watch`.
+…`) and at check-in (`intake_non_default`). The default is `charge`.
 
 ### Reopening a settled item
 

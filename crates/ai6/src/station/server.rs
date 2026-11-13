@@ -61,8 +61,8 @@ mod verdicts;
 mod verification;
 mod vetting;
 #[cfg(test)]
-mod watch_tests;
-mod watches;
+mod charge_tests;
+mod charges;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -1021,7 +1021,7 @@ where
         vetting: Default::default(),
         models: Default::default(),
         usage_watch: Default::default(),
-        watches: Default::default(),
+        charges: Default::default(),
         #[cfg(feature = "publisher")]
         publisher,
     };
@@ -1078,7 +1078,7 @@ where
         }
     };
     let _ = tokio::time::timeout(shutdown_wait, drain).await;
-    let _ = tokio::time::timeout(shutdown_wait, watches::close_all(&state)).await;
+    let _ = tokio::time::timeout(shutdown_wait, charges::close_all(&state)).await;
     served.map_err(io::Error::other)
 }
 
@@ -1386,7 +1386,7 @@ fn cable_endpoints(
 
 /// Where a Cable waits when its addressee has no live Run: the Agent `target` names in each
 /// Operation it serves, or for the Operation it names (its coordinating role) the Agent of its
-/// watch or, with no watch, its 00 Agents.
+/// charge or, with no charge, its 00 Agents.
 fn cable_residents(roster: &Roster, station: &str, target: &CableTarget) -> Vec<CableEndpoint> {
     let now = unix_now() as i64;
     let mut found = Vec::new();
@@ -1415,13 +1415,13 @@ fn cable_residents(roster: &Roster, station: &str, target: &CableTarget) -> Vec<
         }
         (CableScope::Operation, Some(name)) => {
             if let Ok(operation) = roster.operation(name) {
-                let watch = roster.watches().get(&format!(
+                let charge = roster.charges().get(&format!(
                     "{}{}",
-                    crate::directorates::m::watches::OPERATION_PREFIX,
+                    crate::directorates::m::charges::OPERATION_PREFIX,
                     operation.id
                 ));
-                if let Some(watch) = watch {
-                    if let Ok(agent) = roster.agent(Some(&operation.id), &watch.settings.agent) {
+                if let Some(charge) = charge {
+                    if let Ok(agent) = roster.agent(Some(&operation.id), &charge.settings.agent) {
                         serve(operation, &agent);
                     }
                 } else {
@@ -1649,8 +1649,8 @@ struct DaemonState {
     models: Arc<models::ModelBoard>,
     /// What the Station knows of the limited accounts it re-reads and the Missions parked on them.
     usage_watch: Arc<usage_watch::UsageWatch>,
-    /// The watches this Station runs.
-    watches: Arc<watches::WatchDesk>,
+    /// The charges this Station runs.
+    charges: Arc<charges::ChargeDesk>,
 }
 
 impl DaemonState {
@@ -1843,7 +1843,7 @@ async fn scheduler_loop(base: DaemonState) {
         let is_headquarters = tokio::task::spawn_blocking(move || schedule_intake_once(&intake))
             .await
             .unwrap_or_default();
-        watches::tend(&state, is_headquarters, check_in).await;
+        charges::tend(&state, is_headquarters, check_in).await;
         #[cfg(feature = "publisher")]
         if check_in {
             controls::stop_settled(&state).await;
@@ -9045,7 +9045,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
 
         let Json(briefs) = list_intake_briefs(State(state)).await.unwrap();
@@ -9213,7 +9213,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
 
         let response = send_cable(
@@ -9958,7 +9958,7 @@ queue = 1
             super::review::testing::MockReviewerHandler,
             super::placement_tests::MockProgramHandler,
             super::standing::testing::MockStandingHandler,
-            super::watch_tests::MockWatchHandler
+            super::charge_tests::MockChargeHandler
         ]
     );
 
@@ -10236,7 +10236,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         }
     }
 
@@ -10804,7 +10804,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
 
         schedule_queued_once(&state).await;
@@ -10936,7 +10936,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -11020,7 +11020,7 @@ queue = 1
                 "mock-stream",
                 "mock-verdict",
                 "mock-wake",
-                "mock-watch",
+                "mock-charge",
             ])
         );
 
@@ -11162,7 +11162,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -11308,7 +11308,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -11367,7 +11367,7 @@ queue = 1
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         }
     }
 
@@ -11596,7 +11596,7 @@ theater = \"other-box\"
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
         let result = create_mission(
             State(state.clone()),
@@ -11716,7 +11716,7 @@ theater = \"other-box\"
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
         let result = create_mission(
@@ -11944,7 +11944,7 @@ theater = \"other-box\"
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
         state.runs.lock().unwrap().insert(
             mission_id.to_string(),
@@ -12051,7 +12051,7 @@ theater = \"other-box\"
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
         let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
@@ -12252,7 +12252,7 @@ theater = \"other-box\"
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
         state.runs.lock().unwrap().insert(
             mission_id.to_string(),
@@ -12641,7 +12641,7 @@ theater = \"other-box\"
             vetting: Default::default(),
             models: Default::default(),
             usage_watch: Default::default(),
-            watches: Default::default(),
+            charges: Default::default(),
         };
         let spec = SafeHouseSpec {
             operation_id: "G".to_owned(),

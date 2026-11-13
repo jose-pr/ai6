@@ -3,7 +3,7 @@
 //! Each item is one Report of kind [`ITEM_KIND`] in its Operation's scope, whose ID is fixed by
 //! the Operation, the Source instance and the item. Polling the item again changes that Report
 //! and never files a second; an item that has not changed leaves it alone. The Operation's
-//! watch, or a person where there is none, decides the item: a `mission` is queued by the
+//! charge, or a person where there is none, decides the item: a `mission` is queued by the
 //! Station that polls the Source, so the Registry keeps one path from an item to a brief.
 //!
 //! Every decision is audited first, then recorded on the Report and the Operation's timeline.
@@ -43,7 +43,7 @@ pub enum Offered {
     /// The item is new: its Report was filed.
     Filed(Report),
     /// The item changed since its Report was written: the Report now holds it. `reopened` says
-    /// a closed or deferred Report is open again for the watch.
+    /// a closed or deferred Report is open again for the charge.
     Changed {
         /// The Report as changed.
         report: Report,
@@ -184,7 +184,7 @@ pub fn offer(
     Ok(Offered::Changed { report, reopened })
 }
 
-/// What a watch or a person decided an item becomes.
+/// What a charge or a person decided an item becomes.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
@@ -200,7 +200,7 @@ pub enum ItemVerdict {
     NoAction,
     /// Look again at the time, in Unix seconds.
     Later {
-        /// When it comes back to the deciding watch or person.
+        /// When it comes back to the deciding charge or person.
         until: f64,
     },
 }
@@ -257,7 +257,7 @@ pub struct ItemDecision<'a> {
     pub verdict: ItemVerdict,
     /// Why; kept as the assessor's comment, apart from the item's words.
     pub reason: &'a str,
-    /// Who decided: a person ID, or `watch:operation:<codename>`.
+    /// Who decided: a person ID, or `charge:operation:<codename>`.
     pub by: &'a str,
     /// When, as Unix seconds.
     pub at: f64,
@@ -583,7 +583,7 @@ mod tests {
         let decide = |report: &str, verdict: ItemVerdict, reason: &str| {
             decide_item(
                 store,
-                &ItemDecision::new("G", report, verdict, reason, "watch:operation:G", 200.0),
+                &ItemDecision::new("G", report, verdict, reason, "charge:operation:G", 200.0),
             )
         };
         let closed = decide(
@@ -668,7 +668,7 @@ mod tests {
                 &id,
                 ItemVerdict::Later { until: 500.0 },
                 "after the release",
-                "watch:operation:G",
+                "charge:operation:G",
                 200.0,
             ),
         )

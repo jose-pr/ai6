@@ -138,7 +138,7 @@ else
   "$@" </dev/null &
 fi
 ai6_pid=$!
-ai6_watch=
+ai6_charge=
 if [ "$ai6_limit" -gt 0 ]; then
   (
     trap 'kill "$ai6_sleep" 2>/dev/null; exit 0' TERM
@@ -149,11 +149,11 @@ if [ "$ai6_limit" -gt 0 ]; then
     sleep 2
     kill -KILL -- "-$ai6_pid" 2>/dev/null
   ) >/dev/null 2>&1 &
-  ai6_watch=$!
+  ai6_charge=$!
 fi
 wait "$ai6_pid"
 ai6_code=$?
-[ -n "$ai6_watch" ] && kill "$ai6_watch" 2>/dev/null
+[ -n "$ai6_charge" ] && kill "$ai6_charge" 2>/dev/null
 kill -TERM -- "-$ai6_pid" 2>/dev/null
 exit "$ai6_code"
 "#;

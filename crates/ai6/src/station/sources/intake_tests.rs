@@ -1,4 +1,4 @@
-//! A Source's items as Reports for the watch: what is filed and told, what becomes a brief, and
+//! A Source's items as Reports for the charge: what is filed and told, what becomes a brief, and
 //! that nothing becomes one by itself.
 
 use std::sync::Mutex;
@@ -49,7 +49,7 @@ fn item(id: &str, body: &str) -> SourceItem {
     }
 }
 
-/// The notices a watch was told, as (instance, body, key).
+/// The notices a charge was told, as (instance, body, key).
 type Told = Mutex<Vec<(String, String, String)>>;
 
 fn recorder(told: &Told) -> impl Fn(&str, &str, &str) -> Result<(), String> + '_ {
@@ -104,13 +104,13 @@ fn decide(registry: &FileRegistry, report: &str, verdict: ItemVerdict, by: &str)
 }
 
 #[test]
-fn a_new_item_is_a_report_the_watch_is_told_of_and_no_brief_exists() {
+fn a_new_item_is_a_report_the_charge_is_told_of_and_no_brief_exists() {
     let state = tempfile::tempdir().unwrap();
     let registry = FileRegistry::open(state.path());
     let told = Told::default();
     let notify = recorder(&told);
     let intake = Intake {
-        mode: SourceIntake::Watch,
+        mode: SourceIntake::Charge,
         notify: Some(&notify),
     };
     let source = Items::of(vec![item("o/r#1", "It fails.")]);
@@ -140,13 +140,13 @@ fn a_new_item_is_a_report_the_watch_is_told_of_and_no_brief_exists() {
 }
 
 #[test]
-fn a_changed_item_reaches_the_watch_again_and_an_unchanged_one_does_not() {
+fn a_changed_item_reaches_the_charge_again_and_an_unchanged_one_does_not() {
     let state = tempfile::tempdir().unwrap();
     let registry = FileRegistry::open(state.path());
     let told = Told::default();
     let notify = recorder(&told);
     let intake = Intake {
-        mode: SourceIntake::Watch,
+        mode: SourceIntake::Charge,
         notify: Some(&notify),
     };
     let source = Items::of(vec![item("o/r#1", "It fails.")]);
@@ -202,13 +202,13 @@ fn a_duplicate_and_a_no_action_leave_no_brief_and_record_the_decision() {
         ItemVerdict::Duplicate {
             of: "G-github-o_r_9".to_owned(),
         },
-        "watch:operation:G",
+        "charge:operation:G",
     );
     decide(
         &registry,
         &id("o/r#2"),
         ItemVerdict::NoAction,
-        "watch:operation:G",
+        "charge:operation:G",
     );
     let polled = setup();
     let queued = settle_items(&registry, "station-a", "G", &[&polled], &Intake::held());
@@ -236,13 +236,13 @@ fn a_mission_decision_is_queued_by_the_desk_and_tied_to_its_report() {
     let told = Told::default();
     let notify = recorder(&told);
     let intake = Intake {
-        mode: SourceIntake::Watch,
+        mode: SourceIntake::Charge,
         notify: Some(&notify),
     };
     let source = Items::of(vec![item("o/r#1", "It fails.")]);
     poll(&registry, &source, &intake);
     let id = reports(&registry)[0].id.clone();
-    decide(&registry, &id, ItemVerdict::Mission, "watch:operation:G");
+    decide(&registry, &id, ItemVerdict::Mission, "charge:operation:G");
     assert!(
         registry.list_new().unwrap().is_empty(),
         "deciding records; the Station that polls queues"
@@ -277,7 +277,7 @@ fn a_mission_decision_is_queued_by_the_desk_and_tied_to_its_report() {
         0
     );
 
-    // The item changes while its brief waits: the brief is amended, the watch told.
+    // The item changes while its brief waits: the brief is amended, the charge told.
     source.set(vec![item("o/r#1", "It fails on macOS.")]);
     let changed = poll(&registry, &source, &intake);
     assert_eq!(changed.updated, 1);
@@ -288,7 +288,7 @@ fn a_mission_decision_is_queued_by_the_desk_and_tied_to_its_report() {
 }
 
 #[test]
-fn with_no_watch_the_items_wait_and_a_persons_decision_applies() {
+fn with_no_charge_the_items_wait_and_a_persons_decision_applies() {
     let state = tempfile::tempdir().unwrap();
     let registry = FileRegistry::open(state.path());
     let intake = Intake::held();
@@ -324,13 +324,13 @@ fn with_no_watch_the_items_wait_and_a_persons_decision_applies() {
 }
 
 #[test]
-fn a_deferred_item_is_told_to_the_watch_again_when_it_is_due() {
+fn a_deferred_item_is_told_to_the_charge_again_when_it_is_due() {
     let state = tempfile::tempdir().unwrap();
     let registry = FileRegistry::open(state.path());
     let told = Told::default();
     let notify = recorder(&told);
     let intake = Intake {
-        mode: SourceIntake::Watch,
+        mode: SourceIntake::Charge,
         notify: Some(&notify),
     };
     let source = Items::of(vec![item("o/r#1", "After the release.")]);
@@ -345,7 +345,7 @@ fn a_deferred_item_is_told_to_the_watch_again_when_it_is_due() {
             &id,
             ItemVerdict::Later { until: then + 50.0 },
             "after the release",
-            "watch:operation:G",
+            "charge:operation:G",
             then,
         ),
     )
@@ -363,7 +363,7 @@ fn a_deferred_item_is_told_to_the_watch_again_when_it_is_due() {
 }
 
 #[test]
-fn a_direct_intake_is_a_reported_non_default_and_a_watch_one_is_not() {
+fn a_direct_intake_is_a_reported_non_default_and_a_charge_one_is_not() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("operations.toml"),
@@ -373,7 +373,7 @@ fn a_direct_intake_is_a_reported_non_default_and_a_watch_one_is_not() {
     )
     .unwrap();
     let roster = Roster::load(dir.path()).unwrap();
-    assert_eq!(roster.operation("H").unwrap().intake, SourceIntake::Watch);
+    assert_eq!(roster.operation("H").unwrap().intake, SourceIntake::Charge);
     let lines = intake_non_defaults(&roster);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(

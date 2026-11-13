@@ -1825,7 +1825,7 @@ class MissionBoard extends ChangeNotifier
       !demo && (userRun?.roster.contains('roster.manage') ?? false);
 
   /// Whether the person may list the records of the roster route kind [kind]: a configuration
-  /// family (`watches`) by `config.read` on it, any other kind by `roster.read`.
+  /// family (`charges`) by `config.read` on it, any other kind by `roster.read`.
   bool canReadRecords(String kind) => rosterConfigKinds.contains(kind)
       ? demo || (userRun?.config[kind]?.contains('config.read') ?? false)
       : canReadRoster;

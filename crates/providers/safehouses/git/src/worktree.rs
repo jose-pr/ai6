@@ -36,12 +36,12 @@ impl Default for Runner {
 }
 
 impl Runner {
-    /// The limits of a command that watches no directory.
+    /// The limits of a command that charges no directory.
     pub(crate) fn limits(&self) -> Limits {
         Limits {
             timeout: self.timeout,
             measure_every: self.measure_every,
-            watch: Vec::new(),
+            charge: Vec::new(),
             max_bytes: None,
         }
     }
@@ -715,7 +715,7 @@ pub(crate) struct Limits {
     /// How often the watched directories are measured.
     pub(crate) measure_every: Duration,
     /// The command is killed once these directories hold more than `max_bytes` together.
-    pub(crate) watch: Vec<PathBuf>,
+    pub(crate) charge: Vec<PathBuf>,
     pub(crate) max_bytes: Option<u64>,
 }
 
@@ -804,7 +804,7 @@ pub(crate) fn git_limited(
             .filter(|_| measured.elapsed() >= limits.measure_every)
             .and_then(|max| {
                 measured = Instant::now();
-                let bytes = tree_bytes(&limits.watch);
+                let bytes = tree_bytes(&limits.charge);
                 (bytes > max).then_some(max)
             });
         let stopped = match child.try_wait() {
@@ -831,7 +831,7 @@ pub(crate) fn git_limited(
     };
     // One that finished between two measurements is measured once more.
     if let Some(max) = limits.max_bytes
-        && tree_bytes(&limits.watch) > max
+        && tree_bytes(&limits.charge) > max
     {
         return Err(format!(
             "git {name} was stopped: it wrote more than {max} bytes"

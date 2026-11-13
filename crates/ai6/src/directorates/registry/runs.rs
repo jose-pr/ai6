@@ -239,7 +239,7 @@ pub struct RunRecord {
     /// has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
-    /// What a watch held at `desk` clearance advises for a verifying attempt; it settles
+    /// What a charge held at `desk` clearance advises for a verifying attempt; it settles
     /// nothing, and a person's decision confirms it or overrides it. The latest stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<MissionVerdict>,
@@ -1330,7 +1330,7 @@ pub trait RunStore {
         verdict: &MissionVerdict,
     ) -> Result<RunRecord, RunError>;
 
-    /// Records what a watch held at `desk` clearance advises for the latest attempt at a Mission
+    /// Records what a charge held at `desk` clearance advises for the latest attempt at a Mission
     /// of `operation`, replacing any it has. It settles nothing and needs no lease.
     ///
     /// # Errors

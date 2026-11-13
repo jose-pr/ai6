@@ -159,7 +159,7 @@ const _kinds = {
   'reviews': 'Review policies',
   _assistantKind: "Moneypenny's settings",
   _rosterSettingsKind: 'Roster settings',
-  'watches': 'Watches',
+  'charges': 'Charges',
   'theaters': 'Theaters',
   'loadouts': 'Loadouts',
   'sandboxes': 'Sandbox profiles',
@@ -195,7 +195,7 @@ const stationScopedKinds = {
 /// The kinds the gateway gates by `config.read` and `config.manage` on `config:<family>`
 /// rather than by the roster's actions.
 const rosterConfigKinds = {
-  'watches',
+  'charges',
   'theaters',
   'loadouts',
   'sandboxes',
@@ -230,7 +230,7 @@ const _routeKinds = {
   'review': 'reviews',
   'assistant': _assistantKind,
   'roster': _rosterSettingsKind,
-  'watch': 'watches',
+  'charge': 'charges',
   'theater': 'theaters',
   'loadout': 'loadouts',
   'sandbox': 'sandboxes',

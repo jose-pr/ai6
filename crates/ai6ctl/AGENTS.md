@@ -105,13 +105,13 @@ origin leaves the public roots alone.
   detail) and prints the findings made since; at the end of the wait it says the Station has not
   answered. `ai6ctl missions verify <MISSION> <done|redispatch|failed> --reason <TEXT> [--amend <TEXT>]
   [--operation <ID>]` posts `.../verify` and prints `MISSION attempt N: DECISION by PERSON`; `--reason` is
-  required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation watch at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
+  required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation charge at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
   repeatable.
 - `ai6ctl reports file|list|show|clearance` use the gateway's `/v1/reports` routes (see its page);
   `ai6ctl reports assess <REPORT> <mission|duplicate|no_action|later> --reason <TEXT> [--of <WHAT>]
   [--wait-seconds <N>]` (`mission.control` on the Operation, and reading the item) puts `.../assessment`
-  and prints `ID STATE VERDICT`. It decides an open Source item the Operation's watch has not (a
-  Operation with no watch holds its items for this); `--of` is required for a duplicate and
+  and prints `ID STATE VERDICT`. It decides an open Source item the Operation's charge has not (a
+  Operation with no charge holds its items for this); `--of` is required for a duplicate and
   `--wait-seconds` for later; a refusal prints the gateway's words and exits `1`.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
@@ -165,7 +165,7 @@ Mission lists include only Missions with a provider Run registered at the gatewa
 
 The records of the configuration provider (`docs/configuration.md`), through the gateway's
 `/v1/user/roster/{kind}` and `/v1/user/resources` routes. A KIND is a family's name or its
-plural (`watch`, `agents`); every verb takes `--station ID` for a Station's own records.
+plural (`charge`, `agents`); every verb takes `--station ID` for a Station's own records.
 
 - `ai6ctl api-resources` prints `KIND ROUTE READ MANAGE RESOURCE STATION SINGLETON LIVE ALLOWED`,
   one line per kind the gateway serves; ALLOWED is the actions you hold.
@@ -195,7 +195,7 @@ plural (`watch`, `agents`); every verb takes `--station ID` for a Station's own 
   name it, listing them; `--force` removes it and the audit record says what named it.
 - Every write prints `KIND/KEY configured|deleted`, `revision` (the configuration revision) and
   any `weakening`. A person without the kind's action is refused naming the family
-  (`the watch family needs config.manage on config:watch`).
+  (`the charge family needs config.manage on config:charge`).
 
 ### Compartments
 

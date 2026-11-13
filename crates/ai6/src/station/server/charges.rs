@@ -1,22 +1,22 @@
-//! The watches this Station runs: one standing Run per scope, woken by its area's events.
+//! The charges this Station runs: one standing Run per scope, woken by its area's events.
 //!
-//! Each check-in, the Station claims or renews every watch on the roster it may run: M's when it
+//! Each check-in, the Station claims or renews every charge on the roster it may run: M's when it
 //! holds the Headquarters lease, an Operation's when the Operation allows it, its own always,
-//! and only when the watch's Agent has a handler here. A watch whose lease another Station took
-//! is closed here, as a Run is fenced out. Then it looks at the watch's area for what the
-//! watch has not been told: a Mission of its Operation entering `verifying`, a quarantine, a
+//! and only when the charge's Agent has a handler here. A charge whose lease another Station took
+//! is closed here, as a Run is fenced out. Then it looks at the charge's area for what the
+//! charge has not been told: a Mission of its Operation entering `verifying`, a quarantine, a
 //! Station gone dark (M's), a control a person asked for. Every round it takes the Cables
-//! waiting for the watch, and wakes it when `wake_every` has passed with nothing else.
+//! waiting for the charge, and wakes it when `wake_every` has passed with nothing else.
 //!
 //! Each wake is one turn, given the waiting events as its input, those carrying outside text
-//! marked untrusted. Turns are counted per hour on the watch's record, so a storm of events waits
+//! marked untrusted. Turns are counted per hour on the charge's record, so a storm of events waits
 //! (and past `max_waiting_events`, is cut) rather than spending turns. The harness is kept
 //! between turns and its provider Run resumed after a restart or a takeover; when the
-//! handler cannot resume it, a fresh Run starts with the watch's logbook.
+//! handler cannot resume it, a fresh Run starts with the charge's logbook.
 //!
-//! A watch is not a Mission: none of this makes a Mission, a brief, a placement or an attempt.
+//! A charge is not a Mission: none of this makes a Mission, a brief, a placement or an attempt.
 //!
-//! An Operation's watch is its 00 Agent in charge, and it decides the Operation's Missions: woken
+//! An Operation's charge is its 00 Agent in charge, and it decides the Operation's Missions: woken
 //! for each one entering `verifying` with the final report, the brief and the declared
 //! deliverables, it probes and reads the work, then decides through [`decide::DecisionDesk`].
 
@@ -31,25 +31,25 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use super::{DaemonState, StationRole, unix_now};
-use crate::directorates::m::watches::{Watch, WatchScope};
+use crate::directorates::m::charges::{Charge, ChargeScope};
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::cables::CablePrincipal;
 use crate::directorates::registry::runs::RunRecord;
-use crate::directorates::registry::watches::{
-    TURN_WINDOW_SECS, WatchError, WatchLogEntry, WatchRecord, WatchUpdate,
+use crate::directorates::registry::charges::{
+    TURN_WINDOW_SECS, ChargeError, ChargeLogEntry, ChargeRecord, ChargeUpdate,
 };
 
-/// How far back M's watch looks for Stations that checked in and went dark, in seconds.
+/// How far back M's charge looks for Stations that checked in and went dark, in seconds.
 const DARK_WINDOW_SECS: u64 = 86_400;
 
-/// The watches running on this Station, by scope.
+/// The charges running on this Station, by scope.
 #[derive(Default)]
-pub(super) struct WatchDesk {
+pub(super) struct ChargeDesk {
     live: Mutex<BTreeMap<String, Arc<Live>>>,
 }
 
-impl WatchDesk {
-    /// Whether this Station runs the watch of `scope` now.
+impl ChargeDesk {
+    /// Whether this Station runs the charge of `scope` now.
     #[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
     pub(super) fn is_live(&self, scope: &str) -> bool {
         self.live.lock().is_ok_and(|live| {
@@ -80,9 +80,9 @@ impl WatchDesk {
     }
 }
 
-/// One event of a watch's area, waiting for its turn.
+/// One event of a charge's area, waiting for its turn.
 #[derive(Debug, Clone, Serialize)]
-struct WatchEvent {
+struct ChargeEvent {
     /// `verifying`, `cable`, `health`, `control` or `timer`.
     kind: &'static str,
     /// When the Station saw it, as Unix seconds.
@@ -92,7 +92,7 @@ struct WatchEvent {
     untrusted: bool,
     /// What it is about.
     detail: serde_json::Value,
-    /// What the watch remembers it by, so it is told once; none for what is never repeated.
+    /// What the charge remembers it by, so it is told once; none for what is never repeated.
     #[serde(skip)]
     key: Option<String>,
     /// The control it answers, taken off the record once the turn is over.
@@ -100,7 +100,7 @@ struct WatchEvent {
     control: Option<String>,
 }
 
-impl WatchEvent {
+impl ChargeEvent {
     fn new(kind: &'static str, untrusted: bool, detail: serde_json::Value) -> Self {
         Self {
             kind,
@@ -118,13 +118,13 @@ impl WatchEvent {
     }
 }
 
-/// A watch this Station holds.
+/// A charge this Station holds.
 pub(super) struct Live {
-    scope: WatchScope,
+    scope: ChargeScope,
     /// The name its Run is started and its credentials issued under.
     key: String,
     /// Its settings as the roster has them now.
-    watch: Mutex<Watch>,
+    charge: Mutex<Charge>,
     /// The fencing token of the lease this Station holds.
     fence: AtomicU64,
     /// When this Station took it, as Unix seconds: the timer counts from here before a first wake.
@@ -135,9 +135,9 @@ pub(super) struct Live {
     closing: AtomicBool,
     /// Before this time (Unix seconds) no turn starts: its harness last failed to start.
     retry_at: Mutex<f64>,
-    waiting: Mutex<VecDeque<WatchEvent>>,
+    waiting: Mutex<VecDeque<ChargeEvent>>,
     /// Keys of events handed to a turn that the record may not show as seen yet, so a scan of an
-    /// older record does not wake the watch for them again.
+    /// older record does not wake the charge for them again.
     told: Mutex<BTreeSet<String>>,
     /// Events dropped for room since the logbook last said so.
     dropped: AtomicU64,
@@ -148,7 +148,7 @@ pub(super) struct Live {
     quota_noted: AtomicBool,
     harness: Mutex<Option<turn::Harnessed>>,
     /// Who it is to the Cable relay, bound to its provider Run once it has one; `None` for a
-    /// watch whose Cables are in no Operation.
+    /// charge whose Cables are in no Operation.
     principal: Mutex<Option<CablePrincipal>>,
     #[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
     exposure: ExposureGate,
@@ -157,10 +157,10 @@ pub(super) struct Live {
 }
 
 impl Live {
-    fn settings(&self) -> Watch {
-        self.watch
+    fn settings(&self) -> Charge {
+        self.charge
             .lock()
-            .map(|watch| watch.clone())
+            .map(|charge| charge.clone())
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
     }
 
@@ -179,7 +179,7 @@ impl Live {
     }
 
     /// Adds `event` unless the same one waits already, dropping the oldest past the bound.
-    fn push(&self, event: WatchEvent) {
+    fn push(&self, event: ChargeEvent) {
         let bound = self.settings().settings.max_waiting_events;
         let Ok(mut waiting) = self.waiting.lock() else {
             return;
@@ -207,9 +207,9 @@ impl Live {
     }
 }
 
-/// The name a watch's Run and credentials go under: `watch--` and its scope, made safe for a
+/// The name a charge's Run and credentials go under: `charge--` and its scope, made safe for a
 /// file name.
-pub(super) fn run_key(scope: &WatchScope) -> String {
+pub(super) fn run_key(scope: &ChargeScope) -> String {
     let safe: String = scope
         .to_string()
         .chars()
@@ -221,16 +221,16 @@ pub(super) fn run_key(scope: &WatchScope) -> String {
             }
         })
         .collect();
-    format!("watch--{safe}")
+    format!("charge--{safe}")
 }
 
-/// Whether this Station may run `watch`: M's on the Headquarters Station, an Operation's on an
+/// Whether this Station may run `charge`: M's on the Headquarters Station, an Operation's on an
 /// execution Station the Operation allows, a Station's on itself.
-fn may_run(state: &DaemonState, watch: &Watch, headquarters: bool) -> bool {
-    match &watch.scope {
-        WatchScope::M => headquarters,
-        WatchScope::Station(station) => *station == state.station_id,
-        WatchScope::Operation(operation) => {
+fn may_run(state: &DaemonState, charge: &Charge, headquarters: bool) -> bool {
+    match &charge.scope {
+        ChargeScope::M => headquarters,
+        ChargeScope::Station(station) => *station == state.station_id,
+        ChargeScope::Operation(operation) => {
             let Ok(operation) = state.roster.operation(operation) else {
                 return false;
             };
@@ -244,11 +244,11 @@ fn may_run(state: &DaemonState, watch: &Watch, headquarters: bool) -> bool {
     }
 }
 
-/// Whether the Agent of `watch` has a handler this Station can start.
-fn has_handler(state: &DaemonState, watch: &Watch) -> bool {
+/// Whether the Agent of `charge` has a handler this Station can start.
+fn has_handler(state: &DaemonState, charge: &Charge) -> bool {
     let Ok(agent) = state
         .roster
-        .agent(watch.scope.operation(), &watch.settings.agent)
+        .agent(charge.scope.operation(), &charge.settings.agent)
     else {
         return false;
     };
@@ -261,68 +261,68 @@ fn has_handler(state: &DaemonState, watch: &Watch) -> bool {
     }
 }
 
-/// One pass over this Station's watches: on a check-in, claims, renews and stops them and looks
+/// One pass over this Station's charges: on a check-in, claims, renews and stops them and looks
 /// at their areas; every round, takes their Cables and wakes those with something waiting.
 pub(super) async fn tend(state: &DaemonState, headquarters: bool, check_in: bool) {
     if check_in {
-        let wanted: Vec<Watch> = state
+        let wanted: Vec<Charge> = state
             .roster
-            .watches()
+            .charges()
             .values()
-            .filter(|watch| may_run(state, watch, headquarters) && has_handler(state, watch))
+            .filter(|charge| may_run(state, charge, headquarters) && has_handler(state, charge))
             .cloned()
             .collect();
-        for live in state.watches.all() {
-            if !wanted.iter().any(|watch| watch.scope == live.scope) {
+        for live in state.charges.all() {
+            if !wanted.iter().any(|charge| charge.scope == live.scope) {
                 stop(state, &live, "this Station no longer runs it").await;
             }
         }
-        for watch in wanted {
-            post(state, watch).await;
+        for charge in wanted {
+            post(state, charge).await;
         }
     }
-    for live in state.watches.all() {
+    for live in state.charges.all() {
         wake(state, &live).await;
     }
 }
 
-/// Closes every watch this Station runs, leaving their leases to lapse and their provider
+/// Closes every charge this Station runs, leaving their leases to lapse and their provider
 /// Runs to be resumed.
 pub(super) async fn close_all(state: &DaemonState) {
-    for live in state.watches.all() {
+    for live in state.charges.all() {
         stop(state, &live, "the Station is stopping").await;
     }
 }
 
-/// Claims or renews `watch` and looks at its area.
-async fn post(state: &DaemonState, watch: Watch) {
-    let scope = watch.scope.to_string();
+/// Claims or renews `charge` and looks at its area.
+async fn post(state: &DaemonState, charge: Charge) {
+    let scope = charge.scope.to_string();
     let (intake, station, agent, ttl) = (
         state.intake.clone(),
         state.station_id.clone(),
-        watch.settings.agent.clone(),
-        watch.settings.lease.0,
+        charge.settings.agent.clone(),
+        charge.settings.lease.0,
     );
     let claim_scope = scope.clone();
     let claimed = tokio::task::spawn_blocking(move || {
-        intake.claim_watch(&claim_scope, &agent, &station, ttl)
+        intake.claim_charge(&claim_scope, &agent, &station, ttl)
     })
     .await;
     let record = match claimed {
         Ok(Ok(record)) => record,
-        Ok(Err(WatchError::HeldBy(_) | WatchError::Stale)) => {
-            if let Some(live) = state.watches.get(&scope) {
+        Ok(Err(ChargeError::HeldBy(_) | ChargeError::Stale)) => {
+            if let Some(live) = state.charges.get(&scope) {
                 stop(state, &live, "another Station holds it").await;
             }
             return;
         }
         Ok(Err(error)) => {
-            eprintln!("ai6: watch {scope:?} was not claimed: {error}");
+            eprintln!("ai6: charge {scope:?} was not claimed: {error}");
             return;
         }
         Err(_) => return,
     };
-    let live = match state.watches.get(&scope) {
+    let live = match state.charges.get(&scope) {
         Some(live)
             if live.fence.load(Ordering::Acquire) == record.fence
                 && live.settings().settings.agent == record.agent =>
@@ -333,13 +333,13 @@ async fn post(state: &DaemonState, watch: Watch) {
             if let Some(stale) = stale {
                 stop(state, &stale, "its lease or Agent changed").await;
             }
-            let live = open(state, &watch, &record).await;
-            state.watches.insert(live.clone());
+            let live = open(state, &charge, &record).await;
+            state.charges.insert(live.clone());
             live
         }
     };
-    if let Ok(mut settings) = live.watch.lock() {
-        *settings = watch;
+    if let Ok(mut settings) = live.charge.lock() {
+        *settings = charge;
     }
     // The record may have been read before a turn in flight wrote it: keep this Station's own turns
     // beside the record's, and forget a told event only once the record shows it seen.
@@ -365,15 +365,15 @@ async fn post(state: &DaemonState, watch: Watch) {
     }
 }
 
-/// Starts holding `watch` here, with its Cable endpoint when its Cables have an Operation or it
+/// Starts holding `charge` here, with its Cable endpoint when its Cables have an Operation or it
 /// has the Station's tools.
-async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<Live> {
-    let principal = watch
+async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Arc<Live> {
+    let principal = charge
         .settings
-        .cable_operation(&watch.scope)
+        .cable_operation(&charge.scope)
         .and_then(|operation| {
             CablePrincipal::try_new(
-                watch.settings.agent.clone(),
+                charge.settings.agent.clone(),
                 operation.to_owned(),
                 None,
                 state.station_id.clone(),
@@ -384,9 +384,9 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
         });
     let exposure = ExposureGate::default();
     let live = Arc::new(Live {
-        scope: watch.scope.clone(),
-        key: run_key(&watch.scope),
-        watch: Mutex::new(watch.clone()),
+        scope: charge.scope.clone(),
+        key: run_key(&charge.scope),
+        charge: Mutex::new(charge.clone()),
         fence: AtomicU64::new(record.fence),
         claimed_at: unix_now(),
         busy: AtomicBool::new(false),
@@ -406,15 +406,15 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
     });
     #[cfg(feature = "cables-mcp")]
     {
-        let station_tools = watch.scope.station().is_some();
-        // A Station's watch with no Operation for its Cables still needs an endpoint for its
+        let station_tools = charge.scope.station().is_some();
+        // A Station's charge with no Operation for its Cables still needs an endpoint for its
         // Station tools; its Cable tools then act under no Operation's grants.
         let identity = principal.or_else(|| {
             station_tools
                 .then(|| {
                     CablePrincipal::try_new(
-                        watch.settings.agent.clone(),
-                        watch.scope.to_string(),
+                        charge.settings.agent.clone(),
+                        charge.scope.to_string(),
                         None,
                         state.station_id.clone(),
                         None,
@@ -436,18 +436,18 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
             {
                 Ok(endpoint) => {
                     if station_tools {
-                        endpoint.open_station_tools(super::head_of_station::Desk::for_watch(
+                        endpoint.open_station_tools(super::head_of_station::Desk::for_charge(
                             state.clone(),
-                            watch.settings.agent.clone(),
+                            charge.settings.agent.clone(),
                         ));
                     }
-                    if let Some(operation) = watch.scope.operation() {
+                    if let Some(operation) = charge.scope.operation() {
                         endpoint.open_green_ink(super::green_ink::Desk::new(state.clone()));
                         endpoint.open_decision_tools(decide::DecisionDesk::new(
                             state.clone(),
                             operation.to_owned(),
-                            watch.settings.agent.clone(),
-                            run_key(&watch.scope),
+                            charge.settings.agent.clone(),
+                            run_key(&charge.scope),
                         ));
                     }
                     if let Ok(mut slot) = live.endpoint.lock() {
@@ -456,16 +456,16 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
                 }
                 Err(error) => {
                     eprintln!(
-                        "ai6: watch {}: its tools did not start: {error}",
-                        watch.scope
+                        "ai6: charge {}: its tools did not start: {error}",
+                        charge.scope
                     );
                 }
             }
         }
     }
     eprintln!(
-        "ai6: Station {} keeps watch {} (fence {})",
-        state.station_id, watch.scope, record.fence
+        "ai6: Station {} keeps charge {} (fence {})",
+        state.station_id, charge.scope, record.fence
     );
     live
 }
@@ -478,11 +478,11 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
     }
     let scope = live.scope.to_string();
     if state
-        .watches
+        .charges
         .get(&scope)
         .is_some_and(|current| Arc::ptr_eq(&current, live))
     {
-        state.watches.remove(&scope);
+        state.charges.remove(&scope);
     }
     let (closing, releasing) = (live.clone(), state.clone());
     let _ = tokio::task::spawn_blocking(move || {
@@ -495,12 +495,12 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
     })
     .await;
     eprintln!(
-        "ai6: Station {} stops watch {scope}: {why}",
+        "ai6: Station {} stops charge {scope}: {why}",
         state.station_id
     );
 }
 
-/// An attempt as a watch reads it to verify: its brief and final report (untrusted text), what it
+/// An attempt as a charge reads it to verify: its brief and final report (untrusted text), what it
 /// was to deliver, what the probes found, and what has been decided or recommended.
 fn attempt_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
     let report = state
@@ -531,12 +531,12 @@ fn attempt_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value 
     })
 }
 
-/// What the watch's area holds that it has not been told: controls, Missions entering
+/// What the charge's area holds that it has not been told: controls, Missions entering
 /// `verifying`, quarantines and dark Stations. Blocks on the Registry.
-fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEvent> {
+fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEvent> {
     let mut found = Vec::new();
     for control in &record.controls {
-        let mut event = WatchEvent::new(
+        let mut event = ChargeEvent::new(
             "control",
             !control.note.is_empty(),
             serde_json::json!({ "by": control.by, "note": control.note, "asked_at": control.at }),
@@ -545,7 +545,7 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
         event.control = Some(control.id.clone());
         found.push(event);
     }
-    if let WatchScope::Operation(operation) = &live.scope {
+    if let ChargeScope::Operation(operation) = &live.scope {
         match state.intake.runs() {
             Ok(runs) => {
                 for run in runs.into_iter().filter(|run| {
@@ -558,13 +558,13 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
                 }) {
                     // The final report and the brief are text written outside AI6.
                     found.push(
-                        WatchEvent::new("verifying", true, attempt_detail(state, &run))
+                        ChargeEvent::new("verifying", true, attempt_detail(state, &run))
                             .keyed(format!("verifying:{}", run.id)),
                     );
                 }
             }
             Err(error) => eprintln!(
-                "ai6: watch {}: Run records unreadable: {error}",
+                "ai6: charge {}: Run records unreadable: {error}",
                 live.scope
             ),
         }
@@ -572,16 +572,16 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
     if let Ok(quarantines) = state.intake.quarantines() {
         for quarantine in quarantines {
             let ours = match &live.scope {
-                WatchScope::M => true,
-                WatchScope::Operation(operation) => quarantine
+                ChargeScope::M => true,
+                ChargeScope::Operation(operation) => quarantine
                     .operation
                     .as_deref()
                     .is_none_or(|quarantined| quarantined == operation),
-                WatchScope::Station(station) => quarantine.by == format!("station:{station}"),
+                ChargeScope::Station(station) => quarantine.by == format!("station:{station}"),
             };
             if ours {
                 found.push(
-                    WatchEvent::new(
+                    ChargeEvent::new(
                         "health",
                         true,
                         serde_json::json!({
@@ -602,7 +602,7 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
             }
         }
     }
-    if live.scope == WatchScope::M {
+    if live.scope == ChargeScope::M {
         let window = std::time::Duration::from_secs(DARK_WINDOW_SECS);
         if let (Ok(known), Ok(alive)) = (
             state.intake.stations(window),
@@ -616,7 +616,7 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
                     .any(|alive| alive.station() == station.station())
             }) {
                 found.push(
-                    WatchEvent::new(
+                    ChargeEvent::new(
                         "health",
                         false,
                         serde_json::json!({
@@ -649,7 +649,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
     if live.retry_at.lock().is_ok_and(|at| now < *at) {
         return;
     }
-    let watch = live.settings();
+    let charge = live.settings();
     let room = live.has_room(now);
     let principal = live
         .principal
@@ -658,7 +658,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         .and_then(|principal| principal.clone());
     if room && let Some(principal) = principal {
         let relay = state.cables.clone();
-        let limit = watch
+        let limit = charge
             .settings
             .max_events_per_turn
             .or_max()
@@ -669,7 +669,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
             && !delivered.is_empty()
         {
             #[cfg(feature = "cables-mcp")]
-            if let Some(operation) = watch.settings.cable_operation(&watch.scope) {
+            if let Some(operation) = charge.settings.cable_operation(&charge.scope) {
                 super::cables_mcp::mark_exposure(
                     state.intake.as_ref(),
                     &live.exposure,
@@ -678,7 +678,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
                 );
             }
             for delivery in delivered {
-                live.push(WatchEvent::new(
+                live.push(ChargeEvent::new(
                     "cable",
                     true,
                     serde_json::to_value(&delivery).unwrap_or_default(),
@@ -697,13 +697,13 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
             .ok()
             .and_then(|last| *last)
             .unwrap_or(live.claimed_at);
-        if watch
+        if charge
             .settings
             .wake_every
             .get()
             .is_some_and(|every| now - since >= every.as_secs_f64())
         {
-            live.push(WatchEvent::new(
+            live.push(ChargeEvent::new(
                 "timer",
                 false,
                 serde_json::json!({ "since": since }),
@@ -718,7 +718,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
             write_log(
                 state,
                 live,
-                WatchLogEntry::new(
+                ChargeLogEntry::new(
                     "quota",
                     format!(
                         "the hour's turns are spent; {waiting} events wait for room \
@@ -732,10 +732,10 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         return;
     }
     live.quota_noted.store(false, Ordering::Release);
-    let events: Vec<WatchEvent> = live.waiting.lock().map_or_else(
+    let events: Vec<ChargeEvent> = live.waiting.lock().map_or_else(
         |_| Vec::new(),
         |mut waiting| {
-            let take = watch
+            let take = charge
                 .settings
                 .max_events_per_turn
                 .or_max()
@@ -764,14 +764,14 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
 }
 
 /// Appends `entry` to the logbook of `live`.
-async fn write_log(state: &DaemonState, live: &Arc<Live>, entry: WatchLogEntry) {
-    let update = WatchUpdate::default().log(entry);
+async fn write_log(state: &DaemonState, live: &Arc<Live>, entry: ChargeLogEntry) {
+    let update = ChargeUpdate::default().log(entry);
     let _ = write(state, live, update).await;
 }
 
 /// Writes `update` to the record of `live` under its lease, renewing it; a lease another took
-/// stops the watch here.
-async fn write(state: &DaemonState, live: &Arc<Live>, update: WatchUpdate) -> Option<WatchRecord> {
+/// stops the charge here.
+async fn write(state: &DaemonState, live: &Arc<Live>, update: ChargeUpdate) -> Option<ChargeRecord> {
     let (intake, station, scope, fence, ttl) = (
         state.intake.clone(),
         state.station_id.clone(),
@@ -780,18 +780,18 @@ async fn write(state: &DaemonState, live: &Arc<Live>, update: WatchUpdate) -> Op
         live.settings().settings.lease.0,
     );
     let written = tokio::task::spawn_blocking(move || {
-        intake.update_watch(&scope, &station, fence, Some(ttl), update)
+        intake.update_charge(&scope, &station, fence, Some(ttl), update)
     })
     .await;
     match written {
         Ok(Ok(record)) => Some(record),
-        Ok(Err(WatchError::Stale | WatchError::NotFound)) => {
+        Ok(Err(ChargeError::Stale | ChargeError::NotFound)) => {
             stop(state, live, "another Station took it").await;
             None
         }
         Ok(Err(error)) => {
             eprintln!(
-                "ai6: watch {}: its record was not written: {error}",
+                "ai6: charge {}: its record was not written: {error}",
                 live.scope
             );
             None
@@ -800,11 +800,11 @@ async fn write(state: &DaemonState, live: &Arc<Live>, update: WatchUpdate) -> Op
     }
 }
 
-/// What a wake tells the watch: the lead, then the events as JSON.
-fn render(scope: &WatchScope, events: &[WatchEvent]) -> String {
+/// What a wake tells the charge: the lead, then the events as JSON.
+fn render(scope: &ChargeScope, events: &[ChargeEvent]) -> String {
     let untrusted = events.iter().any(|event| event.untrusted);
     let mut text = format!(
-        "Watch {scope} wakes for {} event{}.",
+        "Charge {scope} wakes for {} event{}.",
         events.len(),
         if events.len() == 1 { "" } else { "s" }
     );
@@ -819,11 +819,11 @@ fn render(scope: &WatchScope, events: &[WatchEvent]) -> String {
     text
 }
 
-/// One turn of `live` with `events`, begun at `now`, and what it leaves on the watch's record.
-async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<WatchEvent>, now: f64) {
+/// One turn of `live` with `events`, begun at `now`, and what it leaves on the charge's record.
+async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent>, now: f64) {
     let scope = live.scope.to_string();
     let intake = state.intake.clone();
-    let record = tokio::task::spawn_blocking(move || intake.watch(&scope))
+    let record = tokio::task::spawn_blocking(move || intake.charge(&scope))
         .await
         .ok()
         .and_then(Result::ok)
@@ -837,28 +837,28 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<WatchEvent>
         return;
     };
     let prompt = render(&live.scope, &events);
-    let (taking, live_for_turn, watch) = (state.clone(), live.clone(), live.settings());
+    let (taking, live_for_turn, charge) = (state.clone(), live.clone(), live.settings());
     let previous = record.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        turn::take(&taking, &live_for_turn, &watch, &prompt, &previous)
+        turn::take(&taking, &live_for_turn, &charge, &prompt, &previous)
     })
     .await
     .unwrap_or_else(|_| turn::Outcome::refused("the turn's thread failed".to_owned()));
     let kinds: Vec<&str> = events.iter().map(|event| event.kind).collect();
-    let mut update = WatchUpdate::default().woke(now, true);
+    let mut update = ChargeUpdate::default().woke(now, true);
     for entry in outcome.log.iter().cloned() {
         update = update.log(entry);
     }
     let dropped = live.dropped.swap(0, Ordering::AcqRel);
     if dropped > 0 {
-        update = update.log(WatchLogEntry::new(
+        update = update.log(ChargeLogEntry::new(
             "quota",
             format!("{dropped} waiting events were dropped for room (max_waiting_events)"),
             now,
         ));
     }
     if !outcome.ran {
-        update = update.log(WatchLogEntry::new(
+        update = update.log(ChargeLogEntry::new(
             "turn",
             format!(
                 "woke for {} but took no turn: {}",
@@ -885,7 +885,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<WatchEvent>
         let _ = write(state, live, update).await;
         return;
     }
-    update = update.log(WatchLogEntry::new(
+    update = update.log(ChargeLogEntry::new(
         "turn",
         format!(
             "woke for {}; the turn ended {}{}{}",

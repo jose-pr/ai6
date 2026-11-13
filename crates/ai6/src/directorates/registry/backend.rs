@@ -46,7 +46,7 @@ pub use super::store::{
 pub use super::timeline::TimelineStore;
 pub use super::usage::UsageStore;
 pub use super::vetting::VettingStore;
-pub use super::watches::WatchStore;
+pub use super::charges::ChargeStore;
 
 /// The bounds a Registry applies to what it keeps and accepts.
 pub trait Limited {
@@ -91,7 +91,7 @@ pub trait RegistryBackend:
     + TimelineStore
     + UsageStore
     + VettingStore
-    + WatchStore
+    + ChargeStore
     + Send
     + Sync
 {
@@ -179,7 +179,7 @@ impl<T> RegistryBackend for T where
         + TimelineStore
         + UsageStore
         + VettingStore
-        + WatchStore
+        + ChargeStore
         + Send
         + Sync
 {

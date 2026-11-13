@@ -115,9 +115,9 @@ pub enum ConfigRecord {
     /// A review policy ([`ReviewPolicy`](crate::ReviewPolicy)): the keys of a `[review.<name>]`
     /// table; global only.
     Review,
-    /// A watch ([`WatchDefinition`](crate::WatchDefinition)): the keys of a `[watch.<scope>]`
+    /// A charge ([`ChargeDefinition`](crate::ChargeDefinition)): the keys of a `[charge.<scope>]`
     /// table, keyed by its scope (`m`, `operation:<codename>`, `station:<id>`); global only.
-    Watch,
+    Charge,
 }
 
 impl ConfigRecord {
@@ -146,7 +146,7 @@ impl ConfigRecord {
         Self::Unex,
         Self::Compartment,
         Self::Review,
-        Self::Watch,
+        Self::Charge,
     ];
 
     /// The key of a singleton family's one record.
@@ -155,7 +155,7 @@ impl ConfigRecord {
     /// The family's name: `operation`, `agent`, `role`, `assistant`, `cover`, `theater`,
     /// `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider`, `pool`, `cables`,
     /// `plugin`, `station`,
-    /// `tls`, `access`, `unex`, `roster`, `compartment`, `review` or `watch`. For a family that shares its
+    /// `tls`, `access`, `unex`, `roster`, `compartment`, `review` or `charge`. For a family that shares its
     /// file, it is also its table there.
     pub const fn name(self) -> &'static str {
         match self {
@@ -182,7 +182,7 @@ impl ConfigRecord {
             Self::Roster => "roster",
             Self::Compartment => "compartment",
             Self::Review => "review",
-            Self::Watch => "watch",
+            Self::Charge => "charge",
         }
     }
 
@@ -214,7 +214,7 @@ impl ConfigRecord {
             Self::Unex => "unex",
             Self::Compartment => "compartments",
             Self::Review => "reviews",
-            Self::Watch => "watches",
+            Self::Charge => "charges",
         }
     }
 
@@ -1505,7 +1505,7 @@ pub const IMPORT_ORDER: [ConfigRecord; 24] = [
     ConfigRecord::Unex,
     ConfigRecord::Compartment,
     ConfigRecord::Review,
-    ConfigRecord::Watch,
+    ConfigRecord::Charge,
 ];
 
 /// One family's records as the part of its family file they make: `[name.<key>]` tables, a
@@ -1555,7 +1555,7 @@ fn family_value(
     document
 }
 
-/// The family whose route kind is `kind`: its name or the plural (`watch`, `watches`).
+/// The family whose route kind is `kind`: its name or the plural (`charge`, `charges`).
 pub fn family_of_kind(kind: &str) -> Option<ConfigRecord> {
     ConfigRecord::ALL.into_iter().find(|record| {
         let name = record.name();
@@ -1954,7 +1954,7 @@ pub(crate) fn assemble(
             agents: family(ConfigRecord::Agent),
             roles: family(ConfigRecord::Role),
             reviews: family(ConfigRecord::Review),
-            watches: family(ConfigRecord::Watch),
+            charges: family(ConfigRecord::Charge),
             assistant,
             settings,
         },
@@ -2362,8 +2362,8 @@ mod tests {
     #[test]
     fn a_kind_is_a_family_s_name_or_its_plural() {
         for (kind, record) in [
-            ("watch", ConfigRecord::Watch),
-            ("watches", ConfigRecord::Watch),
+            ("charge", ConfigRecord::Charge),
+            ("charges", ConfigRecord::Charge),
             ("agents", ConfigRecord::Agent),
             ("sandboxes", ConfigRecord::Sandbox),
             ("secret_providers", ConfigRecord::SecretProvider),
@@ -2373,7 +2373,7 @@ mod tests {
         ] {
             assert_eq!(family_of_kind(kind), Some(record), "{kind}");
         }
-        for kind in ["", "watchess", "secret_", "nothing", "agentss"] {
+        for kind in ["", "chargess", "secret_", "nothing", "agentss"] {
             assert_eq!(family_of_kind(kind), None, "{kind}");
         }
     }
@@ -2381,7 +2381,7 @@ mod tests {
     #[test]
     fn a_document_reads_into_records_in_the_order_they_are_stored_and_back() {
         let document = serde_json::json!({
-            "watch": {"operation:G": {"agent": "007"}},
+            "charge": {"operation:G": {"agent": "007"}},
             "agent": {"007": {"handler": "mock-agent"}},
             "assistant": {"allow_elevated": false},
             "tls": {"min_version": "1.3"},
@@ -2399,7 +2399,7 @@ mod tests {
                 "agent/007",
                 "plugin/a.dll",
                 "tls/settings",
-                "watch/operation:G"
+                "charge/operation:G"
             ]
         );
         assert_eq!(records[2].2, serde_json::json!({"sha256": "00"}));
@@ -2440,11 +2440,11 @@ mod tests {
 
     #[test]
     fn a_parsed_document_takes_its_format_and_a_family_file_is_the_record() {
-        let toml = "[watch.\"operation:G\"]\nagent = \"007\"\n";
+        let toml = "[charge.\"operation:G\"]\nagent = \"007\"\n";
         let yaml = "#!yaml\nwatch:\n  \"operation:G\":\n    agent: '007'\n";
-        let json = r#"{"watch": {"operation:G": {"agent": "007"}}}"#;
+        let json = r#"{"charge": {"operation:G": {"agent": "007"}}}"#;
         let expected = vec![(
-            ConfigRecord::Watch,
+            ConfigRecord::Charge,
             "operation:G".to_owned(),
             serde_json::json!({"agent": "007"}),
         )];
@@ -2474,7 +2474,7 @@ mod tests {
         let refused = parse_document(
             Path::new("a.cfg"),
             None,
-            "[watch.x]\nagent = 1\nagent = 2\n",
+            "[charge.x]\nagent = 1\nagent = 2\n",
         )
         .unwrap_err()
         .to_string();

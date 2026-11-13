@@ -694,7 +694,7 @@ pub struct Operation {
     pub green_ink: GreenInkPolicy,                // strict unless configured; see Green ink
     pub vetting: VettingPolicy,                   // every check on unless configured; see Vetting
     pub sources: toml::Table,                     // provider ID -> that provider's settings (or a target string)
-    pub intake: SourceIntake,                     // [operation.ID] intake: Watch (default, items are Reports the watch decides) or Direct (each item queued as a brief); Direct is a reported non-default
+    pub intake: SourceIntake,                     // [operation.ID] intake: Charge (default, items are Reports the charge decides) or Direct (each item queued as a brief); Direct is a reported non-default
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
     pub overlays: Vec<String>,                    // [overlay.<name>] names its Runs get after the loadout's; each once
@@ -783,7 +783,7 @@ impl RosterBuilder {
     pub fn role(self, role: AgentRole) -> Self;
     pub fn cover(self, cover: Cover) -> Self;      // replaces a built-in of the same name
     pub fn assistant(self, settings: AssistantSettings) -> Self;
-    pub fn watch(self, watch: Watch) -> Self;      // build checks its Agent and Operations
+    pub fn charge(self, charge: Charge) -> Self;      // build checks its Agent and Operations
     pub fn settings(self, settings: RosterSettings) -> Self;
     pub fn max_operation_depth(self, depth: Limit) -> Self;   // Limit::UNBOUNDED: no bound
     pub fn max_compartment_rules(self, rules: Limit) -> Self; // pairs per compartment
@@ -1318,7 +1318,7 @@ pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, Roster
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
     Mcp, Overlay, Secret, Pool, Cables, Plugin, Station, Tls, Access, OperationAccess, Unex,
-    Roster, Compartment, Review, Watch }        // Watch: `[watch.<scope>]`, file `watches`, global
+    Roster, Compartment, Review, Charge }        // Charge: `[charge.<scope>]`, file `charges`, global
 impl ConfigRecord {
     pub const ALL: [Self; 24];                  // Roster first
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
@@ -1948,12 +1948,12 @@ pub trait TimelineStore;     // the activity timeline (timeline.rs)
 pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
-pub trait WatchStore;        // each watch's record, lease and logbook (watches.rs)
+pub trait ChargeStore;        // each charge's record, lease and logbook (charges.rs)
 pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
     + QuarantineStore + ReportStore + RunContextStore + RunStore + SleeperStore + SourceStore + TimelineStore
-    + UsageStore + VettingStore + WatchStore + Send + Sync {}
+    + UsageStore + VettingStore + ChargeStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` / `postgresql://…` → SqlRegistry;
@@ -1978,7 +1978,7 @@ pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits
     pub runs: RunLimits,
     pub sleepers: SleeperLimits, pub sources: SourceLimits, pub stations: StationLimits,
     pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits,
-    pub watches: WatchLimits }
+    pub charges: ChargeLimits }
 impl RegistryLimits {
     pub fn weakenings(&self) -> Vec<String>;   // "registry.limits.T.KEY VALUE is looser than the default D"
     pub fn held_record_bytes(&self) -> Limit;  // briefs.record_bytes + 64 KiB
@@ -2494,7 +2494,7 @@ impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub deliverables: Vec<Deliverable>,      // what the Mission was to deliver; set when the attempt goes verifying
     pub evidence: Vec<Evidence>,             // what probes found of them, oldest first, bounded (evidence_entries)
     pub probe_requested: Option<f64>,        // when a person asked for a probe, until the Station ran it
-    pub recommendation: Option<MissionVerdict>,   // what a `desk` watch advises for a verifying attempt; settles nothing
+    pub recommendation: Option<MissionVerdict>,   // what a `desk` charge advises for a verifying attempt; settles nothing
 }
 #[non_exhaustive] pub enum ProbeResult { Found, Missing, Unprobed, Failed }   // serde kebab-case; as_str()
     // Missing: the place was read and it is not there. Failed: the look failed or timed out, nothing is known.
@@ -3396,8 +3396,8 @@ prints the decision (a deny when stdin cannot be read or deciding fails) and alw
 A Source is a Guatiao kind (`ai6_source`) for a tracker or CI system. All models are
 Guatiao values; the kind grows by appending methods with defaults.
 
-With `[operation.ID] intake = "watch"` (the default) a polled item is not queued: it is a Report
-(`registry::source_items`, below) and the Operation's watch is told by Cable. `ingest_source_item`
+With `[operation.ID] intake = "charge"` (the default) a polled item is not queued: it is a Report
+(`registry::source_items`, below) and the Operation's charge is told by Cable. `ingest_source_item`
 is then called only for an item decided `mission` (and, afterwards, to follow its changes), by the
 Station that polls the Source; `intake = "direct"` calls it for every item, as it always did.
 
@@ -3799,23 +3799,23 @@ LogbookStore::file_station_report(report: &StationReport) -> io::Result<()>   //
 LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         // oldest first; empty when none
 ```
 
-## Watches (`ai6::directorates::m::watches`, `ai6::directorates::registry::watches`)
+## Charges (`ai6::directorates::m::charges`, `ai6::directorates::registry::charges`)
 
-A watch is one standing Run per scope (`m`, `operation:<codename>`, `station:<id>`), run by
+A charge is one standing Run per scope (`m`, `operation:<codename>`, `station:<id>`), run by
 the Station the scope names (M's on the Headquarters Station, an Operation's on an execution
 Station it allows, a Station's on itself) and woken by its area's events, one turn per wake. It is
 not a Mission: no Mission record, brief, placement, attempt or Run record names it. Its record
-(`watches/<hex of scope>.json`, SQL table `ai6_watches`) holds its lease, fence, provider Run
+(`charges/<hex of scope>.json`, SQL table `ai6_charges`) holds its lease, fence, provider Run
 and handler, logbook, last wake, the turns of the last hour, what it was told, and controls.
-`docs/watches.md` has the behaviour. `Watch`, `WatchDefinition` and `WatchScope` are at the crate
+`docs/charges.md` has the behaviour. `Charge`, `ChargeDefinition` and `ChargeScope` are at the crate
 root.
 
 ```rust
 pub const M_SCOPE: &str = "m"; pub const OPERATION_PREFIX: &str = "operation:"; pub const STATION_PREFIX: &str = "station:";
-#[non_exhaustive] pub enum WatchScope { M, Operation(String), Station(String) }  // FromStr, Display
-impl WatchScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self) -> Option<&str>; }
-/// `[watch.<scope>]`; ToValue, FromValue, Schema, Form; deny_unknown_fields.
-#[non_exhaustive] pub struct WatchDefinition {
+#[non_exhaustive] pub enum ChargeScope { M, Operation(String), Station(String) }  // FromStr, Display
+impl ChargeScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self) -> Option<&str>; }
+/// `[charge.<scope>]`; ToValue, FromValue, Schema, Form; deny_unknown_fields.
+#[non_exhaustive] pub struct ChargeDefinition {
     pub agent: String, pub operation: Option<String>,   // operation: M's/a Station's Cables; an Operation's may only repeat its own
     pub wake_every: TimeLimit,            // 3600; none: events only
     pub max_turns_per_hour: Limit,        // 30, counted on the record across Stations
@@ -3824,38 +3824,38 @@ impl WatchScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self)
     pub turn_timeout: TimeLimit,          // 1800; the turn is interrupted
     pub lease: Seconds,                   // 60; a lapsed lease is taken over
 }
-impl WatchDefinition {
+impl ChargeDefinition {
     pub const DEFAULTS: Self; pub fn new(agent) -> Self;
     pub fn wake_every(self, TimeLimit) -> Self; pub fn max_turns_per_hour(self, Limit) -> Self; pub fn lease(self, Duration) -> Self;
-    pub fn cable_operation<'a>(&'a self, scope: &'a WatchScope) -> Option<&'a str>;
-    pub fn validate(&self, scope: &WatchScope) -> Result<(), String>;
+    pub fn cable_operation<'a>(&'a self, scope: &'a ChargeScope) -> Option<&'a str>;
+    pub fn validate(&self, scope: &ChargeScope) -> Result<(), String>;
 }
-#[non_exhaustive] pub struct Watch { pub scope: WatchScope, pub settings: WatchDefinition }   // Watch::new(scope, settings)
-pub fn watches_from_records(records) -> Result<BTreeMap<String, Watch>, String>;
-Roster::watches(&self) -> &BTreeMap<String, Watch>;   // by scope; `watches.toml` in Roster::load
+#[non_exhaustive] pub struct Charge { pub scope: ChargeScope, pub settings: ChargeDefinition }   // Charge::new(scope, settings)
+pub fn charges_from_records(records) -> Result<BTreeMap<String, Charge>, String>;
+Roster::charges(&self) -> &BTreeMap<String, Charge>;   // by scope; `charges.toml` in Roster::load
 
-// ai6::directorates::registry::watches
+// ai6::directorates::registry::charges
 pub const TURN_WINDOW_SECS: f64 = 3_600.0;
-#[non_exhaustive] pub struct WatchLimits { pub records: Limit /*1024*/, pub record_bytes: Limit /*1 MiB*/,
+#[non_exhaustive] pub struct ChargeLimits { pub records: Limit /*1024*/, pub record_bytes: Limit /*1 MiB*/,
     pub logbook: Limit /*100*/, pub entry_bytes: Limit /*2 KiB, longer cut*/, pub seen: Limit /*1024*/, pub controls: Limit /*32*/ }
-#[non_exhaustive] pub struct WatchLogEntry { pub at: f64, pub kind: String, pub text: String }   // new(kind, text, at)
-#[non_exhaustive] pub struct WatchControl { pub id: String, pub by: String, pub note: String, pub at: f64 }
-#[non_exhaustive] pub struct WatchRecord { pub scope, pub agent, pub station, pub fence: u64, pub lease_expires: f64,
+#[non_exhaustive] pub struct ChargeLogEntry { pub at: f64, pub kind: String, pub text: String }   // new(kind, text, at)
+#[non_exhaustive] pub struct ChargeControl { pub id: String, pub by: String, pub note: String, pub at: f64 }
+#[non_exhaustive] pub struct ChargeRecord { pub scope, pub agent, pub station, pub fence: u64, pub lease_expires: f64,
     pub opened_at: f64, pub provider_id: Option<String>, pub handler: Option<String>, pub last_wake: Option<f64>,
-    pub turns: Vec<f64>, pub logbook: Vec<WatchLogEntry>, pub seen: Vec<String>, pub controls: Vec<WatchControl> }
-impl WatchRecord { pub fn turns_since(&self, since: f64) -> usize; }
-#[non_exhaustive] #[derive(Default)] pub struct WatchUpdate { pub run: Option<Option<(String, String)>>,
-    pub last_wake, pub turn_at, pub log: Vec<WatchLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String> }
-impl WatchUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids) }
-#[non_exhaustive] pub enum WatchError { NotFound, HeldBy(String), Stale, Io(io::Error) }
-pub trait WatchStore {
-    fn claim_watch(&self, scope, agent, station, ttl: Duration) -> Result<WatchRecord, WatchError>;
+    pub turns: Vec<f64>, pub logbook: Vec<ChargeLogEntry>, pub seen: Vec<String>, pub controls: Vec<ChargeControl> }
+impl ChargeRecord { pub fn turns_since(&self, since: f64) -> usize; }
+#[non_exhaustive] #[derive(Default)] pub struct ChargeUpdate { pub run: Option<Option<(String, String)>>,
+    pub last_wake, pub turn_at, pub log: Vec<ChargeLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String> }
+impl ChargeUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids) }
+#[non_exhaustive] pub enum ChargeError { NotFound, HeldBy(String), Stale, Io(io::Error) }
+pub trait ChargeStore {
+    fn claim_charge(&self, scope, agent, station, ttl: Duration) -> Result<ChargeRecord, ChargeError>;
         // makes, renews (same Station, same fence) or takes over a lapsed lease (fence + 1, logged);
         // another Agent forgets the provider Run; HeldBy while another's lease is live
-    fn update_watch(&self, scope, station, fence: u64, renew: Option<Duration>, update: WatchUpdate) -> Result<WatchRecord, WatchError>;  // Stale unless holder and fence
-    fn request_watch_wake(&self, scope, by, note) -> Result<WatchControl, WatchError>;   // no lease; NotFound before a first claim
-    fn watch(&self, scope: &str) -> io::Result<Option<WatchRecord>>;
-    fn watches(&self) -> io::Result<Vec<WatchRecord>>;   // by scope
+    fn update_charge(&self, scope, station, fence: u64, renew: Option<Duration>, update: ChargeUpdate) -> Result<ChargeRecord, ChargeError>;  // Stale unless holder and fence
+    fn request_charge_wake(&self, scope, by, note) -> Result<ChargeControl, ChargeError>;   // no lease; NotFound before a first claim
+    fn charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>>;
+    fn charges(&self) -> io::Result<Vec<ChargeRecord>>;   // by scope
 }
 ```
 
@@ -5364,12 +5364,12 @@ house and starts a new provider Run), told the person's reason and amendment aft
 Nothing else leaves `verifying`.
 
 `ai6::directorates::registry::decisions` is the one path a decision takes, for the gateway's `verify`
-route and for an Operation's watch alike:
+route and for an Operation's charge alike:
 
 ```rust
 #[non_exhaustive] pub struct VerifyingDecision<'a> { pub operation: &'a str, pub mission: &'a str /* UID */,
     pub verdict: OutcomeVerdict /* Confirmed | FailedVerification | Redispatch */, pub reason: &'a str,
-    pub amendment: Option<&'a str>, pub by: &'a str /* person ID or `watch:operation:CODENAME` */, pub at: f64 }
+    pub amendment: Option<&'a str>, pub by: &'a str /* person ID or `charge:operation:CODENAME` */, pub at: f64 }
 impl<'a> VerifyingDecision<'a> {
     pub fn new(operation, mission, verdict, reason, by, at) -> Self; pub fn with_amendment(self, Option<&'a str>) -> Self;
     pub fn verdict_named(word: &str) -> Option<OutcomeVerdict>;   // "done" | "failed" | "redispatch"
@@ -5451,15 +5451,15 @@ unless `with_config_provider(Arc<dyn ConfigProvider>)` names another provider; t
 read once at start. `with_registry(Arc<dyn RegistryBackend>)` replaces the
 `FileRegistry::from_environment()` default.
 
-Each scheduler round also tends the watches on the roster this Station may run
-(`docs/watches.md`): on a check-in it claims or renews each, closes one another Station took, and
+Each scheduler round also tends the charges on the roster this Station may run
+(`docs/charges.md`): on a check-in it claims or renews each, closes one another Station took, and
 looks at its area (Missions of its Operation in `verifying`, quarantines, dark Stations for M,
-controls); every round it takes the watch's Cables, adds a `wake_every` timer, and starts one turn
+controls); every round it takes the charge's Cables, adds a `wake_every` timer, and starts one turn
 of waiting events when the hour's `max_turns_per_hour` has room. The harness runs on this host in
-`<state dir>/watches/watch--<scope>`, started as `AgentStart.mission_id = "watch--<scope>"` (no
+`<state dir>/charges/charge--<scope>`, started as `AgentStart.mission_id = "charge--<scope>"` (no
 Mission has that ID), resumed with the record's provider Run, or started fresh with the
-logbook when the resume is refused or fails before it answers. A Station's watch gets
-`station_report` and `file_report` on its Cable endpoint. Stopping closes every watch's harness.
+logbook when the resume is refused or fails before it answers. A Station's charge gets
+`station_report` and `file_report` on its Cable endpoint. Stopping closes every charge's harness.
 
 ## Source items (`ai6::directorates::registry::source_items`)
 
@@ -5487,13 +5487,13 @@ pub fn is_mission(&Report) -> bool;
 ```
 
 `CableRelay::notice(&CablePrincipal /* "source:INSTANCE" */, operation, agent, body, key)` sends a Cable
-from the Station itself to one Agent (the Operation's watch): no send grant, the receiver's Receive
+from the Station itself to one Agent (the Operation's charge): no send grant, the receiver's Receive
 grant on the Operation scope and inbound mode apply; the same `key` is the same Cable. `SourceDesk`
-(Headquarters) polls, files the Reports, tells the watch (`change` `new`, `changed` or `due`, with the
+(Headquarters) polls, files the Reports, tells the charge (`change` `new`, `changed` or `due`, with the
 Report ID, item, link, title, labels), queues what was decided `mission` (`settle_items`: ingest, link the
-issue, tie the Report to the Mission) and reopens due `later` items. An Operation with no watch Agent gets
-no notice and its items wait open. The watch's Cable endpoint has `source_items`, `source_item(report)` and
-`assess_report(report, assessment, reason, of?, wait_seconds?)`, which decides as `watch:operation:CODENAME`
+issue, tie the Report to the Mission) and reopens due `later` items. An Operation with no charge Agent gets
+no notice and its items wait open. The charge's Cable endpoint has `source_items`, `source_item(report)` and
+`assess_report(report, assessment, reason, of?, wait_seconds?)`, which decides as `charge:operation:CODENAME`
 and refuses at `desk` clearance; a person decides with `PUT /v1/reports/{id}/assessment` or `ai6ctl reports
 assess`. Check-in field `intake_non_default` lists Operations with `intake = "direct"`.
 
@@ -5504,16 +5504,16 @@ the Chief of Staff's review (`review-hold`, `ReportFiler::Review`), both linked 
 would be, and M's scorecard proposal (`scorecard`, `probe:scorecard`, linked `decision` to its green ink
 request). The Head of Station's findings were already Reports.
 
-An Operation's watch is its 00 Agent in charge: `Roster` refuses an `operation:` watch whose Agent's
+An Operation's charge is its 00 Agent in charge: `Roster` refuses an `operation:` charge whose Agent's
 configured clearance is not `00`. Its `verifying` event carries the attempt (brief and final report,
 untrusted; deliverables; evidence; verdict; recommendation). Its Cable endpoint gets `operation_missions`,
 `mission_detail`, `deliverables`, `deliverable_probe` (probes locally and keeps the evidence, or asks the
 holding Station through `request_probe`), `verify_mission(mission, done|failed, reason)` and
-`redispatch(mission, brief_amendment?, reason)`, which call `registry::decisions` as the watch
-(`watch:operation:CODENAME`), re-reading the Agent's effective clearance each time: at `desk` they
+`redispatch(mission, brief_amendment?, reason)`, which call `registry::decisions` as the charge
+(`charge:operation:CODENAME`), re-reading the Agent's effective clearance each time: at `desk` they
 `recommend`. It never replaces a verdict a person gave. `propose_mission` is its tool too, naming the
-watch's Run where a Mission's would be named. A Cable to `operation:CODENAME` waits for the watch's
-Agent alone when the Operation has a watch, else for its 00 Agents.
+charge's Run where a Mission's would be named. A Cable to `operation:CODENAME` waits for the charge's
+Agent alone when the Operation has a charge, else for its 00 Agents.
 
 Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
 background scheduler starts assigned queued Missions and leases file-backed Registry

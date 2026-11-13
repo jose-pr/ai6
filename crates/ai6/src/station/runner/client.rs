@@ -583,7 +583,7 @@ fn refuse(message: impl std::fmt::Display) -> ProviderError {
 /// A connection that drops costs only time: the next `next_event` that can reach the runner
 /// attaches again and the runner replays what followed the last event taken. A runner out of
 /// reach past its [`ReachWatch`] grace, one that no longer has the Run, or one that
-/// restarted without its harness gives the Run up as lost through the watch. A Station that
+/// restarted without its harness gives the Run up as lost through the charge. A Station that
 /// another Station's connection supersedes stops reading and says so.
 pub(crate) struct RemoteRun {
     link: Arc<RunnerLink>,

@@ -19,7 +19,7 @@ use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
     AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
 };
-use crate::directorates::m::watches::WatchDefinition;
+use crate::directorates::m::charges::ChargeDefinition;
 
 /// A declaration's schema as JSON. A derive that cannot build its schema is a defect a test holds
 /// every root to, so it reads as an empty schema here.
@@ -44,7 +44,7 @@ fn roots() -> Vec<(&'static str, Value)> {
         ("record.roster", json_of::<RosterSettings>()),
         ("record.compartment", json_of::<CompartmentSettings>()),
         ("record.review", json_of::<ReviewPolicy>()),
-        ("record.watch", json_of::<WatchDefinition>()),
+        ("record.charge", json_of::<ChargeDefinition>()),
     ];
     #[cfg(feature = "daemon")]
     roots.push((

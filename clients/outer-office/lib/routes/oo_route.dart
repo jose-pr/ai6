@@ -135,7 +135,7 @@ const _fields = <OoPage, List<_Field>>{
       'cover',
       'review',
       'assistant',
-      'watch',
+      'charge',
       'theater',
       'loadout',
       'sandbox',

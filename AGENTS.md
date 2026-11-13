@@ -77,7 +77,7 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
 - Agent identity, role, Operation policy, Mission ID, Run ID and provider ID are
   distinct contracts.
 - A Run is one AI6 agent run of a Mission or a charge, named by one UUID (`id`); a Mission or a Run is
-  executed; a watch is a charge; Moneypenny's chats are conversations. "Run" stays only where another
+  executed; a charge is a charge; Moneypenny's chats are conversations. "Run" stays only where another
   protocol or product owns the word (ACP's `sessionId`, the Claude Code and Codex CLIs' own run ids,
   a person's sign-in session, MCP's `Mcp-Session-Id`); a Run is never called a Run.
 - Directorates are modules of the `ai6` crate. Providers live under `crates/providers/` and

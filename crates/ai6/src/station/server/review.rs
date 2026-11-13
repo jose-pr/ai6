@@ -149,7 +149,7 @@ pub(super) fn holds_output(
     true
 }
 
-/// Closes the author's Run and blocks the Mission for `gate`, telling whoever watches why.
+/// Closes the author's Run and blocks the Mission for `gate`, telling whoever charges why.
 fn stop_author(
     state: &DaemonState,
     mission_id: &str,

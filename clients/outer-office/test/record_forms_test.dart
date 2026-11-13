@@ -221,7 +221,7 @@ const _reported = <String, Object?>{
 };
 
 const _allFamilies = <String, List<String>>{
-  'watches': ['config.read', 'config.manage'],
+  'charges': ['config.read', 'config.manage'],
   'theaters': ['config.read', 'config.manage'],
   'loadouts': ['config.read', 'config.manage'],
   'sandboxes': ['config.read', 'config.manage'],
@@ -356,7 +356,7 @@ const _kinds = {
   'roles': ('Agent roles', 'purpose', 'Runs cases'),
   'covers': ('Cover policies', 'description', 'Named'),
   'assistant': ("Moneypenny's settings", 'personal_repo', '/srv/{person}.git'),
-  'watches': ('Watches', 'agent', 'M-00'),
+  'charges': ('Charges', 'agent', 'M-00'),
   'theaters': ('Theaters', 'workdir', '/work'),
   'sandboxes': ('Sandbox profiles', 'backend', 'bubblewrap'),
   'overlays': ('Overlays', 'path', '/overlays/house'),
@@ -978,21 +978,21 @@ void main() {
       });
     }
 
-    testWidgets('a person without config.read is not offered Watches, and one '
+    testWidgets('a person without config.read is not offered Charges, and one '
         'with it alone edits none', (tester) async {
       final roster = FakeRoster(
         records: {
-          'watches/operation:G': {'agent': 'M-00'},
+          'charges/operation:G': {'agent': 'M-00'},
         },
       );
       final board = _signedIn(roster, config: const {});
       await _open(tester, board, 'Roster');
       await tester.tap(find.byType(DropdownButton<String>).first);
       await tester.pumpAndSettle();
-      expect(find.text('Watches'), findsNothing);
+      expect(find.text('Charges'), findsNothing);
       expect(
         roster.requests.where(
-          (request) => request.url.path.endsWith('/watches'),
+          (request) => request.url.path.endsWith('/charges'),
         ),
         isEmpty,
       );
@@ -1002,11 +1002,11 @@ void main() {
       final reader = _signedIn(
         roster,
         config: const {
-          'watches': ['config.read'],
+          'charges': ['config.read'],
         },
       );
       await _open(tester, reader, 'Roster');
-      await _rosterKind(tester, 'Watches');
+      await _rosterKind(tester, 'Charges');
       expect(find.text('operation:G'), findsOneWidget);
       expect(find.text('Add'), findsNothing);
       expect(find.byTooltip('Edit operation:G'), findsNothing);

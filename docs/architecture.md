@@ -88,7 +88,7 @@ README has the details).
 4. **M owns decisions.** The roster, Agent selection, clearance, cover and the Mission
    lifecycle (`ai6::directorates::m`), and the access kinds whose policy Universal Exports
    enforces.
-5. **Medical watches health.** The watchdog detects stalls, loops and blocked prompts.
+5. **Medical charges health.** The watchdog detects stalls, loops and blocked prompts.
 6. **The Station runs it all** (`ai6::station`): server, provider host, safe houses,
    publisher and mTLS identity.
 

@@ -1648,18 +1648,18 @@
         "intake": {
           "type": "string",
           "enum": [
-            "watch",
+            "charge",
             "direct"
           ],
           "x-enum-labels": {
-            "watch": "Report to the watch, which decides",
+            "charge": "Report to the charge, which decides",
             "direct": "Queue each item as a brief"
           },
           "title": "Source intake",
-          "description": "Whether Source items are reported to the watch, which decides what each becomes, or queued as briefs at once.",
+          "description": "Whether Source items are reported to the charge, which decides what each becomes, or queued as briefs at once.",
           "x-section": "sources",
           "x-advanced": true,
-          "default": "watch"
+          "default": "charge"
         },
         "sleepers": {
           "type": "object",
@@ -5638,7 +5638,7 @@
       "description": "What Operations, roles and briefs choose this policy by. It cannot be changed later."
     }
   },
-  "watches": {
+  "charges": {
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5646,7 +5646,7 @@
         "agent": {
           "type": "string",
           "title": "Agent",
-          "description": "The Agent that keeps the watch, by codename: its handler, model, effort, route and pool account run the watch's Run."
+          "description": "The Agent that keeps the charge, by codename: its handler, model, effort, route and pool account run the charge's Run."
         },
         "operation": {
           "type": [
@@ -5654,7 +5654,7 @@
             "null"
           ],
           "title": "Cables in Operation",
-          "description": "For M's or a Station's watch, the Operation its Cables are sent and received in, under that Operation's Cable grants; without one, no Cable wakes it. An Operation's watch is in its own Operation, which this may only repeat.",
+          "description": "For M's or a Station's charge, the Operation its Cables are sent and received in, under that Operation's Cable grants; without one, no Cable wakes it. An Operation's charge is in its own Operation, which this may only repeat.",
           "x-advanced": true
         },
         "wake_every": {
@@ -5676,7 +5676,7 @@
           ],
           "format": "seconds",
           "title": "Woken at least every",
-          "description": "Seconds after its last wake that the watch is woken with nothing else to tell it; `none` wakes it only on events.",
+          "description": "Seconds after its last wake that the charge is woken with nothing else to tell it; `none` wakes it only on events.",
           "default": 3600.0
         },
         "max_turns_per_hour": {
@@ -5696,7 +5696,7 @@
             }
           ],
           "title": "Turns an hour",
-          "description": "Turns the watch takes in any hour, each wake one turn; past it, events wait for the hour to make room.",
+          "description": "Turns the charge takes in any hour, each wake one turn; past it, events wait for the hour to make room.",
           "default": 30
         },
         "max_events_per_turn": {
@@ -5736,7 +5736,7 @@
             }
           ],
           "title": "Events waiting",
-          "description": "Events waiting for a turn; past it the oldest are dropped, and the watch's logbook says how many.",
+          "description": "Events waiting for a turn; past it the oldest are dropped, and the charge's logbook says how many.",
           "default": 500
         },
         "turn_timeout": {
@@ -5766,7 +5766,7 @@
           "minimum": 0,
           "format": "seconds",
           "title": "Held without renewing for",
-          "description": "Seconds the Station running the watch holds it without renewing before another Station may take it over.",
+          "description": "Seconds the Station running the charge holds it without renewing before another Station may take it over.",
           "x-advanced": true,
           "default": 60.0
         }
@@ -5779,7 +5779,7 @@
     "form": {},
     "key": {
       "title": "Scope",
-      "description": "What the watch keeps: m, operation:<codename> or station:<id>. It cannot be changed later."
+      "description": "What the charge keeps: m, operation:<codename> or station:<id>. It cannot be changed later."
     }
   },
   "theaters": {

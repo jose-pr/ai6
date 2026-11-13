@@ -1,4 +1,4 @@
-//! Watches with a stand-in harness: a watch takes a turn per wake, resumes its Run across a
+//! Charges with a stand-in harness: a charge takes a turn per wake, resumes its Run across a
 //! restart, starts fresh with its logbook when it cannot, moves to another Station when its own
 //! goes dark, stops at its turn quota, and never becomes a Mission.
 
@@ -21,7 +21,7 @@ use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::registry::cables::{CableAction, CableGrant, CablePolicy, CableScope};
 use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::runs::{NewRun, RunResult, RunUpdate};
-use crate::directorates::registry::watches::WatchRecord;
+use crate::directorates::registry::charges::ChargeRecord;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 
 /// What the stand-in was asked: `start`, `resume` or `message`, under which Run name, on which
@@ -37,11 +37,11 @@ struct Call {
 
 static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
 
-/// What a stand-in watch does in a turn, as a model would: it is given the wake's text and the
+/// What a stand-in charge does in a turn, as a model would: it is given the wake's text and the
 /// environment naming its AI6 tools, and runs before the turn ends.
 type Turn = Arc<dyn Fn(&str, &BTreeMap<String, String>) + Send + Sync>;
 
-/// The turns the stand-in takes, by the watch's Run name.
+/// The turns the stand-in takes, by the charge's Run name.
 static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
 
 fn act(key: &str, text: &str, environment: &BTreeMap<String, String>) {
@@ -67,13 +67,13 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
 }
 
 /// A harness that answers each message with a line and ends its turn. Its Agent's
-/// `MOCK_WATCH_RESUME` makes a resume `refuse` (the handler errs) or `fail` (the resumed
+/// `MOCK_CHARGE_RESUME` makes a resume `refuse` (the handler errs) or `fail` (the resumed
 /// Run fails before it answers, as one whose transcript is gone does).
 #[derive(Default, Provider)]
-#[provider(AgentHandler, id = "mock-watch", name = "Mock Watch", crate = crate::guatiao)]
-pub(super) struct MockWatchHandler;
+#[provider(AgentHandler, id = "mock-charge", name = "Mock Charge", crate = crate::guatiao)]
+pub(super) struct MockChargeHandler;
 
-impl AgentHandler for MockWatchHandler {
+impl AgentHandler for MockChargeHandler {
     fn start(
         &self,
         request: AgentStart,
@@ -96,7 +96,7 @@ impl AgentHandler for MockWatchHandler {
             &request.prompt,
             &request.environment,
         );
-        Ok(WatchRun::answering(
+        Ok(ChargeRun::answering(
             request.mission_id.to_string(),
             run,
             request.environment,
@@ -125,14 +125,14 @@ impl AgentHandler for MockWatchHandler {
         );
         match request
             .environment
-            .get("MOCK_WATCH_RESUME")
+            .get("MOCK_CHARGE_RESUME")
             .map(String::as_str)
         {
             Some("refuse") => Err(ProviderError::new(
                 guatiao::Status::GUATIAO_ERR_INTERNAL,
                 "no conversation found",
             )),
-            Some("fail") => Ok(WatchRun {
+            Some("fail") => Ok(ChargeRun {
                 key: request.mission_id.to_string(),
                 run,
                 events: Mutex::new(VecDeque::from([event(
@@ -143,7 +143,7 @@ impl AgentHandler for MockWatchHandler {
                 _terminal: terminal,
             }
             .into_object()),
-            _ => Ok(WatchRun::answering(
+            _ => Ok(ChargeRun::answering(
                 request.mission_id.to_string(),
                 run,
                 request.environment,
@@ -154,7 +154,7 @@ impl AgentHandler for MockWatchHandler {
     }
 }
 
-struct WatchRun {
+struct ChargeRun {
     key: String,
     run: String,
     environment: BTreeMap<String, String>,
@@ -162,7 +162,7 @@ struct WatchRun {
     _terminal: Object<dyn AgentTerminal>,
 }
 
-impl WatchRun {
+impl ChargeRun {
     /// A Run answering the message it was started or resumed with.
     fn answering(
         key: String,
@@ -183,7 +183,7 @@ impl WatchRun {
     }
 }
 
-impl AgentSession for WatchRun {
+impl AgentSession for ChargeRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(Some(self.run.clone()))
     }
@@ -225,24 +225,24 @@ impl AgentSession for WatchRun {
     }
 }
 
-/// The Operation and watch Agent of a test's `tag`.
+/// The Operation and charge Agent of a test's `tag`.
 fn names(tag: &str) -> (String, String) {
     (tag.to_uppercase(), format!("k{tag}"))
 }
 
 /// A Station `station` sharing `root`'s Registry and configuration: Operation `TAG` and its
-/// watch kept by Agent `kTAG` on the stand-in, with `settings` added to the watch's table and
-/// `env` to the Agent's environment. The relay lets 007 and the watch's Agent exchange Cables.
+/// charge kept by Agent `kTAG` on the stand-in, with `settings` added to the charge's table and
+/// `env` to the Agent's environment. The relay lets 007 and the charge's Agent exchange Cables.
 fn station(root: &Path, tag: &str, station: &str, settings: &str, env: &str) -> DaemonState {
     station_with(root, tag, station, settings, env, &Extra::default())
 }
 
 /// What a test adds to its Station: Agent tables, Operation settings, and the Cable grants of the
-/// Operation scope (007 sends to the Operation, its watch's Agent receives).
+/// Operation scope (007 sends to the Operation, its charge's Agent receives).
 #[derive(Default)]
 struct Extra<'a> {
-    /// Settings of the watch's Agent itself.
-    watch_agent: &'a str,
+    /// Settings of the charge's Agent itself.
+    charge_agent: &'a str,
     agents: &'a str,
     operation: &'a str,
     operation_cables: bool,
@@ -258,8 +258,8 @@ fn station_with(
 ) -> DaemonState {
     let (operation, agent) = names(tag);
     std::fs::write(
-        root.join("watches.toml"),
-        format!("[watch.\"operation:{operation}\"]\nagent = \"{agent}\"\nwake_every = \"none\"\n{settings}"),
+        root.join("charges.toml"),
+        format!("[charge.\"operation:{operation}\"]\nagent = \"{agent}\"\nwake_every = \"none\"\n{settings}"),
     )
     .unwrap();
     let checkout = root.join("checkout");
@@ -272,9 +272,9 @@ fn station_with(
         ),
         &format!(
             "[agent.007]\nhandler = \"mock-agent\"\n\
-             [agent.{agent}]\nhandler = \"mock-watch\"\nclearance = \"00\"\n{}\
-             [agent.{agent}.env]\nMOCK_WATCH = \"1\"\n{env}\n{}",
-            extra.watch_agent, extra.agents
+             [agent.{agent}]\nhandler = \"mock-charge\"\nclearance = \"00\"\n{}\
+             [agent.{agent}.env]\nMOCK_CHARGE = \"1\"\n{env}\n{}",
+            extra.charge_agent, extra.agents
         ),
     );
     state.station_id = station.to_owned();
@@ -326,19 +326,19 @@ fn scope(tag: &str) -> String {
 }
 
 fn key(tag: &str) -> String {
-    format!("watch--operation-{}", names(tag).0)
+    format!("charge--operation-{}", names(tag).0)
 }
 
-fn record(state: &DaemonState, tag: &str) -> WatchRecord {
-    state.intake.watch(&scope(tag)).unwrap().unwrap()
+fn record(state: &DaemonState, tag: &str) -> ChargeRecord {
+    state.intake.charge(&scope(tag)).unwrap().unwrap()
 }
 
-/// Turns the watch took, by its logbook. A wake whose turn was refused (a loaded machine can
+/// Turns the charge took, by its logbook. A wake whose turn was refused (a loaded machine can
 /// refuse one, and the wake is retried) is logged as a `turn` too, and is not counted.
 fn turns(state: &DaemonState, tag: &str) -> usize {
     state
         .intake
-        .watch(&scope(tag))
+        .charge(&scope(tag))
         .unwrap()
         .map_or(0, |record| {
             record
@@ -349,20 +349,20 @@ fn turns(state: &DaemonState, tag: &str) -> usize {
         })
 }
 
-/// Tends `state`'s watches until `done`, with a wide margin for a loaded machine.
+/// Tends `state`'s charges until `done`, with a wide margin for a loaded machine.
 async fn tend_until(state: &DaemonState, what: &str, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(90);
     while !done() {
         assert!(Instant::now() < deadline, "never happened: {what}");
-        watches::tend(state, false, true).await;
+        charges::tend(state, false, true).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 
-/// Tends `state`'s watches for a while, for what must not happen.
+/// Tends `state`'s charges for a while, for what must not happen.
 async fn tend_for(state: &DaemonState, rounds: usize) {
     for _ in 0..rounds {
-        watches::tend(state, false, true).await;
+        charges::tend(state, false, true).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
@@ -370,11 +370,11 @@ async fn tend_for(state: &DaemonState, rounds: usize) {
 fn control(state: &DaemonState, tag: &str, note: &str) {
     state
         .intake
-        .request_watch_wake(&scope(tag), "person-1", note)
+        .request_charge_wake(&scope(tag), "person-1", note)
         .unwrap();
 }
 
-/// Nothing about the watch is a Mission: no Mission, brief, placement or Run record names it.
+/// Nothing about the charge is a Mission: no Mission, brief, placement or Run record names it.
 fn assert_no_mission(state: &DaemonState, tag: &str) {
     let key = key(tag);
     assert!(state.intake.list_new().unwrap().is_empty(), "no brief");
@@ -385,8 +385,8 @@ fn assert_no_mission(state: &DaemonState, tag: &str) {
             .runs()
             .unwrap()
             .iter()
-            .all(|run| !run.mission_id.starts_with("watch--")),
-        "no Run record of a watch"
+            .all(|run| !run.mission_id.starts_with("charge--")),
+        "no Run record of a charge"
     );
     assert!(state.intake.resolve_mission(&key).unwrap().is_none());
     assert!(
@@ -396,18 +396,18 @@ fn assert_no_mission(state: &DaemonState, tag: &str) {
             .unwrap()
             .list()
             .iter()
-            .all(|mission| !mission.mission_id.as_str().starts_with("watch--")),
+            .all(|mission| !mission.mission_id.as_str().starts_with("charge--")),
         "no Mission"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
+async fn a_charge_takes_one_turn_per_wake_and_is_no_mission() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w1";
     let state = station(root.path(), tag, "test", "", "");
-    watches::tend(&state, false, true).await;
-    assert!(state.watches.is_live(&scope(tag)));
+    charges::tend(&state, false, true).await;
+    assert!(state.charges.is_live(&scope(tag)));
     let held = record(&state, tag);
     assert_eq!((held.station.as_str(), held.fence), ("test", 1));
     tend_for(&state, 5).await;
@@ -466,7 +466,7 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
     let mut expected = 2;
     #[cfg(feature = "cables-mcp")]
     {
-        // A Cable to the watch's Agent, which it takes in its own Run.
+        // A Cable to the charge's Agent, which it takes in its own Run.
         let from = CablePrincipal::try_new(
             "007".to_owned(),
             operation.clone(),
@@ -483,7 +483,7 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
                 CableSendRequest::new(
                     CableTarget::try_new(CableScope::Agent, Some(names(tag).1)).unwrap(),
                     "the build is red".to_owned(),
-                    "watch-cable-1".to_owned(),
+                    "charge-cable-1".to_owned(),
                 ),
             )
             .unwrap();
@@ -530,11 +530,11 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
     let health = messages.last().unwrap();
     assert!(health.text.contains("\"health\"") && health.text.contains("quarantine"));
     assert_no_mission(&state, tag);
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_control_wakes_the_watch_once_though_it_is_tended_during_the_turn() {
+async fn a_control_wakes_the_charge_once_though_it_is_tended_during_the_turn() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w7";
     TURNS.lock().unwrap().insert(
@@ -544,7 +544,7 @@ async fn a_control_wakes_the_watch_once_though_it_is_tended_during_the_turn() {
         }),
     );
     let state = station(root.path(), tag, "test", "", "");
-    watches::tend(&state, false, true).await;
+    charges::tend(&state, false, true).await;
     control(&state, tag, "once");
     tend_until(&state, "the turn", || turns(&state, tag) == 1).await;
     tend_for(&state, 25).await;
@@ -552,22 +552,22 @@ async fn a_control_wakes_the_watch_once_though_it_is_tended_during_the_turn() {
     assert_eq!(all.len(), 1, "one turn for one control: {all:?}");
     assert_eq!(turns(&state, tag), 1);
     TURNS.lock().unwrap().remove(&key(tag));
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_restarted_station_resumes_the_watch_run() {
+async fn a_restarted_station_resumes_the_charge_run() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w2";
     let before = station(root.path(), tag, "test", "", "");
-    watches::tend(&before, false, true).await;
+    charges::tend(&before, false, true).await;
     control(&before, tag, "first");
     tend_until(&before, "the first turn", || turns(&before, tag) == 1).await;
     let provider = record(&before, tag).provider_id.unwrap();
     drop(before);
 
     let after = station(root.path(), tag, "test", "", "");
-    watches::tend(&after, false, true).await;
+    charges::tend(&after, false, true).await;
     control(&after, tag, "after the restart");
     tend_until(&after, "a turn after the restart", || {
         turns(&after, tag) == 2
@@ -588,23 +588,23 @@ async fn a_restarted_station_resumes_the_watch_run() {
     assert_eq!(kept.fence, 1, "the same Station renews under its own token");
     assert!(kept.logbook.iter().any(|entry| entry.kind == "resumed"));
     assert_no_mission(&after, tag);
-    watches::close_all(&after).await;
+    charges::close_all(&after).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_watch_that_cannot_resume_starts_fresh_with_its_logbook() {
+async fn a_charge_that_cannot_resume_starts_fresh_with_its_logbook() {
     for (tag, mode) in [("w3", "refuse"), ("w4", "fail")] {
         let root = tempfile::tempdir().unwrap();
-        let env = format!("MOCK_WATCH_RESUME = \"{mode}\"\n");
+        let env = format!("MOCK_CHARGE_RESUME = \"{mode}\"\n");
         let before = station(root.path(), tag, "test", "", &env);
-        watches::tend(&before, false, true).await;
+        charges::tend(&before, false, true).await;
         control(&before, tag, "first");
         tend_until(&before, "the first turn", || turns(&before, tag) == 1).await;
         let lost = record(&before, tag).provider_id.unwrap();
         drop(before);
 
         let after = station(root.path(), tag, "test", "", &env);
-        watches::tend(&after, false, true).await;
+        charges::tend(&after, false, true).await;
         control(&after, tag, "after the restart");
         tend_until(&after, "a fresh turn", || turns(&after, tag) == 2).await;
         let all = calls(&key(tag));
@@ -638,33 +638,33 @@ async fn a_watch_that_cannot_resume_starts_fresh_with_its_logbook() {
             kept.logbook
         );
         assert_no_mission(&after, tag);
-        watches::close_all(&after).await;
+        charges::close_all(&after).await;
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_watch_moves_to_another_station_when_its_station_goes_dark() {
+async fn a_charge_moves_to_another_station_when_its_station_goes_dark() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w5";
     let lease = "lease = 1\n";
     let first = station(root.path(), tag, "station-a", lease, "");
     let second = station(root.path(), tag, "station-b", lease, "");
-    watches::tend(&first, false, true).await;
+    charges::tend(&first, false, true).await;
     control(&first, tag, "on a");
     tend_until(&first, "a turn on a", || turns(&first, tag) == 1).await;
     let provider = record(&first, tag).provider_id.unwrap();
-    watches::tend(&second, false, true).await;
-    assert!(!second.watches.is_live(&scope(tag)), "a's lease is live");
+    charges::tend(&second, false, true).await;
+    assert!(!second.charges.is_live(&scope(tag)), "a's lease is live");
 
-    // Station a goes dark: it stops renewing, and b takes the watch once the lease lapses.
-    tend_until(&second, "b takes the watch over", || {
-        second.watches.is_live(&scope(tag))
+    // Station a goes dark: it stops renewing, and b takes the charge once the lease lapses.
+    tend_until(&second, "b takes the charge over", || {
+        second.charges.is_live(&scope(tag))
     })
     .await;
     let moved = record(&second, tag);
     assert_eq!((moved.station.as_str(), moved.fence), ("station-b", 2));
     assert!(moved.logbook.iter().any(|entry| entry.kind == "station"));
-    watches::tend(&second, false, true).await;
+    charges::tend(&second, false, true).await;
     control(&second, tag, "on b");
     tend_until(&second, "a turn on b", || turns(&second, tag) == 2).await;
     let resumed: Vec<Call> = calls(&key(tag))
@@ -682,12 +682,12 @@ async fn a_watch_moves_to_another_station_when_its_station_goes_dark() {
         "b resumes a's provider Run"
     );
 
-    // a comes back, finds b holds the watch, and lets it go.
-    watches::tend(&first, false, true).await;
-    assert!(!first.watches.is_live(&scope(tag)));
+    // a comes back, finds b holds the charge, and lets it go.
+    charges::tend(&first, false, true).await;
+    assert!(!first.charges.is_live(&scope(tag)));
     assert_eq!(record(&second, tag).station, "station-b");
     assert_no_mission(&second, tag);
-    watches::close_all(&second).await;
+    charges::close_all(&second).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -701,7 +701,7 @@ async fn quotas_stop_a_storm() {
         "max_turns_per_hour = 2\nmax_events_per_turn = 3\nmax_waiting_events = 5\n",
         "",
     );
-    watches::tend(&state, false, true).await;
+    charges::tend(&state, false, true).await;
     for at in 0..20 {
         control(&state, tag, &format!("storm {at}"));
     }
@@ -738,5 +738,5 @@ async fn quotas_stop_a_storm() {
         "what was not told waits on the record"
     );
     assert_no_mission(&state, tag);
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
 }

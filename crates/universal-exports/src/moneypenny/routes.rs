@@ -75,7 +75,7 @@ const ROSTER_KINDS: &[&str] = &[
     "cover",
     "review",
     "assistant",
-    "watch",
+    "charge",
     "theater",
     "loadout",
     "sandbox",

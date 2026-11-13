@@ -462,7 +462,7 @@ impl fmt::Debug for GatewayConfig {
     }
 }
 
-/// Whether an attachment may only watch or may send terminal input.
+/// Whether an attachment may only charge or may send terminal input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AttachMode {
@@ -3450,7 +3450,7 @@ struct UserProfile {
     stations: Vec<UserStationAccess>,
     /// The actions the person holds on the roster (`config:roster`).
     roster: Vec<String>,
-    /// For each configuration family the roster routes serve beyond the roster (`watches`), the
+    /// For each configuration family the roster routes serve beyond the roster (`charges`), the
     /// actions the person holds on `config:<family>`; a family with none is absent.
     config: BTreeMap<String, Vec<String>>,
     /// The actions the person holds on the global access policy (`access.read`, `access.manage`),
@@ -5450,7 +5450,7 @@ pub struct MissionAttempt {
     /// When a probe was asked for, as Unix seconds, until the Station has run it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
-    /// What an Operation's watch at `desk` clearance advises for the verifying attempt, which a
+    /// What an Operation's charge at `desk` clearance advises for the verifying attempt, which a
     /// person confirms by deciding it the same way.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<ai6::MissionVerdict>,

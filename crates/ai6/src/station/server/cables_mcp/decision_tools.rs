@@ -1,7 +1,7 @@
-//! An Operation's watch decides its Missions: see them, read back what each was to deliver, and
+//! An Operation's charge decides its Missions: see them, read back what each was to deliver, and
 //! verify or redispatch the ones that are verifying.
 //!
-//! These tools exist only for the Operation's watch, whose Station opened its [`DecisionDesk`].
+//! These tools exist only for the Operation's charge, whose Station opened its [`DecisionDesk`].
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{tool, tool_router};
@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::CableTools;
-use crate::station::server::watches::decide::DecisionDesk;
+use crate::station::server::charges::decide::DecisionDesk;
 
 #[derive(Deserialize, JsonSchema)]
 struct MissionArgs {

@@ -1,6 +1,6 @@
-//! A Source's items reach an Operation's watch as Cables, and the watch decides what each
+//! A Source's items reach an Operation's charge as Cables, and the charge decides what each
 //! becomes with its tools over the real endpoint, as a model would. A stand-in Source supplies
-//! the items; nothing becomes a brief until the watch decides `mission`.
+//! the items; nothing becomes a brief until the charge decides `mission`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -42,12 +42,12 @@ fn item(id: &str, body: &str) -> SourceItem {
     }
 }
 
-/// Polls `source` for the Operation of `tag` as its Station does: the watch is told by Cable.
+/// Polls `source` for the Operation of `tag` as its Station does: the charge is told by Cable.
 fn poll(state: &DaemonState, tag: &str, source: &Items) -> PollSummary {
     let operation = state.roster.operation(&names(tag).0).unwrap();
     let desk = SourceDesk::new("test", Default::default()).with_cables(state.cables.clone());
     let notify = desk.notify_for(&state.roster, operation);
-    assert!(notify.is_some(), "the Operation has a watch Agent");
+    assert!(notify.is_some(), "the Operation has a charge Agent");
     poll_source(
         state.intake.as_ref(),
         "test",
@@ -56,14 +56,14 @@ fn poll(state: &DaemonState, tag: &str, source: &Items) -> PollSummary {
         source,
         &Reopening::never(),
         &Intake {
-            mode: SourceIntake::Watch,
+            mode: SourceIntake::Charge,
             notify: notify.as_deref(),
         },
     )
     .unwrap()
 }
 
-/// Queues what the watch decided `mission`, as the Station that polls the Source does.
+/// Queues what the charge decided `mission`, as the Station that polls the Source does.
 fn settle(state: &DaemonState, tag: &str) -> usize {
     let setup = SourceSetup::stand_in("github");
     settle_items(
@@ -75,7 +75,7 @@ fn settle(state: &DaemonState, tag: &str) -> usize {
     )
 }
 
-/// What a stand-in watch decides of an item, by the item's number.
+/// What a stand-in charge decides of an item, by the item's number.
 fn decision_for(item: &str) -> Value {
     match item {
         "o/r#1" => json!({ "assessment": "mission", "reason": "a real fault" }),
@@ -91,7 +91,7 @@ fn decision_for(item: &str) -> Value {
 static LISTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static NOTICES: AtomicUsize = AtomicUsize::new(0);
 
-/// Makes the watch of `tag` act on each source item a wake brings: it lists the open items,
+/// Makes the charge of `tag` act on each source item a wake brings: it lists the open items,
 /// reads the one it was told of, and decides it with `decision_for`.
 fn deciding(tag: &str) {
     let key = key(tag);
@@ -146,7 +146,7 @@ fn reports(state: &DaemonState, tag: &str) -> Vec<crate::directorates::registry:
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_source_item_reaches_the_watch_as_a_cable_and_waits_for_its_decision() {
+async fn a_source_item_reaches_the_charge_as_a_cable_and_waits_for_its_decision() {
     let root = tempfile::tempdir().unwrap();
     let tag = "s1";
     let state = station_with(
@@ -160,8 +160,8 @@ async fn a_source_item_reaches_the_watch_as_a_cable_and_waits_for_its_decision()
             ..Extra::default()
         },
     );
-    watches::tend(&state, false, true).await;
-    // A watch that only takes the notice.
+    charges::tend(&state, false, true).await;
+    // A charge that only takes the notice.
     TURNS.lock().unwrap().remove(&key(tag));
     let source = Items(Mutex::new(vec![item("o/r#1", "It fails.")]));
 
@@ -174,7 +174,7 @@ async fn a_source_item_reaches_the_watch_as_a_cable_and_waits_for_its_decision()
     }
     assert!(
         state.intake.list_new().unwrap().is_empty(),
-        "no brief exists until the watch decides mission"
+        "no brief exists until the charge decides mission"
     );
     assert_eq!(reports(&state, tag).len(), 1);
     assert_no_mission(&state, tag);
@@ -185,12 +185,12 @@ async fn a_source_item_reaches_the_watch_as_a_cable_and_waits_for_its_decision()
     assert_eq!((again.reported, again.unchanged), (0, 1));
     tend_for(&state, 10).await;
     assert_eq!(turns(&state, tag), 1, "an unchanged item wakes nobody");
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
+async fn the_charge_decides_each_item_and_only_a_mission_becomes_a_brief() {
     let root = tempfile::tempdir().unwrap();
     let tag = "s2";
     let state = station_with(
@@ -205,7 +205,7 @@ async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
         },
     );
     deciding(tag);
-    watches::tend(&state, false, true).await;
+    charges::tend(&state, false, true).await;
     let source = Items(Mutex::new(vec![
         item("o/r#1", "It fails."),
         item("o/r#2", "Same as before."),
@@ -242,7 +242,7 @@ async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
     assert_eq!(duplicate.assessment.as_ref().unwrap().verdict, "duplicate");
     assert_eq!(
         duplicate.assessment.as_ref().unwrap().by,
-        format!("watch:operation:{}", names(tag).0)
+        format!("charge:operation:{}", names(tag).0)
     );
     assert_eq!(
         duplicate.resolution.as_ref().unwrap().note.as_deref(),
@@ -286,9 +286,9 @@ async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
             .iter()
             .any(|link| link.item == "o/r#1")
     );
-    assert_no_watch_mission(&state);
+    assert_no_charge_mission(&state);
 
-    // A changed item reaches the watch again, and the decided Mission's brief follows it.
+    // A changed item reaches the charge again, and the decided Mission's brief follows it.
     let notices = NOTICES.load(Ordering::SeqCst);
     *source.0.lock().unwrap() = vec![item("o/r#1", "It fails on macOS.")];
     let changed = poll(&state, tag, &source);
@@ -303,19 +303,19 @@ async fn the_watch_decides_each_item_and_only_a_mission_becomes_a_brief() {
             .contains("on macOS")
     );
     assert_eq!(reports(&state, tag).len(), 4, "still one Report per item");
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
-/// The watch has no Mission, brief or placement of its own: only the item it queued exists.
-fn assert_no_watch_mission(state: &DaemonState) {
+/// The charge has no Mission, brief or placement of its own: only the item it queued exists.
+fn assert_no_charge_mission(state: &DaemonState) {
     assert!(
         state
             .intake
             .runs()
             .unwrap()
             .iter()
-            .all(|run| !run.mission_id.starts_with("watch--")),
-        "no Run record of a watch"
+            .all(|run| !run.mission_id.starts_with("charge--")),
+        "no Run record of a charge"
     );
 }

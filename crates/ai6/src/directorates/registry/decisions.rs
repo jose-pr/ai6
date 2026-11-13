@@ -1,8 +1,8 @@
 //! Deciding a Mission whose latest attempt is verifying: the one path a person (through the
-//! gateway) and an Operation's watch both take.
+//! gateway) and an Operation's charge both take.
 //!
 //! A decision is audited first, then recorded as the attempt's verdict, then put on the
-//! Operation's timeline. A watch held at `desk` clearance does not decide: it recommends, which
+//! Operation's timeline. A charge held at `desk` clearance does not decide: it recommends, which
 //! is audited and timelined the same way and settles nothing.
 
 use super::backend::RegistryBackend;
@@ -24,7 +24,7 @@ pub struct VerifyingDecision<'a> {
     pub reason: &'a str,
     /// For a redispatch, what the next attempt is told beyond the brief and the reason.
     pub amendment: Option<&'a str>,
-    /// Who decided: a person ID, or `watch:operation:<codename>`.
+    /// Who decided: a person ID, or `charge:operation:<codename>`.
     pub by: &'a str,
     /// When, as Unix seconds.
     pub at: f64,
@@ -160,7 +160,7 @@ pub fn decide(
     Ok(record)
 }
 
-/// Records what a watch at `desk` clearance advises for the verifying attempt, as `decide` does a
+/// Records what a charge at `desk` clearance advises for the verifying attempt, as `decide` does a
 /// decision, except that nothing is settled: a person confirms it by deciding the same way.
 ///
 /// # Errors

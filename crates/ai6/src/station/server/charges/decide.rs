@@ -1,11 +1,11 @@
-//! The tools an Operation's watch decides with: what its Missions stand at, what a verifying one
+//! The tools an Operation's charge decides with: what its Missions stand at, what a verifying one
 //! was to deliver and what the probes found, and the decision itself.
 //!
-//! The watch is the Operation's 00 Agent in charge, so it verifies and the Station only provides.
+//! The charge is the Operation's 00 Agent in charge, so it verifies and the Station only provides.
 //! A decision takes the path a person's does ([`decisions::decide`]): audited, recorded as the
 //! attempt's verdict, on the timeline, and applied by the Mission's Station, which counts it on
-//! the scorecard. A watch whose clearance has been lowered to `desk` recommends instead, and a
-//! person confirms. A person's decision replaces a watch's, and a watch never replaces a person's.
+//! the scorecard. A charge whose clearance has been lowered to `desk` recommends instead, and a
+//! person confirms. A person's decision replaces a charge's, and a charge never replaces a person's.
 
 use std::collections::BTreeMap;
 
@@ -22,16 +22,16 @@ use crate::directorates::registry::runs::{OutcomeVerdict, RunRecord};
 use crate::directorates::registry::source_items::{self, ITEM_KIND, ItemDecision, ItemVerdict};
 use crate::directorates::registry::store::AuditRecord;
 
-/// The prefix of the name a watch's decisions are recorded under.
-const BY_PREFIX: &str = "watch:operation:";
+/// The prefix of the name a charge's decisions are recorded under.
+const BY_PREFIX: &str = "charge:operation:";
 
-/// An Operation's watch at work on its Missions.
+/// An Operation's charge at work on its Missions.
 #[derive(Clone)]
 pub(in crate::station::server) struct DecisionDesk {
     state: DaemonState,
     operation: String,
     agent: String,
-    /// The watch's Run name, which its proposals name as their parent.
+    /// The charge's Run name, which its proposals name as their parent.
     key: String,
 }
 
@@ -59,7 +59,7 @@ impl DecisionDesk {
     }
 
     /// The latest attempt at the Mission `name` names (a UID or a handle), when the Operation is
-    /// the watch's.
+    /// the charge's.
     fn latest(&self, name: &str) -> Result<RunRecord, String> {
         let intake = &self.state.intake;
         let latest = match intake.latest_run(name).ok().flatten() {
@@ -189,7 +189,7 @@ impl DecisionDesk {
     }
 
     /// Decides the verifying Mission `done` or `failed`, or redispatches it with `amendment`.
-    /// Held at `desk` clearance, the watch records a recommendation a person confirms instead.
+    /// Held at `desk` clearance, the charge records a recommendation a person confirms instead.
     pub(in crate::station::server) fn decide(
         &self,
         name: &str,
@@ -282,7 +282,7 @@ impl DecisionDesk {
 
     /// Decides what an open Source item becomes: `mission`, `duplicate` of what `of` names,
     /// `no_action`, or `later` after `wait_seconds`. A `mission` is queued as a brief by the
-    /// Station that polls the Source, and vetted as any brief is. At `desk` clearance the watch
+    /// Station that polls the Source, and vetted as any brief is. At `desk` clearance the charge
     /// decides nothing and a person does.
     pub(in crate::station::server) fn assess(
         &self,

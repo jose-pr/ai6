@@ -17,7 +17,7 @@ pub const DOCS: [&str; 6] = [
     "docs/assistant.md",
     "docs/compartments.md",
     "docs/review.md",
-    "docs/watches.md",
+    "docs/charges.md",
 ];
 
 /// What Outer Office reads of `[oo]`, from the repository's root: the schema, the form and each

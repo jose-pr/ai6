@@ -61,7 +61,7 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   codename, the clearance it works at, a coming retirement and a promotion waiting for green
   ink; with `agent.configure`, lower its clearance there or restore the configured one.
   Its Roles tab holds the Operation-scoped Agent roles (purpose and policy).
-- A Station (route `stations?station_id=…`) is a watch: Online or Dark, the last check-in,
+- A Station (route `stations?station_id=…`) is a charge: Online or Dark, the last check-in,
   its roles, running Runs of its capacity, resources as last sampled (**Not reported**
   when it sends none), and **Runs here**, each Mission with an active attempt there as a
   link to its detail.

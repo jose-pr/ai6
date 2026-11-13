@@ -215,7 +215,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "cable.read",
         "compartment.read",
     ];
-    const WATCH: [&str; 3] = ["audit.read", "access.read", "run.context"];
+    const CHARGE: [&str; 3] = ["audit.read", "access.read", "run.context"];
     const VERIFY: [&str; 1] = ["mission.verify"];
     const WORK: [&str; 9] = [
         "mission.create",
@@ -259,7 +259,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "controller".into(),
         role(
             "Administers: everything an operator does, plus roster, Agents, Stations, pools, green-ink classes, access and accounts",
-            &[&READ, &WATCH, &VERIFY, &WORK, &ADMINISTER],
+            &[&READ, &CHARGE, &VERIFY, &WORK, &ADMINISTER],
         ),
     );
     policy.roles.insert(
@@ -270,7 +270,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "auditor".into(),
         role(
             "Views everything and gives verdicts on Missions' outcomes; changes nothing else",
-            &[&READ, &WATCH, &VERIFY],
+            &[&READ, &CHARGE, &VERIFY],
         ),
     );
     policy

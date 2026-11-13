@@ -1,4 +1,4 @@
-//! An Operation's watch decides its Missions with a stand-in harness: woken for a Mission that
+//! An Operation's charge decides its Missions with a stand-in harness: woken for a Mission that
 //! entered `verifying` with its final report, brief and deliverables, it uses its AI6 tools over
 //! the real endpoint, as a model would, and the Station carries the decision out as it does a
 //! person's.
@@ -25,10 +25,10 @@ const WORKERS: &str = "[role.shipper]\npurpose = \"Ships\"\npolicy = \"Ship it.\
      deliverables = [\"branch:feature-x\"]\n\
      [agent.ag]\nhandler = \"mock-verdict\"\nmodel = \"clear\"\nroles = [\"shipper\"]\n";
 
-/// What each tool a stand-in watch called answered, `TOOL=>ANSWER`, by the watch's Run name.
+/// What each tool a stand-in charge called answered, `TOOL=>ANSWER`, by the charge's Run name.
 static SAID: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
 
-/// What the watch's tools answered, once at least `count` calls have: the decision is recorded
+/// What the charge's tools answered, once at least `count` calls have: the decision is recorded
 /// before the call returns to the harness.
 async fn said_after(tag: &str, count: usize) -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -46,7 +46,7 @@ async fn said_after(tag: &str, count: usize) -> Vec<String> {
     }
 }
 
-/// The watch's AI6 tools, called over the endpoint its environment names.
+/// The charge's AI6 tools, called over the endpoint its environment names.
 pub(super) struct Tools {
     pub(super) client: rmcp::service::RunningService<rmcp::RoleClient, ()>,
     pub(super) runtime: tokio::runtime::Runtime,
@@ -124,7 +124,7 @@ pub(super) fn events_of(text: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// Makes the watch of `tag` act in each turn it takes: for each Mission that entered verifying,
+/// Makes the charge of `tag` act in each turn it takes: for each Mission that entered verifying,
 /// `judge` is given its tools and the event's detail.
 fn judging(tag: &str, judge: impl Fn(&Tools, &Value) + Send + Sync + 'static) {
     let (key, judge) = (key(tag), Arc::new(judge));
@@ -231,12 +231,12 @@ async fn verifying_mission(state: &DaemonState, tag: &str, name: &str) -> String
     mission
 }
 
-/// Tends the watches and settles what has been decided, as the Station's beat does, until `done`.
+/// Tends the charges and settles what has been decided, as the Station's beat does, until `done`.
 async fn tend_and_settle(state: &DaemonState, what: &str, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(90);
     while !done() {
         assert!(Instant::now() < deadline, "never happened: {what}");
-        watches::tend(state, false, true).await;
+        charges::tend(state, false, true).await;
         super::super::verdicts::settle_held(state);
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -361,7 +361,7 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
     );
     let verdict = first.verdict.clone().unwrap();
     assert_eq!(verdict.verdict, OutcomeVerdict::Redispatch);
-    assert_eq!(verdict.by, format!("watch:operation:{}", names(tag).0));
+    assert_eq!(verdict.by, format!("charge:operation:{}", names(tag).0));
     assert_eq!(
         verdict.note.as_deref(),
         Some("branch feature-x is missing on the remote")
@@ -419,7 +419,7 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
         Some(first.id.as_str())
     );
     assert!(second.verdict.is_none());
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
@@ -449,12 +449,12 @@ async fn a_verified_mission_settles_done() {
         scorecard::judge(&attempt(&state, &mission, 1)),
         Judgment::Done
     );
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_watchs_failed_settles_the_mission_failed() {
+async fn a_charges_failed_settles_the_mission_failed() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d3";
     let state = station_for(root.path(), tag);
@@ -486,12 +486,12 @@ async fn a_watchs_failed_settles_the_mission_failed() {
         scorecard::judge(&attempt(&state, &mission, 1)),
         Judgment::Disputed
     );
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_persons_later_decision_overrides_the_watchs() {
+async fn a_persons_later_decision_overrides_the_charges() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d4";
     let state = station_for(root.path(), tag);
@@ -503,8 +503,8 @@ async fn a_persons_later_decision_overrides_the_watchs() {
             json!({ "mission": mission, "decision": "failed", "reason": "no branch" }),
         );
     });
-    // The watch decides; nothing is settled until the Station's beat applies it.
-    tend_until(&state, "the watch decided", || {
+    // The charge decides; nothing is settled until the Station's beat applies it.
+    tend_until(&state, "the charge decided", || {
         attempt(&state, &mission, 1).verdict.is_some()
     })
     .await;
@@ -524,20 +524,20 @@ async fn a_persons_later_decision_overrides_the_watchs() {
     super::super::verdicts::settle_held(&state);
     wait_for_state(&state, &mission, MissionState::Done).await;
 
-    // A watch never replaces a person's decision.
+    // A charge never replaces a person's decision.
     let refused = {
         let desk =
-            watches::decide::DecisionDesk::new(state.clone(), names(tag).0, names(tag).1, key(tag));
+            charges::decide::DecisionDesk::new(state.clone(), names(tag).0, names(tag).1, key(tag));
         desk.decide(&mission, "failed", "again", None)
     };
     assert!(refused.is_err());
     assert_eq!(attempt(&state, &mission, 1).verdict.unwrap().by, "person-m");
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_watch_at_desk_clearance_only_recommends() {
+async fn a_charge_at_desk_clearance_only_recommends() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d5";
     let state = station_with(
@@ -547,7 +547,7 @@ async fn a_watch_at_desk_clearance_only_recommends() {
         "",
         "",
         &Extra {
-            watch_agent: "retire_on = \"2000-01-01\"\n",
+            charge_agent: "retire_on = \"2000-01-01\"\n",
             agents: WORKERS,
             ..Extra::default()
         },
@@ -561,7 +561,7 @@ async fn a_watch_at_desk_clearance_only_recommends() {
             json!({ "mission": mission, "reason": "no branch", "brief_amendment": "Push it." }),
         );
     });
-    tend_and_settle(&state, "the watch recommended", || {
+    tend_and_settle(&state, "the charge recommended", || {
         attempt(&state, &mission, 1).recommendation.is_some()
     })
     .await;
@@ -592,12 +592,12 @@ async fn a_watch_at_desk_clearance_only_recommends() {
     person_decides(&state, tag, &mission, OutcomeVerdict::Confirmed);
     super::super::verdicts::settle_held(&state);
     wait_for_state(&state, &mission, MissionState::Done).await;
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_cable_to_the_operation_reaches_its_watch_and_creates_no_mission() {
+async fn a_cable_to_the_operation_reaches_its_charge_and_creates_no_mission() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d6";
     let state = station_with(
@@ -613,7 +613,7 @@ async fn a_cable_to_the_operation_reaches_its_watch_and_creates_no_mission() {
     );
     let operation = names(tag).0;
     let before = state.missions.lock().unwrap().list().len();
-    watches::tend(&state, false, true).await;
+    charges::tend(&state, false, true).await;
     let from = CablePrincipal::try_new(
         "007".to_owned(),
         operation.clone(),
@@ -640,7 +640,7 @@ async fn a_cable_to_the_operation_reaches_its_watch_and_creates_no_mission() {
             .map(|recipient| recipient.agent())
             .collect::<Vec<_>>(),
         [names(tag).1.as_str()],
-        "the Operation's coordinating role is its watch"
+        "the Operation's coordinating role is its charge"
     );
     tend_until(&state, "a turn for the Cable", || turns(&state, tag) == 1).await;
     let first = &calls(&key(tag))[0];
@@ -652,29 +652,29 @@ async fn a_cable_to_the_operation_reaches_its_watch_and_creates_no_mission() {
     assert_no_mission(&state, tag);
     assert_eq!(state.missions.lock().unwrap().list().len(), before);
     assert!(state.intake.runs().unwrap().is_empty());
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_watch_has_the_decision_tools_and_proposes_missions_as_its_own() {
+async fn the_charge_has_the_decision_tools_and_proposes_missions_as_its_own() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d7";
     let state = station(root.path(), tag, "test", "", "");
     static LISTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static PROPOSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    let watch_key = key(tag);
+    let charge_key = key(tag);
     TURNS.lock().unwrap().insert(
-        watch_key.clone(),
+        charge_key.clone(),
         Arc::new({
-            let watch_key = watch_key.clone();
+            let charge_key = charge_key.clone();
             move |text: &str, environment: &BTreeMap<String, String>| {
                 // The first turn starts the Run; the proposal waits for a bound one.
                 if !text.contains("second") {
                     return;
                 }
-                let (environment, watch_key) = (environment.clone(), watch_key.clone());
+                let (environment, charge_key) = (environment.clone(), charge_key.clone());
                 std::thread::spawn(move || {
-                    let tools = Tools::connect(&watch_key, &environment);
+                    let tools = Tools::connect(&charge_key, &environment);
                     *LISTED.lock().unwrap() = tools.names();
                     let answer = tools.call(
                         "propose_mission",
@@ -692,7 +692,7 @@ async fn the_watch_has_the_decision_tools_and_proposes_missions_as_its_own() {
             }
         }),
     );
-    watches::tend(&state, false, true).await;
+    charges::tend(&state, false, true).await;
     control(&state, tag, "first");
     tend_until(&state, "the first turn", || turns(&state, tag) == 1).await;
     control(&state, tag, "second");
@@ -719,11 +719,11 @@ async fn the_watch_has_the_decision_tools_and_proposes_missions_as_its_own() {
     assert_eq!(proposals.len(), 1);
     assert_eq!(proposals[0].parent_mission_id.as_str(), key(tag));
     assert_eq!(proposals[0].proposer_agent_id, names(tag).1);
-    watches::close_all(&state).await;
+    charges::close_all(&state).await;
 }
 
 #[test]
-fn a_watch_agent_without_00_is_refused_at_configuration() {
+fn a_charge_agent_without_00_is_refused_at_configuration() {
     let write = |root: &Path, clearance: &str| {
         std::fs::write(
             root.join("operations.toml"),
@@ -732,12 +732,12 @@ fn a_watch_agent_without_00_is_refused_at_configuration() {
         .unwrap();
         std::fs::write(
             root.join("agents.toml"),
-            format!("[agent.chief]\nhandler = \"mock-watch\"\nclearance = \"{clearance}\"\n"),
+            format!("[agent.chief]\nhandler = \"mock-charge\"\nclearance = \"{clearance}\"\n"),
         )
         .unwrap();
         std::fs::write(
-            root.join("watches.toml"),
-            "[watch.\"operation:G\"]\nagent = \"chief\"\n[watch.\"station:s\"]\nagent = \"chief\"\n",
+            root.join("charges.toml"),
+            "[charge.\"operation:G\"]\nagent = \"chief\"\n[charge.\"station:s\"]\nagent = \"chief\"\n",
         )
         .unwrap();
     };
@@ -759,5 +759,5 @@ fn a_watch_agent_without_00_is_refused_at_configuration() {
     let root = tempfile::tempdir().unwrap();
     write(root.path(), "00");
     let roster = crate::directorates::m::roster::Roster::load(root.path()).unwrap();
-    assert_eq!(roster.watches().len(), 2);
+    assert_eq!(roster.charges().len(), 2);
 }

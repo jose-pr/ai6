@@ -33,7 +33,7 @@ pub(crate) enum ReportsCommand {
     /// Decide what an open Source item becomes (needs mission.control on its Operation and
     /// reading the item): `mission` queues it as a brief for vetting and placement, `duplicate`
     /// names what it repeats, `no_action` closes it, `later` brings it back after a wait.
-    /// Nothing becomes a Mission without this or the Operation's watch deciding it.
+    /// Nothing becomes a Mission without this or the Operation's charge deciding it.
     Assess {
         /// The item's Report ID.
         id: String,

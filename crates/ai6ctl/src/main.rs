@@ -1064,7 +1064,7 @@ struct BoardAttempt {
     /// When a probe was asked for, until the Station ran it.
     #[serde(default)]
     probe_requested: Option<f64>,
-    /// What an Operation's watch at `desk` clearance advises, for a person to confirm.
+    /// What an Operation's charge at `desk` clearance advises, for a person to confirm.
     #[serde(default)]
     recommendation: Option<BoardVerdict>,
 }

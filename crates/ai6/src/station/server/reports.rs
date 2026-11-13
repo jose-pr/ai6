@@ -229,7 +229,7 @@ impl ReportDesk {
     }
 
     /// The Reports of `scope` (the Run's Operation when left out) or tied to `mission`, in
-    /// a watch's order, each as far as the Run may see it, fenced.
+    /// a charge's order, each as far as the Run may see it, fenced.
     pub(super) fn list(
         &self,
         reader: &Reader,

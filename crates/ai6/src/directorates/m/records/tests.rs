@@ -14,7 +14,7 @@ const KINDS: [ConfigRecord; 9] = [
     ConfigRecord::Roster,
     ConfigRecord::Compartment,
     ConfigRecord::Review,
-    ConfigRecord::Watch,
+    ConfigRecord::Charge,
 ];
 
 /// The families whose records their own parsers read; their forms are declared apart.
@@ -282,7 +282,7 @@ fn full_example(record: ConfigRecord) -> Value {
             "max_tokens": 100000,
             "reviewer_timeout_secs": 600
         }),
-        ConfigRecord::Watch => json!({
+        ConfigRecord::Charge => json!({
             "agent": "M",
             "operation": "G",
             "wake_every": "none",
@@ -471,8 +471,8 @@ fn records_parse(record: ConfigRecord, definition: &Value) -> Result<(), String>
         ConfigRecord::Review => {
             from_json::<crate::directorates::m::review::ReviewPolicy>(definition).map(drop)
         }
-        ConfigRecord::Watch => {
-            from_json::<crate::directorates::m::watches::WatchDefinition>(definition).map(drop)
+        ConfigRecord::Charge => {
+            from_json::<crate::directorates::m::charges::ChargeDefinition>(definition).map(drop)
         }
         other => panic!("no type for {other:?}"),
     }
@@ -1037,7 +1037,7 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("roster", ConfigRecord::Roster),
         ("compartments", ConfigRecord::Compartment),
         ("reviews", ConfigRecord::Review),
-        ("watches", ConfigRecord::Watch),
+        ("charges", ConfigRecord::Charge),
         ("theaters", ConfigRecord::Theater),
         ("loadouts", ConfigRecord::Loadout),
         ("sandboxes", ConfigRecord::Sandbox),

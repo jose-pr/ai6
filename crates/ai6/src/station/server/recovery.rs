@@ -158,7 +158,7 @@ fn operation_on_lost(state: &DaemonState, lease: &Lease) -> OnLost {
         .map_or(OnLost::default(), |operation| operation.on_lost)
 }
 
-/// The watch for a Run of `operation_id`, with that Operation's `lost_after_secs`.
+/// The charge for a Run of `operation_id`, with that Operation's `lost_after_secs`.
 pub(super) fn reach_watch(state: &DaemonState, operation_id: Option<&str>) -> ReachWatch {
     let secs = operation_id
         .and_then(|id| state.roster.operation(id).ok())

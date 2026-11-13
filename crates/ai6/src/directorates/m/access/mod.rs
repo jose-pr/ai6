@@ -67,7 +67,7 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// `access.manage` read and change a policy, at `config:access` (the global one) or
 /// `operation:<id>` (that Operation's); `account.manage` manages accounts at
 /// `config:accounts`. `config.read` and `config.manage` list and change one configuration
-/// family's records at `config:<family>` (`config:watch`). `compartment.read` and
+/// family's records at `config:<family>` (`config:charge`). `compartment.read` and
 /// `compartment.manage` act on `compartment:<id>`; `plugin.manage` on `config:plugin` approves a
 /// provider library a Station found and did not load (held by the chief alone until a role is
 /// given it.

@@ -670,9 +670,9 @@ mod tests {
         }
     }
 
-    /// A watch put into the shared database, as the gateway puts one, is the watch a running
+    /// A charge put into the shared database, as the gateway puts one, is the charge a running
     /// Station keeps from its next poll.
-    fn a_watch_set_in_a_shared_sql_roster_reaches_a_running_station(location: &str) {
+    fn a_charge_set_in_a_shared_sql_roster_reaches_a_running_station(location: &str) {
         use crate::directorates::m::config::{ConfigRecord, ConfigScope, SqlProvider};
         use serde_json::json;
 
@@ -703,28 +703,28 @@ mod tests {
             false,
         );
         let scope = "operation:G";
-        assert!(state.current().roster.watches().get(scope).is_none());
+        assert!(state.current().roster.charges().get(scope).is_none());
         assert!(!poll(&state), "nothing changed");
 
         let set = admin
             .put(
-                ConfigRecord::Watch,
+                ConfigRecord::Charge,
                 &global,
                 scope,
                 &json!({"agent": "007", "max_turns_per_hour": 4}),
             )
             .unwrap();
-        assert!(poll(&state), "the next poll takes the watch up");
+        assert!(poll(&state), "the next poll takes the charge up");
         let current = state.current();
-        let watch = current.roster.watches().get(scope).expect("the watch");
-        assert_eq!(watch.settings.agent, "007");
-        assert_eq!(watch.settings.max_turns_per_hour, crate::Limit::at(4));
+        let charge = current.roster.charges().get(scope).expect("the charge");
+        assert_eq!(charge.settings.agent, "007");
+        assert_eq!(charge.settings.max_turns_per_hour, crate::Limit::at(4));
         assert_eq!(state.config.status().revision, Some(set.get().to_string()));
         assert!(state.config.status().needs_restart.is_empty());
 
         let changed = admin
             .put(
-                ConfigRecord::Watch,
+                ConfigRecord::Charge,
                 &global,
                 scope,
                 &json!({"agent": "007", "max_turns_per_hour": 9}),
@@ -732,7 +732,7 @@ mod tests {
             .unwrap();
         assert!(poll(&state));
         assert_eq!(
-            state.current().roster.watches()[scope]
+            state.current().roster.charges()[scope]
                 .settings
                 .max_turns_per_hour,
             crate::Limit::at(9)
@@ -742,23 +742,23 @@ mod tests {
             Some(changed.get().to_string())
         );
 
-        admin.remove(ConfigRecord::Watch, &global, scope).unwrap();
+        admin.remove(ConfigRecord::Charge, &global, scope).unwrap();
         assert!(poll(&state));
-        assert!(state.current().roster.watches().get(scope).is_none());
+        assert!(state.current().roster.charges().get(scope).is_none());
     }
 
     #[test]
     #[cfg(any(feature = "sqlite", feature = "postgres"))]
-    fn a_watch_set_in_the_shared_database_reaches_a_running_station_without_a_restart() {
+    fn a_charge_set_in_the_shared_database_reaches_a_running_station_without_a_restart() {
         #[cfg(feature = "sqlite")]
         {
             let store = crate::directorates::registry::suite::SqliteStore::new();
-            a_watch_set_in_a_shared_sql_roster_reaches_a_running_station(&store.location());
+            a_charge_set_in_a_shared_sql_roster_reaches_a_running_station(&store.location());
         }
         #[cfg(feature = "postgres")]
         match crate::directorates::registry::suite::PostgresStore::new() {
             Some(store) => {
-                a_watch_set_in_a_shared_sql_roster_reaches_a_running_station(&store.location())
+                a_charge_set_in_a_shared_sql_roster_reaches_a_running_station(&store.location())
             }
             None => eprintln!(
                 "skipped the PostgreSQL run: {} is not set",

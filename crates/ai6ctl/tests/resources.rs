@@ -201,19 +201,19 @@ roster = [\"007\"]
 handler = \"mock-agent\"
 clearance = \"00\"
 
-[watch.\"operation:G\"]
+[charge.\"operation:G\"]
 agent = \"007\"
 ";
 
-fn watch(deployment: &Deployment) -> Option<ai6::directorates::m::watches::WatchDefinition> {
+fn charge(deployment: &Deployment) -> Option<ai6::directorates::m::charges::ChargeDefinition> {
     deployment
         .station
         .load("")
         .unwrap()
         .roster
-        .watches()
+        .charges()
         .get("operation:G")
-        .map(|watch| watch.settings.clone())
+        .map(|charge| charge.settings.clone())
 }
 
 #[tokio::test]
@@ -258,7 +258,7 @@ async fn a_first_install_is_loaded_by_the_chief_with_one_apply_and_nobody_else_m
     for line in [
         "operation/G created",
         "agent/007 created",
-        "watch/operation:G created",
+        "charge/operation:G created",
     ] {
         assert!(applied.contains(line), "{applied}");
     }
@@ -268,17 +268,17 @@ async fn a_first_install_is_loaded_by_the_chief_with_one_apply_and_nobody_else_m
         applied.contains(&format!("revision\t{revision}")),
         "{applied}"
     );
-    assert_eq!(watch(&deployment).unwrap().agent, "007");
+    assert_eq!(charge(&deployment).unwrap().agent, "007");
     let updates = audits(&deployment, "roster.update");
     assert_eq!(updates.len(), 3, "one audit record per record stored");
     assert!(
         updates
             .iter()
-            .any(|record| record.target == "watch operation:G")
+            .any(|record| record.target == "charge operation:G")
     );
 
     let again = boss(&deployment, &["apply", "-f", file]).await;
-    assert!(again.contains("watch/operation:G unchanged"), "{again}");
+    assert!(again.contains("charge/operation:G unchanged"), "{again}");
     assert_eq!(audits(&deployment, "roster.update").len(), 3);
     assert_eq!(
         deployment.station.revision("").unwrap().get().to_string(),
@@ -288,7 +288,7 @@ async fn a_first_install_is_loaded_by_the_chief_with_one_apply_and_nobody_else_m
 
     let kinds = boss(&deployment, &["api-resources"]).await;
     assert!(
-        kinds.contains("watch\twatches\tconfig.read\tconfig.manage\tconfig:watch\tfalse\tfalse\ttrue\tconfig.read,config.manage"),
+        kinds.contains("charge\tcharges\tconfig.read\tconfig.manage\tconfig:charge\tfalse\tfalse\ttrue\tconfig.read,config.manage"),
         "{kinds}"
     );
     assert!(kinds.contains("agent\tagents\troster.read\troster.manage\tconfig:roster"));
@@ -329,7 +329,7 @@ async fn apply_reads_cfg_yaml_and_standard_input_and_stores_all_or_none() {
         &["apply", "--dry-run", "-f", dir.to_str().unwrap()],
     )
     .await;
-    assert!(dry.contains("watch/operation:G would be created"), "{dry}");
+    assert!(dry.contains("charge/operation:G would be created"), "{dry}");
     assert!(dry.contains("dry run: nothing stored"), "{dry}");
     assert_eq!(deployment.station.revision("").unwrap(), before);
     assert!(audits(&deployment, "roster.update").is_empty());
@@ -337,7 +337,7 @@ async fn apply_reads_cfg_yaml_and_standard_input_and_stores_all_or_none() {
     let applied = boss(&deployment, &["apply", "-f", dir.to_str().unwrap()]).await;
     assert!(applied.contains("agent/007 created"), "{applied}");
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
+        charge(&deployment).unwrap().max_turns_per_hour,
         ai6::Limit::at(3)
     );
 
@@ -346,14 +346,14 @@ async fn apply_reads_cfg_yaml_and_standard_input_and_stores_all_or_none() {
         &deployment,
         &deployment.boss,
         &["apply", "-f", "-"],
-        Some("[watch.\"operation:G\"]\nagent = \"007\"\nmax_turns_per_hour = 9\n\n[agent.008]\nextends = \"nobody\"\n"),
+        Some("[charge.\"operation:G\"]\nagent = \"007\"\nmax_turns_per_hour = 9\n\n[agent.008]\nextends = \"nobody\"\n"),
         &[],
     )
     .await;
     assert!(!bad.ok);
     assert!(bad.err.contains("refused"), "{}", bad.err);
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
+        charge(&deployment).unwrap().max_turns_per_hour,
         ai6::Limit::at(3)
     );
     assert!(!audits(&deployment, "roster.refused").is_empty());
@@ -363,26 +363,26 @@ async fn apply_reads_cfg_yaml_and_standard_input_and_stores_all_or_none() {
         &deployment,
         &deployment.boss,
         &["apply", "-f", "-"],
-        Some("[watch.\"operation:G\"]\nagent = \"007\"\nmax_turns_per_hour = 5\n"),
+        Some("[charge.\"operation:G\"]\nagent = \"007\"\nmax_turns_per_hour = 5\n"),
         &[],
     )
     .await;
     assert!(plain.ok, "{}", plain.err);
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
+        charge(&deployment).unwrap().max_turns_per_hour,
         ai6::Limit::at(5)
     );
     let json = ai6ctl(
         &deployment,
         &deployment.boss,
         &["apply", "--format", "json", "-f", "-"],
-        Some(r#"{"watch": {"operation:G": {"agent": "007", "max_turns_per_hour": 6}}}"#),
+        Some(r#"{"charge": {"operation:G": {"agent": "007", "max_turns_per_hour": 6}}}"#),
         &[],
     )
     .await;
     assert!(json.ok, "{}", json.err);
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
+        charge(&deployment).unwrap().max_turns_per_hour,
         ai6::Limit::at(6)
     );
 
@@ -408,18 +408,18 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
     std::fs::write(&file, FIRST).unwrap();
     boss(&deployment, &["apply", "-f", file.to_str().unwrap()]).await;
 
-    let shown = boss(&deployment, &["get", "watches"]).await;
-    assert!(shown.contains("[watch.\"operation:G\"]"), "{shown}");
+    let shown = boss(&deployment, &["get", "charges"]).await;
+    assert!(shown.contains("[charge.\"operation:G\"]"), "{shown}");
     assert_eq!(
-        boss(&deployment, &["get", "watch", "operation:G", "agent"]).await,
+        boss(&deployment, &["get", "charge", "operation:G", "agent"]).await,
         "007\n"
     );
     let json: Value = serde_json::from_str(
-        &boss(&deployment, &["get", "watch", "operation:G", "-o", "json"]).await,
+        &boss(&deployment, &["get", "charge", "operation:G", "-o", "json"]).await,
     )
     .unwrap();
-    assert_eq!(json["watch"]["operation:G"]["agent"], "007");
-    let yaml = boss(&deployment, &["get", "watch", "-o", "yaml"]).await;
+    assert_eq!(json["charge"]["operation:G"]["agent"], "007");
+    let yaml = boss(&deployment, &["get", "charge", "-o", "yaml"]).await;
     assert!(
         yaml.contains("agent: '007'") || yaml.contains("agent: \"007\""),
         "{yaml}"
@@ -427,13 +427,13 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
     let missing = ai6ctl(
         &deployment,
         &deployment.boss,
-        &["get", "watch", "operation:Z"],
+        &["get", "charge", "operation:Z"],
         None,
         &[],
     )
     .await;
     assert!(
-        !missing.ok && missing.err.contains("no watch record"),
+        !missing.ok && missing.err.contains("no charge record"),
         "{}",
         missing.err
     );
@@ -442,15 +442,15 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
         &deployment,
         &[
             "set",
-            "watch",
+            "charge",
             "operation:G",
             "max_turns_per_hour=4",
             "wake_every=3600",
         ],
     )
     .await;
-    assert!(set.contains("watch/operation:G configured"), "{set}");
-    let held = watch(&deployment).unwrap();
+    assert!(set.contains("charge/operation:G configured"), "{set}");
+    let held = charge(&deployment).unwrap();
     assert_eq!(held.max_turns_per_hour, ai6::Limit::at(4));
     assert_eq!(held.agent, "007", "the fields not named stay as stored");
     assert!(set.contains(&format!(
@@ -459,17 +459,17 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
     )));
     boss(
         &deployment,
-        &["set", "watch", "operation:G", "max_turns_per_hour=none"],
+        &["set", "charge", "operation:G", "max_turns_per_hour=none"],
     )
     .await;
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
+        charge(&deployment).unwrap().max_turns_per_hour,
         ai6::Limit::UNBOUNDED
     );
     let wrong = ai6ctl(
         &deployment,
         &deployment.boss,
-        &["set", "watch", "operation:G", "nope=1"],
+        &["set", "charge", "operation:G", "nope=1"],
         None,
         &[],
     )
@@ -482,17 +482,17 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
 
     boss(
         &deployment,
-        &["unset", "watch", "operation:G", "max_turns_per_hour"],
+        &["unset", "charge", "operation:G", "max_turns_per_hour"],
     )
     .await;
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
-        ai6::directorates::m::watches::WatchDefinition::DEFAULTS.max_turns_per_hour
+        charge(&deployment).unwrap().max_turns_per_hour,
+        ai6::directorates::m::charges::ChargeDefinition::DEFAULTS.max_turns_per_hour
     );
     let absent = ai6ctl(
         &deployment,
         &deployment.boss,
-        &["unset", "watch", "operation:G", "lease"],
+        &["unset", "charge", "operation:G", "lease"],
         None,
         &[],
     )
@@ -504,11 +504,11 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
     );
 
     // A change over a newer one is refused.
-    let revisions = boss(&deployment, &["get", "watch", "--revisions"]).await;
+    let revisions = boss(&deployment, &["get", "charge", "--revisions"]).await;
     let revision = revisions.trim().split('\t').nth(1).unwrap().to_owned();
     boss(
         &deployment,
-        &["set", "watch", "operation:G", "turn_timeout=60"],
+        &["set", "charge", "operation:G", "turn_timeout=60"],
     )
     .await;
     let stale = ai6ctl(
@@ -516,7 +516,7 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
         &deployment.boss,
         &[
             "set",
-            "watch",
+            "charge",
             "operation:G",
             "turn_timeout=90",
             "--if-revision",
@@ -547,13 +547,13 @@ async fn get_set_unset_and_delete_work_on_the_stored_record_by_its_schema() {
         named.err
     );
     assert!(!audits(&deployment, "roster.refused").is_empty());
-    let removed = boss(&deployment, &["delete", "watch", "operation:G"]).await;
-    assert!(removed.contains("watch/operation:G deleted"), "{removed}");
-    assert!(watch(&deployment).is_none());
+    let removed = boss(&deployment, &["delete", "charge", "operation:G"]).await;
+    assert!(removed.contains("charge/operation:G deleted"), "{removed}");
+    assert!(charge(&deployment).is_none());
     let gone = ai6ctl(
         &deployment,
         &deployment.boss,
-        &["delete", "watch", "operation:G"],
+        &["delete", "charge", "operation:G"],
         None,
         &[],
     )
@@ -605,7 +605,7 @@ async fn edit_stores_what_the_editor_saved_and_nothing_when_it_changed_nothing()
     boss(&deployment, &["apply", "-f", file.to_str().unwrap()]).await;
     boss(
         &deployment,
-        &["set", "watch", "operation:G", "max_turns_per_hour=2"],
+        &["set", "charge", "operation:G", "max_turns_per_hour=2"],
     )
     .await;
 
@@ -613,7 +613,7 @@ async fn edit_stores_what_the_editor_saved_and_nothing_when_it_changed_nothing()
     let kept = ai6ctl(
         &deployment,
         &deployment.boss,
-        &["edit", "watch", "operation:G"],
+        &["edit", "charge", "operation:G"],
         None,
         &[(
             "EDITOR",
@@ -636,19 +636,19 @@ async fn edit_stores_what_the_editor_saved_and_nothing_when_it_changed_nothing()
     let edited = ai6ctl(
         &deployment,
         &deployment.boss,
-        &["edit", "watch", "operation:G"],
+        &["edit", "charge", "operation:G"],
         None,
         &[("EDITOR", editor(deployment.directory.path()))],
     )
     .await;
     assert!(edited.ok, "{}", edited.err);
     assert!(
-        edited.out.contains("watch/operation:G configured"),
+        edited.out.contains("charge/operation:G configured"),
         "{}",
         edited.out
     );
     assert_eq!(
-        watch(&deployment).unwrap().max_turns_per_hour,
+        charge(&deployment).unwrap().max_turns_per_hour,
         ai6::Limit::at(8)
     );
 }
@@ -660,19 +660,19 @@ async fn a_family_the_person_holds_no_action_on_is_refused_naming_it() {
     std::fs::write(&file, FIRST).unwrap();
     boss(&deployment, &["apply", "-f", file.to_str().unwrap()]).await;
     for args in [
-        vec!["get", "watch"],
-        vec!["set", "watch", "operation:G", "turn_timeout=90"],
-        vec!["delete", "watch", "operation:G"],
+        vec!["get", "charge"],
+        vec!["set", "charge", "operation:G", "turn_timeout=90"],
+        vec!["delete", "charge", "operation:G"],
     ] {
         let ran = ai6ctl(&deployment, &deployment.guest, &args, None, &[]).await;
         assert!(!ran.ok, "{args:?}");
         assert!(
-            ran.err.contains("the watch family needs config.") && ran.err.contains("config:watch"),
+            ran.err.contains("the charge family needs config.") && ran.err.contains("config:charge"),
             "{args:?}: {}",
             ran.err
         );
     }
-    assert!(watch(&deployment).is_some());
+    assert!(charge(&deployment).is_some());
 }
 
 #[tokio::test]

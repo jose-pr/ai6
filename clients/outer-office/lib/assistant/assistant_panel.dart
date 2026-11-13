@@ -1056,17 +1056,17 @@ class _ProposalCardState extends State<ProposalCard> {
   @override
   void initState() {
     super.initState();
-    _watch();
+    _charge();
   }
 
   @override
   void didUpdateWidget(ProposalCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.proposal['status'] != widget.proposal['status']) _watch();
+    if (oldWidget.proposal['status'] != widget.proposal['status']) _charge();
   }
 
   /// Starts the clock when the proposal is applying and stops it when it is not.
-  void _watch() {
+  void _charge() {
     _timer?.cancel();
     if (_status == 'confirming') {
       _timer = Timer(widget.confirmingAfter, () {

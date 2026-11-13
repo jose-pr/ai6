@@ -1,10 +1,10 @@
-//! Watches: one standing Run per scope that supervises its area, woken by the area's events.
+//! Charges: one standing Run per scope that supervises its area, woken by the area's events.
 //!
-//! M's watch (`m`) keeps the whole deployment from the Headquarters Station, an Operation's watch
-//! (`operation:P`) its Operation from a Station the Operation allows, and a Station's watch
-//! (`station:S`) that Station from itself. A watch is not a Mission: it has no brief, placement,
-//! attempt, scorecard credit or board card, and no Sleeper queues it. `[watch.<scope>]` names the
-//! Agent that keeps it and paces it ([`WatchDefinition`]); the Station runs it.
+//! M's charge (`m`) keeps the whole deployment from the Headquarters Station, an Operation's charge
+//! (`operation:P`) its Operation from a Station the Operation allows, and a Station's charge
+//! (`station:S`) that Station from itself. A charge is not a Mission: it has no brief, placement,
+//! attempt, scorecard credit or board card, and no Sleeper queues it. `[charge.<scope>]` names the
+//! Agent that keeps it and paces it ([`ChargeDefinition`]); the Station runs it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -16,18 +16,18 @@ use guatiao_intake::Form;
 
 use crate::bounds::{Limit, Seconds, TimeLimit};
 
-/// The scope of M's watch.
+/// The scope of M's charge.
 pub const M_SCOPE: &str = "m";
-/// The prefix of an Operation's watch scope.
+/// The prefix of an Operation's charge scope.
 pub const OPERATION_PREFIX: &str = "operation:";
-/// The prefix of a Station's watch scope.
+/// The prefix of a Station's charge scope.
 pub const STATION_PREFIX: &str = "station:";
 
-/// The area a watch keeps.
+/// The area a charge keeps.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum WatchScope {
-    /// The whole deployment: M's watch, run by the Headquarters Station.
+pub enum ChargeScope {
+    /// The whole deployment: M's charge, run by the Headquarters Station.
     M,
     /// One Operation, by codename.
     Operation(String),
@@ -35,8 +35,8 @@ pub enum WatchScope {
     Station(String),
 }
 
-impl WatchScope {
-    /// The Operation the scope is, for an Operation's watch.
+impl ChargeScope {
+    /// The Operation the scope is, for an Operation's charge.
     pub fn operation(&self) -> Option<&str> {
         match self {
             Self::Operation(operation) => Some(operation),
@@ -44,7 +44,7 @@ impl WatchScope {
         }
     }
 
-    /// The Station the scope is, for a Station's watch.
+    /// The Station the scope is, for a Station's charge.
     pub fn station(&self) -> Option<&str> {
         match self {
             Self::Station(station) => Some(station),
@@ -53,7 +53,7 @@ impl WatchScope {
     }
 }
 
-impl fmt::Display for WatchScope {
+impl fmt::Display for ChargeScope {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::M => formatter.write_str(M_SCOPE),
@@ -63,7 +63,7 @@ impl fmt::Display for WatchScope {
     }
 }
 
-impl FromStr for WatchScope {
+impl FromStr for ChargeScope {
     type Err = String;
 
     /// `m`, `operation:<codename>` or `station:<id>`; a name holds no whitespace, control or `:`.
@@ -76,7 +76,7 @@ impl FromStr for WatchScope {
                     .any(|c| c.is_whitespace() || c.is_control() || c == ':');
             valid
                 .then(|| rest.to_owned())
-                .ok_or_else(|| format!("watch scope {text:?} names no valid {what}"))
+                .ok_or_else(|| format!("charge scope {text:?} names no valid {what}"))
         };
         if text == M_SCOPE {
             Ok(Self::M)
@@ -86,59 +86,59 @@ impl FromStr for WatchScope {
             name(rest, "Station").map(Self::Station)
         } else {
             Err(format!(
-                "watch scope {text:?} is not m, operation:<codename> or station:<id>"
+                "charge scope {text:?} is not m, operation:<codename> or station:<id>"
             ))
         }
     }
 }
 
-/// One watch's settings: the keys of a `[watch.<scope>]` table. Every bound can be lifted with
+/// One charge's settings: the keys of a `[charge.<scope>]` table. Every bound can be lifted with
 /// `none`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
-pub struct WatchDefinition {
-    /// The Agent that keeps the watch, by codename: its handler, model, effort, route and pool
-    /// account run the watch's Run.
+pub struct ChargeDefinition {
+    /// The Agent that keeps the charge, by codename: its handler, model, effort, route and pool
+    /// account run the charge's Run.
     #[schema(title = "Agent")]
     pub agent: String,
-    /// For M's or a Station's watch, the Operation its Cables are sent and received in, under
-    /// that Operation's Cable grants; without one, no Cable wakes it. An Operation's watch is in
+    /// For M's or a Station's charge, the Operation its Cables are sent and received in, under
+    /// that Operation's Cable grants; without one, no Cable wakes it. An Operation's charge is in
     /// its own Operation, which this may only repeat.
     #[schema(title = "Cables in Operation", advanced)]
     pub operation: Option<String>,
-    /// Seconds after its last wake that the watch is woken with nothing else to tell it; `none`
+    /// Seconds after its last wake that the charge is woken with nothing else to tell it; `none`
     /// wakes it only on events.
     #[schema(title = "Woken at least every")]
-    #[map(default = WatchDefinition::DEFAULTS.wake_every)]
+    #[map(default = ChargeDefinition::DEFAULTS.wake_every)]
     pub wake_every: TimeLimit,
-    /// Turns the watch takes in any hour, each wake one turn; past it, events wait for the hour to
+    /// Turns the charge takes in any hour, each wake one turn; past it, events wait for the hour to
     /// make room.
     #[schema(title = "Turns an hour")]
-    #[map(default = WatchDefinition::DEFAULTS.max_turns_per_hour)]
+    #[map(default = ChargeDefinition::DEFAULTS.max_turns_per_hour)]
     pub max_turns_per_hour: Limit,
     /// Events one turn is given; the rest wait for the next turn.
     #[schema(title = "Events one turn is given")]
-    #[map(default = WatchDefinition::DEFAULTS.max_events_per_turn)]
+    #[map(default = ChargeDefinition::DEFAULTS.max_events_per_turn)]
     pub max_events_per_turn: Limit,
-    /// Events waiting for a turn; past it the oldest are dropped, and the watch's logbook says how
+    /// Events waiting for a turn; past it the oldest are dropped, and the charge's logbook says how
     /// many.
     #[schema(title = "Events waiting")]
-    #[map(default = WatchDefinition::DEFAULTS.max_waiting_events)]
+    #[map(default = ChargeDefinition::DEFAULTS.max_waiting_events)]
     pub max_waiting_events: Limit,
     /// Seconds one turn may run before the Station interrupts it.
     #[schema(title = "Longest turn")]
-    #[map(default = WatchDefinition::DEFAULTS.turn_timeout)]
+    #[map(default = ChargeDefinition::DEFAULTS.turn_timeout)]
     pub turn_timeout: TimeLimit,
-    /// Seconds the Station running the watch holds it without renewing before another Station may
+    /// Seconds the Station running the charge holds it without renewing before another Station may
     /// take it over.
     #[schema(title = "Held without renewing for", advanced)]
-    #[map(default = WatchDefinition::DEFAULTS.lease)]
+    #[map(default = ChargeDefinition::DEFAULTS.lease)]
     pub lease: Seconds,
 }
 
-impl WatchDefinition {
-    /// The settings a watch has unless its table says otherwise, its Agent unnamed.
+impl ChargeDefinition {
+    /// The settings a charge has unless its table says otherwise, its Agent unnamed.
     pub const DEFAULTS: Self = Self {
         agent: String::new(),
         operation: None,
@@ -150,7 +150,7 @@ impl WatchDefinition {
         lease: Seconds::new(60),
     };
 
-    /// A watch kept by `agent`, every other setting at its default.
+    /// A charge kept by `agent`, every other setting at its default.
     pub fn new(agent: impl Into<String>) -> Self {
         Self {
             agent: agent.into(),
@@ -158,7 +158,7 @@ impl WatchDefinition {
         }
     }
 
-    /// Sets how long after its last wake the watch is woken with nothing else to tell it.
+    /// Sets how long after its last wake the charge is woken with nothing else to tell it.
     #[must_use]
     pub fn wake_every(mut self, every: TimeLimit) -> Self {
         self.wake_every = every;
@@ -179,19 +179,19 @@ impl WatchDefinition {
         self
     }
 
-    /// The Operation its Cables go in, for a watch of `scope`: an Operation's own, else the one
+    /// The Operation its Cables go in, for a charge of `scope`: an Operation's own, else the one
     /// its table names.
-    pub fn cable_operation<'a>(&'a self, scope: &'a WatchScope) -> Option<&'a str> {
+    pub fn cable_operation<'a>(&'a self, scope: &'a ChargeScope) -> Option<&'a str> {
         scope.operation().or(self.operation.as_deref())
     }
 
-    /// Checks what no setting can mean for a watch of `scope`: no Agent, or an Operation's watch
+    /// Checks what no setting can mean for a charge of `scope`: no Agent, or an Operation's charge
     /// naming another Operation for its Cables.
     ///
     /// # Errors
     ///
     /// Names the setting.
-    pub fn validate(&self, scope: &WatchScope) -> Result<(), String> {
+    pub fn validate(&self, scope: &ChargeScope) -> Result<(), String> {
         if self.agent.trim().is_empty() {
             return Err("names no agent".to_owned());
         }
@@ -199,47 +199,47 @@ impl WatchDefinition {
             && own != named
         {
             return Err(format!(
-                "is an Operation's watch, so its Cables are in {own:?}, not {named:?}"
+                "is an Operation's charge, so its Cables are in {own:?}, not {named:?}"
             ));
         }
         Ok(())
     }
 }
 
-/// A watch on the roster: its scope and its settings.
+/// A charge on the roster: its scope and its settings.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Watch {
+pub struct Charge {
     /// What it keeps.
-    pub scope: WatchScope,
+    pub scope: ChargeScope,
     /// How it is kept.
-    pub settings: WatchDefinition,
+    pub settings: ChargeDefinition,
 }
 
-impl Watch {
-    /// The watch of `scope` with `settings`.
-    pub fn new(scope: WatchScope, settings: WatchDefinition) -> Self {
+impl Charge {
+    /// The charge of `scope` with `settings`.
+    pub fn new(scope: ChargeScope, settings: ChargeDefinition) -> Self {
         Self { scope, settings }
     }
 }
 
-/// The watches of `records`, `[watch.<scope>]` tables as a record holds them, by scope. Each is
+/// The charges of `records`, `[charge.<scope>]` tables as a record holds them, by scope. Each is
 /// checked against the roster when the roster is built.
 ///
 /// # Errors
 ///
 /// Names the first scope that is not one, or the first key that is not acceptable.
-pub fn watches_from_records(
+pub fn charges_from_records(
     records: impl IntoIterator<Item = (String, serde_json::Value)>,
-) -> Result<BTreeMap<String, Watch>, String> {
-    let mut watches = BTreeMap::new();
+) -> Result<BTreeMap<String, Charge>, String> {
+    let mut charges = BTreeMap::new();
     for (key, definition) in records {
-        let scope: WatchScope = key.parse()?;
-        let settings: WatchDefinition = crate::directorates::m::records::from_json(&definition)
-            .map_err(|reason| format!("watch {key:?}: {reason}"))?;
-        watches.insert(scope.to_string(), Watch::new(scope, settings));
+        let scope: ChargeScope = key.parse()?;
+        let settings: ChargeDefinition = crate::directorates::m::records::from_json(&definition)
+            .map_err(|reason| format!("charge {key:?}: {reason}"))?;
+        charges.insert(scope.to_string(), Charge::new(scope, settings));
     }
-    Ok(watches)
+    Ok(charges)
 }
 
 #[cfg(test)]
@@ -249,11 +249,11 @@ mod tests {
     #[test]
     fn a_scope_reads_as_it_is_written() {
         for (text, scope) in [
-            ("m", WatchScope::M),
-            ("operation:G", WatchScope::Operation("G".to_owned())),
-            ("station:hq-1", WatchScope::Station("hq-1".to_owned())),
+            ("m", ChargeScope::M),
+            ("operation:G", ChargeScope::Operation("G".to_owned())),
+            ("station:hq-1", ChargeScope::Station("hq-1".to_owned())),
         ] {
-            assert_eq!(text.parse::<WatchScope>(), Ok(scope.clone()));
+            assert_eq!(text.parse::<ChargeScope>(), Ok(scope.clone()));
             assert_eq!(scope.to_string(), text);
         }
         for bad in [
@@ -264,20 +264,20 @@ mod tests {
             "operation:a:b",
             "theater:x",
         ] {
-            assert!(bad.parse::<WatchScope>().is_err(), "{bad:?}");
+            assert!(bad.parse::<ChargeScope>().is_err(), "{bad:?}");
         }
     }
 
     #[test]
-    fn an_operation_watch_keeps_its_cables_in_its_own_operation() {
-        let scope = WatchScope::Operation("G".to_owned());
-        let mut settings = WatchDefinition::new("00");
+    fn an_operation_charge_keeps_its_cables_in_its_own_operation() {
+        let scope = ChargeScope::Operation("G".to_owned());
+        let mut settings = ChargeDefinition::new("00");
         assert_eq!(settings.cable_operation(&scope), Some("G"));
         settings.operation = Some("H".to_owned());
         assert!(settings.validate(&scope).is_err());
-        let station = WatchScope::Station("s".to_owned());
+        let station = ChargeScope::Station("s".to_owned());
         assert!(settings.validate(&station).is_ok());
         assert_eq!(settings.cable_operation(&station), Some("H"));
-        assert!(WatchDefinition::new(" ").validate(&station).is_err());
+        assert!(ChargeDefinition::new(" ").validate(&station).is_err());
     }
 }

@@ -39,7 +39,7 @@ use super::memories::MemoryDesk;
 use super::reports::ReportDesk;
 use super::review;
 use super::unix_now;
-use super::watches::decide::DecisionDesk;
+use super::charges::decide::DecisionDesk;
 use crate::bounds::{Limit, TimeLimit};
 use crate::directorates::m::assistant::AssistantDeskLimits;
 use crate::directorates::m::identity::{MissionId, RunId};
@@ -186,7 +186,7 @@ impl Endpoint {
         })
     }
 
-    /// Gives an Operation's watch the tools to see its Missions and decide the verifying ones;
+    /// Gives an Operation's charge the tools to see its Missions and decide the verifying ones;
     /// without this they do not exist for the Run. Open it before the harness connects.
     pub(super) fn open_decision_tools(&self, desk: DecisionDesk) {
         let _ = self.decision_desk.set(desk);
@@ -2220,7 +2220,7 @@ impl CableTools {
         if !allowed {
             return "Mission proposal permission is unavailable".to_owned();
         }
-        // A watch proposes as itself: its Run name stands where a Mission's would.
+        // A charge proposes as itself: its Run name stands where a Mission's would.
         let (Some(parent_mission_id), Some(provider_id)) = (
             principal
                 .mission_id()

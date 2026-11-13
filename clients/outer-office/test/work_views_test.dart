@@ -307,7 +307,7 @@ void main() {
     },
   );
 
-  test('a Station watch names the Run updated last, not the longest', () {
+  test('a Station charge names the Run updated last, not the longest', () {
     final board = demoBoard();
     RunSummary run(String id, int sequence, double updatedAt) =>
         RunSummary(

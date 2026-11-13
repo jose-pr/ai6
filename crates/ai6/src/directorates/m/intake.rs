@@ -1,7 +1,7 @@
-//! How an Operation's Source items become work: reported to a watch, or queued as briefs.
+//! How an Operation's Source items become work: reported to a charge, or queued as briefs.
 //!
-//! By default a polled item is filed as a Report and its Operation's watch decides what it
-//! becomes (a Mission, a duplicate, nothing, or later); with no watch Agent a person decides.
+//! By default a polled item is filed as a Report and its Operation's charge decides what it
+//! becomes (a Mission, a duplicate, nothing, or later); with no charge Agent a person decides.
 //! `direct` keeps the older path, where each item is queued as a brief by itself.
 //!
 //! ```toml
@@ -29,21 +29,21 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 #[map(rename_all = "lowercase")]
 pub enum SourceIntake {
-    /// The item is a Report. The Operation's watch decides what becomes a Mission, or a person
-    /// does when the Operation has no watch Agent; nothing becomes one by itself.
+    /// The item is a Report. The Operation's charge decides what becomes a Mission, or a person
+    /// does when the Operation has no charge Agent; nothing becomes one by itself.
     #[default]
-    #[schema(label = "Report to the watch, which decides")]
-    Watch,
+    #[schema(label = "Report to the charge, which decides")]
+    Charge,
     /// The item is queued as a brief at once, with no one deciding.
     #[schema(label = "Queue each item as a brief")]
     Direct,
 }
 
 impl SourceIntake {
-    /// `watch` or `direct`.
+    /// `charge` or `direct`.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Watch => "watch",
+            Self::Charge => "charge",
             Self::Direct => "direct",
         }
     }
@@ -51,10 +51,10 @@ impl SourceIntake {
     /// What `direct` changes from the default, worded for a log line and the check-in.
     pub fn non_default(self) -> Option<&'static str> {
         match self {
-            Self::Watch => None,
+            Self::Charge => None,
             Self::Direct => Some(
-                "intake = \"direct\" (default \"watch\"): each Source item is queued as a brief \
-                 with no watch or person deciding it first",
+                "intake = \"direct\" (default \"charge\"): each Source item is queued as a brief \
+                 with no charge or person deciding it first",
             ),
         }
     }

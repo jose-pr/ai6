@@ -1205,8 +1205,8 @@ impl Iterator for Follow {
 }
 
 fn watching(caller: &Caller<'_>) -> Open {
-    let watch = caller.watch();
-    Arc::new(move || !watch.is_closed())
+    let charge = caller.charge();
+    Arc::new(move || !charge.is_closed())
 }
 
 impl Agent for Liaison {

@@ -1,6 +1,6 @@
 //! The directorates: who decides. M sets policy and authorizes; the Registry keeps the
 //! shared record (briefs, leases, check-ins, audit) and relays Cables; Q Branch issues
-//! equipment; the 00 Section defines how Agents are run; Medical watches their health.
+//! equipment; the 00 Section defines how Agents are run; Medical charges their health.
 //! The node that carries out their decisions is [`crate::station`].
 
 pub mod m;

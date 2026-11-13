@@ -159,10 +159,10 @@ error naming the key.
 `sources` lists the tracker instances an Operation uses. Each key names an instance and holds
 its settings; `provider` names the provider that serves it (default: the key), so two
 GitHub repositories are two instances. The Station holding the Headquarters lease polls each
-instance and reports what it finds to the Operation's watch, unless `intake = false` keeps it for
-linking and creating only. An item becomes a Mission only when the watch, or a person, decides
+instance and reports what it finds to the Operation's charge, unless `intake = false` keeps it for
+linking and creating only. An item becomes a Mission only when the charge, or a person, decides
 it; the Operation's own `intake = "direct"` queues each item as a brief at once instead (default
-`watch`). See [Sources](missions.md#sources).
+`charge`). See [Sources](missions.md#sources).
 
 ```toml
 [operation.G.sources.github]

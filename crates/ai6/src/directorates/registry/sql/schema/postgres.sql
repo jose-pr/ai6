@@ -251,8 +251,8 @@ CREATE TABLE IF NOT EXISTS ai6_logbooks (
     revision BIGINT NOT NULL
 );
 
--- Each watch: its standing Run, lease and logbook as JSON, keyed by its scope.
-CREATE TABLE IF NOT EXISTS ai6_watches (
+-- Each charge: its standing Run, lease and logbook as JSON, keyed by its scope.
+CREATE TABLE IF NOT EXISTS ai6_charges (
     scope TEXT PRIMARY KEY,
     record TEXT NOT NULL,
     revision BIGINT NOT NULL
@@ -496,7 +496,7 @@ CREATE TABLE IF NOT EXISTS ai6_config_review (
     PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE IF NOT EXISTS ai6_config_watch (
+CREATE TABLE IF NOT EXISTS ai6_config_charge (
     scope TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
     definition TEXT NOT NULL,

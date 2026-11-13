@@ -17,7 +17,7 @@ use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::intake::SourceIntake;
 use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster::{Operation, Roster};
-use crate::directorates::m::watches::WatchScope;
+use crate::directorates::m::charges::ChargeScope;
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{CablePrincipal, CableRelay};
 use crate::directorates::registry::mission_issues::{
@@ -178,7 +178,7 @@ pub(crate) fn log_non_defaults(roster: &Roster) {
 /// What one poll of one source changed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct PollSummary {
-    /// Items filed or updated as Reports for the watch.
+    /// Items filed or updated as Reports for the charge.
     pub reported: usize,
     pub queued: usize,
     pub updated: usize,
@@ -375,11 +375,11 @@ pub(crate) fn build_tracker(
         .map_err(|error| error.to_string())
 }
 
-/// What a poll of a Source tells the Operation's watch, and how.
+/// What a poll of a Source tells the Operation's charge, and how.
 pub(crate) struct Intake<'a> {
-    /// Whether items are reported to the watch or queued as briefs.
+    /// Whether items are reported to the charge or queued as briefs.
     pub mode: SourceIntake,
-    /// Tells the watch of an item; `None` when the Operation has no watch Agent, and the items
+    /// Tells the charge of an item; `None` when the Operation has no charge Agent, and the items
     /// wait for a person.
     pub notify: Option<&'a Notifier<'a>>,
 }
@@ -398,13 +398,13 @@ impl Intake<'_> {
     #[cfg(test)]
     pub(crate) fn held() -> Intake<'static> {
         Intake {
-            mode: SourceIntake::Watch,
+            mode: SourceIntake::Charge,
             notify: None,
         }
     }
 }
 
-/// Tells the watch of an item's Report: the Source instance it is from, the Cable's body, then
+/// Tells the charge of an item's Report: the Source instance it is from, the Cable's body, then
 /// the key that makes telling it twice one Cable.
 pub(crate) type Notifier<'a> = dyn Fn(&str, &str, &str) -> Result<(), String> + 'a;
 
@@ -460,7 +460,7 @@ fn tell(intake: &Intake<'_>, instance: &str, change: &str, report: &Report) {
     let (body, key) = notice_of(instance, change, report);
     if let Err(error) = notify(instance, &body, &key) {
         eprintln!(
-            "ai6: source {instance}: the watch was not told of item {:?}: {error}",
+            "ai6: source {instance}: the charge was not told of item {:?}: {error}",
             report.id
         );
     }
@@ -471,8 +471,8 @@ fn tell(intake: &Intake<'_>, instance: &str, change: &str, report: &Report) {
 /// not its provider's only one in the Operation: its name replaces an item's code tag. An item
 /// whose Mission settled is reopened as `reopening` says.
 ///
-/// With `intake.mode` watch, each item is a Report and the watch is told of a new or changed
-/// one; only an item the watch or a person decided `mission` is queued. With `direct`, each item
+/// With `intake.mode` charge, each item is a Report and the charge is told of a new or changed
+/// one; only an item the charge or a person decided `mission` is queued. With `direct`, each item
 /// is queued as a brief.
 pub(crate) fn poll_source(
     registry: &dyn RegistryBackend,
@@ -613,8 +613,8 @@ fn tie_mission(
     }
 }
 
-/// Queues the items the watch or a person decided `mission` and that are not queued yet, and
-/// opens again those deferred until now, telling the watch of them. Returns how many items it
+/// Queues the items the charge or a person decided `mission` and that are not queued yet, and
+/// opens again those deferred until now, telling the charge of them. Returns how many items it
 /// queued or updated.
 pub(crate) fn settle_items(
     registry: &dyn RegistryBackend,
@@ -809,7 +809,7 @@ pub(crate) fn reopen_item(
 /// Reads again the newest settled items of each instance whose items reopen, at most
 /// `limits.reopen_watch` per instance, so a label taken off one is seen and its return reopens
 /// it ([`Reopen::Label`]). Only the Headquarters Station does; returns how many it read.
-pub(crate) fn watch_settled(
+pub(crate) fn charge_settled(
     registry: &dyn RegistryBackend,
     roster: &Roster,
     build: &TrackerBuilder<'_>,
@@ -1545,14 +1545,14 @@ pub(crate) struct SourceDesk {
     next_report: Mutex<Instant>,
     next_drain: Mutex<Instant>,
     next_replies: Mutex<Instant>,
-    next_watch: Mutex<Instant>,
+    next_charge: Mutex<Instant>,
     drained: DrainState,
     next_sleepers: Mutex<Instant>,
     warned: Mutex<BTreeSet<String>>,
     /// This Station: the provenance of the briefs it queues names it.
     station: String,
     limits: SourceLimits,
-    /// How a watch is told of an item; without it, items wait for a person.
+    /// How a charge is told of an item; without it, items wait for a person.
     cables: Option<Arc<CableRelay>>,
 }
 
@@ -1568,22 +1568,22 @@ impl SourceDesk {
             next_report: Mutex::new(Instant::now()),
             next_drain: Mutex::new(Instant::now()),
             next_replies: Mutex::new(Instant::now()),
-            next_watch: Mutex::new(Instant::now()),
+            next_charge: Mutex::new(Instant::now()),
             drained: DrainState::new(),
             next_sleepers: Mutex::new(Instant::now()),
             warned: Mutex::new(BTreeSet::new()),
         }
     }
 
-    /// Tells watches of items through `cables`.
+    /// Tells charges of items through `cables`.
     #[must_use]
     pub(crate) fn with_cables(mut self, cables: Arc<CableRelay>) -> Self {
         self.cables = Some(cables);
         self
     }
 
-    /// How an Operation's items are taken: reported to its watch Agent through the Cable relay,
-    /// or held for a person when it has no watch Agent or this desk has no relay.
+    /// How an Operation's items are taken: reported to its charge Agent through the Cable relay,
+    /// or held for a person when it has no charge Agent or this desk has no relay.
     pub(crate) fn notify_for<'a>(
         &'a self,
         roster: &'a Roster,
@@ -1591,9 +1591,9 @@ impl SourceDesk {
     ) -> Option<Box<Notifier<'a>>> {
         let relay = self.cables.as_ref()?;
         let agent = roster
-            .watches()
-            .get(&WatchScope::Operation(operation.id.clone()).to_string())
-            .map(|watch| watch.settings.agent.as_str())?;
+            .charges()
+            .get(&ChargeScope::Operation(operation.id.clone()).to_string())
+            .map(|charge| charge.settings.agent.as_str())?;
         Some(Box::new(move |instance: &str, body: &str, key: &str| {
             let from = CablePrincipal::try_new(
                 format!("source:{instance}"),
@@ -1657,7 +1657,7 @@ impl SourceDesk {
                 notify: notify.as_deref(),
             };
             let polled: Vec<&SourceSetup> = setups.iter().flatten().collect();
-            if intake.mode == SourceIntake::Watch && !polled.is_empty() {
+            if intake.mode == SourceIntake::Charge && !polled.is_empty() {
                 settle_items(registry, &self.station, &operation.id, &polled, &intake);
             }
             for setup in &setups {
@@ -1777,8 +1777,8 @@ impl SourceDesk {
                 unix_seconds() as f64,
             );
         }
-        let watch_due = self
-            .next_watch
+        let charge_due = self
+            .next_charge
             .lock()
             .map(|mut next| {
                 let due = *next <= now;
@@ -1788,8 +1788,8 @@ impl SourceDesk {
                 due
             })
             .unwrap_or(false);
-        if watch_due {
-            watch_settled(registry, roster, build_tracker, &self.station, &self.limits);
+        if charge_due {
+            charge_settled(registry, roster, build_tracker, &self.station, &self.limits);
         }
         let sleepers_due = self
             .next_sleepers
@@ -3784,7 +3784,7 @@ mod reopen_tests {
             Ok(Box::new(issue.clone()))
         };
         assert_eq!(
-            watch_settled(
+            charge_settled(
                 registry,
                 &roster,
                 &build,
@@ -3795,7 +3795,7 @@ mod reopen_tests {
             "only the Headquarters Station reads settled items"
         );
         assert_eq!(
-            watch_settled(
+            charge_settled(
                 registry,
                 &roster,
                 &build,

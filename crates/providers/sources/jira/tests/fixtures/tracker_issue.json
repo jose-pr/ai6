@@ -52,7 +52,7 @@
     "customfield_10029": null,
     "resolutiondate": null,
     "workratio": -1,
-    "watches": {
+    "charges": {
       "self": "https://example.atlassian.net/rest/api/3/issue/AI6-7/watchers",
       "watchCount": 1,
       "isWatching": true

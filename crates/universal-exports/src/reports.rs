@@ -1,7 +1,7 @@
 //! Reports as people reach them: `/v1/reports`.
 //!
 //! `POST /v1/reports` files one; `GET /v1/reports?scope=SCOPE` (or `?mission=ID`) lists them in a
-//! watch's order; `GET /v1/reports/{id}` shows one; `PUT /v1/reports/{id}/markings` changes its
+//! charge's order; `GET /v1/reports/{id}` shows one; `PUT /v1/reports/{id}/markings` changes its
 //! markings; `GET /v1/missions/{id}/reports` lists the Reports tied to a Mission.
 //!
 //! `PUT /v1/reports/{id}/assessment` decides what an open Source item becomes (`mission.control`
@@ -435,7 +435,7 @@ pub(crate) async fn mark(
 
 /// `PUT /v1/reports/{id}/assessment` with `{"assessment", "reason", "of"?, "wait_seconds"?}`: a
 /// person decides what an open Source item becomes (`mission`, `duplicate`, `no_action` or
-/// `later`), as the Operation's watch does. It needs `mission.control` on the Operation and being
+/// `later`), as the Operation's charge does. It needs `mission.control` on the Operation and being
 /// able to read the item's content; nothing becomes a Mission by itself, and the Station that
 /// polls the Source queues a `mission` on its next pass. `404` for a Report of a scope the person
 /// may not read or one that is no Source item, `409` for an item already decided.

@@ -169,11 +169,11 @@ pub enum ReportFiler {
         /// The Mission.
         mission: String,
     },
-    /// A standing watch's Agent, in the watch's own Run: no Mission.
-    Watch {
+    /// A standing charge's Agent, in the charge's own Run: no Mission.
+    Charge {
         /// The Agent codename.
         agent: String,
-        /// The watch's scope (`m`, `operation:P`, `station:S`).
+        /// The charge's scope (`m`, `operation:P`, `station:S`).
         scope: String,
         /// The provider Run, or the scope until the harness has reported one.
         run: String,
@@ -206,7 +206,7 @@ impl ReportFiler {
     /// The Run of an Agent's filing, which the rate limit counts.
     pub fn run(&self) -> Option<&str> {
         match self {
-            Self::Agent { run, .. } | Self::Watch { run, .. } => Some(run),
+            Self::Agent { run, .. } | Self::Charge { run, .. } => Some(run),
             _ => None,
         }
     }
@@ -216,7 +216,7 @@ impl ReportFiler {
     pub fn source_key(&self) -> String {
         match self {
             Self::Source { source, .. } => format!("source:{source}"),
-            Self::Agent { agent, .. } | Self::Watch { agent, .. } => format!("agent:{agent}"),
+            Self::Agent { agent, .. } | Self::Charge { agent, .. } => format!("agent:{agent}"),
             Self::Person { person } => format!("person:{person}"),
             Self::Probe { probe } => format!("probe:{probe}"),
             Self::Review { .. } => "review".to_owned(),
@@ -232,7 +232,7 @@ impl ReportFiler {
                 run,
                 mission,
             } => vec![agent, run, mission],
-            Self::Watch {
+            Self::Charge {
                 agent,
                 scope,
                 run,
@@ -312,7 +312,7 @@ impl ReportLink {
     }
 }
 
-/// What the scope's watch decided to do with a Report. Kept for the assessment that writes it.
+/// What the scope's charge decided to do with a Report. Kept for the assessment that writes it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReportAssessment {
@@ -438,7 +438,7 @@ pub struct Report {
     pub item: Option<SourceItem>,
     /// Where it stands.
     pub state: ReportState,
-    /// What the watch decided, once it has.
+    /// What the charge decided, once it has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assessment: Option<ReportAssessment>,
     /// How it ended, once it has.
@@ -891,7 +891,7 @@ impl ReportSource {
     }
 }
 
-/// Orders Reports for a watch: priority, then deadline, credibility, the source's reliability
+/// Orders Reports for a charge: priority, then deadline, credibility, the source's reliability
 /// and age (oldest first). Unset priority, deadline and credibility come last, and a source
 /// without a record counts as `F`.
 pub(super) fn order_reports(
@@ -1016,7 +1016,7 @@ pub trait ReportStore {
     /// `InvalidInput` for an ID that is not a Registry key; I/O errors otherwise.
     fn report(&self, id: &str) -> io::Result<Option<Report>>;
 
-    /// The Reports `filter` matches in a watch's order: priority, deadline, credibility, the
+    /// The Reports `filter` matches in a charge's order: priority, deadline, credibility, the
     /// source's reliability, then oldest first. Unreadable ones are skipped.
     ///
     /// # Errors

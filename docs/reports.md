@@ -3,7 +3,7 @@
 A **Report** is one record of something observed: an Agent's finding along the way, a person's
 note, the Head of Station's round. It is kept in the Registry against its **scope**, an
 Operation, a Station or M, and tied to what it is about. Filing a Report creates no Mission,
-brief or placement: an Operation's watch or a person decides what, if anything, it becomes.
+brief or placement: an Operation's charge or a person decides what, if anything, it becomes.
 
 Assessment (turning a Report into a Mission, a link, no action, a question or a decision) and the
 closing that follows it are not implemented yet: a Report is filed `open` and stays so, and its
@@ -135,7 +135,7 @@ update: a probe run twice, or a hold seen on every pass, is one Report. A Report
 stored is logged and never stops the check.
 
 A Source item's Report keeps the item as last polled and the decision on it, and the Operation's
-watch (or a person) decides it: [Items are Reports](missions.md#items-are-reports).
+charge (or a person) decides it: [Items are Reports](missions.md#items-are-reports).
 
 ## Clearances
 

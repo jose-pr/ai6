@@ -32,7 +32,7 @@ use crate::directorates::m::review::{ReviewChoice, ReviewPolicy, policies_from_r
 use crate::directorates::m::scorecard::{ScorecardDefinition, ScorecardPolicy};
 use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::m::vetting::{VettingPolicy, VettingSetting, policy_of};
-use crate::directorates::m::watches::{Watch, watches_from_records};
+use crate::directorates::m::charges::{Charge, charges_from_records};
 use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy};
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
@@ -48,8 +48,8 @@ const AGENTS_STEM: &str = "agents";
 const OPERATIONS_FILE: &str = "operations.toml";
 /// The review policies' file.
 const REVIEWS_FILE: &str = "reviews.toml";
-/// The watches' file.
-const WATCHES_FILE: &str = "watches.toml";
+/// The charges' file.
+const CHARGES_FILE: &str = "charges.toml";
 /// The clearances, lowest first.
 pub(crate) const CLEARANCES: &[&str] = &["desk", "field", "00"];
 
@@ -677,7 +677,7 @@ pub struct Operation {
     pub review: ReviewChoice,
     /// Work sources (trackers, CI) this Operation takes briefs from.
     pub sources: toml::Table,
-    /// Who decides what a Source item becomes; the Operation's watch unless configured.
+    /// Who decides what a Source item becomes; the Operation's charge unless configured.
     pub intake: SourceIntake,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
     pub sleepers: BTreeMap<String, Sleeper>,
@@ -840,7 +840,7 @@ pub struct Roster {
     assistant: AssistantSettings,
     settings: RosterSettings,
     reviews: BTreeMap<String, ReviewPolicy>,
-    watches: BTreeMap<String, Watch>,
+    charges: BTreeMap<String, Charge>,
 }
 
 /// How deep an Operation may sit in the tree of Operations by default: 64 levels, a root
@@ -1069,7 +1069,7 @@ pub struct RosterBuilder {
     assistant: AssistantSettings,
     settings: RosterSettings,
     reviews: BTreeMap<String, ReviewPolicy>,
-    watches: Vec<Watch>,
+    charges: Vec<Charge>,
 }
 
 impl RosterBuilder {
@@ -1097,9 +1097,9 @@ impl RosterBuilder {
         self
     }
 
-    /// Adds a watch; [`RosterBuilder::build`] checks its Agent and scope.
-    pub fn watch(mut self, watch: Watch) -> Self {
-        self.watches.push(watch);
+    /// Adds a charge; [`RosterBuilder::build`] checks its Agent and scope.
+    pub fn charge(mut self, charge: Charge) -> Self {
+        self.charges.push(charge);
         self
     }
 
@@ -1159,12 +1159,12 @@ impl RosterBuilder {
         }
         roster.reviews = self.reviews;
         roster.check_reviews()?;
-        roster.watches = self
-            .watches
+        roster.charges = self
+            .charges
             .into_iter()
-            .map(|watch| (watch.scope.to_string(), watch))
+            .map(|charge| (charge.scope.to_string(), charge))
             .collect();
-        roster.check_watches()?;
+        roster.check_charges()?;
         Ok(roster)
     }
 }
@@ -1233,7 +1233,7 @@ impl<'a> AgentQuery<'a> {
 }
 
 impl Roster {
-    /// Loads global `operations.toml`, `agents.toml`, `reviews.toml` and `watches.toml` from a
+    /// Loads global `operations.toml`, `agents.toml`, `reviews.toml` and `charges.toml` from a
     /// configuration directory. Missing files mean an empty registry; invalid files fail closed.
     pub fn load(root: impl Into<PathBuf>) -> Result<Self, RosterError> {
         let root = root.into();
@@ -1291,14 +1291,14 @@ impl Roster {
                 .map_err(|reason| error(format!("{source}: {reason}")))?;
         }
         roster.check_reviews()?;
-        let watches_file = root.join(WATCHES_FILE);
-        if watches_file.exists() {
-            let document: WatchesDocument = parse_file(&watches_file)?;
-            let source = watches_file.display();
-            roster.watches = watches_from_records(document.watch)
+        let charges_file = root.join(CHARGES_FILE);
+        if charges_file.exists() {
+            let document: ChargesDocument = parse_file(&charges_file)?;
+            let source = charges_file.display();
+            roster.charges = charges_from_records(document.charge)
                 .map_err(|reason| error(format!("{source}: {reason}")))?;
             roster
-                .check_watches()
+                .check_charges()
                 .map_err(|reason| error(format!("{source}: {reason}")))?;
         }
         Ok(roster)
@@ -1309,20 +1309,20 @@ impl Roster {
         &self.reviews
     }
 
-    /// The watches there are, by scope (`m`, `operation:<codename>`, `station:<id>`).
-    pub fn watches(&self) -> &BTreeMap<String, Watch> {
-        &self.watches
+    /// The charges there are, by scope (`m`, `operation:<codename>`, `station:<id>`).
+    pub fn charges(&self) -> &BTreeMap<String, Charge> {
+        &self.charges
     }
 
-    /// Checks that each watch names an Agent of the global roster, and Operations the roster has:
-    /// an Operation's watch its own, and the Operation its Cables go in.
-    fn check_watches(&self) -> Result<(), RosterError> {
-        for (scope, watch) in &self.watches {
-            watch
+    /// Checks that each charge names an Agent of the global roster, and Operations the roster has:
+    /// an Operation's charge its own, and the Operation its Cables go in.
+    fn check_charges(&self) -> Result<(), RosterError> {
+        for (scope, charge) in &self.charges {
+            charge
                 .settings
-                .validate(&watch.scope)
-                .map_err(|reason| error(format!("watch {scope:?} {reason}")))?;
-            let agent = &watch.settings.agent;
+                .validate(&charge.scope)
+                .map_err(|reason| error(format!("charge {scope:?} {reason}")))?;
+            let agent = &charge.settings.agent;
             let roster = &self.agents;
             let aliased = |entry: &AgentEntry| entry.aliases().iter().any(|alias| alias == agent);
             let Some(entry) = roster
@@ -1330,23 +1330,23 @@ impl Roster {
                 .or_else(|| roster.values().find(|entry| aliased(entry)))
             else {
                 return Err(error(format!(
-                    "watch {scope:?}: its Agent {agent:?} is not on the roster"
+                    "charge {scope:?}: its Agent {agent:?} is not on the roster"
                 )));
             };
-            // An Operation's watch is its 00 Agent in charge: it decides whether the Operation's
+            // An Operation's charge is its 00 Agent in charge: it decides whether the Operation's
             // Missions are done.
-            if watch.scope.operation().is_some() && entry.clearance() != "00" {
+            if charge.scope.operation().is_some() && entry.clearance() != "00" {
                 return Err(error(format!(
-                    "watch {scope:?}: its Agent {agent:?} holds clearance {:?}, and an Operation's \
-                     watch is kept by an Agent that holds 00",
+                    "charge {scope:?}: its Agent {agent:?} holds clearance {:?}, and an Operation's \
+                     charge is kept by an Agent that holds 00",
                     entry.clearance()
                 )));
             }
-            if let Some(operation) = watch.settings.cable_operation(&watch.scope)
+            if let Some(operation) = charge.settings.cable_operation(&charge.scope)
                 && self.operation(operation).is_err()
             {
                 return Err(error(format!(
-                    "watch {scope:?}: Operation {operation:?} is not on the roster"
+                    "charge {scope:?}: Operation {operation:?} is not on the roster"
                 )));
             }
         }
@@ -1806,9 +1806,9 @@ struct ReviewsDocument {
 
 #[derive(Debug, Default, FromValue)]
 #[map(deny_unknown_fields)]
-struct WatchesDocument {
+struct ChargesDocument {
     #[map(with = guatiao_serde::adapt::any, default)]
-    watch: BTreeMap<String, serde_json::Value>,
+    charge: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, FromValue)]
@@ -2151,7 +2151,7 @@ pub(crate) struct OperationDefinition {
     #[map(with = crate::directorates::m::family_forms::source_instances, default)]
     #[form(form = crate::directorates::m::family_forms::SourceInstanceForm)]
     sources: toml::Table,
-    /// Whether Source items are reported to the watch, which decides what each becomes, or
+    /// Whether Source items are reported to the charge, which decides what each becomes, or
     /// queued as briefs at once.
     #[schema(title = "Source intake", section = "sources", advanced)]
     #[map(default)]
@@ -2714,8 +2714,8 @@ pub(crate) struct RosterDefinitions {
     pub(crate) roles: Vec<(String, serde_json::Value)>,
     /// `[review.<name>]` tables.
     pub(crate) reviews: Vec<(String, serde_json::Value)>,
-    /// `[watch.<scope>]` tables.
-    pub(crate) watches: Vec<(String, serde_json::Value)>,
+    /// `[charge.<scope>]` tables.
+    pub(crate) charges: Vec<(String, serde_json::Value)>,
     /// The `[assistant]` table; `None` is the default settings.
     pub(crate) assistant: Option<serde_json::Value>,
     /// The `[roster]` table; `None` is the default settings.
@@ -2740,7 +2740,7 @@ pub(crate) fn roster_from_definitions(
         agents,
         roles,
         reviews,
-        watches,
+        charges,
         assistant,
         settings,
     } = definitions;
@@ -2804,10 +2804,10 @@ pub(crate) fn roster_from_definitions(
     roster
         .check_reviews()
         .map_err(|reason| error(format!("{source}: {reason}")))?;
-    roster.watches =
-        watches_from_records(watches).map_err(|reason| error(format!("{source}: {reason}")))?;
+    roster.charges =
+        charges_from_records(charges).map_err(|reason| error(format!("{source}: {reason}")))?;
     roster
-        .check_watches()
+        .check_charges()
         .map_err(|reason| error(format!("{source}: {reason}")))?;
     Ok(roster)
 }

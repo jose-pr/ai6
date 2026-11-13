@@ -114,7 +114,7 @@ pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 14] = [
     ("tls", ConfigRecord::Tls),
     ("cables", ConfigRecord::Cables),
     ("unex", ConfigRecord::Unex),
-    ("watches", ConfigRecord::Watch),
+    ("charges", ConfigRecord::Charge),
     ("theaters", ConfigRecord::Theater),
     ("loadouts", ConfigRecord::Loadout),
     ("sandboxes", ConfigRecord::Sandbox),
@@ -136,7 +136,7 @@ const ROSTER_KINDS: [(&str, ConfigRecord); 7] = [
     ("roster", ConfigRecord::Roster),
 ];
 
-/// The family a route kind names, in the family's name or its plural (`watch`, `watches`).
+/// The family a route kind names, in the family's name or its plural (`charge`, `charges`).
 fn family_of(kind: &str) -> Result<Family, ApiError> {
     let record =
         ai6::directorates::m::config::family_of_kind(kind).ok_or_else(ApiError::not_found)?;
@@ -185,7 +185,7 @@ async fn require(
     }
 }
 
-/// The audit target of a record: `watch operation:G`, or with a Station's own `loadout 007 (station:x)`.
+/// The audit target of a record: `charge operation:G`, or with a Station's own `loadout 007 (station:x)`.
 fn target_of(record: ConfigRecord, scope: &ai6::ConfigScope, key: &str) -> String {
     match scope {
         ai6::ConfigScope::Global => format!("{} {key}", record.name()),
@@ -1688,7 +1688,7 @@ mod tests {
 
         [[rule]]
         subject = "person:viewer-007"
-        scope = "config:watch"
+        scope = "config:charge"
         role = "config-readers"
 
         [role.config-managers]
@@ -1696,7 +1696,7 @@ mod tests {
 
         [[rule]]
         subject = "person:operator-007"
-        scope = "config:watch"
+        scope = "config:charge"
         role = "config-managers"
     "#;
 
@@ -1718,7 +1718,7 @@ mod tests {
 
     #[cfg(feature = "cli")]
     #[tokio::test]
-    async fn a_watch_is_listed_set_and_removed_under_its_own_action_and_audited() {
+    async fn a_charge_is_listed_set_and_removed_under_its_own_action_and_audited() {
         use ai6::{ConfigProvider, ConfigRecord, SqlProvider};
 
         let directory = tempfile::tempdir().unwrap();
@@ -1755,14 +1755,14 @@ mod tests {
                     .json()
                     .await
                     .unwrap();
-            assert_eq!(profile["config"]["watches"], held);
+            assert_eq!(profile["config"]["charges"], held);
         }
 
         let form = call(
             &served,
             &served.viewer,
             reqwest::Method::GET,
-            "roster/watches/schema",
+            "roster/charges/schema",
             None,
         )
         .await;
@@ -1776,7 +1776,7 @@ mod tests {
             &served,
             &served.viewer,
             reqwest::Method::PUT,
-            "roster/watches/operation:G",
+            "roster/charges/operation:G",
             Some(json!({"agent": "007"})),
         )
         .await;
@@ -1792,7 +1792,7 @@ mod tests {
         assert_eq!(
             other_family.status(),
             StatusCode::FORBIDDEN,
-            "config.manage on config:watch opens no other family"
+            "config.manage on config:charge opens no other family"
         );
         assert_eq!(station.revision("").unwrap(), before);
 
@@ -1800,7 +1800,7 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::PUT,
-            "roster/watches/operation:G",
+            "roster/charges/operation:G",
             Some(json!({"agent": "007", "max_turns_per_hour": 4})),
         )
         .await;
@@ -1812,22 +1812,22 @@ mod tests {
             station.revision("").unwrap().get().to_string()
         );
         let held = station.load("").unwrap();
-        let watch = &held.roster.watches()["operation:G"];
-        assert_eq!(watch.settings.agent, "007");
-        assert_eq!(watch.settings.max_turns_per_hour, ai6::Limit::at(4));
+        let charge = &held.roster.charges()["operation:G"];
+        assert_eq!(charge.settings.agent, "007");
+        assert_eq!(charge.settings.max_turns_per_hour, ai6::Limit::at(4));
 
         let listed: serde_json::Value = call(
             &served,
             &served.viewer,
             reqwest::Method::GET,
-            "roster/watches",
+            "roster/charges",
             None,
         )
         .await
         .json()
         .await
         .unwrap();
-        assert_eq!(listed["kind"], "watches");
+        assert_eq!(listed["kind"], "charges");
         assert_eq!(listed["writable"], true);
         assert_eq!(listed["records"][0]["key"], "operation:G");
         let revision = listed["records"][0]["revision"]
@@ -1836,21 +1836,21 @@ mod tests {
             .to_owned();
         let updates = audits(&served, "roster.update");
         assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].resource.as_deref(), Some("config:watch"));
-        assert_eq!(updates[0].target, "watch operation:G");
+        assert_eq!(updates[0].resource.as_deref(), Some("config:charge"));
+        assert_eq!(updates[0].target, "charge operation:G");
 
         let refused = call(
             &served,
             &served.operator,
             reqwest::Method::PUT,
-            "roster/watches/operation:G",
+            "roster/charges/operation:G",
             Some(json!({"agent": "no-such-agent"})),
         )
         .await;
         assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(audits(&served, "roster.refused").len(), 1);
         assert_eq!(
-            station.load("").unwrap().roster.watches()["operation:G"]
+            station.load("").unwrap().roster.charges()["operation:G"]
                 .settings
                 .agent,
             "007"
@@ -1860,7 +1860,7 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::DELETE,
-            "roster/watches/operation:G",
+            "roster/charges/operation:G",
             "0",
         )
         .await;
@@ -1869,15 +1869,15 @@ mod tests {
             &served,
             &served.operator,
             reqwest::Method::DELETE,
-            "roster/watches/operation:G",
+            "roster/charges/operation:G",
             &revision,
         )
         .await;
         assert_eq!(removed.status(), StatusCode::OK);
-        assert!(station.load("").unwrap().roster.watches().is_empty());
+        assert!(station.load("").unwrap().roster.charges().is_empty());
         let removals = audits(&served, "roster.remove");
-        assert_eq!(removals[0].resource.as_deref(), Some("config:watch"));
-        assert_eq!(removals[0].target, "watch operation:G");
+        assert_eq!(removals[0].resource.as_deref(), Some("config:charge"));
+        assert_eq!(removals[0].target, "charge operation:G");
     }
 
     #[cfg(feature = "cli")]
@@ -1963,7 +1963,7 @@ mod tests {
             }
         };
         let documents = json!({"records": [
-            {"kind": "watches", "key": "operation:G", "definition": {"agent": "007"}},
+            {"kind": "charges", "key": "operation:G", "definition": {"agent": "007"}},
             {"kind": "agent", "key": "007", "definition": {"handler": "mock-agent", "clearance": "00"}},
             {"kind": "operations", "key": "G", "definition": {"roster": ["007"]}},
         ]});
@@ -2010,7 +2010,7 @@ mod tests {
             station.revision("").unwrap().get().to_string()
         );
         assert_eq!(
-            station.load("").unwrap().roster.watches()["operation:G"]
+            station.load("").unwrap().roster.charges()["operation:G"]
                 .settings
                 .agent,
             "007"
@@ -2021,7 +2021,7 @@ mod tests {
             .iter()
             .map(|record| record.resource.clone().unwrap())
             .collect();
-        assert!(resources.contains(&"config:watch".to_owned()));
+        assert!(resources.contains(&"config:charge".to_owned()));
         assert!(resources.contains(&"config:roster".to_owned()));
 
         let same = apply(served.operator.clone(), documents).await;
@@ -2163,9 +2163,9 @@ mod tests {
                 .unwrap()
                 .clone()
         };
-        assert_eq!(kind("watch")["route"], "watches");
-        assert_eq!(kind("watch")["allowed"], json!(["config.read"]));
-        assert_eq!(kind("watch")["resource"], "config:watch");
+        assert_eq!(kind("charge")["route"], "charges");
+        assert_eq!(kind("charge")["allowed"], json!(["config.read"]));
+        assert_eq!(kind("charge")["resource"], "config:charge");
         assert_eq!(kind("agent")["allowed"], json!(["roster.read"]));
         // The Station record is served like the other station-scoped families.
         assert_eq!(kind("station")["route"], "station");

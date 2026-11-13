@@ -2153,7 +2153,7 @@ impl CableRelay {
         Ok(accepted)
     }
 
-    /// Tells `agent`, an Operation's watch, something the Station itself saw, as a Cable from
+    /// Tells `agent`, an Operation's charge, something the Station itself saw, as a Cable from
     /// `from`, a name such as `source:github` that is no Agent: no grant lets it send, so only
     /// the receiver's grant and inbound mode apply, and the notice is audited like any send.
     /// Sent again under the same `key`, it is the Cable already sent.
@@ -2194,7 +2194,7 @@ impl CableRelay {
             .policy
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
-        // Only the watch is told, whichever of the Operation's Runs are live: the Cable
+        // Only the charge is told, whichever of the Operation's Runs are live: the Cable
         // waits for its Run between turns or its next one.
         let mut recipients = Vec::new();
         if self.allows(&policy, agent, CableAction::Receive, &target) {

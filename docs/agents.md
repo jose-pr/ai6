@@ -229,13 +229,13 @@ Run (`modelProvider`), never those that decide what it may do.
 
 ## 00 coordination
 
-The 00 Agent in charge of an Operation is the Operation's [watch](watches.md): an Agent with `00`
-clearance that the Operation's `[watch."operation:CODENAME"]` table names, kept as one standing
+The 00 Agent in charge of an Operation is the Operation's [charge](charges.md): an Agent with `00`
+clearance that the Operation's `[charge."operation:CODENAME"]` table names, kept as one standing
 Run that is not a Mission. It replaces the 00 coordinator that was the Run of one Mission.
 It decides the Operation's Missions that are verifying, takes Cables to the Operation, and has
 `propose_mission` among its tools: it submits a child-Mission brief to the Operation's pending
-proposal inbox, naming the watch's own Run where a Mission's Run would be named. An
-Agent whose clearance is not `00` is refused when the watch is configured. A Mission's own Run
+proposal inbox, naming the charge's own Run where a Mission's Run would be named. An
+Agent whose clearance is not `00` is refused when the charge is configured. A Mission's own Run
 at `00` clearance keeps `propose_mission` too. AI6 binds the
 proposer, parent Mission, provider Run and Operation; proposals stay outside runnable I
 intake until M explicitly authorizes and promotes them. Universal Exports' authenticated
@@ -395,7 +395,7 @@ step 2. A restricted thread that uses a tool anyway is ended (above).
 AI6's **Cable** relay supports Agent unicast and permission-scoped Station, Theater,
 Global and named-channel broadcasts. Its MCP tools provide peer discovery, sending,
 inbox reads, acknowledgements, replies and explicitly authorized held-Cable release. An
-authorized 00 Agent, and an Operation's watch, also has the `propose_mission` tool for submitting
+authorized 00 Agent, and an Operation's charge, also has the `propose_mission` tool for submitting
 work to M; this does not make the proposal a Cable or scheduler input. The Station checks the Agent's clearance
 again on every proposal, so a lowered clearance or a retirement stops a running Run's
 proposals at once. Every Agent has `request_approval`, which
@@ -489,9 +489,9 @@ wake_on_cable = true   # the default; false leaves its Cables for its own read_c
 wakes_per_hour = 60    # the default; 0 wakes none
 ```
 
-An Agent that keeps a [watch](watches.md) takes its Cables in the watch's Run instead: each
-is a `cable` event of a wake, counted against the watch's own `max_turns_per_hour`, not
-`wakes_per_hour`. A watch is not a Mission, and its Agent is best kept for the watch alone: a
+An Agent that keeps a [charge](charges.md) takes its Cables in the charge's Run instead: each
+is a `cable` event of a wake, counted against the charge's own `max_turns_per_hour`, not
+`wakes_per_hour`. A charge is not a Mission, and its Agent is best kept for the charge alone: a
 Cable to the Agent goes to whichever of its Runs reads it first.
 
 Neither path adds authority: the relay asks for the sender's and the receiver's grants and for
@@ -518,7 +518,7 @@ and `memory_forget`, for its Operation's memory and the global one ([Memories](m
 Every Run has `file_report` on its AI6 MCP server: what it observed that someone should know or
 decide about, a problem found along the way, a risk, an idea for later work. It is a
 [Report](reports.md) of its Operation, linked to its Mission, and it starts no work: the Operation's
-watch or a person assesses it, and `propose_mission` is still how an Agent asks for work.
+charge or a person assesses it, and `propose_mission` is still how an Agent asks for work.
 
 | Argument | What |
 | --- | --- |

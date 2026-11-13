@@ -139,7 +139,7 @@ that table bound the people kept, a record and a name.
 `operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads),
 `config:assistant` (Moneypenny's repositories), `config:memory` (the global
 [memory](memories.md)), `config:access` (the global policy) or
-`config:accounts` (the accounts) or `config:<family>` (a [configuration family](configuration.md#families) such as `config:watch`); the
+`config:accounts` (the accounts) or `config:<family>` (a [configuration family](configuration.md#families) such as `config:charge`); the
 first rule that matches decides, and no match denies. The actions Universal Exports checks
 are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
 `assistant.memory.admin`, `audit.read`,

@@ -571,18 +571,18 @@ global one.
 | `kept_days` | 8 | Days of usage kept. |
 <!-- schema:registry.limits.usage:end -->
 
-`[registry.limits.watches]`: each watch's record ([Watches](watches.md)).
+`[registry.limits.charges]`: each charge's record ([Charges](charges.md)).
 
-<!-- schema:registry.limits.watches:begin -->
+<!-- schema:registry.limits.charges:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `records` | 1,024 | **Watch records.** Watch records the Registry keeps. |
-| `record_bytes` | 1 MiB | **Largest watch record.** Bytes of one watch's record. |
-| `logbook` | 100 | **Logbook entries per watch.** Logbook entries kept per watch, and handed to a fresh Run; past it the oldest go. |
+| `records` | 1,024 | **Charge records.** Charge records the Registry keeps. |
+| `record_bytes` | 1 MiB | **Largest charge record.** Bytes of one charge's record. |
+| `logbook` | 100 | **Logbook entries per charge.** Logbook entries kept per charge, and handed to a fresh Run; past it the oldest go. |
 | `entry_bytes` | 2 KiB | **Longest logbook entry.** Bytes of one logbook entry's text, or of a control's note; a longer entry is cut. |
-| `seen` | 1,024 | **Events remembered per watch.** Events a watch remembers being told of, so it is not told twice; past it the oldest go. |
-| `controls` | 32 | **Controls waiting per watch.** Controls waiting for a watch's Station; past it a control is refused. |
-<!-- schema:registry.limits.watches:end -->
+| `seen` | 1,024 | **Events remembered per charge.** Events a charge remembers being told of, so it is not told twice; past it the oldest go. |
+| `controls` | 32 | **Controls waiting per charge.** Controls waiting for a charge's Station; past it a control is refused. |
+<!-- schema:registry.limits.charges:end -->
 
 ### `ai6ctl`
 
@@ -909,7 +909,7 @@ no-op is stored at once.
 | `unex` | `unex` | no | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: Universal Exports' sign-in, limits and assistant |
 | `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 | `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
-| `watch` | `watches` | no | no | live | Roster page (Watches), route `/v1/user/roster/watches` | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
+| `charge` | `charges` | no | no | live | Roster page (Charges), route `/v1/user/roster/charges` | `[charge.<scope>]`: [charges](charges.md), keyed `m`, `operation:<codename>` or `station:<id>` |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live
 reaches requests, the scheduler and new Runs at once; running Runs keep what they
@@ -1668,20 +1668,20 @@ ai6 config public --output web/ai6.cfg     # the public file a web page reads
 ```
 
 Records are managed with `ai6ctl`, through Universal Exports and under the person's actions, as
-`kubectl` manages a cluster through its API server. A kind is a family's name (`watch`, `agent`,
+`kubectl` manages a cluster through its API server. A kind is a family's name (`charge`, `agent`,
 `loadout`), or its plural.
 
 ```console
 ai6ctl api-resources                        # the kinds, the action each needs and which you hold
 ai6ctl get agent                            # every Agent, as a document `apply` reads back
 ai6ctl get agent 007 -o yaml                # one record; -o cfg (the default), toml, json or yaml
-ai6ctl get watch operation:G wake_every     # one field, dotted for a nested table
+ai6ctl get charge operation:G wake_every     # one field, dotted for a nested table
 ai6ctl apply -f ./config/                   # every document of a directory (but ai6.cfg)
-ai6ctl apply -f agents.cfg -f watches.yaml  # any documents, each with any kinds' tables
+ai6ctl apply -f agents.cfg -f charges.yaml  # any documents, each with any kinds' tables
 ai6 config public | ai6ctl apply -f -       # standard input, read as a .cfg is
 ai6ctl apply --dry-run -f agents.cfg        # check against the stored records; store nothing
-ai6ctl set watch operation:G max_turns_per_hour=4   # fields of the stored record, values by their type
-ai6ctl unset watch operation:G max_turns_per_hour   # back to the default
+ai6ctl set charge operation:G max_turns_per_hour=4   # fields of the stored record, values by their type
+ai6ctl unset charge operation:G max_turns_per_hour   # back to the default
 ai6ctl edit agent 007                       # the record in $EDITOR, stored on save
 ai6ctl delete agent 007                     # refused while another record names it
 ai6ctl apply --station hq-1 -f hq-1.cfg     # a Station's own records (--station on every verb)
@@ -1689,7 +1689,7 @@ ai6ctl apply --station hq-1 -f hq-1.cfg     # a Station's own records (--station
 
 A document is read by extension (`.cfg` and `.toml` are TOML, `.json`, `.yaml`, `.yml`), a `.cfg`
 may name another format on its first line (`#!yaml`), and `--format` overrides both. Its top-level
-tables name the kinds: `[agent.007]`, `[watch."operation:G"]`, a singleton's `[assistant]`, the
+tables name the kinds: `[agent.007]`, `[charge."operation:G"]`, a singleton's `[assistant]`, the
 plugins' `[[library]]` entries. A document named for a whole-file family's file (`access.toml`,
 `station.json`) that has no table of that family's name is the record itself.
 

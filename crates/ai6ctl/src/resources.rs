@@ -1,6 +1,6 @@
 //! `ai6ctl get|apply|edit|set|unset|delete|api-resources`: the records of the configuration
 //! provider, managed through the gateway under the person's actions. A kind is a family's name
-//! (`watch`, `agent`, `theater`), or its plural.
+//! (`charge`, `agent`, `theater`), or its plural.
 
 use std::collections::BTreeSet;
 use std::io::{IsTerminal as _, Read as _, Write as _};
@@ -71,7 +71,7 @@ pub(crate) struct Scope {
 /// `ai6ctl get KIND [KEY] [FIELD]`.
 #[derive(Debug, Args)]
 pub(crate) struct Get {
-    /// The kind of record: watch, agent, operation, ...; `ai6ctl api-resources` lists them.
+    /// The kind of record: charge, agent, operation, ...; `ai6ctl api-resources` lists them.
     kind: String,
     /// One record's key; a kind with a single record is keyed `settings`.
     key: Option<String>,
@@ -91,7 +91,7 @@ pub(crate) struct Get {
 #[derive(Debug, Args)]
 pub(crate) struct Apply {
     /// A document, or a directory of them (but `ai6.cfg`, the bootstrap), or `-` for standard
-    /// input read as a `.cfg` is. Each holds the tables of any kinds: `[watch.KEY]`,
+    /// input read as a `.cfg` is. Each holds the tables of any kinds: `[charge.KEY]`,
     /// `[agent.KEY]`, `[assistant]`, ...
     #[arg(
         short = 'f',
