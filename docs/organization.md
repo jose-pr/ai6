@@ -100,7 +100,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Sleepers** | real tradecraft | Standing orders: a schedule wakes an Agent with a set brief, once each authorized by M (`operation.<id>.sleepers`) |
 | **CX report** | real (SIS reporting) | The outcome report a Source receives when its Mission ends: an issue comment, a Jira transition |
 | **Chief of Staff** | novel, film | The `chief-of-staff` role: reviews untrusted briefs before M places them, and can only hold them; the deterministic vetting before it is M's (`operation.<id>.vetting`) |
-| **Head of Station** | novel and real (SIS) | The `head-of-station` role: a round of each Station on a schedule, with the Station's logbook ([Stations](stations.md#head-of-station)) |
+| **Chief of Station** | novel and real (SIS) | The Station's charge: keeps it fit, provides what 00s ask ([Stations](stations.md#chief-of-station)) |
 | **Liaison** | real | A2A, as Cables ([Liaison](liaison.md)) |
 
 ## Planned posts
@@ -122,7 +122,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
 | **Run / Run ID** | an agent run of a Mission or a charge, one UUID AI6 makes (`id`; `run_id` elsewhere); a Mission starts its next Run, a Run starts or resumes: executed |
 | **Conversation** | a chat with Moneypenny; the run behind it is a Run |
-| **Charge** | what an Agent answers for (an Operation's `00`, a Station's Head of Station, M's service); one standing Run ([Charges](charges.md)) |
+| **Charge** | what an Agent answers for (an Operation's `00`, a Station's Chief of Station, M's service); one standing Run ([Charges](charges.md)) |
 | **Session** | only another protocol's word, at its wire (ACP `sessionId`, sign-in sessions, `Mcp-Session-Id`); never a Run |
 | **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |
 | **Headquarters Station (HQS)** | the control Station holding the current Headquarters lease |

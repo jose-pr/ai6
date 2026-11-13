@@ -207,67 +207,57 @@ view of Station health, roles, capacity, the Operations each Station serves, the
 each Station reaches and the current Headquarters Station; host and process details are
 omitted.
 
-## Head of Station
+## Chief of Station
 
-The **Head of Station** keeps each Station fit: its free space, its safe houses, its
-Theaters. It is an Agent role, `head-of-station`, not a process of its own: each **round** is
-an ordinary Mission that an `each_station` [Sleeper](missions.md#sleepers) queues for every
-Station, narrowed to that Station, under an Operation set aside for housekeeping.
+A Station answers for **running**, and for **providing** what the Operations that work on it ask of
+it. The **Chief of Station** (`head_of_station` in code and in the settings) is the
+[charge](charges.md) that does this: one standing Run, `station:<id>`, kept by an Agent of your
+choice on that Station. It is not a Mission and no Sleeper queues it; the Station wakes it with what
+happened, and it takes a turn. It keeps the Station fit (its free space, its safe houses, its
+Theaters), watches its Runs' progress, and answers the 00 Agents who ask it for an Agent, a Theater,
+an account or capacity. It never judges an Operation's work: that is the Operation's 00 Agent's
+([Missions](missions.md#verifying)).
 
 ```toml
-# operations.toml
-[operation.housekeeping]
-path = "/var/lib/ai6/housekeeping"   # must exist on every Station that keeps rounds
-clearance = "field"
-
-[operation.housekeeping.sleepers.rounds]
-schedule = "0 * * * *"               # hourly, in UTC
-title = "Station round"
-prompt = "Look over this Station with station_report, act within its limits and file_report what you found."
-role = "head-of-station"
-each_station = true
-
-# agents.toml
-[role.head-of-station]
-purpose = "Keep one Station fit: disk, safe houses and Theaters."
-policy = "Act only through the Station's tools and within their limits; report the rest."
+# charge records (Roster, Charges)
+[charge."station:hq-1"]
+agent = "chief"           # any Agent whose handler this Station can start
+stall_after = 1800        # seconds a Run may make no progress before it is told of; "none" leaves it to the Run's watchdog
 ```
 
-Qualify an Agent for the role (`roles = [..., "head-of-station"]`) and authorize the rounds:
-`ai6 sleeper authorize housekeeping rounds`.
+The charge's other settings (`wake_every`, `max_turns_per_hour`, `lease`, …) are the ones every
+charge has ([Charges](charges.md#configuration)); like them, `stall_after` is a record edited live,
+never a restart-only setting. A Station's charge sends and receives Cables only once its table names an `operation` for them.
 
-- **A round per Station per window.** Headquarters queues one brief for each Station whose
-  last check-in placement accepts for the Operation, keyed by the window and the Station, so
-  a failover never doubles a round. A busy Station's round waits for room.
-- **Rounds, not one long Run.** A single endless Run would hit context limits, park
-  on provider limits and spend tokens idling; each round is a Mission of its own. What one
-  round saw reaches the next through the Station's **logbook**: the newest 20 reports, kept
-  in the Registry (`logbook/<station>.json`, or the `ai6_logbooks` table) and handed to each
-  round as context, fenced as data.
-- **Which Mission is a round.** Only this Station's round of an authorized `each_station`
-  Sleeper, as the Registry recorded where its brief entered, gets the logbook and the
-  Station's tools: its role is `head-of-station`, it names this Station alone, and the Sleeper
-  is still configured and authorized exactly as it was when it fired. A brief anyone writes
-  with that role and Station is not a round; Universal Exports refuses the role on a brief, an
-  Agent may not propose it, and revoking the Sleeper takes the tools away from a round.
-- **Untrusted text.** The logbook reaches a round with every line quoted, and
-  `station_report` quotes what other Missions' Agents wrote (commit subjects, branch names),
-  so a round that reads either is treated as exposed to untrusted input: it sends no Cable
-  that is not a reply, and its requests always go to a person.
+- **One Run, a logbook.** A single endless Run would hit context limits and spend tokens idling, so
+  the Station wakes the charge only for events (and every `wake_every`); the Run is resumed across
+  turns and restarts, and a fresh one is given the charge's logbook. The Station's own logbook of
+  filed reports (the newest 20, kept in the Registry as `logbook/<station>.json` or the `ai6_logbooks`
+  table) is what the next check-in publishes.
+- **What wakes it.** A Run that has made no progress for `stall_after`, or that its own watchdog
+  judged stalled (`health`, flag `run-stalled`, told once per Run); a request of an Operation's 00
+  Agent (`request`, below); a quarantine of an Agent it works with; a Cable to the charge's Agent; a
+  person's control; the timer.
+- **Untrusted text.** `station_report` quotes what other Missions' Agents wrote (commit subjects,
+  branch names) and a request carries the asker's words, so a charge that reads them is treated as
+  exposed to untrusted input: it sends no Cable that is not a reply, and its requests always go to a
+  person.
 
 ### Station tools and reports
 
-A round's Cable endpoint also lists two tools that no other Run has:
+The charge's Cable endpoint also lists tools that no other Run has. Every call checks again that this
+Station still runs the charge.
 
-- `station_report`: the Station's capacity and the Missions not over, free space where its
-  state and safe houses are, its resources, each Theater it reaches and why placement would
-  not use it, every safe house it keeps (the Mission's state, age, size, cache directories and
-  whether its work exists anywhere else, as the safe-house provider tells it), provider
-  libraries loaded without a pin, and the limits below. It carries no secret: no environment
-  value, token, loadout or brief text.
+- `station_report`: the Station's capacity and the Missions not over, each with how long its Run has
+  made no progress and whether that counts as `stalled`; the **queue** (Missions this Station holds
+  the claim on that have no Run here yet, and the briefs no Station has claimed); free space where
+  its state and safe houses are; its resources; each Theater it reaches and why placement would not
+  use it; every safe house it keeps (the Mission's state, age, size, cache directories and whether its
+  work exists anywhere else, as the safe-house provider tells it); provider libraries loaded without a
+  pin; and the limits below. It carries no secret: no environment value, token, loadout or brief text.
 - `file_report { summary, findings }`: findings are typed (`disk`, `theater`, `safe-house`,
-  `provider`, `other`) with a severity (`info`, `warning`, `critical`). The report goes into
-  the logbook, is published with the Station's next check-in (`head_of_station` in
+  `provider`, `other`) with a severity (`info`, `warning`, `critical`). The report goes into the
+  logbook, is published with the Station's next check-in (`head_of_station` in
   `GET /v1/stations` for people with `station.read` on `station:ID`, since it covers every
   Operation there, and on the Station's card in Outer Office), and is sent as a Cable to the
   `heads-of-station` channel when `cables.toml` defines it and lets the Agent send there:
@@ -284,13 +274,52 @@ name = "heads-of-station"
 heads-of-station = ["007", "008"]
 ```
 
-The same report is also kept as a [Report](reports.md) of the Station (kind `station`, linked to
-the round's Mission), read with `station.read` on `station:ID`; when it cannot be stored, the logbook
-entry stands and the answer says why.
+The same report is also kept as a [Report](reports.md) of the Station (kind `station`, filed by the
+charge, linked to no Mission), read with `station.read` on `station:ID`; when it cannot be stored,
+the logbook entry stands and the answer says why.
 
-Every call checks again that its Mission is still a live round of this Station; a round that is over
-is refused. A Run of any other role has none of the Station's tools, and its `file_report` files
-a Report of its own Operation, not a round's report.
+- `tidy_safe_house`, `provision_theater`: below.
+- `surrender_claim { mission, reason? }`: gives up this Station's claim on a **stalled** Mission. See
+  [Runs that make no progress](#runs-that-make-no-progress).
+- `answer_request { request, operation, kind, name?, decision, reason? }`: see
+  [What an Operation asks of a Station](#what-an-operation-asks-of-a-station).
+
+### Runs that make no progress
+
+A Run counts as stalled when it has made no progress (output, or an operator's input) for the charge's
+`stall_after`, or when its own watchdog already judged the Mission stalled. A Run that waits on a
+person (green ink, a question) is never stalled. The charge is told once per Run, and `station_report`
+shows `quiet_secs` and `stalled` for every Run.
+
+`surrender_claim` is the one way the charge ends a Run, and the Station, not the charge, decides
+whether it may: a Mission that is not stalled, one that waits on someone, one that is over, or one
+this Station does not keep is refused and nothing is touched. When it is accepted the Station stops the
+Run and lets its leases lapse, and the Registry queues the brief again (the Mission is `abandoned` here)
+or files it under the Operation's `on_lost`, exactly as for a Run whose harness is gone. The surrender is
+audited (`head_of_station.surrendered`).
+
+### What an Operation asks of a Station
+
+The Operation's 00 Agent in charge asks with `request_resources { kind, name?, detail?, station?,
+idempotency_key? }`, `kind` being `agent`, `theater`, `account` or `capacity`. The request is a record
+in the Registry addressed to the Station's charge (default: the Station that runs the 00's charge), so
+the two charges can be on different Stations. The Station's charge is woken with a `request` event that
+carries the asker's words (untrusted) and **the Station's own check** of what it can provide:
+
+| Kind | `can_provide` | `cannot_provide` |
+| --- | --- | --- |
+| `theater` | the Theater and an Agent M's placement would put a Mission on here | busy (the Operation's or Agent's `max_concurrent` or the Station's places are taken), not fitted (the Theater is not among the places that fit, with the unmet requirement), outside the Operation's allowance |
+| `agent` | the Agent and the Theater it would run on | as above, plus a handler this Station lacks |
+| `capacity` | a place, with the Theater and Agent | as above |
+| `account` | the pools with an account that has room (no account is named or claimed) | no room, or outside the Operation's allowance (its `pools`) |
+
+It answers with `answer_request`: `provide`, or `refuse` with the reason. The Station verifies a
+provision again before it is promised, so a charge that says `provide` for what the Station cannot give
+sends a refusal with the Station's reason. The answer is a record addressed to the Operation's charge,
+which wakes with a `resources` event. Both are audited (`resources.requested`, `resources.answered`).
+Being outside the Operation's allowance means the Operation's `stations` does not name this Station, a
+`station_labels` entry does not match, or a pool does not admit it; the Station never judges the
+Operation's work, only what it can run and provide.
 
 ### Safe-house hygiene: fixed limits
 
@@ -303,8 +332,9 @@ Station enforces in its own code, whatever the prompt or the Operation's policy 
 | Read anything `station_report` shows | always |
 | `caches`: remove the cache directories (`target`, `node_modules`, `.dart_tool`; the `station` record's `safe_house_caches` replaces the list); in a Git safe house only those Git ignores whole | unattended, for a Mission that is over whose safe house has been left alone for 7 days (`safe_house_cache_age`) |
 | `remove` a safe house whose work all exists elsewhere (every commit on a remote, checked against the remote itself; nothing uncommitted or untracked; ignored files only inside cache directories) | unattended, for a Mission that is over |
-| `remove` a safe house holding anything else (unpushed commits, uncommitted or ignored files such as `.env`, submodules, Git LFS objects), or whose provider cannot tell (the `copy` provider) | green ink, kind `safe-house-delete`, asked of the Operation the safe house belongs to; no class authorisation approves it. The round carries on; a later call, in this round or a later one, removes it once a person approved, spending that approval on that one removal |
+| `remove` a safe house holding anything else (unpushed commits, uncommitted or ignored files such as `.env`, submodules, Git LFS objects), or whose provider cannot tell (the `copy` provider) | green ink, kind `safe-house-delete`, asked of the Operation the safe house belongs to; no class authorisation approves it. The charge carries on; a later call, in this wake or a later one, removes it once a person approved, spending that approval on that one removal |
 | `provision_theater` with `apply`: the steps a Theater's declaration calls for | unattended; anything outside the declaration is a finding |
+| `surrender_claim` on a Mission whose Run is stalled | unattended |
 | Change configuration, the roster or policy; read a secret; act on another Station; touch the safe house of a Mission that is not over | never: the tools cannot, or refuse |
 
 `provision_theater { theater, apply }` checks a Theater this Station reaches against its
@@ -316,7 +346,7 @@ A green ink request for a removal is made even when the Operation's green ink po
 the Agent delete unattended. A tidy holds the Mission's start reservation while it works, so a
 retry or resume of that Mission waits for it, and a tidy of a Mission being started is
 refused. Applying a Theater's provisioning is refused while a Mission of this Station works on
-it, and a failed step's output is withheld from the round (`ai6 theater provision` shows it). Every removal is audited (`head_of_station.caches_removed`,
+it, and a failed step's output is withheld from the charge (`ai6 theater provision` shows it). Every removal is audited (`head_of_station.caches_removed`,
 `head_of_station.removed`) with the Station as its resource.
 
 ## Station identity

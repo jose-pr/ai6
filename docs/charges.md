@@ -11,9 +11,10 @@ own record in the Registry, which names its scope where a Mission's Run record n
 Mission.
 
 The Operation's charge decides the Missions that wait in `verifying`
-([Missions](missions.md#verifying)) and what the Operation's [Sources](#source-items) report; the
-Chief of Station taking over the [Head of Station](stations.md#head-of-station) rounds comes in a
-later release. This page describes the Run they all run in.
+([Missions](missions.md#verifying)) and what the Operation's [Sources](#source-items) report. The
+Station's charge, the [Chief of Station](stations.md#chief-of-station), keeps its Station fit and
+provides what the Operations ask of it. [M's charge](#m-and-the-board) watches the whole deployment.
+This page describes the Run they all run in.
 
 ## Scopes and where a charge runs
 
@@ -66,6 +67,8 @@ allow `00` as well, or the Agent cannot serve it.
 | `max_waiting_events` | 500 | **Events waiting.** Events waiting for a turn; past it the oldest are dropped, and the charge's logbook says how many. |
 | `turn_timeout` | 1,800 | **Longest turn.** Seconds one turn may run before the Station interrupts it. |
 | `lease` | 60 | **Held without renewing for.** Seconds the Station running the charge holds it without renewing before another Station may take it over. |
+| `stall_after` | 1,800 | **Run stalled after.** For a Station's charge: seconds a Run of that Station may make no progress before the charge is told it is stalled and may surrender its claim; `none` leaves it to the Run's own stall judgement. |
+| `poll_frozen_after` | 600 | **Source poll frozen after.** For M's charge: seconds a Source poll may run, or a Source stay unpolled past its interval, before the charge is told the poll is frozen; `none` never flags one. |
 <!-- schema:record.charge:end -->
 
 The Registry bounds what a charge's record keeps in [`[registry.limits.charges]`](configuration.md).
@@ -95,7 +98,9 @@ The Station wakes a charge with what its area holds that the charge has not been
 | --- | --- | --- |
 | `verifying`: a Mission of the Operation enters `verifying`, on any Station | `operation:` | always: it carries the final report and the brief |
 | `cable`: a Cable to the charge's Agent, or to its Operation | any, when its Cables have an Operation | always |
-| `health`: an Agent quarantined in the area; for M, a Station whose check-ins stopped | all | the quarantine's reason |
+| `health`: an Agent quarantined in the area; for M, a Station whose check-ins stopped and a Source poll that froze; for a Station's, a Run that stopped making progress | all | the quarantine's reason |
+| `request`: an Operation's 00 asked this Station for an Agent, a Theater, an account or capacity, with the Station's own check of what it can provide | `station:` | always: it carries the asker's words |
+| `resources`: a Station answered a request of the Operation | `operation:` | always: it carries the Station's reason |
 | `control`: a person asked the charge to wake, with an optional note | all | when it carries a note |
 | `timer`: `wake_every` passed with no other wake | all | no |
 
@@ -123,13 +128,14 @@ A charge's tools are its scope's, and their rules are Station code:
 - **Cables**, on a charge whose Cables have an Operation: its own, or for M's and a Station's charge
   the `operation` its table names. It sends, reads and replies under that Operation's Cable grants
   like any Agent ([Agents](agents.md#cables)).
-- **`station_report` and `file_report`**, on a Station's charge: the Head of Station's read of the
-  Station and its logbook, each call checking that this Station still runs the charge.
+- **The Station charge's tools**, on a Station's charge: `station_report`, `file_report`,
+  `tidy_safe_house`, `provision_theater`, `surrender_claim` and `answer_request`, each call checking
+  that this Station still runs the charge ([Stations](stations.md#chief-of-station)).
 - **The Operation charge's tools**, on an Operation's charge: `operation_missions`, `mission_detail`,
   `deliverables`, `deliverable_probe`, `verify_mission`, `redispatch` and `propose_mission`
-  ([below](#deciding-missions)).
-
-The Chief of Station's other tools come with the phases that give each charge its work.
+  ([below](#deciding-missions)), and `request_resources` to ask a Station for what the Operation
+  needs to run ([Stations](stations.md#what-an-operation-asks-of-a-station)).
+- **`raise_flag`**, on M's charge ([below](#m-and-the-board)).
 
 ## Deciding Missions
 
@@ -155,6 +161,20 @@ A Cable to the Operation (its coordinating role) goes to its charge alone when t
 and reaches it as a message ([Agents](agents.md#cables)); it creates no Mission. Only the
 Operation's own 00 Agents see it when there is no charge. A charge that leaves a Mission
 `verifying` leaves it for a person, shown on the board.
+
+## M and the board
+
+M's charge runs on the Headquarters Station and keeps the whole deployment. It is woken when a
+Station that checked in has stopped (`health`, flag `station-dark`) and when a Source's polls have
+stopped finishing (`health`, flag `source-poll-frozen`): a poll in flight longer than
+`poll_frozen_after`, or none finished for that long past the Source's interval. A hung provider call holds up
+the desk that polls, so every Source stops finishing, and each is told. A Source taken out of the
+configuration is not frozen. A person's controls reach it as for any charge.
+
+It acts only through controls M already has, and adds none. Its one tool, `raise_flag { title, text,
+severity?, kind? }`, files a [Report](reports.md) of M's own scope (`ai6ctl reports`, and the Reports
+page of Outer Office), which is the board's flag: it starts no work and changes nothing, and each is
+audited (`flag.raised`). It sends Cables like any charge whose table names an `operation`.
 
 ## Source items
 

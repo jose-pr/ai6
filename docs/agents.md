@@ -535,8 +535,8 @@ charge or a person assesses it, and `propose_mission` is still how an Agent asks
 Reports, another's only through a compartment granting `mission.read` there (audited, and marking
 the Run exposed as that Operation's product), and a Report's content only when the Agent is read
 in to each of its compartments and cleared for its classification; otherwise it sees the tearline, or
-the ID and markings alone. A Head of Station round's `file_report` is its round's report
-([Stations](stations.md)), also kept as a Report of its Station. Filing is rate limited per Run
+the ID and markings alone. The Station's charge files its report with `file_report`
+([Stations](stations.md#chief-of-station)), also kept as a Report of its Station. Filing is rate limited per Run
 and per Operation (`[registry.limits.reports]`).
 
 ## Clearance

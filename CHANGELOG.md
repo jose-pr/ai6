@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The Station's charge is the Chief of Station: one standing Run per Station (`station:<id>`) that keeps
+  the Station fit and provides what the Operations ask of it, replacing the Head of Station rounds that an
+  `each_station` Sleeper queued as Missions. Its tools are `station_report` (now with each Run's quiet
+  time, whether it counts as stalled, and the queue), `file_report`, `tidy_safe_house`,
+  `provision_theater`, and two new ones: `surrender_claim` stops a stalled Run and gives its brief back to
+  the Registry, and `answer_request` answers an Operation's 00. A Run that makes no progress for the
+  charge's `stall_after` (default 1800 seconds; `none` leaves it to the Run's watchdog) is told to the
+  charge once.
+- An Operation's 00 asks a Station for an Agent, a Theater, an account or capacity with
+  `request_resources`; the Station's charge provides it or says why not (busy, not fitted, outside the
+  Operation's allowance) and the answer wakes the 00. The Station checks every provision itself, so a
+  promise it cannot back is sent as a refusal with its reason; both are audited.
+- M's charge watches Source polls: a poll in flight, or none finished past the Source's interval, for
+  longer than `poll_frozen_after` (default 600 seconds; `none` never) wakes it, and its `raise_flag` tool
+  puts what it finds on M's board as a Report of M's scope.
 - Outer Office has a Reports page under Work: one row per Report across the Operations and Stations the
   person reads, filtered by Operation, state, who filed it, classification, kind and priority, with the
   selected Report beside the list (its filer, source reliability, markings, assessment and resolution). A
@@ -121,6 +136,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A Sleeper has no `each_station` (one brief per Station per window); the Chief of Station's charge is
+  woken instead. Removing it changes every Sleeper's fingerprint, so each stored authorization must be
+  given again, and an Operation record that still sets `each_station` is refused. Gone with it:
+  `ai6::HEAD_OF_STATION_ROLE`, `ai6::is_head_of_station_role` (a brief or a proposal may name any role),
+  `sleeper_brief`'s and `SleeperStore::fire_sleeper`'s per-Station parameter, the Station argument of
+  `MissionEntry::sleeper` and `MissionEntry::standing`, and the `station:logbook` exposure source.
 - Missions' state filters that no Mission is in are left out until one is.
 - A Session is a Run, a watch is a charge, and a Mission's attempt is its next Run. The word Session stays only
   where another protocol or product owns it: ACP's `sessionId`, the Claude Code and Codex CLIs' own session ids,

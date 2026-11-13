@@ -1,7 +1,7 @@
 # Reports
 
 A **Report** is one record of something observed: an Agent's finding along the way, a person's
-note, the Head of Station's round. It is kept in the Registry against its **scope**, an
+note, the Station charge's report. It is kept in the Registry against its **scope**, an
 Operation, a Station or M, and tied to what it is about. Filing a Report creates no Mission,
 brief or placement: an Operation's charge or a person decides what, if anything, it becomes.
 
@@ -45,8 +45,7 @@ Reading a Report's content takes all three:
    [access policy](access.md) or a [compartment](compartments.md) granting `mission.read` on it,
    for an Agent's Run its own Operation, or another through such a compartment. A read
    through a compartment is a crossing, written to the audit log first. A Station's Reports need
-   `station.read` on `station:ID` (and for an Agent, being that Station's Head of Station
-   round), M's `station.read` on `config:reports`.
+   `station.read` on `station:ID` (and for an Agent, being that Station's charge), M's `station.read` on `config:reports`.
 2. **Being read in to each of its compartments**, as a compartment's `read_in` lists people,
    groups, accounts, Operations, Missions and Agents. Reading in and out is the compartment's own,
    audited like any change to it, and holds from the next call. A compartment that does not exist
@@ -85,9 +84,9 @@ Mission's Operation and linked to its Mission ([Agents](agents.md#reports)). It 
 markings. `reports` lists and `read_report` reads what the Run may, inside `<ai6-data>`; a
 Report from another Operation marks the Run exposed as that Operation's product.
 
-A **Head of Station** round's `file_report` keeps its logbook, check-in and channel
-([Stations](stations.md)), and is also stored as a Report of its Station, kind `station`, linked
-to the round.
+The **Station charge's** `file_report` keeps its logbook, check-in and channel
+([Stations](stations.md#chief-of-station)), and is also stored as a Report of its Station, kind
+`station`, filed by the charge and linked to no Mission.
 
 An Agent's filings are rate limited per Run (`per_run`) and per scope (`per_operation`)
 over `window`; past either, `file_report` answers to wait.
@@ -208,7 +207,7 @@ summary (`GET /v1/user/attention`) has no Reports section.
 | Vetting holding a brief | `vetting-hold` | the brief's Operation, linked to the Mission it would be. Filer `probe:vetting` |
 | The Chief of Staff's review holding a brief | `review-hold` | as above; the filer is the review of that Mission |
 | M's scorecard proposing a hold or a preference | `scorecard` | the Operation, linked (`decision`) to its green ink request. Filer `probe:scorecard` |
-| The Head of Station | the finding's | its Station |
+| The Station's charge (Chief of Station) | the finding's | its Station |
 | A person | their own | the scope they name |
 
 A producer files beside the record it already keeps (the evidence on the run, the hold on the

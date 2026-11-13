@@ -938,7 +938,7 @@ tables configure providers.
 | `labels` | none | Placement labels. |
 | `terminal` | see meaning | **Terminal provider.** The terminal provider harnesses run in. Default: one that suits the handler. |
 | `resources_every` | 60 | **Sample a Theater's resources every.** Seconds between samples of each remote Theater's resources; 0 leaves only the requirements probe. |
-| `safe_house_caches` | see meaning | **Rebuildable cache directories.** Directory names the Head of Station may remove from a finished Mission's safe house. Default: `target`, `node_modules` and `.dart_tool`. |
+| `safe_house_caches` | see meaning | **Rebuildable cache directories.** Directory names the Station's charge may remove from a finished Mission's safe house. Default: `target`, `node_modules` and `.dart_tool`. |
 | `safe_house_cache_age` | 604,800 (7 days) | **Leave a finished safe house alone for.** Seconds a finished Mission's safe house is left alone before its caches may go. |
 | `partial_line_bytes` | 4 KiB | **Longest partial terminal line.** Bytes of a terminal line the watchdog holds before it counts as a line. |
 | `providers` | none | **Provider configurations.** `[providers.<id>]`: provider `<id>`'s Guatiao configuration when the Station builds it with none of its own (handlers, terminals and safe houses). |
@@ -1427,8 +1427,8 @@ a Run. `unpinned = true` is a weakening, named each time such an overlay is issu
 | --- | --- | --- |
 | `listed_changes` | 20 | **Safe house changes in one report.** Changes of a kept safe house listed in one report. |
 | `survey_entries` | 500,000 | **Directory entries one survey walks.** Directory entries one survey of a safe house walks before it reports a partial size. |
-| `reason_bytes` | 2,000 | **Longest reason for a safe house deletion.** Bytes of the reason a round gives when it asks to delete a safe house; longer is cut. |
-| `audit_target_bytes` | 500 | **Longest provisioning audit target.** Bytes of what a provisioning round's audit record names; longer is cut. |
+| `reason_bytes` | 2,000 | **Longest reason for a safe house deletion.** Bytes of the reason the charge gives when it asks to delete a safe house; longer is cut. |
+| `audit_target_bytes` | 500 | **Longest provisioning audit target.** Bytes of what a provisioning audit record names; longer is cut. |
 <!-- schema:record.station.head_of_station:end -->
 
 The `cables` record takes `grants`, `inbound` and `channels`, and the relay's limits:

@@ -475,6 +475,7 @@ impl Watchdog {
     pub fn pause(&self);       // waiting on a person: never stalled, looping, blocked or past max runtime
     pub fn resume(&self);      // fresh deadlines; paused time does not count toward max runtime
     pub fn is_paused(&self) -> bool;
+    pub fn quiet_for(&self) -> Option<Duration>;   // since the last output or input; None while paused
 }
 impl ServeConfig {
     pub fn with_watchdog(self, watchdog: WatchdogConfig) -> Self;
@@ -1939,7 +1940,7 @@ pub trait AgentRecordStore;  // Agent track records (agent_records.rs)
 pub trait ClearanceStore;    // clearance grants per Agent and Operation (clearance.rs)
 pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs)
 pub trait AssistantLogStore; // Moneypenny's conversation log (assistant_log.rs)
-pub trait LogbookStore;      // each Station's Head of Station reports (logbook.rs)
+pub trait LogbookStore;      // each Station's charge's reports (logbook.rs)
 pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
 pub trait RunStore;      // Run records and fenced leases (runs.rs)
 pub trait RunContextStore; // each Run's harness context (contexts.rs)
@@ -2957,7 +2958,7 @@ pub fn new_report_id() -> String;   // "report-" + 32 hex
 ```
 
 Every Run (feature `cables-mcp`) has `file_report` (against its Mission's Operation, linked to
-its Mission; a Head of Station round's goes to the logbook, check-in and channel and is also a
+its Mission; the Station charge's goes to the logbook, check-in and channel and is also a
 `station` Report of its Station), `reports` and `read_report`, answering inside `<ai6-data>`; another
 Operation's content marks the Run `product:<operation>`. Universal Exports serves `POST`, `GET
 /v1/reports`, `GET /v1/reports/{id}` (`403` with the markings below Content), `PUT
@@ -3713,7 +3714,6 @@ pub struct Sleeper {
     pub role: Option<String>,
     pub priority: i64,
     pub stations: Vec<String>,   // narrows its briefs, like Brief.stations; empty adds no limit
-    pub each_station: bool,      // one round per eligible Station per window (default false)
     pub standing: bool,          // one Mission, each window a run of it (default false)
     pub resume: bool,            // needs standing: resume the last run's Run
 }   // standing and resume are left out of the serialized form when false, so the fingerprint
@@ -3738,37 +3738,31 @@ impl Cron {
     pub fn latest_at_or_before(&self, now: i64, lookback_days: u32) -> Option<i64>; // Unix seconds
 }
 pub fn window_label(window: i64) -> String; // "20261025T0300Z"
-/// The brief of one window; with `station`, that Station's round, narrowed to it.
-pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64, station: Option<&str>) -> Brief;
+/// The brief of one window.
+pub fn sleeper_brief(operation: &str, name: &str, sleeper: &Sleeper, window: i64) -> Brief;
 
 SleeperStore::authorize_sleeper(operation: &str, name: &str, sleeper: &Sleeper, authorized_by: &str, at: i64) -> io::Result<()>
 SleeperStore::sleeper_authorization(operation: &str, name: &str) -> io::Result<Option<SleeperAuthorization>>
 SleeperStore::revoke_sleeper(operation: &str, name: &str) -> io::Result<bool>   // and its mark
 SleeperStore::mark_sleeper(operation: &str, name: &str, mark: &SleeperMark) -> io::Result<bool>   // false with no approval
-SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, round: (i64, Option<&str>), received_by: &str) -> io::Result<Fire>  // (window, station)
+SleeperStore::fire_sleeper(operation: &str, name: &str, sleeper: &Sleeper, window: i64, received_by: &str) -> io::Result<Fire>
 ```
 
 Cron fields take `*`, numbers, `a-b`, `,` lists and `/step`; day-of-week is 0-7 (0 and 7 are
 Sunday); when both day fields are restricted a day matches if either does. A schedule that
 never matches within a year (`0 0 30 2 *`) parses but never fires.
 
-`fire_sleeper` enters a brief whose `id` is `<operation>.<name>.<window>` (with a Station,
-`...<window>.<station>`, the ID made key-safe with a digest when it had to change) with the entry
-`MissionEntry::sleeper` for that window and Station, and reports `AlreadyFired` when that entry's
-brief exists in `new`, `claimed`, `done` or `failed`, which is what makes a window, or one
-Station's round in it, fire once across Stations. A `standing` Sleeper enters its first window
+`fire_sleeper` enters a brief whose `id` is `<operation>.<name>.<window>` with the entry
+`MissionEntry::sleeper` for that window, and reports `AlreadyFired` when that entry's
+brief exists in `new`, `claimed`, `done` or `failed`, which is what makes a window fire once across
+Stations. A `standing` Sleeper enters its first window
 with `MissionEntry::standing` and every later one through `reenter_brief`: `AlreadyFired` when the
 brief is for that window, `InFlight` (logged once per window) when an earlier window's run is
 queued, held or claimed. Its data's `sleeper` object also carries `standing` and `resume`; a
 start whose claimed brief says `resume`, with the Registry's Sleeper provenance, resumes the
 latest run's Run when that run had the same handler, and records `sleeper`/
 `resumed` or `started` on the timeline. A brief's
-`stations` is the sleeper's, or `[station]` for a round; its data's `sleeper` object names
-`operation`, `name`, `window` and, for a round, `station`. For an `each_station` sleeper the
-Headquarters holder fires one round for each Station whose last check-in placement accepts
-for the Operation and the sleeper's Agent or role, within the sleeper's `stations`; load,
-resources and quarantines are ignored there (they only delay a brief), and a Station dark
-past `[registry.limits.stations] gone_dark_after` gets no round until it checks in again.
+`stations` is the sleeper's; its data's `sleeper` object names `operation`, `name` and `window`.
 `authorize_sleeper` refuses a prompt over `[registry.limits.sleepers] prompt_bytes`.
 Authorizations are stored under `sleepers/` (SQL: the record column of
 `ai6_sleeper_authorizations`), each with what the Headquarters holder has reckoned of its windows
@@ -3786,20 +3780,11 @@ audits `sleeper.superseded` (target `<mission> <window>`) and records `sleeper`/
 
 ## Station logbooks (`ai6::directorates::registry::logbook`)
 
-Each Station's logbook keeps the newest `[registry.limits.logbook] entries` (20) reports its Head of Station
-filed, oldest first, under `logbook/<station>.json` (SQL table `ai6_logbooks`). A round is
-a Mission of role `head-of-station` whose brief, as this Station leased it, is this Station's
-round of an authorized `each_station` Sleeper: the Registry kept `Origin::Sleeper` provenance
-for it, its `data.sleeper` names this Station, the Mission's Operation and the Sleeper, that
-Sleeper still exists with `each_station`, role `head-of-station` and the fingerprint the
-provenance names, and its stored authorization has that fingerprint. The Station starts a round with the logbook as fenced context, every line
-quoted (`> `), and marks its Run exposed (`STATION_LOGBOOK`) when the logbook holds reports.
-Universal Exports refuses a brief whose role `is_head_of_station_role`, and a Mission proposal
-asking for one is refused at the Cable endpoint.
+Each Station's logbook keeps the newest `[registry.limits.logbook] entries` (20) reports its charge
+filed, oldest first, under `logbook/<station>.json` (SQL table `ai6_logbooks`); the newest is
+published with the Station's check-in.
 
 ```rust
-pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
-pub fn is_head_of_station_role(role: &str) -> bool;   // the role or one beneath it ("head-of-station/...")
 pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
 #[non_exhaustive] pub enum StationFindingKind { Disk, Theater, SafeHouse, Provider, Other } // kebab-case; as_str, FromStr, Display
 #[non_exhaustive] pub enum Severity { Info, Warning, Critical }                     // lowercase; ordered
@@ -3812,7 +3797,7 @@ impl StationFinding { pub fn new(kind, severity, text) -> Self; }
 impl StationReport {
     pub fn new(station, summary, at: i64) -> Self;
     pub fn with_findings(self, findings: impl IntoIterator<Item = StationFinding>) -> Self;
-    pub fn filed_by(self, mission, agent) -> Self;
+    pub fn filed_by(self, mission, agent) -> Self;   // a Mission's report; the Station's charge files none
     pub fn worst(&self) -> Option<Severity>;
     pub fn validate(&self, limits: &LogbookLimits) -> io::Result<()>;   // InvalidInput: Station ID, summary, findings out of limits
 }
@@ -3844,6 +3829,8 @@ impl ChargeScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self
     pub max_waiting_events: Limit,        // 500; past it the oldest are dropped and logged
     pub turn_timeout: TimeLimit,          // 1800; the turn is interrupted
     pub lease: Seconds,                   // 60; a lapsed lease is taken over
+    pub stall_after: TimeLimit,           // 1800; a Station charge: a Run quiet this long is told of and may be surrendered; none: the Run's own watchdog
+    pub poll_frozen_after: TimeLimit,     // 600; M's charge: a Source poll in flight, or unfinished past its interval, this long is flagged; none: never
 }
 impl ChargeDefinition {
     pub const DEFAULTS: Self; pub fn new(agent) -> Self;
@@ -5351,7 +5338,7 @@ otherwise, from loopback too; `/healthz` is open); Universal Exports remains the
 
 A Run that ends done does not settle its Mission: a Mission of an Operation goes `verifying`
 (`MissionState::Verifying`; non-terminal, no harness, its brief stays claimed) and leaves it only by a
-decision. Review and panel Missions, Head of Station rounds and Missions with no Operation settle done as
+decision. Review and panel Missions and Missions with no Operation settle done as
 before. A `held` Mission (a role's `require_approval_before_done` unmet) stays `held`.
 
 ```rust
@@ -5479,8 +5466,13 @@ controls); every round it takes the charge's Cables, adds a `wake_every` timer, 
 of waiting events when the hour's `max_turns_per_hour` has room. The harness runs on this host in
 `<state dir>/charges/charge--<scope>`, started as `AgentStart.mission_id = "charge--<scope>"` (no
 Mission has that ID), resumed with the record's Run, or started fresh with the
-logbook when the resume is refused or fails before it answers. A Station's charge gets
-`station_report` and `file_report` on its Cable endpoint. Stopping closes every charge's harness.
+logbook when the resume is refused or fails before it answers. A Station's charge gets the
+Station tools (below) on its Cable endpoint, an Operation's `request_resources`, M's `raise_flag`.
+The scan also tells a Station's charge of its Runs that made no progress for `stall_after`
+(`health`, flag `run-stalled`, keyed by Run) and of the controls that are requests of an
+Operation's 00 (`request`, with the Station's own `check`), M's of Source polls that froze
+(`health`, flag `source-poll-frozen`, `poll_frozen_after`), and an Operation's of a Station's answers
+(`resources`). Stopping closes every charge's harness.
 
 ## Assessing Reports (`ai6::directorates::registry::assessments`)
 
@@ -5569,7 +5561,7 @@ Report per thing, updated in place, never stopping the check): probe evidence (k
 `probe:deliverables`, linked to the Mission), a brief held by vetting (`vetting-hold`, `probe:vetting`) or by
 the Chief of Staff's review (`review-hold`, `ReportFiler::Review`), both linked to the Mission the brief
 would be, and M's scorecard proposal (`scorecard`, `probe:scorecard`, linked `decision` to its green ink
-request). The Head of Station's findings were already Reports.
+request). The Station charge's findings are Reports of its Station.
 
 An Operation's charge is its 00 Agent in charge: `Roster` refuses an `operation:` charge whose Agent's
 configured clearance is not `00`. Its `verifying` event carries the run (brief and final report,
@@ -5653,17 +5645,14 @@ The Station audits `green_ink.requested` (actor `agent:CODENAME`) for each new p
 request, `green_ink.expired` (actor `expiry`) when it tells the Agent a request expired, and
 `class_authorization.used` (actor `class:ID`); each target is `REQUEST_ID KIND TARGET`, never
 the reason.
-Head of Station tools: a round (a Mission of role `head-of-station` whose brief, as this Station leased it, is this Station's
-round of an authorized `each_station` Sleeper: the Registry kept `Origin::Sleeper` provenance
-for it, its `data.sleeper` names this Station, the Mission's Operation and the Sleeper, that
-Sleeper still exists with `each_station`, role `head-of-station` and the fingerprint the
-provenance names, and its stored authorization has that fingerprint) also lists
-`station_report`, `file_report`, `tidy_safe_house` and `provision_theater` on its endpoint,
-whether started or resumed; any other Run's endpoint has no such tools, so a call is an
-MCP error. Every call checks again that the Mission is not over and still such a round, so
-revoking the Sleeper takes the tools away.
+Station tools: the Station's charge (`station:<id>`, kept by an Agent) lists `station_report`,
+`file_report`, `tidy_safe_house`, `provision_theater`, `surrender_claim` and `answer_request` on its
+endpoint (`head_of_station::Desk`); any other Run's endpoint has none, so a call is an MCP error.
+Every call checks again that this Station still runs the charge.
 `station_report` answers JSON: `station`, `at`, `capacity`, `missions` not over (`mission`,
-`operation`, `agent`, `role`, `state`, `run`), `disk` (`path`, `free_mb`, `total_mb` of the
+`operation`, `agent`, `role`, `state`, `run`, `quiet_secs` (seconds its Run made no progress; absent
+while it waits on a person or has no Run here), `stalled`), `queue` (`waiting_here`: Missions this
+Station holds the claim on with no Run here; `unclaimed`: briefs no Station has claimed), `disk` (`path`, `free_mb`, `total_mb` of the
 state directory), `resources`, `theaters` (each published `TheaterSummary` plus `unfit`, why
 placement would not run a Run there), `safe_houses` (each kept safe house still on disk:
 `mission`, `operation`, `state`, `live`, `path`, `branch`, `size_bytes`, `size_complete` (false
@@ -5675,13 +5664,13 @@ every ignored path inside a cache directory), `unexported` and `ignored` (at mos
 and age and the unattended, green ink and never lists the Station enforces); no environment
 value, token, loadout or brief text. Commit subjects and branch names in it were written by
 other Missions' Agents, so a successful call marks the Run exposed (`STATION_REPORT`). `file_report {summary, findings: [{kind, severity, text}]}` files a `StationReport` (filed
-by the Mission and its Agent) in the logbook, records a `head_of_station`/`reported` timeline
+by the charge's Agent, no Mission) in the logbook, records a `head_of_station`/`reported` timeline
 event, and sends it as a Cable to channel `heads-of-station` (`HEAD_OF_STATION_CHANNEL`) when
 the Cable policy allows; it answers `{filed, at, cable}` where `cable` says `sent to N
 recipients` or why not (an exposed Run sends none).
 `tidy_safe_house {mission, action, reason?}` acts on the kept safe house of a Mission of this
 Station that is over (terminal and no Run here; otherwise refused, as is a Mission this
-Station does not keep, the round itself, or an action other than `caches` and `remove`), after
+Station does not keep, or an action other than `caches` and `remove`), after
 its provider re-attaches to it. The tidy holds the Mission's start reservation (`starting`)
 from its first check to its last change, so a start, retry or resume of it is refused
 meanwhile (and a tidy of a Mission being started is refused), and checks again that the
@@ -5693,10 +5682,10 @@ through the provider when `exports()` shows nothing unexported, nothing uncommit
 ignored path inside a cache directory; otherwise (or when `exports()` fails or is
 unsupported) it asks for green ink with `Desk::request_always`, kind `SAFE_HOUSE_DELETE`
 (`safe-house-delete`, compared as exact text), target `safe house MISSION on Station ID`,
-filed under the Operation that owns the safe house's Mission and on that Mission (the round's
+filed under the Operation that owns the safe house's Mission and on that Mission (the charge's
 Run and Agent ask; idempotency key the target), so its policy and approvers decide, its
 `unattended` list never skips the person and no class authorisation approves it. The
-request does not block the round: any later call, from this round or a later one, finds a
+request does not block the charge: any later call finds a
 pending or rejected request and answers it without asking again, or finds the live, unspent
 approval, spends it and discards. A removal records `kept = false` on the Mission. Answers
 `{mission, status, removed?, kept?, freed_bytes, green_ink?: {request_id, operation, status,
@@ -5711,6 +5700,24 @@ Station reaches with `check = !apply`, only the steps its `requires`, `provision
 failed step's `detail` never carries what the command printed. An ephemeral template, a
 Theater made for a Mission and one without a transport are refused, and `apply` is refused
 while a Mission of this Station that is not over has the Theater in its launch record.
+`surrender_claim {mission, reason?}` gives up this Station's claim on a Mission of this Station
+whose Run is stalled (`quiet_secs` past the charge's `stall_after`, or Mission state `stalled`; a
+Mission that is `working` and quiet less long, one waiting on someone and one over are refused),
+through `recovery::give_up`: the Run stops, the leases lapse and the Registry queues the brief again
+or files it under the Operation's `on_lost`. Answers `{mission, state, quiet_secs?}`; audited as
+`head_of_station.surrendered` (target the Mission). `answer_request {request, operation, kind, name?,
+decision, reason?}` answers an Operation's request: `decision` is `provide` or `refuse`; the Station
+runs `resources::check` for `(operation, kind, name)` (the Operation's `stations` and
+`station_labels` must allow this Station, placement or the account pools must have room) and turns a
+`provide` it cannot back into a refusal with its reason. The answer is a charge control from
+`resources:station:<id>` on `operation:<codename>`'s record (`request_charge_wake`), with the
+`Answer {request, station, kind, answer: provided|refused, provided?, reason?}` as its note, audited
+`resources.answered`. An Operation's charge asks with `request_resources {kind: agent|theater|account|
+capacity, name?, detail?, station?, idempotency_key?}`: a control from `resources:operation:<codename>`
+on `station:<id>`'s record (this Station's by default; refused when that charge never ran), audited
+`resources.requested`; asking again with the same key is the same request. M's charge raises
+`raise_flag {title, text, severity?, kind?}`: a Report of `ReportScope::M` filed by
+`ReportFiler::Charge`, audited `flag.raised`.
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,

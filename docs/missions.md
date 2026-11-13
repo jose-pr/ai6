@@ -321,8 +321,7 @@ the scorecard until the verdict.
 A Run saying it is done does not make its Mission done. A Mission of an Operation whose Run ends
 done is `verifying`: its work is kept, no harness runs, its brief stays claimed, and it holds no place in
 the Station's capacity. It leaves `verifying` only by a decision, and never by itself: not when it is
-old, and not when it declares nothing to check. Review and panel Missions, Head of Station rounds and
-Missions with no Operation settle done as before.
+old, and not when it declares nothing to check. Review and panel Missions and Missions with no Operation settle done as before.
 
 **Deliverables.** What a Mission is to deliver is declared before the work, as text, `kind` or
 `kind:target`, by its role and by its brief:
@@ -1139,7 +1138,7 @@ operator approves it.
 schedule = "0 3 * * *"   # minute hour day-of-month month day-of-week, in UTC
 title = "Update dependencies"
 prompt = "Update the lockfile, run the tests and keep the work on a branch."
-role = "maintenance"      # optional: agent, role, priority, stations, each_station
+role = "maintenance"      # optional: agent, role, priority, stations
 ```
 
 ```bash
@@ -1163,15 +1162,8 @@ ai6 sleeper revoke G nightly-deps
 - **Prompt.** The prompt is the operator's own text, not fenced as untrusted data.
 - **Stations.** `stations = ["ID", ...]` limits the sleeper's briefs to those Stations, as a
   brief's `stations` does: it narrows the Operation's list and never widens it.
-- **A round of every Station.** With `each_station = true` the sleeper queues one brief per
-  window for each Station whose last check-in placement accepts for the Operation and the
-  sleeper's Agent or role (within its `stations`), each narrowed to that Station, and the
-  window and the Station keep one Mission ID, so a failover never doubles a round. A Station's load does not
-  exclude it (its round waits for room); a Station that has gone dark gets its round when it
-  checks in again within the window. This is how the [Head of
-  Station](stations.md#head-of-station) runs.
-- **A standing Mission.** With `standing = true` the sleeper is one Mission (one per Station with
-  `each_station`), `<operation>-<sleeper>-<n>`, and each window is a new run of it: the run
+- **A standing Mission.** With `standing = true` the sleeper is one Mission,
+  `<operation>-<sleeper>-<n>`, and each window is a new run of it: the run
   `<handle>.<run>` records the window it answers (`window` on its Run record), and the
   board and scorecards show one Mission with a run history. A window that comes while a run
   is queued, held or running does not fire; it fires when the run settles if it is still the
@@ -1206,7 +1198,7 @@ ai6 sleeper revoke G nightly-deps
 - **Duplicates.** A Sleeper's windows share its title, and are never held as duplicates of each
   other; a person's brief with the same title is still a duplicate of an open window.
 - **Fingerprint.** Every field the sleeper sets is part of what `authorize` approves, so
-  adding `stations`, `each_station`, `standing` or `resume` withdraws the approval until it is
+  adding `stations`, `standing` or `resume` withdraws the approval until it is
   given again; a sleeper that sets none of them keeps the approval it has.
 - **Events.** There is no event trigger; a CI failure or a new issue arrives through a
   [Source](#sources).

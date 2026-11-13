@@ -116,7 +116,7 @@ Theater's transport provider and `--config` for another bootstrap file.
 default directory, the login user's home over SSH). Provisioning carries no secret: harness
 and forge credentials reach a Run as leases, never as files on the Theater.
 
-**On a round.** A [Head of Station](stations.md#head-of-station) round runs the same steps
+**By the Station's charge.** The [Chief of Station](stations.md#chief-of-station) runs the same steps
 through its `provision_theater { theater, apply }` tool: `apply = false` is `--check`, and
 `apply = true` fits the Theater out unattended, because the operator declared every step it
 can take. What the declaration does not cover is reported, never changed. A run that changed
@@ -444,5 +444,5 @@ to ask why.
 - Ephemeral virtual machines: only containers have a Theater provider. Destroying a kept
   Theater early is not yet a step an operator approves in green ink; the sweep's bounds
   remove it.
-- A Theater is refitted on a Head of Station round only when the round asks; nothing
-  refits it on a schedule of its own.
+- A Theater is refitted by the Station's charge only when it asks; nothing refits it on a
+  schedule of its own.
