@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../controls/mission_actions.dart';
@@ -288,16 +290,31 @@ class StationCard extends StatelessWidget {
                   ),
                 ),
             ],
-            if (station.operations.isNotEmpty) ...[
+            if (station.operations.isNotEmpty ||
+                board.readsSettings(station)) ...[
               const SizedBox(height: 10),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
                 children: [
+                  // Settings opens on this Station, not on whichever the page lists first.
+                  if (board.readsSettings(station))
+                    ActionChip(
+                      key: ValueKey('station-settings-${station.stationId}'),
+                      label: const Text('Settings'),
+                      avatar: const Icon(Icons.tune, size: 16),
+                      tooltip: 'Settings of ${station.stationId}',
+                      onPressed: () => onRoute(
+                        const OoRoute(OoPage.stations)
+                            .withField('tab', 'settings')
+                            .withField('station_id', station.stationId),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   for (final operation in station.operations) ...[
                     ActionChip(
-                      label: Text('Operation $operation'),
-                      tooltip: 'Open Operation $operation',
+                      label: Text('Operation ${OperationNames.of(operation)}'),
+                      tooltip: 'Open Operation ${OperationNames.of(operation)}',
                       onPressed: OoLinks.opener(
                         context,
                         OoLinkTo.operation(operation),
@@ -306,9 +323,12 @@ class StationCard extends StatelessWidget {
                     ),
                     if (canCreateMission(operation))
                       ActionChip(
-                        label: Text('New Mission in $operation'),
+                        label: Text(
+                          'New Mission in ${OperationNames.of(operation)}',
+                        ),
                         avatar: const Icon(Icons.add, size: 16),
-                        tooltip: 'Start a Mission in $operation',
+                        tooltip:
+                            'Start a Mission in ${OperationNames.of(operation)}',
                         onPressed: () => onCreateMission(operation),
                         visualDensity: VisualDensity.compact,
                       ),
@@ -462,7 +482,7 @@ class _RunsHere extends StatelessWidget {
                     .withField('mission_id', mission.missionId),
               ),
               child: Text(
-                '${mission.operationId} › '
+                '${OperationNames.of(mission.operationId)} › '
                 '${board.handleOf(mission.operationId, mission.missionId)}'
                 '${run == null ? '' : ' · ${run.runId}'}',
               ),

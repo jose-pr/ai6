@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../controls/mission_actions.dart';
@@ -79,7 +81,7 @@ class MissionDetail extends StatelessWidget {
                 child: Semantics(
                   header: true,
                   child: Text(
-                    '$operationId › ${board.handleOf(operationId, mission.missionId)}',
+                    '${OperationNames.of(operationId)} › ${board.handleOf(operationId, mission.missionId)}',
                     style: text.titleLarge,
                   ),
                 ),
@@ -106,7 +108,7 @@ class MissionDetail extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 32),
             child: OoLink(
-              'Operation $operationId',
+              'Operation ${OperationNames.of(operationId)}',
               route: OoLinkTo.operation(operationId),
               style: text.bodySmall,
             ),
@@ -408,7 +410,7 @@ class _WhyItMayWaitState extends State<WhyItMayWait> {
             Text('WHY IT MAY WAIT', style: ooSectionLabel(context)),
             const SizedBox(height: 4),
             Text(
-              'Placement for Operation ${widget.operationId} now',
+              'Placement for Operation ${OperationNames.of(widget.operationId)} now',
               style: text.titleSmall,
             ),
             const SizedBox(height: 6),

@@ -31,11 +31,16 @@ class MissionsPage extends StatefulWidget {
     required this.desktopWindows,
     required this.pages,
     this.onCreateMission,
+    this.onDraftMission,
     super.key,
   });
 
   /// Starts a Mission in an Operation; the empty board offers it.
   final ValueChanged<String>? onCreateMission;
+
+  /// Asks Moneypenny to draft a Mission in an Operation; without it the empty board does not
+  /// offer that.
+  final ValueChanged<String>? onDraftMission;
 
   final MissionBoard board;
   final OoRoute route;
@@ -304,6 +309,8 @@ class _MissionsPageState extends State<MissionsPage> {
                           operation.operationId,
                     ],
               onCreate: widget.onCreateMission,
+              onDraft: widget.onDraftMission,
+              operation: listRoute['operation_id'],
             ),
           )
         else if (missions.isEmpty && board.error != null)

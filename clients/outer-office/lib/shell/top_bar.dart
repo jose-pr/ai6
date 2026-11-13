@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart'
@@ -308,7 +310,7 @@ class _OoSearchState extends State<OoSearch> {
             const <UserOperationAccess>[])
       (
         OoIconName.operations,
-        'Operation ${operation.operationId}',
+        'Operation ${OperationNames.of(operation.operationId)}',
         'Operation',
         _route(OoPage.operations, {'operation_id': operation.operationId}),
       ),
@@ -320,7 +322,7 @@ class _OoSearchState extends State<OoSearch> {
           ?widget.board
               .missionBrief(mission.operationId, mission.missionId)
               ?.name,
-          'Operation ${mission.operationId}',
+          'Operation ${OperationNames.of(mission.operationId)}',
           mission.state,
         ].join(' · '),
         _route(OoPage.missions, {

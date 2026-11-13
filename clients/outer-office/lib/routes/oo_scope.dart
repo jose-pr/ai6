@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart' show ReadForbidden;
@@ -103,7 +105,10 @@ class OoOperationPicker extends StatelessWidget {
           child: Text('All Operations'),
         ),
         for (final operation in scope.readable)
-          DropdownMenuItem(value: operation, child: Text(operation)),
+          DropdownMenuItem(
+            value: operation,
+            child: Text(OperationNames.of(operation)),
+          ),
       ],
       onChanged: (chosen) {
         if (chosen == null) return;
@@ -133,7 +138,10 @@ class OoOperationHeading extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(8, 16, 8, 4),
     child: OoLinkLine([
-      ('Operation $operation', OoLinkTo.operation(operation)),
+      (
+        'Operation ${OperationNames.of(operation)}',
+        OoLinkTo.operation(operation),
+      ),
     ], style: Theme.of(context).textTheme.titleSmall),
   );
 }
@@ -156,7 +164,9 @@ class OoReadFailures extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final MapEntry(key: operation, value: why) in failed.entries)
-          Text(several ? 'Operation $operation: $why' : why),
+          Text(
+            several ? 'Operation ${OperationNames.of(operation)}: $why' : why,
+          ),
       ],
     ),
   );

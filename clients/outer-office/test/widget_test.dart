@@ -1225,10 +1225,8 @@ void main() {
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Missions that are parked'));
-    await tester.pumpAndSettle();
-    expect(find.text('claude-session-789'), findsNothing);
-    expect(find.text('No Missions match these filters.'), findsOneWidget);
+    // No Mission is parked, so that state is no filter to pick.
+    expect(find.byTooltip('Missions that are parked'), findsNothing);
 
     await tester.tap(find.byTooltip('Show every Mission'));
     await tester.pumpAndSettle();

@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -638,7 +640,7 @@ class _CoverDialogState extends State<_CoverDialog> {
             for (final operation in open)
               ListTile(
                 key: Key('compartment-cover-$operation'),
-                title: Text(operation),
+                title: Text(OperationNames.of(operation)),
                 onTap: () => _pick('operation:$operation'),
               ),
             SwitchListTile(

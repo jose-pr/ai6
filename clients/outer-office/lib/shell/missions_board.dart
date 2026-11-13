@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../assistant/pages.dart' show launchPage;
@@ -155,22 +157,25 @@ class BoardHeader extends StatelessWidget {
                       selected: selectedStates.isEmpty,
                       onPressed: () => onSelectStates(const []),
                     ),
+                    // A state with no Mission is no choice: it stays only while it is picked.
                     for (final state in boardStates)
-                      _CountChip(
-                        label: state == 'verifying'
-                            ? 'verifying (waiting for a decision)'
-                            : state,
-                        count: counts[state] ?? 0,
-                        state: state,
-                        selected: selectedStates.contains(state),
-                        // One state at a time from the chips; a link may name several.
-                        onPressed: () => onSelectStates(
-                          selectedStates.length == 1 &&
-                                  selectedStates.single == state
-                              ? const []
-                              : [state],
+                      if ((counts[state] ?? 0) > 0 ||
+                          selectedStates.contains(state))
+                        _CountChip(
+                          label: state == 'verifying'
+                              ? 'verifying (waiting for a decision)'
+                              : state,
+                          count: counts[state] ?? 0,
+                          state: state,
+                          selected: selectedStates.contains(state),
+                          // One state at a time from the chips; a link may name several.
+                          onPressed: () => onSelectStates(
+                            selectedStates.length == 1 &&
+                                    selectedStates.single == state
+                                ? const []
+                                : [state],
+                          ),
                         ),
-                      ),
                   ],
                 ),
               ),
@@ -400,7 +405,7 @@ class MissionCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 27, top: 4, bottom: 8),
             child: OoLink(
-              'Operation ${mission.operationId}',
+              'Operation ${OperationNames.of(mission.operationId)}',
               route: OoLinkTo.operation(mission.operationId),
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -607,7 +612,10 @@ class MissionBriefPage extends StatelessWidget {
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        Text(brief.operationId, style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          OperationNames.of(brief.operationId),
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 20),
         Text('Brief', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
@@ -1023,32 +1031,80 @@ class _LiveRunTerminalState extends State<_LiveRunTerminal> {
   );
 }
 
-/// The board with no Mission on it: what a Mission is, and a way to start the first in each
-/// Operation the person may, or who can if they may not.
-class EmptyBoard extends StatelessWidget {
-  const EmptyBoard({this.operations = const [], this.onCreate, super.key});
+/// The board with no Mission on it: what a Mission is, and, for an Operation the person
+/// picks among those they may start one in, a way to start the first: the form, or a draft
+/// with Moneypenny. Or who can, if they may not.
+class EmptyBoard extends StatefulWidget {
+  const EmptyBoard({
+    this.operations = const [],
+    this.onCreate,
+    this.onDraft,
+    this.operation,
+    super.key,
+  });
 
   /// The Operations the person may start a Mission in.
   final List<String> operations;
   final ValueChanged<String>? onCreate;
 
+  /// Asks Moneypenny to draft a Mission in the Operation; without it there is no such button.
+  final ValueChanged<String>? onDraft;
+
+  /// The Operation the page is already filtered to, picked first when the person may use it.
+  final String? operation;
+
   @override
-  Widget build(BuildContext context) => OoEmptyState(
-    icon: OoIconName.missions,
-    backdrop: true,
-    title: 'No Missions yet',
-    body: operations.isEmpty
-        ? 'A Mission is one brief of work under an Operation, and its Runs show here. Your '
-              'account cannot start one; a controller grants mission.create on an Operation.'
-        : 'A Mission is one brief of work under an Operation. Start the first, and its '
-              'Runs show here.',
-    actions: [
-      if (onCreate case final onCreate?)
-        for (final operation in operations)
-          ('New Mission in $operation', () => onCreate(operation)),
-    ],
-    link: const ('See Stations', OoRoute(OoPage.stations)),
-  );
+  State<EmptyBoard> createState() => _EmptyBoardState();
+}
+
+class _EmptyBoardState extends State<EmptyBoard> {
+  String? _picked;
+
+  String? get _operation {
+    final picked = _picked;
+    if (picked != null && widget.operations.contains(picked)) return picked;
+    if (widget.operations.contains(widget.operation)) return widget.operation;
+    return widget.operations.firstOrNull;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final operation = _operation;
+    final onCreate = widget.onCreate;
+    final onDraft = widget.onDraft;
+    return OoEmptyState(
+      icon: OoIconName.missions,
+      backdrop: true,
+      title: 'No Missions yet',
+      body: operation == null
+          ? 'A Mission is one brief of work under an Operation, and its Runs show here. Your '
+                'account cannot start one; a controller grants mission.create on an Operation.'
+          : 'A Mission is one brief of work under an Operation. Start the first, and its '
+                'Runs show here.',
+      controls: operation == null || (onCreate == null && onDraft == null)
+          ? null
+          : DropdownMenu<String>(
+              key: const ValueKey('new-mission-operation'),
+              label: const Text('Operation'),
+              initialSelection: operation,
+              requestFocusOnTap: false,
+              dropdownMenuEntries: [
+                for (final id in widget.operations)
+                  DropdownMenuEntry(value: id, label: OperationNames.of(id)),
+              ],
+              onSelected: (id) => setState(() => _picked = id),
+            ),
+      actions: [
+        if (operation != null && onCreate != null)
+          ('New Mission', () => onCreate(operation)),
+      ],
+      secondary: [
+        if (operation != null && onDraft != null)
+          ('Draft with Moneypenny', () => onDraft(operation)),
+      ],
+      link: const ('See Stations', OoRoute(OoPage.stations)),
+    );
+  }
 }
 
 class DemoBanner extends StatelessWidget {

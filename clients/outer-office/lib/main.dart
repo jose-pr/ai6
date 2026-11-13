@@ -1,6 +1,8 @@
 // ignore_for_file: invalid_use_of_internal_member
 // ignore_for_file: implementation_imports
 
+import 'shell/operation_names.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show AppExitType;
@@ -30,6 +32,7 @@ import 'assistant/chat_window.dart';
 import 'assistant/demo_conversation.dart';
 import 'assistant/images.dart' show platformImageInput;
 import 'assistant/memory_page.dart';
+import 'assistant/mission_draft.dart';
 import 'assistant/navigation_card.dart';
 import 'assistant/pages.dart';
 import 'assistant/transcripts.dart';
@@ -216,7 +219,7 @@ class AppearancePreferences {
 }
 
 class MissionBoard extends ChangeNotifier
-    implements PageActions, TranscriptReads, ChatCommands {
+    implements PageActions, TranscriptReads, ChatCommands, MissionDraftReads {
   MissionBoard({
     required this.apiOrigin,
     this.demo = false,
@@ -561,7 +564,17 @@ class MissionBoard extends ChangeNotifier
     notifyListeners();
   }
 
-  UserSessionSummary? userSession;
+  UserSessionSummary? _userSession;
+  UserSessionSummary? get userSession => _userSession;
+  set userSession(UserSessionSummary? session) {
+    _userSession = session;
+    OperationNames.use({
+      for (final operation
+          in session?.operations ?? const <UserOperationAccess>[])
+        operation.operationId: ?operation.name,
+    });
+  }
+
   StationBoardSummary stationBoard = const StationBoardSummary(
     headquartersStation: null,
     stations: [],
@@ -753,6 +766,41 @@ class MissionBoard extends ChangeNotifier
             ..removeWhere((operation) => !canReadMissions(operation)))
           .toList()
         ..sort();
+
+  @override
+  Future<DraftPlacement?> placement(String operationId) async {
+    try {
+      final preview = await loadPlacementPreview(operationId);
+      final best = preview.choices.firstOrNull;
+      return DraftPlacement(
+        best: best == null
+            ? null
+            : '${best.station} · ${best.theater} · Agent ${best.agent}',
+        reasons: [
+          for (final rejection in preview.rejections)
+            '${rejection.subject.isEmpty ? 'Any' : rejection.subject}: '
+                '${rejection.reason}',
+        ],
+      );
+    } on Object {
+      // A preview this account may not read, or that failed, is left out of the card.
+      return null;
+    }
+  }
+
+  @override
+  MissionStanding? standing(String operationId, String missionId) {
+    for (final group in missionGroups()) {
+      if (group.operationId == operationId && group.missionId == missionId) {
+        return MissionStanding(group.state, reason: group.reason);
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<String?> finalReport(String operationId, String missionId) async =>
+      (await loadLatestRun(operationId, missionId))?.finalReport;
 
   Future<PlacementPreview> loadPlacementPreview(String operationId) async {
     if (demo) {
@@ -2736,6 +2784,10 @@ class MissionBoard extends ChangeNotifier
           .toList(growable: false) ??
       const [];
 
+  /// Whether this account may read [station]'s settings, which the Stations page links to.
+  bool readsSettings(StationSummary station) =>
+      !demo && readableStations.contains(station.stationId);
+
   bool canConfigureStation(String stationId) =>
       userSession?.stations.any(
         (station) =>
@@ -4484,11 +4536,15 @@ class UserOperationAccess {
   const UserOperationAccess({
     required this.operationId,
     required this.actions,
+    this.name,
     this.parent,
     this.compartments = const [],
   });
 
   final String operationId;
+
+  /// What the Operation is called; `null` when it has no name.
+  final String? name;
   final List<String> actions;
 
   /// The nearest Operation above it the person may read; `null` for a root, or when every
@@ -4502,6 +4558,7 @@ class UserOperationAccess {
       UserOperationAccess(
         operationId: json['operation_id'] as String,
         actions: (json['actions'] as List<dynamic>).cast<String>(),
+        name: json['name'] as String?,
         parent: json['parent'] as String?,
         compartments: (json['compartments'] as List<dynamic>? ?? const [])
             .cast<String>(),
@@ -5414,6 +5471,7 @@ MoneypennyChat moneypennyChatFor(
     settings: settings,
     proposalWait: board.limits.controls.confirming,
     pageActions: board.demo ? null : board,
+    missions: board.demo ? null : board,
     transcripts: board.demo ? null : board,
     imageInput: board.demo ? null : platformImageInput(),
     imageLoader: board.demo ? null : board.conversationImage,
@@ -5603,199 +5661,209 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   void _tab(OoRoute route, String tab) =>
       widget.onRoute(route.withField('tab', tab));
 
-  Widget _pageBody(BuildContext context, OoRoute route, List<OoPage> pages) =>
-      AnimatedBuilder(
-        animation: Listenable.merge([widget.board, ?widget.chat]),
-        builder: (context, _) {
-          final board = widget.board;
-          final onRoute = widget.onRoute;
-          return switch (route.page) {
-            OoPage.overview || OoPage.memory || OoPage.pages => OverviewPage(
-              board: board,
-              pages: pages,
-              onOpen: _open,
-              activityEvery: board.limits.refresh.overview,
-              onRoute: _openRoute,
-              assistant: widget.chat?.controller,
-              chatOpen: switch (widget.chat?.layout) {
-                ChatLayout.docked || ChatLayout.expanded => true,
-                _ => false,
-              },
-              onFocusChat: () => widget.chat?.focusComposer(),
-              onAsk: (text) {
-                widget.chat?.open();
-                widget.chat?.controller.ask(
-                  text,
-                  route: const OoRoute(OoPage.overview),
-                );
-              },
-            ),
-            OoPage.operations => OperationsPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-              pages: pages,
-            ),
-            OoPage.missions => MissionsPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-              desktopWindows: widget.desktopWindows,
-              pages: pages,
-              onCreateMission: (operationId) =>
-                  _showCreateMission(context, operationId, board),
-            ),
-            OoPage.runs => RunsPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-              onOpen: (run) => _openRun(context, run),
-            ),
-            OoPage.agents => OoTabs(
-              empty: 'No Agents are available to this account.',
-              selected: route['tab'],
-              onSelect: (tab) => _tab(route, tab),
-              tabs: [
-                if (_canReadRoles)
-                  (
-                    'agents',
-                    'Agents',
-                    AgentsPage(board: board, route: route, onRoute: onRoute),
-                  ),
-                if (_canReadRoles)
-                  (
-                    'roles',
-                    'Roles',
-                    AgentRolesPage(
-                      board: board,
-                      route: route,
-                      onRoute: onRoute,
-                    ),
-                  ),
-              ],
-            ),
-            OoPage.stations => OoTabs(
-              empty: 'No Stations are available to this account.',
-              selected: route['tab'],
-              onSelect: (tab) => _tab(route, tab),
-              tabs: [
-                ('overview', 'Stations', _stationsTab(context, route)),
-                (
-                  'theaters',
-                  'Theaters',
-                  _TheatersTab(
-                    board: board.stationBoard,
-                    stationId: route['station_id'],
-                    theaterId: route['theater_id'],
-                  ),
-                ),
-                if (board.demo || board.readableStations.isNotEmpty)
-                  (
-                    'settings',
-                    'Settings',
-                    StationSettingsPage(
-                      board: board,
-                      route: route,
-                      onRoute: onRoute,
-                    ),
-                  ),
-                if (board.previewOperations.isNotEmpty)
-                  (
-                    'placement',
-                    'Placement',
-                    ListView(children: [_PlacementPanel(board: board)]),
-                  ),
-              ],
-            ),
-            OoPage.greenInk => OoTabs(
-              empty: 'No green ink is available to this account.',
-              selected: route['tab'],
-              onSelect: (tab) => _tab(route, tab),
-              tabs: [
-                if (board.greenInkOperations.isNotEmpty)
-                  (
-                    'inbox',
-                    'Inbox',
-                    GreenInkPage(board: board, route: route, onRoute: onRoute),
-                  ),
-                if (board.greenInkOperations.isNotEmpty)
-                  (
-                    'expired',
-                    'Expired',
-                    ExpiredGreenInkPage(
-                      board: board,
-                      route: route,
-                      onRoute: onRoute,
-                    ),
-                  ),
-                if (board.classAuthorizationOperations.isNotEmpty)
-                  (
-                    'classes',
-                    'Class authorisations',
-                    ClassAuthorizationsPage(
-                      board: board,
-                      route: route,
-                      onRoute: onRoute,
-                    ),
-                  ),
-              ],
-            ),
-            OoPage.briefings => OoTabs(
-              empty: 'No briefings are available to this account.',
-              selected: route['tab'],
-              onSelect: (tab) => _tab(route, tab),
-              tabs: [
-                (
-                  'proposals',
-                  'Mission proposals',
-                  MissionProposalsPage(
-                    board: board,
+  Widget _pageBody(
+    BuildContext context,
+    OoRoute route,
+    List<OoPage> pages,
+  ) => AnimatedBuilder(
+    animation: Listenable.merge([widget.board, ?widget.chat]),
+    builder: (context, _) {
+      final board = widget.board;
+      final onRoute = widget.onRoute;
+      return switch (route.page) {
+        OoPage.overview || OoPage.memory || OoPage.pages => OverviewPage(
+          board: board,
+          pages: pages,
+          onOpen: _open,
+          activityEvery: board.limits.refresh.overview,
+          onRoute: _openRoute,
+          assistant: widget.chat?.controller,
+          chatOpen: switch (widget.chat?.layout) {
+            ChatLayout.docked || ChatLayout.expanded => true,
+            _ => false,
+          },
+          onFocusChat: () => widget.chat?.focusComposer(),
+          onAsk: (text) {
+            widget.chat?.open();
+            widget.chat?.controller.ask(
+              text,
+              route: const OoRoute(OoPage.overview),
+            );
+          },
+        ),
+        OoPage.operations => OperationsPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+          pages: pages,
+        ),
+        OoPage.missions => MissionsPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+          desktopWindows: widget.desktopWindows,
+          pages: pages,
+          onCreateMission: (operationId) =>
+              _showCreateMission(context, operationId, board),
+          onDraftMission: board.demo || widget.chat == null
+              ? null
+              : (operationId) {
+                  widget.chat?.open();
+                  widget.chat?.controller.ask(
+                    'I want to start a new Mission in Operation $operationId. '
+                    'Draft it for me: ask only for what you cannot find out, '
+                    'then propose it.',
                     route: route,
-                    onRoute: onRoute,
-                  ),
+                  );
+                },
+        ),
+        OoPage.runs => RunsPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+          onOpen: (run) => _openRun(context, run),
+        ),
+        OoPage.agents => OoTabs(
+          empty: 'No Agents are available to this account.',
+          selected: route['tab'],
+          onSelect: (tab) => _tab(route, tab),
+          tabs: [
+            if (_canReadRoles)
+              (
+                'agents',
+                'Agents',
+                AgentsPage(board: board, route: route, onRoute: onRoute),
+              ),
+            if (_canReadRoles)
+              (
+                'roles',
+                'Roles',
+                AgentRolesPage(board: board, route: route, onRoute: onRoute),
+              ),
+          ],
+        ),
+        OoPage.stations => OoTabs(
+          empty: 'No Stations are available to this account.',
+          selected: route['tab'],
+          onSelect: (tab) => _tab(route, tab),
+          tabs: [
+            ('overview', 'Stations', _stationsTab(context, route)),
+            (
+              'theaters',
+              'Theaters',
+              _TheatersTab(
+                board: board.stationBoard,
+                stationId: route['station_id'],
+                theaterId: route['theater_id'],
+              ),
+            ),
+            if (board.demo || board.readableStations.isNotEmpty)
+              (
+                'settings',
+                'Settings',
+                StationSettingsPage(
+                  board: board,
+                  route: route,
+                  onRoute: onRoute,
                 ),
-                (
-                  'held',
-                  'Held briefs',
-                  HeldBriefsPage(board: board, route: route, onRoute: onRoute),
+              ),
+            if (board.previewOperations.isNotEmpty)
+              (
+                'placement',
+                'Placement',
+                ListView(children: [_PlacementPanel(board: board)]),
+              ),
+          ],
+        ),
+        OoPage.greenInk => OoTabs(
+          empty: 'No green ink is available to this account.',
+          selected: route['tab'],
+          onSelect: (tab) => _tab(route, tab),
+          tabs: [
+            if (board.greenInkOperations.isNotEmpty)
+              (
+                'inbox',
+                'Inbox',
+                GreenInkPage(board: board, route: route, onRoute: onRoute),
+              ),
+            if (board.greenInkOperations.isNotEmpty)
+              (
+                'expired',
+                'Expired',
+                ExpiredGreenInkPage(
+                  board: board,
+                  route: route,
+                  onRoute: onRoute,
                 ),
-              ],
+              ),
+            if (board.classAuthorizationOperations.isNotEmpty)
+              (
+                'classes',
+                'Class authorisations',
+                ClassAuthorizationsPage(
+                  board: board,
+                  route: route,
+                  onRoute: onRoute,
+                ),
+              ),
+          ],
+        ),
+        OoPage.briefings => OoTabs(
+          empty: 'No briefings are available to this account.',
+          selected: route['tab'],
+          onSelect: (tab) => _tab(route, tab),
+          tabs: [
+            (
+              'proposals',
+              'Mission proposals',
+              MissionProposalsPage(
+                board: board,
+                route: route,
+                onRoute: onRoute,
+              ),
             ),
-            OoPage.roster => RosterPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
+            (
+              'held',
+              'Held briefs',
+              HeldBriefsPage(board: board, route: route, onRoute: onRoute),
             ),
-            OoPage.pools => AccountPoolsPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-              refreshEvery: board.limits.refresh.pools,
-            ),
-            OoPage.timeline => OperationTimelinePage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-              refreshEvery: board.limits.refresh.timeline,
-            ),
-            OoPage.audit => AuditLogPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-            ),
-            OoPage.access => AccessPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-            ),
-            OoPage.compartments => CompartmentsPage(
-              board: board,
-              route: route,
-              onRoute: onRoute,
-            ),
-          };
-        },
-      );
+          ],
+        ),
+        OoPage.roster => RosterPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+        ),
+        OoPage.pools => AccountPoolsPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+          refreshEvery: board.limits.refresh.pools,
+        ),
+        OoPage.timeline => OperationTimelinePage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+          refreshEvery: board.limits.refresh.timeline,
+        ),
+        OoPage.audit => AuditLogPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+        ),
+        OoPage.access => AccessPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+        ),
+        OoPage.compartments => CompartmentsPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+        ),
+      };
+    },
+  );
 
   Widget _stationsTab(BuildContext context, OoRoute route) {
     final stationBoard = widget.board.stationBoard;
@@ -6133,7 +6201,7 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
         title: Text(approve ? 'Approve Mission proposal?' : 'Reject proposal?'),
         content: Text(
           approve
-              ? 'Queue “${proposal.title}” as a Mission in ${proposal.operationId}? M will assign it under the Operation policy.'
+              ? 'Queue “${proposal.title}” as a Mission in ${OperationNames.of(proposal.operationId)}? M will assign it under the Operation policy.'
               : 'Reject “${proposal.title}” and keep it out of runnable intake?',
         ),
         actions: [
@@ -6434,10 +6502,19 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
       ? const ['station-control-01']
       : widget.board.readableStations;
 
-  /// The route's Station, else the first whose settings this person may read.
+  /// The route's Station, else the first that can run Missions among those whose settings
+  /// this person may read: a control-only Station has no execution to set.
   String? get _routeStation =>
       widget.route['station_id'] ??
-      (_stations.isEmpty ? null : _stations.first);
+      _stations.where(_runsMissions).firstOrNull ??
+      _stations.firstOrNull;
+
+  bool _runsMissions(String stationId) =>
+      widget.board.stationBoard.stations.any(
+        (station) =>
+            station.stationId == stationId &&
+            station.roles.contains('execution'),
+      );
 
   @override
   void initState() {
@@ -6589,27 +6666,33 @@ class _StationSettingsPageState extends State<StationSettingsPage> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      !settings.executionEnabled
-                          ? 'This Station does not have the execution role, so it cannot run Missions.'
-                          : settings.configured
-                          ? 'Configured through Outer Office. Changes apply to new Missions.'
-                          : 'Current Station value. Save to establish an authorized live setting.',
-                    ),
-                    const SizedBox(height: 16),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 320),
-                      child: TextField(
-                        key: const Key('station-capacity'),
-                        controller: _capacity,
-                        enabled: canConfigure && !_saving,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Maximum concurrent Missions',
-                          helperText: 'Allowed range: 1–1,024',
+                    if (!settings.executionEnabled)
+                      const Text(
+                        'Execution unavailable on this Station: it does not have the '
+                        'execution role, so it runs no Missions and has no capacity to set.',
+                        key: Key('station-execution-unavailable'),
+                      )
+                    else ...[
+                      Text(
+                        settings.configured
+                            ? 'Configured through Outer Office. Changes apply to new Missions.'
+                            : 'Current Station value. Save to establish an authorized live setting.',
+                      ),
+                      const SizedBox(height: 16),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 320),
+                        child: TextField(
+                          key: const Key('station-capacity'),
+                          controller: _capacity,
+                          enabled: canConfigure && !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Maximum concurrent Missions',
+                            helperText: 'Allowed range: 1–1,024',
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 20),
                     Text(
                       'Resource limits',
@@ -7192,7 +7275,7 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        'Operation ${operation.operationId}',
+                                        'Operation ${OperationNames.of(operation.operationId)}',
                                       ),
                                       OoAccessSummary(operation.actions),
                                     ],
@@ -7329,7 +7412,7 @@ class _PlacementPanelState extends State<_PlacementPanel> {
                       for (final operation in operations)
                         DropdownMenuItem(
                           value: operation,
-                          child: Text(operation),
+                          child: Text(OperationNames.of(operation)),
                         ),
                     ],
                     onChanged: (value) => setState(() {
@@ -7447,7 +7530,7 @@ Future<void> _showCreateMission(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: Text('New Mission · $operationId'),
+          title: Text('New Mission · ${OperationNames.of(operationId)}'),
           content: SizedBox(
             width: 520,
             child: Column(
@@ -7530,7 +7613,9 @@ Future<void> _showCreateMission(
     if (result != null && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Mission $result queued for Operation $operationId.'),
+          content: Text(
+            'Mission $result queued for Operation ${OperationNames.of(operationId)}.',
+          ),
         ),
       );
     }

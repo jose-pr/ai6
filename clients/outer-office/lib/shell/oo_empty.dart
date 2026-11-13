@@ -38,6 +38,8 @@ class OoEmptyState extends StatelessWidget {
     this.link,
     this.action,
     this.actions = const [],
+    this.controls,
+    this.secondary = const [],
     this.backdrop = false,
     super.key,
   });
@@ -52,6 +54,12 @@ class OoEmptyState extends StatelessWidget {
   /// A label and what it does.
   final (String, VoidCallback)? action;
   final List<(String, VoidCallback)> actions;
+
+  /// A control above the buttons, such as a picker the buttons act on.
+  final Widget? controls;
+
+  /// Buttons after [actions] that are not the primary one.
+  final List<(String, VoidCallback)> secondary;
 
   /// Whether the wallpaper shows behind it; not on pages that must stay plain, such as green ink.
   final bool backdrop;
@@ -93,7 +101,11 @@ class OoEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: text.bodyMedium?.copyWith(color: tokens.muted),
             ),
-            if (open != null || action != null || actions.isNotEmpty) ...[
+            if (controls != null) ...[const SizedBox(height: 16), controls!],
+            if (open != null ||
+                action != null ||
+                actions.isNotEmpty ||
+                secondary.isNotEmpty) ...[
               const SizedBox(height: 16),
               Wrap(
                 alignment: WrapAlignment.center,
@@ -102,6 +114,8 @@ class OoEmptyState extends StatelessWidget {
                 children: [
                   for (final (label, onPressed) in [...actions, ?action])
                     FilledButton(onPressed: onPressed, child: Text(label)),
+                  for (final (label, onPressed) in secondary)
+                    OutlinedButton(onPressed: onPressed, child: Text(label)),
                   if (open case (final label, final onPressed))
                     OutlinedButton(onPressed: onPressed, child: Text(label)),
                 ],

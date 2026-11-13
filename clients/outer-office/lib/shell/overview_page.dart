@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -567,7 +569,7 @@ class _ActiveOperations extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: OoLink(
-                    'Operation $operationId',
+                    'Operation ${OperationNames.of(operationId)}',
                     route: OoLinkTo.operation(operationId),
                     style: text.titleSmall,
                   ),
@@ -587,7 +589,7 @@ class _ActiveOperations extends StatelessWidget {
                     color: color == tokens.muted ? tokens.accent : color,
                     backgroundColor: tokens.border,
                     semanticsLabel:
-                        'Operation $operationId: $done of $total Missions done',
+                        'Operation ${OperationNames.of(operationId)}: $done of $total Missions done',
                   ),
                 ),
               ],
@@ -801,7 +803,7 @@ class _Upcoming extends StatelessWidget {
           route: OoLinkTo.mission(mission.operationId, mission.missionId),
           detail: [
             ?board.missionBrief(mission.operationId, mission.missionId)?.name,
-            'Operation ${mission.operationId}',
+            'Operation ${OperationNames.of(mission.operationId)}',
             ?mission.pending?.name,
             mission.pending?.describe(now) ?? 'queued',
             ?mission.pending?.reason,
@@ -824,7 +826,8 @@ class _Upcoming extends StatelessWidget {
           color: tokens.warning,
           title: revealInvisible(brief.title),
           route: OoLinkTo.heldBrief(brief.operationId, brief.key),
-          detail: 'Operation ${brief.operationId} · held for review',
+          detail:
+              'Operation ${OperationNames.of(brief.operationId)} · held for review',
         ),
     ];
     final briefings = onOpen(OoPage.briefings);

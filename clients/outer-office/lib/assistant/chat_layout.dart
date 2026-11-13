@@ -10,6 +10,7 @@ import '../routes/oo_route.dart';
 import '../settings/oo_config.dart';
 import 'pages.dart' show PageActions;
 import 'images.dart' show ImageInput, ImageLoader;
+import 'mission_draft.dart' show MissionDraftReads;
 import 'transcripts.dart' show TranscriptReads;
 import '../shell/app_window.dart';
 import '../shell/oo_shell.dart';
@@ -184,6 +185,7 @@ class MoneypennyChat extends ChangeNotifier {
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
     this.pageActions,
+    this.missions,
     this.transcripts,
     this.imageInput,
     this.imageLoader,
@@ -204,6 +206,9 @@ class MoneypennyChat extends ChangeNotifier {
 
   /// What the page cards ask of Universal Exports; none where there are no pages (the demo).
   final PageActions? pageActions;
+
+  /// What Mission draft cards read of the board; none in the demo.
+  final MissionDraftReads? missions;
 
   /// Reads the conversation's log and its harnesses' contexts; none in the demo.
   final TranscriptReads? transcripts;

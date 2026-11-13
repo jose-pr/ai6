@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -73,7 +75,10 @@ class TimelineItemSummary {
 
   /// Where it happened, each thing named as what opens it.
   List<(String, OoRoute?)> get places => [
-    ('Operation $operationId', OoLinkTo.operation(operationId)),
+    (
+      'Operation ${OperationNames.of(operationId)}',
+      OoLinkTo.operation(operationId),
+    ),
     if (missionId case final mission?)
       ('Mission ${handle ?? mission}', OoLinkTo.mission(operationId, mission)),
     if (runId case final run?) ('Run $run', OoLinkTo.run(operationId, run)),
@@ -311,7 +316,10 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
                 hint: const Text('Operation'),
                 items: [
                   for (final operation in operations)
-                    DropdownMenuItem(value: operation, child: Text(operation)),
+                    DropdownMenuItem(
+                      value: operation,
+                      child: Text(OperationNames.of(operation)),
+                    ),
                 ],
                 onChanged: (chosen) {
                   if (chosen == null || chosen == operation) return;

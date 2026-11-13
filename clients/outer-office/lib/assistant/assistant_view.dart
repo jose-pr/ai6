@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -1203,7 +1205,8 @@ class _CardView extends StatelessWidget {
       _ => Icons.dns_outlined,
     };
     final name = switch (block.card) {
-      'mission' => 'Mission ${block.id} · Operation ${block.operationId}',
+      'mission' =>
+        'Mission ${block.id} · Operation ${OperationNames.of(block.operationId ?? '')}',
       'station' => 'Station ${block.id}',
       _ => 'Theater ${block.id}',
     };

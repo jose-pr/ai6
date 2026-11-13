@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
@@ -165,7 +167,8 @@ class RunsPage extends StatelessWidget {
             cell: (context, run) => OoLink(
               run.operationId,
               route: OoLinkTo.operation(run.operationId),
-              semanticLabel: 'Open Operation ${run.operationId}',
+              semanticLabel:
+                  'Open Operation ${OperationNames.of(run.operationId)}',
             ),
           ),
           OoColumn(
@@ -285,7 +288,7 @@ class _RunFacts extends StatelessWidget {
             children: [
               OoLinkLine([
                 (
-                  'Operation ${run.operationId}',
+                  'Operation ${OperationNames.of(run.operationId)}',
                   OoLinkTo.operation(run.operationId),
                 ),
                 (
@@ -362,7 +365,7 @@ class _RunList extends StatelessWidget {
                         ),
                         OoLinkLine([
                           (
-                            'Operation ${run.operationId}',
+                            'Operation ${OperationNames.of(run.operationId)}',
                             OoLinkTo.operation(run.operationId),
                           ),
                           (

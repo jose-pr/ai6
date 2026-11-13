@@ -451,7 +451,7 @@ void main() {
       );
       expect(find.text('No Missions yet'), findsOneWidget);
       expect(find.textContaining('one brief of work'), findsWidgets);
-      await tester.tap(find.text('New Mission in G'));
+      await tester.tap(find.text('New Mission'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
     });
@@ -461,7 +461,7 @@ void main() {
     ) async {
       await open(tester, empty(), '/missions');
       expect(find.textContaining('a controller grants'), findsOneWidget);
-      expect(find.text('New Mission in G'), findsNothing);
+      expect(find.text('New Mission'), findsNothing);
     });
 
     testWidgets('Runs links on to Missions', (tester) async {

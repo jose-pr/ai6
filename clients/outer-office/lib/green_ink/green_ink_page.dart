@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -419,7 +421,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
                                 OoLinkLine([
                                   if (operationId == null)
                                     (
-                                      'Operation ${request.operationId}',
+                                      'Operation ${OperationNames.of(request.operationId)}',
                                       OoLinkTo.operation(request.operationId),
                                     ),
                                   (

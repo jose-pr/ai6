@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -317,7 +319,7 @@ class _OperationCard extends StatelessWidget {
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: OoLink(
-                      'Operation ${operation.operationId}',
+                      'Operation ${OperationNames.of(operation.operationId)}',
                       route: OoLinkTo.operation(operation.operationId),
                       style: text.titleMedium,
                     ),

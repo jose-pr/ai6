@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -288,7 +290,7 @@ class _ScorecardSectionState extends State<ScorecardSection> {
     final theme = Theme.of(context);
     return Card(
       child: ExpansionTile(
-        title: Text('Scorecard · ${widget.operation}'),
+        title: Text('Scorecard · ${OperationNames.of(widget.operation)}'),
         subtitle: Text(
           card == null
               ? (_error ?? 'Reading the Runs…')

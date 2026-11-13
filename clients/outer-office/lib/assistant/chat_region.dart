@@ -385,6 +385,7 @@ class ChatPanel extends StatelessWidget {
                 : () => chat.onMemory?.call(context),
             proposalWait: chat.proposalWait,
             pageActions: chat.pageActions,
+            missions: chat.missions,
             transcripts: chat.transcripts,
             imageInput: chat.imageInput,
             imageLoader: chat.imageLoader,

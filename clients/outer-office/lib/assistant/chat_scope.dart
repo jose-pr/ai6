@@ -1,3 +1,5 @@
+import '../shell/operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../routes/oo_route.dart';
@@ -109,7 +111,7 @@ class ChatScopeBar extends StatelessWidget {
                 for (final operation in operations)
                   PopupMenuItem(
                     value: operation,
-                    child: Text('Operation · $operation'),
+                    child: Text('Operation · ${OperationNames.of(operation)}'),
                   ),
               ],
             ),

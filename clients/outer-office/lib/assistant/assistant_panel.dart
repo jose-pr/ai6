@@ -16,6 +16,7 @@ import 'assistant_view.dart';
 import 'entry_kind.dart';
 import 'images.dart';
 import 'export.dart' as exporting;
+import 'mission_draft.dart';
 import 'pages.dart';
 import 'transcripts.dart';
 import 'turns.dart';
@@ -44,6 +45,7 @@ class AssistantPanel extends StatefulWidget {
     this.label,
     this.proposalWait = ControlSettings.defaultConfirming,
     this.pageActions,
+    this.missions,
     this.transcripts,
     this.saveText = exporting.saveText,
     this.imageInput,
@@ -96,6 +98,10 @@ class AssistantPanel extends StatefulWidget {
   /// What the cards of pages she published ask of Universal Exports; without it a page card
   /// shows her title only.
   final PageActions? pageActions;
+
+  /// What a Mission draft card reads of the board; without it a Mission proposal is the plain
+  /// card.
+  final MissionDraftReads? missions;
 
   /// Reads the conversation's log and contexts; without it the menu does not offer them.
   final TranscriptReads? transcripts;
@@ -584,6 +590,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
                         onOpen: widget.onOpen,
                         proposalWait: widget.proposalWait,
                         pageActions: widget.pageActions,
+                        missions: widget.missions,
                         imageLoader: widget.imageLoader,
                       )) {
                         // Views are tables and charts: they take the whole width.
@@ -741,11 +748,13 @@ class _EntryView extends StatelessWidget {
     required this.controller,
     required this.proposalWait,
     this.pageActions,
+    this.missions,
     this.onOpen,
     this.imageLoader,
   });
 
   final PageActions? pageActions;
+  final MissionDraftReads? missions;
   final Duration proposalWait;
   final AssistantEntry entry;
   final AssistantController controller;
@@ -838,6 +847,19 @@ class _EntryView extends StatelessWidget {
           ),
         ],
       ),
+      'proposal'
+          when missions != null && entry.data?['tool'] == 'propose_mission' =>
+        MissionDraftCard(
+          proposal: entry.data ?? const {},
+          reads: missions!,
+          onConfirm: controller.confirm,
+          onCancel: controller.cancel,
+          onRevise: (id, text) {
+            controller.cancel(id);
+            controller.say(text);
+          },
+          onOpen: onOpen,
+        ),
       'proposal' => ProposalCard(
         proposal: entry.data ?? const {},
         onConfirm: controller.confirm,

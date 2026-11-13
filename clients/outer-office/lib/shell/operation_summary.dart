@@ -1,3 +1,5 @@
+import 'operation_names.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../access/access_words.dart';
@@ -105,7 +107,10 @@ class _OperationSummaryState extends State<OperationSummary> {
             Expanded(
               child: Semantics(
                 header: true,
-                child: Text('Operation $_id', style: text.titleLarge),
+                child: Text(
+                  'Operation ${OperationNames.of(_id)}',
+                  style: text.titleLarge,
+                ),
               ),
             ),
           ],
