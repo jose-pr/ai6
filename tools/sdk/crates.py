@@ -605,6 +605,9 @@ def export_commit(repo: Repo, into: Path) -> Path:
     )
     with tarfile.open(fileobj=made.stdout, mode="r|") as tar:
         tar.extractall(tree, filter="data")
+    # git pads the archive to a whole record after its end marker; read it, or the pipe stays full
+    # and git never exits (a Windows pipe holds 4 KiB).
+    made.stdout.read()
     if made.wait():
         raise Problem(f"git archive of {repo.name} at {repo.commit} failed")
     shutil.rmtree(work, ignore_errors=True)
