@@ -2596,6 +2596,13 @@ fn publish_station_check_in(state: &DaemonState) {
         ),
         Err(error) => eprintln!("ai6: could not encode the Operation tree: {error}"),
     }
+    // The names Operations are called by, for the people reading the board.
+    let names: BTreeMap<&str, &str> = state
+        .roster
+        .operations()
+        .filter_map(|operation| Some((operation.id.as_str(), operation.name.as_deref()?)))
+        .collect();
+    info.insert("operation_names".to_owned(), serde_json::json!(names));
     info.insert(
         "retirements".to_owned(),
         serde_json::json!(agents::retirements(&state.roster, state.clock.now())),

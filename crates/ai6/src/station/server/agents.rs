@@ -624,6 +624,8 @@ mod tests {
             stations[0].info()["operation_lineage"],
             serde_json::json!({"G": ["P", "ROOT"], "P": ["ROOT"], "ROOT": []})
         );
+        // Only an Operation with a name is listed.
+        assert_eq!(stations[0].info()["operation_names"], serde_json::json!({}));
     }
 
     #[test]

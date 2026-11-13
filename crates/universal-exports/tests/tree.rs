@@ -55,6 +55,10 @@ async fn serve() -> (String, oneshot::Sender<()>, tempfile::TempDir) {
                     serde_json::json!(["SOUTH", "OTHER"]),
                 ),
                 (
+                    "operation_names".to_owned(),
+                    serde_json::json!({"SOUTH": "South Base", "BODYGUARD": "Hidden Name"}),
+                ),
+                (
                     "operation_lineage".to_owned(),
                     serde_json::json!({
                         "BODYGUARD": [], "FORTITUDE": ["BODYGUARD"],
@@ -211,16 +215,23 @@ async fn a_rule_on_a_parent_reaches_its_subtree_and_hidden_ancestors_stay_unname
     assert_eq!(named, ["FORTITUDE", "SOUTH"], "BODYGUARD is hidden");
     assert!(operations[0].get("parent").is_none(), "{profile}");
     assert_eq!(operations[1]["parent"], "FORTITUDE");
+    assert!(
+        operations[0].get("name").is_none(),
+        "an Operation with no name sends none"
+    );
+    assert_eq!(operations[1]["name"], "South Base");
     assert!(!profile.to_string().contains("BODYGUARD"));
+    assert!(!profile.to_string().contains("Hidden Name"));
 
     let (_, board) = get(&base, &viewer, "/v1/stations").await;
     assert_eq!(
         board["operations"],
         serde_json::json!([
             {"operation_id": "FORTITUDE"},
-            {"operation_id": "SOUTH", "parent": "FORTITUDE"}
+            {"operation_id": "SOUTH", "name": "South Base", "parent": "FORTITUDE"}
         ])
     );
+    assert!(!board.to_string().contains("Hidden Name"));
     let (status, _) = get(&base, &viewer, "/v1/user/roster/operation/SOUTH/effective").await;
     assert_eq!(status, reqwest::StatusCode::FORBIDDEN, "needs roster.read");
     let _ = shutdown.send(());

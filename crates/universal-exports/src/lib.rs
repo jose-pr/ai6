@@ -2249,6 +2249,7 @@ async fn stations(
             .iter()
             .map(|operation| BoardOperation {
                 operation_id: operation.clone(),
+                name: tree.name(operation),
                 parent: tree.visible_parent(operation, |id| readable.contains(id)),
             })
             .collect();
@@ -3435,6 +3436,9 @@ struct UserProfile {
 #[derive(Serialize)]
 struct UserOperationAccess {
     operation_id: String,
+    /// What the Operation is called, when it has a name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     /// The nearest Operation above it the person may read; omitted for a root or when every
     /// ancestor is hidden from them.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4294,6 +4298,7 @@ async fn user_profile(
                     .unwrap_or_default();
                 if !actions.is_empty() {
                     operations.push(UserOperationAccess {
+                        name: tree.name(&operation_id),
                         operation_id,
                         parent: None,
                         actions,
@@ -5511,6 +5516,9 @@ pub struct StationBoard {
 pub struct BoardOperation {
     /// Operation codename.
     pub operation_id: String,
+    /// What the Operation is called (its project name); omitted when it has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// The nearest Operation above it the person may read; `None` (omitted) for a root or
     /// when every ancestor is hidden from them, which are never named.
     #[serde(skip_serializing_if = "Option::is_none")]

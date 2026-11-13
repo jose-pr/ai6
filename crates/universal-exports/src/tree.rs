@@ -13,23 +13,25 @@ use ai6::{AuthorizationRequest, Person};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OperationTree {
     lineage: BTreeMap<String, Vec<String>>,
+    /// The names the Operations are called by, where they have one.
+    names: BTreeMap<String, String>,
 }
 
 impl OperationTree {
     /// The tree the most recent check-in carrying `operation_lineage` published; empty when
     /// none does. Entries that are not a list of IDs are left out.
     pub(crate) fn from_check_ins(records: &[ai6::StationRecord]) -> Self {
-        let Some(published) = records
+        let Some((published, names)) = records
             .iter()
             .filter_map(|record| {
                 record
                     .info()
                     .get("operation_lineage")
                     .and_then(serde_json::Value::as_object)
-                    .map(|lineage| (record.seen(), lineage))
+                    .map(|lineage| (record.seen(), lineage, record.info().get("operation_names")))
             })
             .max_by(|left, right| left.0.total_cmp(&right.0))
-            .map(|(_, lineage)| lineage)
+            .map(|(_, lineage, names)| (lineage, names))
         else {
             return Self::default();
         };
@@ -44,13 +46,30 @@ impl OperationTree {
                 Some((operation.clone(), ancestors))
             })
             .collect();
-        Self { lineage }
+        let names = names
+            .and_then(serde_json::Value::as_object)
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(|(operation, name)| {
+                        Some((operation.clone(), name.as_str()?.to_owned()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { lineage, names }
+    }
+
+    /// The name `operation` is called by, when it has one.
+    pub(crate) fn name(&self, operation: &str) -> Option<String> {
+        self.names.get(operation).cloned()
     }
 
     /// A tree of these lineages, for tests.
     #[cfg(test)]
     pub(crate) fn of(lineage: &[(&str, &[&str])]) -> Self {
         Self {
+            names: BTreeMap::new(),
             lineage: lineage
                 .iter()
                 .map(|(operation, ancestors)| {
