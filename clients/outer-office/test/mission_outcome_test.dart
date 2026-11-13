@@ -48,9 +48,9 @@ Future<MissionBoard> _board(
           'mission_id': 'm1',
           'handle': 'G-1',
           'runs': const <Object>[],
-          'attempts': [
+          'history': [
             {
-              'attempt': 1,
+              'number': 1,
               'run_id': 's1',
               'station': 'hq',
               'status': 'ended',
@@ -66,7 +66,7 @@ Future<MissionBoard> _board(
           return json({
             'operation_id': 'G',
             'mission_id': 'm1',
-            'attempt': 1,
+            'number': 1,
             'run_id': 's1',
             ...standing!,
           });

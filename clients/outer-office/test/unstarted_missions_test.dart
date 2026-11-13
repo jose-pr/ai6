@@ -24,7 +24,7 @@ Map<String, Object?> _pending(
   'mission_id': id,
   'handle': 'ai6-$id',
   'runs': const <Object>[],
-  'attempts': const <Object>[],
+  'history': const <Object>[],
   'pending': pending,
 };
 
@@ -61,7 +61,7 @@ final _missions = [
     'mission_id': '4',
     'handle': 'ai6-4',
     'runs': const <Object>[],
-    'attempts': const <Object>[],
+    'history': const <Object>[],
   },
 ];
 

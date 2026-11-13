@@ -63,7 +63,7 @@ void main() {
     for (final title in [
       'station-control-01 hands mission-007 to build-box',
       'Where G runs',
-      'Attempts of mission-007',
+      'Runs of mission-007',
     ]) {
       await tester.scrollUntilVisible(
         find.text(title),

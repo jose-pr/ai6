@@ -90,7 +90,7 @@ List<(MissionGroup, RunSummary?)> runsHere(
 ) {
   final here = <(MissionGroup, RunSummary?)>[];
   for (final mission in board.missionGroups()) {
-    final attempts = board.attempts(mission.operationId, mission.missionId);
+    final attempts = board.history(mission.operationId, mission.missionId);
     if (!attempts.any(
       (attempt) => attempt.station == stationId && attempt.status == 'active',
     )) {
@@ -450,7 +450,7 @@ class _RunsHere extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'No active attempt is on this Station.',
+              'No active run is on this Station.',
               style: TextStyle(color: OoTokens.of(context).muted),
             ),
           ),

@@ -207,17 +207,17 @@ class DemoAssistantChannel implements AssistantChannel {
     'blocks': [
       {
         'kind': 'schedule',
-        'title': 'Attempts of mission-007',
+        'title': 'Runs of mission-007',
         'rows': [
           {
-            'label': 'attempt 1',
+            'label': 'run 1',
             'start': '2026-10-29T08:00:00Z',
             'end': '2026-10-29T08:40:00Z',
             'state': 'failed',
             'link': 'app:/missions?operation_id=G&mission_id=mission-007',
           },
           {
-            'label': 'attempt 2',
+            'label': 'run 2',
             'start': '2026-10-29T08:45:00Z',
             'end': '2026-10-29T09:30:00Z',
             'state': 'working',

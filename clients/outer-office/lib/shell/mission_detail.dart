@@ -46,7 +46,7 @@ class MissionDetail extends StatelessWidget {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
     final operationId = mission.operationId;
-    final attempts = board.attempts(operationId, mission.missionId);
+    final attempts = board.history(operationId, mission.missionId);
     final current = board.currentRun(operationId, mission.missionId);
     final brief = board.missionBrief(operationId, mission.missionId);
     final latest = mission.latest;
@@ -140,8 +140,8 @@ class MissionDetail extends StatelessWidget {
             Text(
               [
                 'State from',
-                if (current != null) 'attempt ${current.attempt}',
-                'Run ${latest.runId}',
+                if (current != null) 'Run ${current.number}',
+                latest.runId,
               ].join(' · '),
               style: text.bodySmall?.copyWith(color: tokens.muted),
             ),
@@ -164,11 +164,11 @@ class MissionDetail extends StatelessWidget {
             missionId: mission.missionId,
             state: mission.state,
           ),
-          Text('ATTEMPTS', style: ooSectionLabel(context)),
+          Text('HISTORY', style: ooSectionLabel(context)),
           const SizedBox(height: 8),
           if (attempts.isEmpty)
             Text(
-              'No attempt is recorded for this Mission.',
+              'No run is recorded for this Mission.',
               style: TextStyle(color: tokens.muted),
             ),
           for (final attempt in attempts)
@@ -255,7 +255,7 @@ class MissionDetail extends StatelessWidget {
 
 class _RunCard extends StatelessWidget {
   const _RunCard({
-    required this.attempt,
+    required this.number,
     required this.runs,
     required this.pages,
     required this.onRoute,
@@ -286,7 +286,7 @@ class _RunCard extends StatelessWidget {
           children: [
             Text(
               [
-                'Attempt ${attempt.attempt}',
+                'Run ${attempt.number}',
                 ?attempt.runId,
                 attempt.status,
               ].join(' · '),

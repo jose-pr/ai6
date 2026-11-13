@@ -319,7 +319,7 @@ class MissionActionsMenu extends StatelessWidget {
           operationId: operationId,
           missionId: missionId,
           decision: action.substring('verify-'.length),
-          attempt: board.currentRun(operationId, missionId)?.attempt,
+          attempt: board.currentRun(operationId, missionId)?.number,
         );
       } on Object catch (error) {
         messenger?.showSnackBar(SnackBar(content: Text(error.toString())));
@@ -390,7 +390,7 @@ class _ControlDialogState extends State<_ControlDialog> {
       ),
       'retry' => (
         'Retry Mission ${widget.missionId}?',
-        'The Mission is queued again as a new attempt that continues in the same safe house.',
+        'The Mission is queued again as a new run that continues in the same safe house.',
         'Retry',
       ),
       'resume' => (

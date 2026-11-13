@@ -101,7 +101,7 @@ const _scorecard = {
     {
       'agent': '007',
       'standing': {
-        'attempts': {
+        'runs': {
           'done': [
             {'mission_id': 'm-1', 'run_id': 'm-1.1'},
             {'mission_id': 'm-2', 'run_id': 'm-2.1'},
@@ -125,7 +125,7 @@ const _scorecard = {
         {
           'route': {'handler': 'claude', 'model': 'sonnet', 'pool': 'team'},
           'standing': {
-            'attempts': {
+            'runs': {
               'done': [
                 {'mission_id': 'm-1', 'run_id': 'm-1.1'},
               ],
@@ -144,7 +144,7 @@ const _scorecard = {
     {
       'model': null,
       'standing': {
-        'attempts': {},
+        'runs': {},
         'judged': 0,
         'small_sample': true,
         'usage': {'input': 0, 'output': 0, 'cost_micro_usd': 0},
@@ -314,7 +314,7 @@ void main() {
         find.textContaining('claude · sonnet · pool team'),
         findsOneWidget,
       );
-      expect(find.textContaining('1 attempts name no Agent'), findsOneWidget);
+      expect(find.textContaining('1 runs name no Agent'), findsOneWidget);
 
       await tester.tap(find.widgetWithText(ActionChip, '3 done'));
       await tester.pumpAndSettle();

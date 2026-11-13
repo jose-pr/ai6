@@ -322,7 +322,7 @@ void main() {
     board.runs = [run('s-first', 40, 100), run('s-retry', 2, 200)];
     board.missionRuns = {
       ('G', 'm'): const [
-        MissionRunSummary(attempt: 2, station: 'hq', status: 'active'),
+        MissionRunSummary(number: 2, station: 'hq', status: 'active'),
       ],
     };
     expect(runsHere(board, 'hq').single.$2?.runId, 's-retry');
@@ -405,8 +405,8 @@ void main() {
         '/missions?operation_id=G&mission_id=mission-007',
         size: const Size(1400, 1600),
       );
-      expect(find.text('Attempt 1 · lost'), findsOneWidget);
-      expect(find.text('Attempt 2 · active'), findsOneWidget);
+      expect(find.text('Run 1 · lost'), findsOneWidget);
+      expect(find.text('Run 2 · active'), findsOneWidget);
       expect(
         find.textContaining('went dark with Theater "local"'),
         findsNWidgets(2),
@@ -416,7 +416,7 @@ void main() {
         findsNWidgets(2),
       );
       expect(
-        find.text('State from · attempt 2 · Run preview-run-007'),
+        find.text('State from · Run 2 · preview-run-007'),
         findsOneWidget,
       );
       expect(find.text('Mission brief'), findsOneWidget);
@@ -549,7 +549,7 @@ void main() {
     expect(find.text('Dark'), findsOneWidget);
     expect(find.text('Resources: Not reported'), findsOneWidget);
     expect(find.textContaining('Last check-in'), findsOneWidget);
-    expect(find.text('No active attempt is on this Station.'), findsOneWidget);
+    expect(find.text('No active run is on this Station.'), findsOneWidget);
   });
 
   testWidgets('a Station that reports resources shows them as sampled', (

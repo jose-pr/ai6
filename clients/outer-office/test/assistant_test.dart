@@ -229,10 +229,10 @@ void main() {
       expect(first.fromY, 0);
       expect(first.toY, 40 * 60, reason: 'forty minutes from the first start');
       expect(
-        chartLabelled('schedule: Attempts of mission-7. 2 rows'),
+        chartLabelled('schedule: Runs of mission-7. 2 rows'),
         findsOneWidget,
       );
-      await tester.tap(find.text('attempt 1'));
+      await tester.tap(find.text('run 1'));
       expect(opened, ['app:/missions?operation_id=G&mission_id=mission-7']);
 
       opened.clear();

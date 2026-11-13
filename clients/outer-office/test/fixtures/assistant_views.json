@@ -94,10 +94,10 @@
       "blocks": [
         {
           "kind": "schedule",
-          "title": "Attempts of mission-7",
+          "title": "Runs of mission-7",
           "rows": [
-            {"label": "attempt 1", "start": "2026-10-29T08:00:00Z", "end": "2026-10-29T08:40:00Z", "state": "failed", "link": "app:/missions?operation_id=G&mission_id=mission-7"},
-            {"label": "attempt 2", "start": "2026-10-29T09:10:00+01:00", "end": "2026-10-29T08:55:30.5Z", "state": "working"}
+            {"label": "run 1", "start": "2026-10-29T08:00:00Z", "end": "2026-10-29T08:40:00Z", "state": "failed", "link": "app:/missions?operation_id=G&mission_id=mission-7"},
+            {"label": "run 2", "start": "2026-10-29T09:10:00+01:00", "end": "2026-10-29T08:55:30.5Z", "state": "working"}
           ]
         }
       ]

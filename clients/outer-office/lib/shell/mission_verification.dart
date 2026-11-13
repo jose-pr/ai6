@@ -96,10 +96,10 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
       final attempt = snapshot.data;
       final report = attempt?.finalReport;
       final number =
-          attempt?.attempt ??
+          attempt?.number ??
           widget.board
               .currentRun(widget.operationId, widget.missionId)
-              ?.attempt;
+              ?.number;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -107,7 +107,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
           const SizedBox(height: 8),
           Text(
             'Waiting for a decision: '
-            '${attempt == null ? 'its' : 'attempt ${attempt.attempt}\'s'} '
+            '${attempt == null ? 'its' : 'run ${attempt.number}\'s'} '
             'Run ended done, and the Mission is not done until it is '
             'decided.',
             style: text.bodyMedium,
@@ -115,7 +115,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
           const SizedBox(height: 10),
           if (snapshot.hasError)
             Text(
-              'The attempt could not be loaded.',
+              'The run could not be loaded.',
               style: TextStyle(color: tokens.muted),
             )
           else if (attempt == null &&
@@ -174,7 +174,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
                   child: Text(
                     number == null
                         ? 'Redispatch'
-                        : 'Redispatch as attempt ${number + 1}',
+                        : 'Redispatch as run ${number + 1}',
                   ),
                 ),
                 TextButton(
@@ -285,10 +285,10 @@ Future<String?> decideMission(
     amendment: answer.amendment,
   );
   final state = board.missionState(operationId, missionId);
-  final next = (recorded['attempt'] as num?)?.toInt();
+  final next = (recorded['number'] as num?)?.toInt();
   final said = [
     'Decision recorded: ${switch (decision) {
-      'redispatch' => next == null ? 'redispatch' : 'redispatch as attempt ${next + 1}',
+      'redispatch' => next == null ? 'redispatch' : 'redispatch as run ${next + 1}',
       _ => decision,
     }}',
     if (state != null) 'Mission is $state',
@@ -336,7 +336,7 @@ class _DecisionDialogState extends State<_DecisionDialog> {
       _ =>
         widget.attempt == null
             ? 'Decide: redispatch'
-            : 'Decide: redispatch as attempt ${widget.attempt! + 1}',
+            : 'Decide: redispatch as run ${widget.attempt! + 1}',
     }),
     content: Column(
       mainAxisSize: MainAxisSize.min,
@@ -346,7 +346,7 @@ class _DecisionDialogState extends State<_DecisionDialog> {
           const Padding(
             padding: EdgeInsets.only(bottom: 8),
             child: Text(
-              'The Mission is queued again as the next attempt, and its new '
+              'The Mission is queued again as the next run, and its new '
               'Run is told the reason and the amendment after its brief.',
             ),
           ),

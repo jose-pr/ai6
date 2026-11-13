@@ -43,7 +43,7 @@ class ScorecardRun {
 @immutable
 class ScorecardStanding {
   const ScorecardStanding({
-    this.attempts = const {},
+    this.runs = const {},
     this.judged = 0,
     this.failureRate,
     this.smallSample = true,
@@ -54,7 +54,7 @@ class ScorecardStanding {
   });
 
   /// The runs of each judgment, by its wire name.
-  final Map<String, List<ScorecardRun>> attempts;
+  final Map<String, List<ScorecardRun>> runs;
   final int judged;
   final double? failureRate;
 
@@ -68,9 +68,9 @@ class ScorecardStanding {
   factory ScorecardStanding.fromJson(Map<String, dynamic> json) {
     final usage = json['usage'] as Map<String, dynamic>? ?? const {};
     return ScorecardStanding(
-      attempts: {
+      runs: {
         for (final entry
-            in (json['attempts'] as Map<String, dynamic>? ?? const {}).entries)
+            in (json['runs'] as Map<String, dynamic>? ?? const {}).entries)
           entry.key: [
             for (final attempt in entry.value as List<dynamic>)
               ScorecardRun.fromJson(attempt as Map<String, dynamic>),
@@ -86,7 +86,7 @@ class ScorecardStanding {
     );
   }
 
-  int count(String judgment) => attempts[judgment]?.length ?? 0;
+  int count(String judgment) => runs[judgment]?.length ?? 0;
 
   /// `3 of 4 judged · 25 % failed`, or what stands in its place with nothing judged.
   String get summary {
@@ -182,7 +182,7 @@ class ScorecardSummary {
   }
 
   String get window =>
-      windowDays == 0 ? 'every attempt on record' : 'the last $windowDays days';
+      windowDays == 0 ? 'every run on record' : 'the last $windowDays days';
 }
 
 /// The scorecards of [operations] under one collapsed heading, so the table below keeps the
@@ -322,12 +322,12 @@ class _ScorecardSectionState extends State<ScorecardSection> {
             ],
             if (card.unattributed > 0)
               Text(
-                '${card.unattributed} attempts name no Agent; they count '
+                '${card.unattributed} runs name no Agent; they count '
                 'toward their model only.',
                 style: theme.textTheme.bodySmall,
               ),
             Text(
-              'A row with fewer than ${card.smallSample} judged attempts is a '
+              'A row with fewer than ${card.smallSample} judged runs is a '
               'small sample and ranks nothing. Grades compare within one '
               'Operation\'s work; they say nothing of a model in general.',
               style: theme.textTheme.bodySmall,
@@ -374,7 +374,7 @@ class _RowTile extends StatelessWidget {
                     onPressed: () {
                       // Resolved here: a dialog sits above the page that knows the links.
                       final opened = [
-                        for (final attempt in standing.attempts[name]!)
+                        for (final attempt in standing.runs[name]!)
                           (
                             board.handleOf(operation, attempt.missionId),
                             OoLinks.opener(

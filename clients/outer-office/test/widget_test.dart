@@ -936,9 +936,9 @@ void main() {
                     'digest': 'sha256:${'0' * 64}',
                   },
                 },
-                'attempts': [
+                'history': [
                   {
-                    'attempt': 1,
+                    'number': 1,
                     'run_id': 'attempt-1',
                     'provider_id': 'claude-session-000',
                     'predecessor': null,
@@ -949,7 +949,7 @@ void main() {
                     'checkpoint_branch': 'mission-007-review',
                   },
                   {
-                    'attempt': 2,
+                    'number': 2,
                     'run_id': 'attempt-2',
                     'provider_id': 'claude-session-123',
                     'predecessor': 'attempt-1',
@@ -1071,14 +1071,14 @@ void main() {
     expect(find.text('Missions'), findsOneWidget);
     expect(find.text('Operation operation-alpha'), findsOneWidget);
     expect(find.text('Mission mission-007'), findsOneWidget);
-    expect(find.text('Attempt 1'), findsOneWidget);
+    expect(find.text('Run 1'), findsOneWidget);
     expect(find.text('Station station-beta'), findsOneWidget);
     expect(find.text('Station "station-beta" went dark'), findsOneWidget);
     expect(
       find.text('Checkpointed to branch mission-007-review'),
       findsOneWidget,
     );
-    expect(find.text('Attempt 2'), findsOneWidget);
+    expect(find.text('Run 2'), findsOneWidget);
     expect(find.text('Station station-alpha'), findsWidgets);
     expect(find.text('claude-session-123'), findsOneWidget);
     expect(find.text('codex-session-456'), findsOneWidget);

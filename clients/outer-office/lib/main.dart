@@ -290,7 +290,7 @@ class MissionBoard extends ChangeNotifier
       missionRuns = const {
         ('G', 'mission-007'): [
           MissionRunSummary(
-            attempt: 1,
+            number: 1,
             station: 'station-remote-02',
             theater: 'local',
             status: 'lost',
@@ -300,7 +300,7 @@ class MissionBoard extends ChangeNotifier
             checkpointBranch: 'mission-007-review',
           ),
           MissionRunSummary(
-            attempt: 2,
+            number: 2,
             station: 'station-control-01',
             theater: 'local',
             status: 'active',
@@ -2404,7 +2404,7 @@ class MissionBoard extends ChangeNotifier
               'judged': 13,
               'failure_rate': 0.15,
               'small_sample': false,
-              'attempts': {
+              'history': {
                 'done': [
                   {'mission_id': 'mission-007', 'run_id': 'mission-007.1'},
                 ],
@@ -3106,7 +3106,7 @@ class MissionBoard extends ChangeNotifier
             for (final item in missions.cast<Map<String, dynamic>>())
               (item['operation_id'] as String, item['mission_id'] as String): [
                 for (final attempt
-                    in (item['attempts'] as List<dynamic>? ?? const []))
+                    in (item['history'] as List<dynamic>? ?? const []))
                   MissionRunSummary.fromJson(
                     attempt as Map<String, dynamic>,
                   ),
@@ -3261,7 +3261,7 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
-  List<MissionRunSummary> attempts(String operationId, String missionId) =>
+  List<MissionRunSummary> history(String operationId, String missionId) =>
       missionRuns[(operationId, missionId)] ?? const [];
 
   /// What a Mission is called: its handle, else its ID. Routes and links keep the ID.
@@ -3353,7 +3353,7 @@ class MissionBoard extends ChangeNotifier
       );
     }
     final mission = jsonDecode(response.body) as Map<String, dynamic>;
-    return (mission['attempts'] as List<dynamic>? ?? const [])
+    return (mission['history'] as List<dynamic>? ?? const [])
         .map(
           (attempt) =>
               MissionRunSummary.fromJson(attempt as Map<String, dynamic>),
@@ -3361,7 +3361,7 @@ class MissionBoard extends ChangeNotifier
         .fold<MissionRunSummary?>(
           null,
           (latest, attempt) =>
-              latest == null || attempt.attempt > latest.attempt
+              latest == null || attempt.number > latest.attempt
               ? attempt
               : latest,
         );
@@ -3469,9 +3469,9 @@ class MissionBoard extends ChangeNotifier
   /// The latest run at a Mission, whose Run sets its state; `null` before one is
   /// recorded.
   MissionRunSummary? currentRun(String operationId, String missionId) =>
-      attempts(operationId, missionId).fold<MissionRunSummary?>(
+      history(operationId, missionId).fold<MissionRunSummary?>(
         null,
-        (latest, attempt) => latest == null || attempt.attempt > latest.attempt
+        (latest, attempt) => latest == null || attempt.number > latest.attempt
             ? attempt
             : latest,
       );
@@ -5049,7 +5049,7 @@ class PendingMission {
 /// One run at a Mission: where it ran and how it stands.
 class MissionRunSummary {
   const MissionRunSummary({
-    required this.attempt,
+    required this.number,
     required this.station,
     required this.status,
     this.deliverables = const [],
@@ -5065,7 +5065,7 @@ class MissionRunSummary {
     this.finalReport,
   });
 
-  final int attempt;
+  final int number;
 
   /// AI6's ID for this run, its UID, apart from the provider's Run ID.
   final String? runId;
@@ -5114,7 +5114,7 @@ class MissionRunSummary {
 
   factory MissionRunSummary.fromJson(Map<String, dynamic> json) =>
       MissionRunSummary(
-        attempt: json['attempt'] as int,
+        number: json['number'] as int,
         runId: json['run_id'] as String?,
         handle: json['handle'] as String?,
         station: json['station'] as String,
@@ -5142,7 +5142,7 @@ class MissionRunSummary {
       );
 
   String describe() => [
-    'Attempt $attempt',
+    'Run $number',
     status,
     'Station $station',
     if (theater case final theater?) 'Theater $theater',

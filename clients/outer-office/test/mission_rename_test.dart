@@ -24,9 +24,9 @@ MissionBoard gateway(
     'runs': const [],
     'brief': null,
     'usage': null,
-    'attempts': [
+    'history': [
       {
-        'attempt': 1,
+        'number': 1,
         'run_id': '019a1b2c-3d4e-7f00-8123-000000000001',
         'handle': 'G-1.1',
         'station': 'hq',

@@ -184,7 +184,7 @@
           "provenance": null
         },
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "G",
@@ -205,7 +205,7 @@
         ],
         "brief": null,
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "Q",
@@ -240,7 +240,7 @@
           "provenance": null
         },
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "G",
@@ -273,7 +273,7 @@
         ],
         "brief": null,
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "G",
@@ -306,7 +306,7 @@
         ],
         "brief": null,
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "G",
@@ -339,7 +339,7 @@
         ],
         "brief": null,
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "G",
@@ -372,7 +372,7 @@
         ],
         "brief": null,
         "usage": null,
-        "attempts": []
+        "history": []
       },
       {
         "operation_id": "R",
@@ -408,7 +408,7 @@
           "provenance": {"origin": "review", "received_by": "hq", "reference": "mission-review:m-done"}
         },
         "usage": null,
-        "attempts": []
+        "history": []
       }
     ],
     "cases": [

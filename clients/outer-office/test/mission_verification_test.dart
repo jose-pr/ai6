@@ -88,9 +88,9 @@ Future<MissionBoard> _board(
           'mission_id': 'm1',
           'handle': 'G-1',
           'runs': const <Object>[],
-          'attempts': [
+          'history': [
             {
-              'attempt': 2,
+              'number': 2,
               'run_id': 's1',
               'station': 'hq',
               'status': 'ended',
@@ -289,10 +289,10 @@ void main() {
     final calls = <(String, Map<String, dynamic>?)>[];
     final board = await _board(['mission.verify'], calls: calls);
     await _detail(tester, board);
-    expect(find.text('Redispatch as attempt 3'), findsOneWidget);
-    await tester.tap(find.text('Redispatch as attempt 3'));
+    expect(find.text('Redispatch as run 3'), findsOneWidget);
+    await tester.tap(find.text('Redispatch as run 3'));
     await tester.pumpAndSettle();
-    expect(find.text('Decide: redispatch as attempt 3'), findsOneWidget);
+    expect(find.text('Decide: redispatch as run 3'), findsOneWidget);
     await tester.enterText(find.byType(TextField).first, 'no branch');
     await tester.enterText(find.byType(TextField).last, 'Push it first.');
     await tester.pump();
@@ -387,7 +387,7 @@ void main() {
             'operation_id': 'G',
             'mission_id': 'm1',
             'runs': const <Object>[],
-            'attempts': const <Object>[],
+            'history': const <Object>[],
           }),
           _ => json(const <Object>[]),
         };

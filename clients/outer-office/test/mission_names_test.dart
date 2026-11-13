@@ -52,7 +52,7 @@ void main() {
     });
     expect(parsed!.name, 'Fix the build');
     final attempt = MissionRunSummary.fromJson({
-      'attempt': 2,
+      'number': 2,
       'run_id': 'ai6-gh-63.2',
       'station': 'hq',
       'status': 'active',
@@ -63,7 +63,7 @@ void main() {
   test('an attempt says which handler, model and pool it ran on', () {
     MissionRunSummary attempt(Map<String, dynamic>? route) =>
         MissionRunSummary.fromJson({
-          'attempt': 1,
+          'number': 1,
           'station': 'hq',
           'status': 'active',
           'route': route,
@@ -87,7 +87,7 @@ void main() {
       ..missionRuns = {
         ('ai6', 'ai6-42'): const [
           MissionRunSummary(
-            attempt: 2,
+            number: 2,
             runId: 'ai6-42.2',
             station: 'hq',
             status: 'active',

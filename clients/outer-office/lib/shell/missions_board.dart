@@ -68,7 +68,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
         mission.missionId,
         board.handleOf(mission.operationId, mission.missionId),
         for (final run in mission.runs) run.runId,
-        for (final attempt in board.attempts(
+        for (final attempt in board.history(
           mission.operationId,
           mission.missionId,
         )) ...[?attempt.runId, ?attempt.handle],
@@ -424,11 +424,11 @@ class MissionCard extends StatelessWidget {
               ],
             ),
           ),
-          if (board.attempts(mission.operationId, mission.missionId)
+          if (board.history(mission.operationId, mission.missionId)
               case final attempts
               when attempts.length > 1 ||
                   attempts.any((attempt) => attempt.status == 'lost'))
-            _RunHistory(attempts: attempts),
+            _RunHistory(history: attempts),
           if (board.controls[(mission.operationId, mission.missionId)]
               case final control?)
             Padding(
@@ -563,9 +563,9 @@ class MissionFacts extends StatelessWidget {
 
 /// Every run at a Mission, first first, with why a lost one was lost.
 class _RunHistory extends StatelessWidget {
-  const _RunHistory({required this.attempts});
+  const _RunHistory({required this.history});
 
-  final List<MissionRunSummary> attempts;
+  final List<MissionRunSummary> history;
 
   @override
   Widget build(BuildContext context) {
@@ -576,9 +576,9 @@ class _RunHistory extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final attempt in attempts) ...[
+          for (final attempt in history) ...[
             OoLinkLine([
-              ('Attempt ${attempt.attempt}', null),
+              ('Run ${attempt.number}', null),
               if (attempt.runId case final run?) ('Run $run', null),
               (attempt.status, null),
               ('Station ${attempt.station}', OoLinkTo.station(attempt.station)),

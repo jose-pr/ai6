@@ -159,11 +159,11 @@ class MissionsTable extends StatelessWidget {
           },
         ),
         OoColumn(
-          id: 'attempts',
-          label: 'Attempts',
+          id: 'history',
+          label: 'History',
           width: 80,
           cell: (context, mission) => Text(
-            '${board.attempts(mission.operationId, mission.missionId).length}',
+            '${board.history(mission.operationId, mission.missionId).length}',
           ),
         ),
         OoColumn(
