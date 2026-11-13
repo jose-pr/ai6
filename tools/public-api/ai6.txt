@@ -7194,7 +7194,6 @@ pub ai6::directorates::registry::runs::RunStart::at: f64
 pub ai6::directorates::registry::runs::RunStart::handler: alloc::string::String
 pub ai6::directorates::registry::runs::RunStart::history: ai6::directorates::registry::runs::RunHistory
 pub ai6::directorates::registry::runs::RunStart::prompt: ai6::directorates::registry::runs::PromptRecord
-pub ai6::directorates::registry::runs::RunStart::resumed: bool
 pub ai6::directorates::registry::runs::RunStart::station: alloc::string::String
 impl ai6::directorates::registry::runs::RunStart
 pub fn ai6::directorates::registry::runs::RunStart::new(f64, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::runs::RunHistory, ai6::directorates::registry::runs::PromptRecord) -> Self
@@ -13233,7 +13232,6 @@ pub ai6::RunStart::at: f64
 pub ai6::RunStart::handler: alloc::string::String
 pub ai6::RunStart::history: ai6::directorates::registry::runs::RunHistory
 pub ai6::RunStart::prompt: ai6::directorates::registry::runs::PromptRecord
-pub ai6::RunStart::resumed: bool
 pub ai6::RunStart::station: alloc::string::String
 impl ai6::directorates::registry::runs::RunStart
 pub fn ai6::directorates::registry::runs::RunStart::new(f64, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::runs::RunHistory, ai6::directorates::registry::runs::PromptRecord) -> Self

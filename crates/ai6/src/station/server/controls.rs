@@ -785,7 +785,6 @@ mod tests {
         };
         assert_eq!(start.handler, "mock-spend");
         assert_eq!(start.station, "test");
-        assert!(!start.resumed);
         assert_eq!(
             start.history,
             RunHistory::HandOff {
@@ -856,8 +855,7 @@ mod tests {
         let [started, resumed] = record.starts.as_slice() else {
             panic!("a start and a resume: {:?}", record.starts);
         };
-        assert!(!started.resumed);
-        assert!(resumed.resumed);
+        assert!(!matches!(started.history, RunHistory::Resumed { .. }));
         assert_eq!(
             resumed.history,
             RunHistory::Resumed {

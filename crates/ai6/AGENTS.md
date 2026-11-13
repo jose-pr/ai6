@@ -2498,9 +2498,9 @@ impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub recommendation: Option<MissionVerdict>,   // what a `desk` charge advises for a verifying run; settles nothing
     pub starts: Vec<RunStart>,               // every start, oldest first, bounded (start_entries, 32)
 }
-#[non_exhaustive] pub struct RunStart { pub at: f64, pub resumed: bool, pub handler: String, pub station: String,
+#[non_exhaustive] pub struct RunStart { pub at: f64, pub handler: String, pub station: String,
     pub history: RunHistory, pub prompt: PromptRecord }
-    // new(at, handler, station, history, prompt); `resumed` is true for RunHistory::Resumed. Added at a Run's first
+    // new(at, handler, station, history, prompt). Added at a Run's first
     // start (NewRun::with_start) and at each resume (RunUpdate::started); a Station records it once the harness is up.
 #[non_exhaustive] pub enum RunHistory { Fresh, Resumed { provider_id: String }, HandOff { run: String } }
     // serde snake_case: where the conversation came from. HandOff: a new conversation briefed on an earlier Run's work.

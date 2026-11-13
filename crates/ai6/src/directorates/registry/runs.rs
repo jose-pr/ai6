@@ -213,8 +213,6 @@ impl PromptRecord {
 pub struct RunStart {
     /// When the harness was started, as Unix seconds.
     pub at: f64,
-    /// Whether the start took up the Run's own earlier history instead of beginning it.
-    pub resumed: bool,
     /// The AgentHandler provider that was started.
     pub handler: String,
     /// The Station that started it.
@@ -236,7 +234,6 @@ impl RunStart {
     ) -> Self {
         Self {
             at,
-            resumed: matches!(history, RunHistory::Resumed { .. }),
             handler: handler.into(),
             station: station.into(),
             history,
@@ -1964,7 +1961,7 @@ mod tests {
         );
         assert_eq!(first.prompt.excerpt.chars().count(), 8);
         assert_eq!((first.prompt.chars, first.prompt.sha256.len()), (20, 64));
-        assert!(!first.resumed);
+        assert_eq!(first.history, RunHistory::Fresh);
 
         let resumed = |at: f64, history: RunHistory| {
             RunStart::new(
@@ -1994,7 +1991,7 @@ mod tests {
             .unwrap();
         assert_eq!(written.starts.len(), 2);
         let kept = &written.starts[1];
-        assert!(kept.resumed);
+        assert!(matches!(kept.history, RunHistory::Resumed { .. }));
         assert_eq!(kept.prompt.excerpt, "carry on");
         assert_eq!(kept.prompt.chars, 17);
         assert_eq!(kept.prompt.sha256, second.prompt.sha256);
