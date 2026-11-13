@@ -85,8 +85,14 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
     }
     let result = match control.action() {
         ControlAction::Cancel => cancel(state, &mission).await,
-        ControlAction::Retry => retry(state, &mission, control.agent()).await,
-        ControlAction::Resume => resume(state, &mission, control.message()).await,
+        ControlAction::Retry => {
+            let agent = control.agent();
+            execute(state, &mission, Execution::Mission { agent }).await
+        }
+        ControlAction::Resume => {
+            let message = control.message();
+            execute(state, &mission, Execution::Run { message }).await
+        }
         ControlAction::Interrupt => interrupt(state, &mission).await,
         ControlAction::Drop => drop_entry(state, &mission).await,
         ControlAction::Reload => reload_entry(state, &mission),
@@ -135,6 +141,7 @@ fn ended_brief(state: &DaemonState, control: &MissionControl) -> Option<&'static
 }
 
 /// The Mission's state after a control, and whether a lifecycle event already reported it.
+#[derive(Debug)]
 struct Applied {
     state: MissionState,
     announced: bool,
@@ -182,7 +189,27 @@ async fn cancel(state: &DaemonState, mission: &Mission) -> Result<Applied, Strin
     })
 }
 
-async fn retry(
+/// What an operator executes. Every start of a Run asked for by a control goes through
+/// [`execute`], whichever wire action carried it.
+enum Execution<'a> {
+    /// A Mission: its next Run is queued, for `agent` when named, and the scheduler starts it.
+    Mission { agent: Option<&'a str> },
+    /// A Run that ran: resumed now, with its Mission, optionally told `message`.
+    Run { message: Option<&'a str> },
+}
+
+async fn execute(
+    state: &DaemonState,
+    mission: &Mission,
+    execution: Execution<'_>,
+) -> Result<Applied, String> {
+    match execution {
+        Execution::Mission { agent } => queue_next_run(state, mission, agent).await,
+        Execution::Run { message } => resume_run(state, mission, message).await,
+    }
+}
+
+async fn queue_next_run(
     state: &DaemonState,
     mission: &Mission,
     agent: Option<&str>,
@@ -220,7 +247,7 @@ async fn retry(
         .missions
         .lock()
         .map_err(|_| "the Mission book is unavailable".to_owned())?
-        .retry_past_brief(mission_id, agent)
+        .execute_past_brief(mission_id, agent)
         .map_err(|error| format!("the Mission could not be queued again: {error:?}"))?;
     if let Ok(mut retries) = state.retry_after.lock() {
         retries.remove(mission_id);
@@ -256,7 +283,7 @@ fn qualified_agent(state: &DaemonState, mission: &Mission, key: &str) -> Result<
     Ok(agent.id)
 }
 
-async fn resume(
+async fn resume_run(
     state: &DaemonState,
     mission: &Mission,
     message: Option<&str>,
@@ -593,6 +620,7 @@ mod tests {
     };
     use super::super::{DEFAULT_LEASE, schedule_queued_once, unix_now};
     use super::*;
+    use crate::directorates::registry::runs::{PromptRecord, RunHistory};
     use crate::directorates::registry::store::FileRegistry;
 
     /// 008's mock provider issues its own Run ID and then stays quiet, working.
@@ -751,6 +779,21 @@ mod tests {
         assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
         assert_eq!(record.station, "test");
         assert_eq!(record.provider_id.as_deref(), Some("provider-id-spend"));
+        // The start says what ran, where, from which history and with what prompt.
+        let [start] = record.starts.as_slice() else {
+            panic!("one start: {:?}", record.starts);
+        };
+        assert_eq!(start.handler, "mock-spend");
+        assert_eq!(start.station, "test");
+        assert!(!start.resumed);
+        assert_eq!(
+            start.history,
+            RunHistory::HandOff {
+                run: first.id.clone()
+            }
+        );
+        let task = mission_state(&state, "mission-1").task();
+        assert_eq!(start.prompt, PromptRecord::new(&task, 200));
         let ids = mission_state(&state, "mission-1").run_ids;
         assert_eq!(
             ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
@@ -808,6 +851,53 @@ mod tests {
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.run_ids.len(), 1);
         assert_eq!(mission.run_ids[0].as_str(), PROVIDER_ID);
+        let hold = run_hold(&state, "mission-1").unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
+        let [started, resumed] = record.starts.as_slice() else {
+            panic!("a start and a resume: {:?}", record.starts);
+        };
+        assert!(!started.resumed);
+        assert!(resumed.resumed);
+        assert_eq!(
+            resumed.history,
+            RunHistory::Resumed {
+                provider_id: PROVIDER_ID.to_owned()
+            }
+        );
+        assert_eq!(resumed.prompt.excerpt, "the review is unblocked; carry on");
+    }
+
+    /// Retry and resume reach the Mission and the Run only through `execute`, which a direct
+    /// call drives the same way.
+    #[tokio::test]
+    async fn execute_queues_a_missions_next_run_and_resumes_a_run() {
+        let root = tempfile::tempdir().unwrap();
+        let state = state_in(root.path(), TWO_AGENTS);
+        blocked_mission(&state).await;
+        let blocked = mission_state(&state, "mission-1");
+
+        let refused = execute(&state, &blocked, Execution::Mission { agent: None }).await;
+        assert!(refused.unwrap_err().contains("stalled or finished"));
+        let resumed = execute(
+            &state,
+            &blocked,
+            Execution::Run {
+                message: Some("go on"),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(resumed.state, MissionState::Working);
+        wait_for_done(&state, "mission-1").await;
+
+        let done = mission_state(&state, "mission-1");
+        let again = execute(&state, &done, Execution::Mission { agent: Some("008") })
+            .await
+            .unwrap();
+        assert_eq!(again.state, MissionState::Queued);
+        let refused = execute(&state, &done, Execution::Run { message: None }).await;
+        assert!(refused.unwrap_err().contains("can resume"));
+        stop(&state);
     }
 
     /// A refused resume has told the gateway of the Run again, which then shows it working.

@@ -1075,6 +1075,14 @@ pub struct RunLimits {
     #[schema(title = "Longest probe finding")]
     #[map(default = RunLimits::default().evidence_detail_chars)]
     pub evidence_detail_chars: Limit,
+    /// Starts kept on one Run; the oldest go first.
+    #[schema(title = "Starts per Run")]
+    #[map(default = RunLimits::default().start_entries)]
+    pub start_entries: Limit,
+    /// Characters kept of the prompt a start gave; its whole length and digest are kept too.
+    #[schema(title = "Longest prompt excerpt")]
+    #[map(default = RunLimits::default().prompt_excerpt_chars)]
+    pub prompt_excerpt_chars: Limit,
 }
 
 impl Default for RunLimits {
@@ -1094,6 +1102,8 @@ impl Default for RunLimits {
             deliverables: Limit::at(32),
             evidence_entries: Limit::at(64),
             evidence_detail_chars: Limit::at(300),
+            start_entries: Limit::at(32),
+            prompt_excerpt_chars: Limit::at(200),
         }
     }
 }

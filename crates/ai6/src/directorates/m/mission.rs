@@ -832,10 +832,10 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Queues a stalled or finished Mission again as a new run, for `agent_id` when
+    /// Executes a stalled or finished Mission: queues its next Run, for `agent_id` when
     /// given and otherwise for the Agent it had. It keeps its Runs and safe house, so the
     /// next run continues the work; a quarantined Mission waits for its release instead.
-    pub fn retry(
+    pub fn execute(
         &mut self,
         mission_id: &str,
         agent_id: Option<String>,
@@ -870,14 +870,14 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// [`retry`](Self::retry) on this Station's word rather than from a brief: it starts whatever
+    /// [`execute`](Self::execute) on this Station's word rather than from a brief: it starts whatever
     /// the Registry has filed that brief as.
-    pub fn retry_past_brief(
+    pub fn execute_past_brief(
         &mut self,
         mission_id: &str,
         agent_id: Option<String>,
     ) -> Result<Mission, MissionError> {
-        self.retry(mission_id, agent_id)?;
+        self.execute(mission_id, agent_id)?;
         let mut next = self.missions.clone();
         let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
         mission.runs_past_brief = true;
@@ -907,7 +907,7 @@ impl MissionStore {
 
     /// Queues a Mission that ended as its next run, from another brief (its `digest`), which
     /// may say more than the last (`prompt`): an item's new comments, a Sleeper's next window. Unlike
-    /// [`retry`](Self::retry), the run does not continue an interrupted one: this Station's
+    /// [`execute`](Self::execute), the run does not continue an interrupted one: this Station's
     /// hold on the last Run is let go, and the next start records a new one after it.
     pub fn reopen(
         &mut self,
@@ -1553,27 +1553,27 @@ mod tests {
         book.attach_run("retry-1", run.clone()).unwrap();
         book.transition("retry-1", MissionState::Failed).unwrap();
 
-        let retried = book.retry("retry-1", None).unwrap();
+        let retried = book.execute("retry-1", None).unwrap();
         assert_eq!(retried.state, MissionState::Queued);
         assert_eq!(retried.agent_id.as_deref(), Some("007"));
         assert_eq!(retried.run_ids, [run]);
 
         book.transition("retry-1", MissionState::Working).unwrap();
         book.transition("retry-1", MissionState::Stalled).unwrap();
-        let handed = book.retry("retry-1", Some("008".to_owned())).unwrap();
+        let handed = book.execute("retry-1", Some("008".to_owned())).unwrap();
         assert_eq!(handed.agent_id.as_deref(), Some("008"));
 
         // Queued, live, parked and quarantined work is not retried.
         assert!(matches!(
-            book.retry("retry-1", None),
+            book.execute("retry-1", None),
             Err(MissionError::InvalidTransition { .. })
         ));
         working_mission(&mut book, "retry-2");
-        assert!(book.retry("retry-2", None).is_err());
+        assert!(book.execute("retry-2", None).is_err());
         book.park("retry-2", 10).unwrap();
-        assert!(book.retry("retry-2", None).is_err());
+        assert!(book.execute("retry-2", None).is_err());
         book.quarantine("retry-2").unwrap();
-        assert!(book.retry("retry-2", None).is_err());
+        assert!(book.execute("retry-2", None).is_err());
     }
 
     #[test]

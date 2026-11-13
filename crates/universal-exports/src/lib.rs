@@ -5425,6 +5425,10 @@ pub struct MissionRun {
     /// person confirms by deciding it the same way.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<ai6::MissionVerdict>,
+    /// Every start of the run, oldest first: the handler, Station, history and prompt each
+    /// was given. The prompt's excerpt is data.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub starts: Vec<ai6::RunStart>,
     /// The last message its Agent ended a turn with, as data. Only one Mission's detail has it:
     /// each can be as long as `[registry.limits.runs] final_report_bytes`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5451,6 +5455,7 @@ impl MissionRun {
             evidence: record.evidence.clone(),
             probe_requested: record.probe_requested,
             recommendation: record.recommendation.clone(),
+            starts: record.starts.clone(),
             final_report: None,
             number: record.number,
             run_id: record.id.clone(),

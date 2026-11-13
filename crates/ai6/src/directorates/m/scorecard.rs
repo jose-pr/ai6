@@ -567,6 +567,7 @@ mod tests {
             evidence: Vec::new(),
             probe_requested: None,
             recommendation: None,
+            starts: Vec::new(),
         }
     }
 

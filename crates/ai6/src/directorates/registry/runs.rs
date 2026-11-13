@@ -157,6 +157,94 @@ impl RunLaunch {
     }
 }
 
+/// Where the conversation a start gave the harness came from.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunHistory {
+    /// A conversation with nothing before it.
+    Fresh,
+    /// The provider's own history, taken up by the ID it issued.
+    Resumed {
+        /// The provider's ID for the history.
+        provider_id: String,
+    },
+    /// A new conversation that continues the work of an earlier Run, briefed on it instead
+    /// of resumed.
+    HandOff {
+        /// The AI6 ID of that Run.
+        run: String,
+    },
+}
+
+/// The prompt a start gave: a bounded excerpt, and the whole of it by length and digest.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptRecord {
+    /// The first characters of the prompt, as many as `[registry.limits.runs]
+    /// prompt_excerpt_chars` allows.
+    pub excerpt: String,
+    /// Characters in the whole prompt.
+    pub chars: u64,
+    /// Lowercase hex SHA-256 of the whole prompt's UTF-8 bytes.
+    pub sha256: String,
+}
+
+impl PromptRecord {
+    /// `prompt` recorded with an excerpt of at most `excerpt_chars` characters.
+    pub fn new(prompt: &str, excerpt_chars: usize) -> Self {
+        use sha2::{Digest, Sha256};
+        Self {
+            excerpt: prompt.chars().take(excerpt_chars).collect(),
+            chars: prompt.chars().count() as u64,
+            sha256: Sha256::digest(prompt.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+        }
+    }
+}
+
+/// One start of a Run: what was run, where, from which history and with what prompt.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunStart {
+    /// When the harness was started, as Unix seconds.
+    pub at: f64,
+    /// Whether the start took up the Run's own earlier history instead of beginning it.
+    pub resumed: bool,
+    /// The AgentHandler provider that was started.
+    pub handler: String,
+    /// The Station that started it.
+    pub station: String,
+    /// Where its conversation came from.
+    pub history: RunHistory,
+    /// What it was told.
+    pub prompt: PromptRecord,
+}
+
+impl RunStart {
+    /// A start of `handler` on `station` at `at`.
+    pub fn new(
+        at: f64,
+        handler: impl Into<String>,
+        station: impl Into<String>,
+        history: RunHistory,
+        prompt: PromptRecord,
+    ) -> Self {
+        Self {
+            at,
+            resumed: matches!(history, RunHistory::Resumed { .. }),
+            handler: handler.into(),
+            station: station.into(),
+            history,
+            prompt,
+        }
+    }
+}
+
 /// One Agent Run as stored in the shared Registry.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -243,6 +331,10 @@ pub struct RunRecord {
     /// nothing, and a person's decision confirms it or overrides it. The latest stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<MissionVerdict>,
+    /// Every start of the Run, oldest first and bounded; the latest says what the harness
+    /// runs as now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub starts: Vec<RunStart>,
 }
 
 /// What a probe found of one deliverable.
@@ -537,6 +629,7 @@ pub struct NewRun {
     launch: Option<RunLaunch>,
     account: Option<AccountRef>,
     window: Option<String>,
+    start: Option<RunStart>,
 }
 
 impl NewRun {
@@ -560,7 +653,14 @@ impl NewRun {
             launch: None,
             account: None,
             window: None,
+            start: None,
         }
+    }
+
+    /// Records the first start of the Run.
+    pub fn with_start(mut self, start: RunStart) -> Self {
+        self.start = Some(start);
+        self
     }
 
     /// Records the standing Sleeper's window the run answers.
@@ -648,9 +748,17 @@ pub struct RunUpdate {
     deliverables: Option<Vec<Deliverable>>,
     evidence: Vec<Evidence>,
     probed: bool,
+    start: Option<RunStart>,
 }
 
 impl RunUpdate {
+    /// Adds a start of the Run; the oldest beyond `[registry.limits.runs] start_entries` go
+    /// first.
+    pub fn started(mut self, start: RunStart) -> Self {
+        self.start = Some(start);
+        self
+    }
+
     /// Records what the Mission was to deliver, replacing the earlier list.
     pub fn deliverables(mut self, deliverables: Vec<Deliverable>) -> Self {
         self.deliverables = Some(deliverables);
@@ -948,6 +1056,7 @@ pub(super) fn opened(new: NewRun, ttl: Duration, now: f64, term: u64) -> RunReco
         evidence: Vec::new(),
         probe_requested: None,
         recommendation: None,
+        starts: new.start.into_iter().collect(),
     }
 }
 
@@ -1047,6 +1156,16 @@ pub(super) fn apply_fenced(
             .len()
             .saturating_sub(limits.evidence_entries.or_max());
         record.evidence.drain(..skip);
+    }
+    if let Some(mut start) = update.start {
+        let excerpt = limits.prompt_excerpt_chars.or_max();
+        start.prompt.excerpt = start.prompt.excerpt.chars().take(excerpt).collect();
+        record.starts.push(start);
+        let skip = record
+            .starts
+            .len()
+            .saturating_sub(limits.start_entries.or_max());
+        record.starts.drain(..skip);
     }
     if update.probed {
         record.probe_requested = None;
@@ -1585,6 +1704,7 @@ mod tests {
         a_verdict_lands_on_the_latest_run_that_ended,
         a_verdict_is_refused_on_an_run_with_no_outcome,
         a_final_report_is_kept_by_its_run_and_cut_when_long,
+        every_start_is_recorded_with_its_prompt_and_kept_within_bounds,
     );
 
     const NOW: f64 = 1_800_000_000.0;
@@ -1814,6 +1934,93 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    fn every_start_is_recorded_with_its_prompt_and_kept_within_bounds(store: &dyn Store) {
+        use crate::directorates::registry::limits::RegistryLimits;
+        let registry = store.handle_with(RegistryLimits {
+            runs: RunLimits {
+                start_entries: Limit::at(2),
+                prompt_excerpt_chars: Limit::at(8),
+                ..RunLimits::default()
+            },
+            ..RegistryLimits::default()
+        });
+        let prompt = "\u{e9}".repeat(20);
+        let first = RunStart::new(
+            NOW,
+            "claude",
+            "station-a",
+            RunHistory::Fresh,
+            PromptRecord::new(&prompt, 8),
+        );
+        let opened = registry
+            .open_run_at(new_run().with_start(first.clone()), TTL, NOW)
+            .unwrap();
+        assert_eq!(opened.starts, vec![first.clone()]);
+        assert_eq!(
+            registry.run("s-1").unwrap().unwrap().starts,
+            vec![first.clone()]
+        );
+        assert_eq!(first.prompt.excerpt.chars().count(), 8);
+        assert_eq!((first.prompt.chars, first.prompt.sha256.len()), (20, 64));
+        assert!(!first.resumed);
+
+        let resumed = |at: f64, history: RunHistory| {
+            RunStart::new(
+                at,
+                "codex",
+                "station-b",
+                history,
+                // The Registry cuts an excerpt a caller left longer than its limit.
+                PromptRecord::new("carry on carry on", 100),
+            )
+        };
+        let second = resumed(
+            NOW + 1.0,
+            RunHistory::Resumed {
+                provider_id: "p-1".to_owned(),
+            },
+        );
+        let written = registry
+            .write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW + 1.0,
+                None,
+                RunUpdate::default().started(second.clone()),
+            )
+            .unwrap();
+        assert_eq!(written.starts.len(), 2);
+        let kept = &written.starts[1];
+        assert!(kept.resumed);
+        assert_eq!(kept.prompt.excerpt, "carry on");
+        assert_eq!(kept.prompt.chars, 17);
+        assert_eq!(kept.prompt.sha256, second.prompt.sha256);
+
+        let third = resumed(
+            NOW + 2.0,
+            RunHistory::HandOff {
+                run: "s-0".to_owned(),
+            },
+        );
+        let last = registry
+            .write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW + 2.0,
+                None,
+                RunUpdate::default().started(third),
+            )
+            .unwrap();
+        assert_eq!(
+            last.starts.iter().map(|start| start.at).collect::<Vec<_>>(),
+            [NOW + 1.0, NOW + 2.0],
+            "the oldest start goes first"
+        );
+        assert_eq!(registry.run("s-1").unwrap().unwrap(), last);
     }
 
     fn a_final_report_is_kept_by_its_run_and_cut_when_long(store: &dyn Store) {

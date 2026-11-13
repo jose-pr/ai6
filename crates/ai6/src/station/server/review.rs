@@ -1141,7 +1141,7 @@ fn restart_turn(state: &DaemonState, mission: &Mission) {
     let requeued = state.missions.lock().ok().is_some_and(|mut missions| {
         missions
             .transition(mission_id, MissionState::Stalled)
-            .and_then(|_| missions.retry_past_brief(mission_id, mission.agent_id.clone()))
+            .and_then(|_| missions.execute_past_brief(mission_id, mission.agent_id.clone()))
             .is_ok()
     });
     if requeued {

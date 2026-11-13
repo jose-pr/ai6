@@ -114,7 +114,8 @@ use crate::directorates::registry::cables::{
 use crate::directorates::registry::contexts::ContextOwner;
 use crate::directorates::registry::mission_ids::new_uid;
 use crate::directorates::registry::runs::{
-    NewRun, RunError, RunRecord, RunResult, RunStatus, RunUpdate,
+    NewRun, PromptRecord, RunError, RunHistory, RunRecord, RunResult, RunStart, RunStatus,
+    RunUpdate,
 };
 use crate::directorates::registry::store::{
     Brief, DEFAULT_LEASE, Lease, LeaseRecovery, StationRecord,
@@ -2298,6 +2299,36 @@ fn acquire_run_hold(
     Ok(hold)
 }
 
+/// Adds a resume to the start record of the Run this Station holds for a Mission.
+fn record_resumed_start(
+    state: &DaemonState,
+    mission_id: &str,
+    handler: &str,
+    provider_id: &RunId,
+    prompt: PromptRecord,
+) {
+    let Some(hold) = run_hold(state, mission_id) else {
+        return;
+    };
+    let start = RunStart::new(
+        state.clock.now() as f64,
+        handler,
+        state.station_id.as_str(),
+        RunHistory::Resumed {
+            provider_id: provider_id.as_str().to_owned(),
+        },
+        prompt,
+    );
+    if let Err(error) = state.intake.update_run(
+        &hold.id,
+        &state.station_id,
+        hold.fence,
+        RunUpdate::default().started(start),
+    ) {
+        eprintln!("ai6: Run record {:?} start not recorded: {error}", hold.id);
+    }
+}
+
 /// What the Mission is called now: its handle in the Registry, else the one this Station
 /// recorded, else its ID. A branch, a run's handle or a tracker comment takes it when written.
 fn current_handle(state: &DaemonState, mission_id: &str) -> String {
@@ -3781,7 +3812,7 @@ fn create_intake_mission(
     }
     if retry {
         missions
-            .retry(mission_id.as_str(), Some(agent_id))
+            .execute(mission_id.as_str(), Some(agent_id))
             .map_err(|error| format!("could not queue the Mission again: {error:?}"))?;
         return missions
             .record_brief_digest(mission_id.as_str(), &digest)
@@ -5565,6 +5596,11 @@ async fn start_mission(
         }
     }
     let task = mission.task();
+    let prompt_record = PromptRecord::new(
+        &task,
+        state.intake.limits().runs.prompt_excerpt_chars.or_max(),
+    );
+    let resumed_from = resume_from.as_ref().map(|id| id.as_str().to_owned());
     let start_request = AgentStart {
         mission_id: mission.mission_id,
         agent_id: agent.id,
@@ -5761,9 +5797,24 @@ async fn start_mission(
                 .map(|record| (record.number, record.id.clone()))
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
+    let history = match (&resumed_from, &predecessor) {
+        (Some(provider_id), _) => RunHistory::Resumed {
+            provider_id: provider_id.clone(),
+        },
+        (None, Some(run)) => RunHistory::HandOff { run: run.clone() },
+        (None, None) => RunHistory::Fresh,
+    };
+    let start = RunStart::new(
+        state.clock.now() as f64,
+        handler_provider.as_str(),
+        state.station_id.as_str(),
+        history,
+        prompt_record,
+    );
     let mut new_run = NewRun::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
         .with_handle(current_handle(&state, mission_id.as_str()))
         .with_theater(theater_id.as_str())
+        .with_start(start)
         .with_number(attempt, predecessor)
         .with_exposure(exposure.exposures());
     if let Some(run) = &window_run {
@@ -6482,6 +6533,10 @@ async fn resume_mission(
     let message = request
         .message
         .or_else(|| reattach.is_none().then(|| RESUMED_MESSAGE.to_owned()));
+    let resume_prompt = PromptRecord::new(
+        message.as_deref().unwrap_or_default(),
+        state.intake.limits().runs.prompt_excerpt_chars.or_max(),
+    );
     let (project_settings, project_mcp) = if review || plan_stage {
         (false, false)
     } else {
@@ -6735,6 +6790,13 @@ async fn resume_mission(
         }
     };
     sync_run_record(&state, &mission_id);
+    record_resumed_start(
+        &state,
+        &mission_id,
+        &handler_provider,
+        &run_id,
+        resume_prompt,
+    );
     if let Ok(mut missions) = state.missions.lock()
         && let Some(mut manifest) = missions.operation(&mission_id)
     {

@@ -228,8 +228,8 @@ pub use directorates::registry::mission_ids::{
 pub use directorates::registry::principals::{PrincipalRecord, PrincipalStore};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::runs::{
-    Evidence, FinalReport, MissionVerdict, NewRun, OutcomeVerdict, ProbeResult, RunError,
-    RunLaunch, RunRecord, RunResult, RunStatus, RunUpdate,
+    Evidence, FinalReport, MissionVerdict, NewRun, OutcomeVerdict, ProbeResult, PromptRecord,
+    RunError, RunHistory, RunLaunch, RunRecord, RunResult, RunStart, RunStatus, RunUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization, SleeperMark,
