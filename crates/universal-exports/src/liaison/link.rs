@@ -13,8 +13,9 @@ use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_agentic_peer::link::{self, Host, Options, Services};
 use coqui_agentic_peer::mux::Side;
 use coqui_agentic_peer::peers::{NoEvents, PeerRecord, PeerStore};
-use coqui_web_channel::Channel as _;
-use coqui_web_channel::websocket::{Frames, Listener};
+use coqui_transport_web::Channel as _;
+use coqui_transport_web::Limits;
+use coqui_transport_web::websocket::{Frames, Listener, ServerTls};
 
 use super::outbound::Outbound;
 use super::{Liaison, LiaisonConfig, LiaisonError};
@@ -116,21 +117,24 @@ impl LinkListener {
                 .build()
                 .map_err(|error| LiaisonError::new(format!("the link key: {error}")))?,
         );
-        let listener = match tls {
-            Some(tls) => Listener::bind(address, Some(tls)),
-            None if address.ip().is_loopback() || config.plain_beyond_loopback => {
-                Listener::bind_plain(address)
-            }
+        let tls = match tls {
+            Some(tls) => ServerTls::Config(tls),
+            None if address.ip().is_loopback() || config.plain_beyond_loopback => ServerTls::Plain,
             None => {
                 return Err(LiaisonError::new(
                     "[unex.liaison] listen beyond loopback needs [unex.tls], or \
                      plain_beyond_loopback",
                 ));
             }
-        }
-        .map_err(|error| LiaisonError::new(format!("the link listener: {error}")))?
-        .with_limits(coqui_web_channel::Limits::default().with_max_message(auth::MAX_PROOF_MESSAGE))
-        .with_frames(Frames::Binary);
+        };
+        let mut limits = Limits::default();
+        limits.max_message = auth::MAX_PROOF_MESSAGE;
+        let listener = Listener::builder(address, tls)
+            .limits(limits)
+            .frames(Frames::Binary)
+            .plain_beyond_loopback(config.plain_beyond_loopback)
+            .build()
+            .map_err(|error| LiaisonError::new(format!("the link listener: {error}")))?;
         let address = listener
             .local_addr()
             .map_err(|error| LiaisonError::new(format!("the link listener: {error}")))?;
@@ -214,7 +218,7 @@ impl Drop for LinkListener {
 /// Proves one dialer and serves its link until it ends. A key nobody configured fails the proof,
 /// and nothing of the link is read.
 fn serve_one(
-    pending: coqui_web_channel::websocket::Pending,
+    pending: coqui_transport_web::websocket::Pending,
     proof: &Proof,
     store: &dyn PeerStore,
     services: &Services,

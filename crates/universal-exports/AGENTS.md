@@ -15,7 +15,7 @@ Development documentation lives with the source at
 
 MSRV: Rust 1.89. The default build depends on Axum, Tokio, guatiao,
 `ai6-diptel`, serde and UUID, and, for Liaison, `coqui-a2a`, `coqui-agentic-peer` and
-`coqui-web-channel` (pinned by git revision), `url`, `time` and `webpki-root-certs`. The `cli`
+`coqui-transport-web` (pinned by git revision), `url`, `time` and `webpki-root-certs`. The `cli`
 feature adds clap and Tokio signal support.
 
 ## Imports and modules

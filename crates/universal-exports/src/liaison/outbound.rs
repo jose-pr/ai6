@@ -13,8 +13,8 @@ use coqui_a2a::model::{GetTaskRequest, Message, Role, SendMessageRequest, SendMe
 use coqui_a2a::{Client, ClientError, ClientTimeouts};
 use coqui_agentic_peer::auth::{Identity, Proof, Sealed, Trust, prove_out};
 use coqui_agentic_peer::mux::{Limits, LinkState, Mux, Side};
-use coqui_web_channel::websocket::{Dialer, Frames};
-use coqui_web_channel::{Channel, Dialer as _, Kind};
+use coqui_transport_web::websocket::{Dialer, Frames};
+use coqui_transport_web::{Channel, Dialer as _, Kind};
 use serde_json::Value;
 
 use super::{ADDRESSEE_MEMBER, Liaison, LiaisonPeer, now};
@@ -102,12 +102,13 @@ impl Outbound {
             .responders(Trust::pinned([server]))
             .build()
             .map_err(|error| error.to_string())?;
-        let mut dialer = Dialer::new().with_frames(Frames::Binary);
+        let mut dialer = Dialer::builder().frames(Frames::Binary);
         if url.scheme() == "wss" {
-            dialer = dialer.with_tls(public_roots()?);
+            dialer = dialer.tls(public_roots()?);
         } else if self.liaison.inner.config.plain_beyond_loopback {
-            dialer = dialer.with_plain_beyond_loopback();
+            dialer = dialer.plain_beyond_loopback(true);
         }
+        let mut dialer = dialer.build().map_err(|error| error.to_string())?;
         let channel = dialer
             .dial(Kind::WebSocket, url, DIAL_WAIT)
             .map_err(|error| error.to_string())?;

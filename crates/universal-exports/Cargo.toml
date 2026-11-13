@@ -65,7 +65,7 @@ uuid = { workspace = true, features = ["std"] }
 time = { workspace = true, features = ["formatting"] }
 coqui-a2a = { workspace = true }
 coqui-agentic-peer = { workspace = true }
-coqui-web-channel = { workspace = true }
+coqui-transport-web = { workspace = true }
 # A peer's url, and the public roots a wss:// peer is dialed with.
 url = { workspace = true }
 webpki-root-certs = { workspace = true }

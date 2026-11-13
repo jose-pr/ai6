@@ -30,8 +30,8 @@ use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust, pro
 use coqui_agentic_peer::link::{self, Host, Options, Services};
 use coqui_agentic_peer::mux::{Limits, Mux, Side};
 use coqui_agentic_peer::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore};
-use coqui_web_channel::websocket::{Channel as WsChannel, Dialer, Frames, Listener};
-use coqui_web_channel::{Channel as _, Dialer as _, Kind};
+use coqui_transport_web::websocket::{Channel as WsChannel, Dialer, Frames, Listener, ServerTls};
+use coqui_transport_web::{Channel as _, Dialer as _, Kind, Limits as TransportLimits};
 use serde_json::{Value, json};
 
 use super::{Addressee, Liaison, LiaisonConfig, LiaisonPeer, LinkListener};
@@ -326,8 +326,10 @@ fn over_link<R>(
         .responders(Trust::pinned([server.parse().unwrap()]))
         .build()
         .unwrap();
-    let channel = Dialer::new()
-        .with_frames(Frames::Binary)
+    let channel = Dialer::builder()
+        .frames(Frames::Binary)
+        .build()
+        .unwrap()
         .dial(Kind::WebSocket, url, WAIT)
         .map_err(|error| error.to_string())?;
     let established = prove_out(
@@ -437,7 +439,7 @@ impl Drop for StandIn {
     }
 }
 
-fn client<'m, 'c, C: coqui_web_channel::Channel>(mux: &'m Mux<'c, C>) -> Client<'m, 'c, C> {
+fn client<'m, 'c, C: coqui_transport_web::Channel>(mux: &'m Mux<'c, C>) -> Client<'m, 'c, C> {
     let mut timeouts = ClientTimeouts::default();
     timeouts.answer = Duration::from_secs(30);
     Client::new(mux).with_timeouts(timeouts)
@@ -1059,10 +1061,13 @@ fn serve_peer(
     agent: Echo,
     stop: Arc<AtomicBool>,
 ) -> (SocketAddr, JoinHandle<()>) {
-    let listener = Listener::bind("127.0.0.1:0".parse().unwrap(), None)
-        .unwrap()
-        .with_limits(coqui_web_channel::Limits::default().with_max_message(auth::MAX_PROOF_MESSAGE))
-        .with_frames(Frames::Binary);
+    let mut limits = TransportLimits::default();
+    limits.max_message = auth::MAX_PROOF_MESSAGE;
+    let listener = Listener::builder("127.0.0.1:0".parse().unwrap(), ServerTls::Plain)
+        .limits(limits)
+        .frames(Frames::Binary)
+        .build()
+        .unwrap();
     let address = listener.local_addr().unwrap();
     let store = MemoryPeers::default();
     store
