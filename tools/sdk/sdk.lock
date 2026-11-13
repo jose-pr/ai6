@@ -32,7 +32,7 @@ app flutter 2541e508405f5d9728286d6ed3307163a5406e08 any - https://github.com/fl
 app flutter-version 3.50.0-1.0.pre-230 any - -
 app flutter-engine f8edeef41f4a89dc912421fedbd6102252394dab any - -
 app dart 3.15.0-72.0.dev any - -
-app deps c67ded31c31000edbba856a390b09f5966423611 any - https://github.com/jose-pr/ai6.git
+app deps 33ed8022624b4a24fc3858f1a25ff2099d6cc1ba any - https://github.com/jose-pr/ai6.git
 
 # Public API snapshots.
 api rust nightly-2026-09-21 any - -
