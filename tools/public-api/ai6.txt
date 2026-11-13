@@ -2658,6 +2658,8 @@ impl ai6::directorates::m::unex_limits::UnexLimits
 pub fn ai6::directorates::m::unex_limits::UnexLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::unex_limits::UnexLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexTimelineLimits
+pub ai6::directorates::m::unex_limits::UnexTimelineLimits::attention_history: ai6::bounds::TimeLimit
+pub ai6::directorates::m::unex_limits::UnexTimelineLimits::attention_items: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexTimelineLimits::audit_page: u64
 pub ai6::directorates::m::unex_limits::UnexTimelineLimits::max_audit_page: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::UnexTimelineLimits::max_page: ai6::bounds::Limit
@@ -14230,6 +14232,8 @@ pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
 #[non_exhaustive] pub struct ai6::UnexTimelineLimits
+pub ai6::UnexTimelineLimits::attention_history: ai6::bounds::TimeLimit
+pub ai6::UnexTimelineLimits::attention_items: ai6::bounds::Limit
 pub ai6::UnexTimelineLimits::audit_page: u64
 pub ai6::UnexTimelineLimits::max_audit_page: ai6::bounds::Limit
 pub ai6::UnexTimelineLimits::max_page: ai6::bounds::Limit
