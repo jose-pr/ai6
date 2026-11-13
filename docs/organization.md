@@ -17,7 +17,7 @@ are a convention, not decoration: each one says who owns a decision.
 | **Universal Exports** | `crates/universal-exports` | The public front: the only address operators and clients reach |
 | **Outer Office** | `clients/outer-office` | The operator app (short name OO): board, briefs, terminals, administration, audit |
 | **Moneypenny** | `crates/universal-exports` (`moneypenny`) | The operator's AI assistant, at her desk in Outer Office |
-| **DipTel** | `crates/ai6-diptel` | The wire contract for Session lifecycle and terminal frames |
+| **DipTel** | `crates/ai6-diptel` | The wire contract for Run lifecycle and terminal frames |
 
 Directorates decide; the Station is where their decisions run. In the novels Universal
 Export is the plate on the door of the London headquarters, the one address outsiders
@@ -28,17 +28,19 @@ setting, not a verified Fleming phrase): operators work in the app and deal with
 ## Work and infrastructure
 
 ```text
-Work            Operation ──► Mission ──► Session
-Infrastructure  Station ──────────────────► Theater   (where a Session runs)
+Work            Operation ──► Mission ──► Run
+Infrastructure  Station ──────────────────► Theater   (where a Run works)
 ```
 
 - **Operation**: a global project and its policy. Stations serve Operations; they do not
   own them. An Operation's `station_labels` names the Station labels its Missions need.
-- **Mission**: one brief under an Operation; its Mission ID may group several Sessions.
-- **Session**: one provider-issued, resumable agent run. Never call it a Task.
+- **Mission**: one brief under an Operation; its Mission ID may group several Runs.
+- **Run**: one AI6 agent run of a Mission or a charge, named by one UUID AI6 makes. A Mission or a Run is
+  *executed*: executing a Mission starts its next Run, and executing a Run starts it, or resumes it if it ran.
+  Never call it a Task or a Session.
 - **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
   or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
-- **Theater**: the host or environment a Session works on, reached through a transport
+- **Theater**: the host or environment a Run works on, reached through a transport
   (`local`, `ssh`, ...). The harness runs on the Theater (field mode: under the Station on
   its own host, or under a runner or the detached wrapper elsewhere), or on the Station while
   acting on a remote Theater through the transport (remote-hands mode).
@@ -68,7 +70,7 @@ grant nothing.
 | `field` | Change its worktree and run tests; irreversible steps need M's authorization |
 | `00` | Act unattended within the Operation's policy (the *licence to kill*) |
 
-**The 00 in charge.** An Operation may give a `00` Agent its [watch](watches.md), which answers
+**The 00 in charge.** An Operation may give a `00` Agent its [charge](charges.md), which answers
 for its outcome: it decides Missions in [`verifying`](missions.md#verifying), takes the
 Operation's Cables and proposes child Missions for an operator to approve. Clearance is
 autonomy, never policy authority: it bypasses no cover, Q lease or Station policy;
@@ -82,7 +84,7 @@ policy for how openly the work may admit an agent did it: `covert` (nothing), `p
 of your own. Every Mission's commits are checked; a commit that breaks cover is **blown**.
 
 **Q issues kit, not secrets.** A loadout lists what an Agent is issued, by name; a
-secret's value reaches the Session only as a Mission-scoped lease, never in a manifest.
+secret's value reaches the Run only as a Mission-scoped lease, never in a manifest.
 
 **Assume any agent can be turned.** 006 was a trusted peer until he was not. Anything an
 agent reads can steer it, so clearance is least privilege, credentials are per Mission,
@@ -120,21 +122,25 @@ see it, and the credential it needs is leased only against an approval.
 | **Operation** | a global project and its policy (`operations.toml`, `operation_id`) |
 | **Subordinate Operation** | an Operation whose `parent` names another |
 | **Mission / Mission ID** | one brief and unit of work under an Operation (`mission_id`) |
-| **Session / Session ID** | one provider-issued agent run, unchanged when resumed (`session_id`) |
+| **Run / Run ID** | one AI6 agent run of a Mission or a charge, named by one UUID AI6 makes (`id`, and `run_id` where another record points at it); a Mission's runs are shown `<handle>.<n>`; executing a Mission starts its next Run, executing a Run starts or resumes it |
+| **Provider ID** | the id a harness or provider knows a Run by, kept apart from the Run's UUID (`provider_id`); a provider maps the UUID to one it accepts and answers with the UUID |
+| **Conversation** | one chat with Moneypenny; the agent run behind it is a Run |
+| **Charge** | what an Agent answers for: an Operation is its `00` Agent's charge, a Station its Head of Station's, the service M's; it holds one standing Run, resumed after restarts and takeovers (`[charge.<scope>]`, [Charges](charges.md)) |
+| **Session** | only another protocol's own word, kept at that wire: ACP's `sessionId` and `session/*` methods, the Claude Code and Codex CLIs' own session ids and flags, a person's sign-in session and its cookie, and MCP's `Mcp-Session-Id`. It is never an AI6 Run |
 | **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |
 | **Headquarters Station (HQS)** | the control Station holding the current Headquarters lease |
 | **Fallback Station** | a control Station ready to take over when the HQS lease lapses |
 | **Relocation** | Headquarters authority moving to a fallback Station |
 | **Outstation** | an execution-only Station |
 | **Check-in / gone dark** | a Station's recurring Registry record / a Station whose check-ins lapsed |
-| **Extraction** | carrying a Mission on when its Station or runner is lost: another Station adopts a runner's Session, or a lost one is retried with a hand-off (`recovery`; `on_lost`, `lost_after_secs`) |
-| **Theater** | the host or environment a Session runs in (an Operation's `theater`) |
+| **Extraction** | carrying a Mission on when its Station or runner is lost: another Station adopts a runner's Run, or a lost one is retried with a hand-off (`recovery`; `on_lost`, `lost_after_secs`) |
+| **Theater** | the host or environment a Run works in (an Operation's `theater`) |
 | **Safe house** | a Mission's isolated workspace, made by a safe-house provider (`SafeHouseProvider`; the `workspace` key on an Operation) |
 | **Registry** | the shared store for briefs, leases, check-ins and audit (`RegistryBackend`: `FileRegistry` or `SqlRegistry`) |
 | **Brief / debrief** | a Mission's request / the outcome the Registry files when it ends |
 | **Dead drop** | how the Registry works: briefs and outcomes exchanged without the sides meeting |
 | **Cable** | a durable, addressed agent-to-agent message with a relay-authenticated sender |
-| **DipTel** | a live frame: Session lifecycle, terminal output or input |
+| **DipTel** | a live frame: Run lifecycle, terminal output or input |
 | **Loadout** | what Q issues an Agent: tools, sandbox and secret names |
 | **Cover / blown** | an Operation's commit attribution policy / a commit that broke it |
 | **Clearance** | `desk`, `field` or `00`: what an Agent may do without asking |

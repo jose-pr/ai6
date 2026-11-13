@@ -63,9 +63,9 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
 
 ## Rules
 
-- Work and infrastructure are separate: Operation → Mission → Session is the work;
+- Work and infrastructure are separate: Operation → Mission → Run is the work;
   Station → Theater is where it runs. Operations are global; no Station owns one.
-- The Station (`ai6`) owns Missions, Agent Sessions and policy. Universal Exports owns the
+- The Station (`ai6`) owns Missions, Runs and policy. Universal Exports owns the
   authenticated public API; Outer Office and `ai6ctl` are its clients and never reach a
   Station directly.
 - An Agent (codename) owns its handler, model and effort, or several routes to its model
@@ -74,8 +74,12 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
   requirement (a JSON handler gets one without a terminal, `pipe`; otherwise `pty` is
   preferred) unless the `station` record pins `terminal`, and refuses a pin that does not meet it; the
   handler declares the requirement, and neither the Agent nor the handler names a provider.
-- Agent identity, role, Operation policy, Mission ID and provider-issued Session ID are
+- Agent identity, role, Operation policy, Mission ID, Run ID and provider ID are
   distinct contracts.
+- A Run is one AI6 agent run of a Mission or a charge, named by one UUID (`id`); a Mission or a Run is
+  executed; a watch is a charge; Moneypenny's chats are conversations. "Session" stays only where another
+  protocol or product owns the word (ACP's `sessionId`, the Claude Code and Codex CLIs' own session ids,
+  a person's sign-in session, MCP's `Mcp-Session-Id`); a Run is never called a Session.
 - Directorates are modules of the `ai6` crate. Providers live under `crates/providers/` and
   carry their own Guatiao entry point; do not add forwarding-only crates.
 - Access kinds, the role authorizer, the access providers and Station mutual TLS are the shared
