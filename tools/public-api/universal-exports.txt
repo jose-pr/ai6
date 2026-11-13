@@ -169,6 +169,7 @@ pub universal_exports::BoardMission::pending: core::option::Option<universal_exp
 pub universal_exports::BoardMission::runs: alloc::vec::Vec<universal_exports::BoardRun>
 pub universal_exports::BoardMission::usage: core::option::Option<ai6::directorates::medical::usage::MissionUsage>
 #[non_exhaustive] pub struct universal_exports::BoardOperation
+pub universal_exports::BoardOperation::name: core::option::Option<alloc::string::String>
 pub universal_exports::BoardOperation::operation_id: alloc::string::String
 pub universal_exports::BoardOperation::parent: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardPending
