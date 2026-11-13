@@ -108,11 +108,16 @@ origin leaves the public roots alone.
   required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation charge at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
   repeatable.
 - `ai6ctl reports file|list|show|clearance` use the gateway's `/v1/reports` routes (see its page);
-  `ai6ctl reports assess <REPORT> <mission|duplicate|no_action|later> --reason <TEXT> [--of <WHAT>]
-  [--wait-seconds <N>]` (`mission.control` on the Operation, and reading the item) puts `.../assessment`
-  and prints `ID STATE VERDICT`. It decides an open Source item the Operation's charge has not (a
-  Operation with no charge holds its items for this); `--of` is required for a duplicate and
-  `--wait-seconds` for later; a refusal prints the gateway's words and exits `1`.
+  `ai6ctl reports assess <REPORT> <mission|duplicate|related|no_action|awaiting|later|decision>
+  --reason <TEXT> [--of <WHAT>] [--mission <ID>] [--question <TEXT>] [--ask <WHO>] [--via <MARK>]
+  [--condition <TEXT>] [--wait-seconds <N>] [--credibility <1-6>] [--priority <P>] [--likelihood <WORDS>
+  --confidence <high|moderate|low>]` (`mission.control` on the Operation, and reading the Report) puts
+  `.../assessment` and prints `ID STATE VERDICT`. It assesses an open Report the Operation's charge has
+  not (an Operation with no charge holds its Reports for this); `--of` is required for duplicate and
+  related, `--question` for awaiting and decision, `--wait-seconds` for awaiting; a refusal prints the
+  gateway's words and exits `1`. `ai6ctl reports reopen <REPORT> --reason <TEXT>` posts `.../reopen`
+  and prints `ID STATE`; `ai6ctl reports source <KEY>` prints a source's reliability and tally, then
+  the closed Reports behind it as `reports list` does.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
   gateway's words and exits `1`. The Operation is looked up when not given.

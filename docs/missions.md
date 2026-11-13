@@ -978,7 +978,7 @@ The Operation's charge Agent is told by a Cable from `source:INSTANCE` (it needs
 to receive in its Operation, as for any Cable to the Operation), reads the item with `source_item`
 and decides it with `assess_report`; a person decides it with `ai6ctl reports assess` or
 `PUT /v1/reports/{id}/assessment` (`mission.control` on the Operation). Each decision is audited
-(`source.item.decide`), kept on the Report with the reason apart from the item's words, and on the
+(`report.assess`), kept on the Report with the reason apart from the item's words, and on the
 timeline:
 
 | Decision | Effect |

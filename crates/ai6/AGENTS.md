@@ -2866,8 +2866,11 @@ impl ReportScope { pub fn operation(&self) -> Option<&str>; }
 pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, id), mission(id)
 #[non_exhaustive] pub struct Tearline { pub text, pub classification: Option<String>, pub compartments: Vec<String> }
     // new(text), classified, in_compartments; never above its Report, compartments within the Report's
-#[non_exhaustive] pub struct ReportAssessment { pub verdict, pub by, pub at: f64, pub comment: Option<String> }
-#[non_exhaustive] pub struct ReportResolution { pub by, pub at: f64, pub note: Option<String> }
+#[non_exhaustive] pub struct ReportAssessment { pub verdict, pub by, pub at: f64, pub comment: Option<String>,
+    pub judgement: Option<Judgement>, pub waits_for: Option<String> /* the question, or the condition */,
+    pub until: Option<f64> /* when awaiting/later comes back */ } // new(verdict, by, at)
+#[non_exhaustive] pub struct ReportResolution { pub by, pub at: f64, pub note: Option<String>,
+    pub outcome: Option<String> /* one of assessments::OUTCOMES */ } // new(by, at)
 #[non_exhaustive] pub struct Report { pub id, pub scope: ReportScope, pub kind, pub severity: Severity,
     // pub item: Option<SourceItem> (the item a `source-item` Report was made from; from_item(item)),
     pub title, pub text, pub filer: ReportFiler, pub links: Vec<ReportLink>, pub sub_source: Option<String>,
@@ -2882,11 +2885,12 @@ impl Report { pub fn new(id, scope, kind, severity, title, text, filer, at) -> S
     pub fn validate(&self, &ReportLimits) -> io::Result<()>; } // InvalidInput: bounds, a tearline
     // compartment not the Report's, credibility 1 with no Report or Evidence link. The lists are
     // ReportSettings::check, not the Registry's
-#[non_exhaustive] #[derive(Default)] pub struct ReportFilter { pub scope, pub state, pub kind, pub mission, pub limit,
-    pub priorities: Vec<String> /* the default list */ } // all(), in_scope, about_mission, in_state, of_kind,
+#[non_exhaustive] #[derive(Default)] pub struct ReportFilter { pub scope, pub state, pub kind, pub mission, pub source, pub limit,
+    pub priorities: Vec<String> /* the default list */ } // all(), in_scope, about_mission, from_source(key), in_state, of_kind,
     // at_most, ordered_by(priorities): pass the deployment's ReportSettings::priorities
 #[non_exhaustive] pub enum Reliability { A, B, C, D, E, F }   // Ord: A first; as_str, FromStr
-#[non_exhaustive] pub struct ReportSource { pub key, pub reliability: Reliability, pub rated: f64 } // new(key): F
+#[non_exhaustive] pub struct ReportSource { pub key, pub reliability: Reliability, pub rated: f64,
+    pub counted: u32, pub confirmed: u32 } // new(key): F; the tally `assessments::rate` keeps
 #[non_exhaustive] pub struct ReportClearance { pub subject /* person:ID, group:NAME, agent:CODENAME */,
     pub classification, pub by, pub at: f64 }  // new(subject, classification, by, at), validate(&ReportLimits)
 pub type ReportChange<'a> = &'a mut dyn FnMut(&mut Report) -> io::Result<()>;
@@ -2915,9 +2919,14 @@ pub struct ReportLimits { pub record_bytes, reports, text_bytes, name_bytes /* a
 // ai6::directorates::m::reports
 #[non_exhaustive] pub struct ReportSettings { pub classifications /* unclassified, restricted,
     confidential: lowest first */, pub handlings /* operation, compartments, peers */,
-    pub priorities /* critical, high, normal, low */: Vec<String> } // ToValue, FromValue, Schema, Form;
-    // the `roster` record's [roster.reports] (RosterSettings::reports, with_reports)
+    pub priorities /* critical, high, normal, low */: Vec<String>,
+    pub rating_min_reports: u32 /* 5: counted Reports before a source leaves F */,
+    pub rating_counts: Vec<String> /* mission_done, mission_failed, decision_approved, decision_rejected, no_action */,
+    pub rating_confirms: Vec<String> /* mission_done, mission_failed, decision_approved */,
+    pub rating_bands: Vec<u8> /* [90, 75, 50, 25]: percent confirmed for A, B, C, D; below, E */ }
+    // ToValue, FromValue, Schema, Form; the `roster` record's [roster.reports] (RosterSettings::reports, with_reports)
 impl ReportSettings { pub fn rank(&self, Option<&str>) -> Option<usize> /* unset is 0 */;
+    pub fn permits(&self, &Report, crossing: &str) -> Result<(), String>; // the Report's handling mark reaches `crossing`
     pub fn check(&self, &Report) -> Result<(), String>; } // lists, and a tearline no higher than its Report
 pub fn settings(&dyn ConfigProvider) -> Result<ReportSettings, RosterError>; // now; defaults with no record
 pub struct ReportRules<'a> { pub settings: &'a ReportSettings, pub clearances: &'a [ReportClearance] }
@@ -5473,6 +5482,52 @@ Mission has that ID), resumed with the record's Run, or started fresh with the
 logbook when the resume is refused or fails before it answers. A Station's charge gets
 `station_report` and `file_report` on its Cable endpoint. Stopping closes every charge's harness.
 
+## Assessing Reports (`ai6::directorates::registry::assessments`)
+
+```rust
+pub const ASSESS_ACTION: &str = "report.assess"; CLOSE_ACTION = "report.close"; REOPEN_ACTION = "report.reopen";
+    CROSS_ACTION = "report.cross"; DECISION_KIND = "decision";
+pub const OUTCOMES: [&str; 7]; // mission_done, mission_failed, decision_approved, decision_rejected, duplicate, related, no_action
+#[non_exhaustive] pub enum Likelihood { RemoteChance, HighlyUnlikely, Unlikely, RealisticPossibility, Likely,
+    HighlyLikely, AlmostCertain }  // words(), band() ("55-75%"), FromStr (spaces, hyphens or underscores)
+#[non_exhaustive] pub enum Confidence { High, Moderate, Low }
+#[non_exhaustive] pub struct Judgement { pub likelihood, pub confidence } // new, parse(Option<&str>, Option<&str>) (both or neither), statement()
+#[non_exhaustive] pub enum Verdict { Mission { mission: Option<String> }, Duplicate { of }, Related { to }, NoAction,
+    Awaiting { question, of: Option<String>, via: Option<String>, until: f64 },
+    Later { until: Option<f64>, condition: Option<String> }, Decision { question } }
+impl Verdict { pub fn parse(word: &str, &VerdictParts, now: f64) -> Result<Self, String>; pub fn word(&self) -> &'static str; }
+pub struct VerdictParts<'a> { of, mission, question, via, ask, condition: Option<&str>, wait_seconds: Option<u64> } // Default
+#[non_exhaustive] pub struct Assessment<'a> { report, verdict, reason, by, at, credibility: Option<u8>,
+    priority: Option<&str>, judgement: Option<Judgement> } // new(report, verdict, reason, by, at), believed, prioritised, judged
+pub struct Context<'a> { pub settings: &ReportSettings, pub reads: &dyn Fn(&ReportScope) -> bool,
+    pub request_ttl: Duration, pub agent: &str } // within(settings, reads): the default request TTL, agent "report"
+pub fn assess(store: &dyn RegistryBackend, &Assessment, &Context) -> io::Result<Report>;
+    // only an open Report; audited first (`report.assess`); keeps the assessment (reason as comment, judgement,
+    // credibility, priority, links both ways for a duplicate/related Report). duplicate/related/no_action close it;
+    // mission/awaiting/later/decision leave it Assessed. A tie to a Report of another scope needs `reads` and a
+    // handling mark of `compartments` on both (audited `report.cross`); `awaiting.via` must be reachable from the
+    // Report's mark. A `decision` files a green ink request (kind `decision`, target `report:ID`, filed under
+    // `Context::agent`) and links it. Errors: NotFound, InvalidInput (message "only an open report" when not open)
+pub fn reopen(store, id, by, why, at) -> io::Result<Report>;      // Assessed or Closed -> Open, audited `report.reopen`
+pub fn reopen_due(store, ReportFilter, now) -> io::Result<Vec<Report>>;  // awaiting deadlines and later times that came
+pub fn sweep(store, now, &ReportSettings) -> io::Result<Swept { closed, reopened }>; // every scope
+pub fn sweep_matching(store, ReportFilter, now, &ReportSettings) -> io::Result<Swept>;
+pub fn mission_settled(store, mission_uid, now, &ReportSettings) -> io::Result<Vec<Report>>;
+    // closes Reports assessed `mission` whose Missions have all settled (brief done: mission_done; failed and
+    // not lost: mission_failed) and `decision` Reports whose request was signed (approved/rejected; an
+    // expired one reopens the Report); each closing is audited `report.close` and counted by `rate`
+pub fn rate(store, &Report, outcome, &ReportSettings, at) -> io::Result<()>; // tally by rating_counts/rating_confirms; rated once rating_min_reports counted
+pub fn reliability_of(confirmed: u32, counted: u32, bands: &[u8]) -> Reliability;
+pub struct SourceStanding { pub source: ReportSource, pub behind: Vec<Report> } // closed Reports from the source
+pub fn standing(store, key) -> io::Result<SourceStanding>;
+```
+
+The Station runs `sweep` on every scheduler beat and `mission_settled` whenever a Mission's brief is
+finished (`station::server::assessing`), telling the charge of a Report that is open again by Cable from
+`report:clock` (ID, kind and former assessment only). The Operation's charge assesses with
+`assess_report` and `reopen_report` (and reads with `reports` and `read_report`, opened for it); both go
+through the same sight check as a reader of the Report's content.
+
 ## Source items (`ai6::directorates::registry::source_items`)
 
 One Report of kind `ITEM_KIND` (`source-item`) per Source item, in the Operation's scope, filer
@@ -5489,11 +5544,11 @@ pub fn offer(store: &dyn RegistryBackend, operation, instance, item: &SourceItem
 pub enum ItemVerdict { Mission, Duplicate { of }, NoAction, Later { until } }   // word(): mission|duplicate|no_action|later
 impl ItemVerdict { pub fn parse(word, of: Option<&str>, wait_seconds: Option<u64>, now: f64) -> Result<Self, String>; }
 pub struct ItemDecision<'a> { operation, report, verdict, reason, by, at }       // new(..)
-pub fn decide_item(store, &ItemDecision) -> io::Result<Report>;
-    // only an open item; audited first (`source.item.decide`, resource `operation:ID`, target `REPORT WORD`), assessment kept
+pub fn decide_item(store, &ItemDecision, &ReportSettings) -> io::Result<Report>;
+    // `assessments::assess` for an item; audited first (`report.assess`, resource `operation:ID`, target `REPORT WORD`), assessment kept
     // on the Report, timeline kind `report`. mission/later -> Assessed; duplicate/no_action -> Closed with a resolution
 pub fn item_report(store, operation, id) -> io::Result<Report>;                  // NotFound when it is not that Operation's item
-pub fn reopen_due(store, operation, now) -> io::Result<Vec<Report>>;             // `later` items whose time came
+pub fn reopen_due(store, operation, now) -> io::Result<Vec<Report>>;             // `later` and `awaiting` items whose time came
 pub fn awaiting_queue(store, operation) -> io::Result<Vec<Report>>;              // decided `mission`, tied to no Mission yet
 pub fn is_mission(&Report) -> bool;
 ```

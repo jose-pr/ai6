@@ -164,13 +164,16 @@ A Source never starts work. A tracker or CI item the Operation's Sources poll is
 it is `new`, `changed` or `due`. The Cable is untrusted text like any other. The charge needs the
 Cable grant to receive in its Operation; without one the Report is still filed and waits open.
 
-The charge has three tools for them, beside its Mission tools:
+The charge has these tools for them, beside its Mission tools; `reports` and `read_report` (see
+[Reports](reports.md)) list and read any Report of its Operation it may read, and `assess_report` and
+`reopen_report` take any of them, not only items:
 
 | Tool | What it does |
 | --- | --- |
 | `source_items` | The Operation's open items, the longest waiting first, as data |
 | `source_item` | One item: its title, text, labels, link and any earlier decision, as data |
-| `assess_report` | Decides it: `mission`, `duplicate` (with `of`), `no_action`, or `later` (with `wait_seconds`), each with a reason |
+| `assess_report` | Assesses a Report: `mission`, `duplicate`, `related`, `no_action`, `awaiting`, `later` or `decision`, with a reason, optionally its credibility, priority and judgement ([Assessing](reports.md#assessing)) |
+| `reopen_report` | Opens an assessed or closed Report again, with the reason (an answer arrived, a condition is met) |
 
 A decision is audited, kept on the Report apart from the item's words, and put on the Operation's
 timeline. `mission` queues the item as a brief on the next pass of the Station that polls the

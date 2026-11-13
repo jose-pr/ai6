@@ -5,9 +5,9 @@ note, the Head of Station's round. It is kept in the Registry against its **scop
 Operation, a Station or M, and tied to what it is about. Filing a Report creates no Mission,
 brief or placement: an Operation's charge or a person decides what, if anything, it becomes.
 
-Assessment (turning a Report into a Mission, a link, no action, a question or a decision) and the
-closing that follows it are not implemented yet: a Report is filed `open` and stays so, and its
-assessment and resolution fields are empty.
+A Report is filed `open`. The Operation's charge, or a person where there is none, **assesses** it
+(see [Assessing](#assessing)); it is then `assessed` until what it was assessed into ends, and
+`closed` with its resolution kept.
 
 ## The record
 
@@ -74,7 +74,8 @@ as it is and would read it as it will be: lowering them needs someone read in, a
 Report past what they hold themselves. The tearline is never classified above its Report.
 
 The handling mark says how far a Report may go (this Operation, its compartments, a peer through
-Liaison). It is kept and shown; the checks at each crossing come with assessment.
+Liaison). It is checked at every crossing an assessment makes ([Assessing](#assessing)): a Report
+goes only as far as its mark, and a Report with none is marked the narrowest.
 
 ## Filing
 
@@ -100,7 +101,9 @@ or on `config:reports`.
 | `GET /v1/reports?scope=S` or `?mission=ID` | `{"reports": [...]}` most urgent first, with `state`, `kind` and `limit` to narrow |
 | `GET /v1/reports/{id}` | The Report, or its tearline; `403` with `report` (its ID and markings) when that is all the person may see; `404` for a scope they may not read |
 | `PUT /v1/reports/{id}/markings` | `{"classification", "handling", "compartments", "tearline"}`, replacing all four |
-| `PUT /v1/reports/{id}/assessment` | `{"assessment", "reason", "of"?, "wait_seconds"?}`: decides an open Source item (`mission`, `duplicate`, `no_action`, `later`); needs `mission.control` on its Operation and reading its content. `404` for a Report that is no item of a scope the person reads, `409` for one already decided |
+| `PUT /v1/reports/{id}/assessment` | `{"assessment", "reason", ...}`: assesses an open Report ([Assessing](#assessing)); needs `mission.control` on its Operation (`station.configure` for a Station's or M's) and reading its content. `404` for a scope the person may not read, `403` without the action or the content, `409` for a Report that is not open, `400` for anything out of bounds |
+| `POST /v1/reports/{id}/reopen` | `{"reason"}`: opens an assessed or closed Report again; the same authority. `409` for one already open |
+| `GET /v1/reports/sources/{key}` | A source's `reliability`, its tally (`counted`, `confirmed`), the `rule` it is judged by and the closed `reports` behind it that the person may read |
 | `GET /v1/missions/{id}/reports` | The Reports tied to a Mission the person reads, each as far as they may see it |
 
 Each answer has `sight`: `content`, `tearline` or `markings`.
@@ -114,7 +117,50 @@ ai6ctl reports list --scope operation:coqui [--state open]
 ai6ctl reports list --mission coqui-41
 ai6ctl reports show report-0f3c...
 ai6ctl reports assess report-0f3c... duplicate --of coqui-41 --reason "the same fault"
+ai6ctl reports assess report-0f3c... awaiting --question "Which branch?" --wait-seconds 86400 \
+    --reason "cannot tell" --likelihood likely --confidence moderate
+ai6ctl reports reopen report-0f3c... --reason "answered: main"
+ai6ctl reports source agent:007
 ```
+
+## Assessing
+
+An open Report is assessed once, by the Operation's charge with `assess_report` or by a person with
+`ai6ctl reports assess` or the route above. Every assessment is audited before it is recorded, kept
+on the Report apart from the filer's words (the reason is the assessor's comment), and put on the
+Operation's timeline. It may also set the Report's `credibility` and `priority`, and state the
+assessor's judgement in the words of the UK probability yardstick with a confidence: `likelihood`
+(`remote chance` under 5%, `highly unlikely` 10-20%, `unlikely` 25-35%, `realistic possibility`
+40-50%, `likely` 55-75%, `highly likely` 80-90%, `almost certain` over 95%) and `confidence` (`high`,
+`moderate`, `low`); the band is shown beside the words, never in place of them. Credibility `1` needs
+a corroborating Report or evidence link.
+
+| Assessment | Takes | Then |
+| --- | --- | --- |
+| `mission` | `mission`: the Mission proposed or amended for it (a Source item needs none: the Station that polls its Source queues it) | `assessed`, linked to the Mission; closes when the Mission settles |
+| `duplicate` | `of`: a Report, Mission or evidence | `closed`; a Report it repeats names it back, so each lists the other |
+| `related` | `of`, the same | `closed`, tied the same way |
+| `no_action` | | `closed` with the reason |
+| `awaiting` | `question`, `wait_seconds` (its deadline), optionally `ask` (who) and `via` (a handling mark) | `assessed`; open again at the deadline or when reopened |
+| `later` | `wait_seconds`, `condition`, or both | `assessed`; open again at its time or when reopened |
+| `decision` | `question` | `assessed`, with a green ink request of kind `decision` for those who may sign; closes when it is signed |
+
+A Report closes when what it was assessed into ends, and its resolution stays: a Mission settles
+done (after verifying) or failed, or a `decision` request is approved or rejected. A request that
+expires unsigned opens the Report again rather than close it on an answer nobody gave. Every
+Station may run the pass that closes and reopens, since a Report is changed once wherever it is met;
+the Operation's charge is told by Cable, by ID alone, of a Report that is open again. Reopening is
+audited (`report.reopen`), and so are closing (`report.close`) and assessing (`report.assess`).
+
+A tie to a Report of another scope is made only when the assessor reads that scope and both
+Reports' handling marks reach `compartments`; an `awaiting` question goes only as far as `via`
+allows the Report's mark to go. Each such crossing is audited (`report.cross`).
+
+**A source's reliability** is earned from how its Reports came out. When a Report closes, its
+outcome (`mission_done`, `mission_failed`, `decision_approved`, `decision_rejected`, `duplicate`,
+`related`, `no_action`) counts toward its source if the deployment's rule says so, and the source is
+rated once enough have counted ([Settings](#settings)). `GET /v1/reports/sources/{key}` and
+`ai6ctl reports source` show the rating with the tally, the rule and the closed Reports behind it.
 
 ## What files them
 
@@ -177,6 +223,10 @@ Without the table, the defaults below apply.
 classifications = ["unclassified", "restricted", "confidential"]   # lowest first
 handlings = ["operation", "compartments", "peers"]                 # narrowest first
 priorities = ["critical", "high", "normal", "low"]                 # most urgent first
+rating_min_reports = 5                                             # counted Reports before a source is rated
+rating_counts = ["mission_done", "mission_failed", "decision_approved", "decision_rejected", "no_action"]
+rating_confirms = ["mission_done", "mission_failed", "decision_approved"]
+rating_bands = [90, 75, 50, 25]                                    # percent confirmed for A, B, C, D; below, E
 ```
 
 A Report filed or remarked with a value outside these lists is refused. One already stored with a

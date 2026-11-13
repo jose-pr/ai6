@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Reports are assessed (`ai6::directorates::registry::assessments`): the Operation's charge
+  (`assess_report`, `reopen_report`, and `reports` and `read_report` for it) or a person
+  (`PUT /v1/reports/{id}/assessment`, `POST /v1/reports/{id}/reopen`, `ai6ctl reports assess|reopen`)
+  assesses an open Report as `mission`, `duplicate`, `related`, `no_action`, `awaiting`, `later` or
+  `decision`, sets its credibility and priority, and states a judgement in the probability yardstick's
+  words with a confidence. Each assessment is audited first. A Report closes, keeping its resolution, when
+  its Mission settles or its `decision` green ink request is signed, and opens again at an `awaiting`
+  deadline or `later` time, each audited; a duplicate links both Reports; a handling mark is checked at
+  each crossing. A closed Report's outcome counts toward its source's reliability by the `roster`
+  record's `reports.rating_*` settings, shown with the Reports behind it
+  (`GET /v1/reports/sources/{key}`, `ai6ctl reports source`).
 - A Mission can be drafted in Moneypenny's conversation: the card shows the brief to edit and where the
   Mission would run, the same Confirm as any proposal follows, and once queued it shows the Mission's
   state and result and a link that reopens it. A confirmed `propose_mission` settles with a `receipt`
