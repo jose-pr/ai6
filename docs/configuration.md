@@ -1004,7 +1004,7 @@ pending_per_station = 8
 <!-- schema:record.unex.gateway:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `runs` | 16 | **Live Runs.** Live Runs. |
+| `runs` | 16 | Live Runs. |
 | `board_runs` | 2,000 | **Runs on the Mission board.** Runs the Mission board lists from the Registry's records, the most recently updated ones; a Run still live is always listed. |
 | `clients_per_run` | 12 | **Browser connections per Run.** Simultaneous browser connections to one Run. |
 | `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per Run for a client that joins late. |
