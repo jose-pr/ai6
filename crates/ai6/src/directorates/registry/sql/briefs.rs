@@ -53,14 +53,14 @@ fn stored_record(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Brief>> {
         .transpose()
 }
 
-/// One row of `SELECT brief, provenance, state, attempts, outcome`.
+/// One row of `SELECT brief, provenance, state, runs, outcome`.
 fn filed_row(row: &Row) -> io::Result<FiledBrief> {
     let brief = stored_brief(&row.text(0)?, row.opt_text(1)?)?;
     brief.validate()?;
     Ok(FiledBrief {
         brief,
         state: row.text(2)?,
-        attempts: u32::try_from(row.int(3)?).unwrap_or(u32::MAX),
+        runs: u32::try_from(row.int(3)?).unwrap_or(u32::MAX),
         outcome: row
             .opt_text(4)?
             .and_then(|text| serde_json::from_str(&text).ok()),
@@ -234,7 +234,7 @@ fn lease_in(tx: &mut Tx<'_>, key: &str) -> io::Result<Option<Lease>> {
         key: key.to_owned(),
         station,
         expires,
-        attempt: u32::try_from(row.int(2)?)
+        number: u32::try_from(row.int(2)?)
             .map_err(|_| invalid_data("invalid Registry attempt count"))?,
         meta: from_json(&row.text(3)?, "Registry lease")?,
     }))
@@ -250,7 +250,7 @@ fn put_lease(tx: &mut Tx<'_>, lease: &Lease, revision: i64) -> io::Result<()> {
             lease.key.as_str().into(),
             lease.station.as_str().into(),
             lease.expires.into(),
-            lease.attempt.into(),
+            lease.number.into(),
             to_json(&lease.meta)?.into(),
             revision.into(),
         ],
@@ -836,7 +836,7 @@ impl BriefStore for SqlRegistry {
                 key,
                 station: station.to_owned(),
                 expires: tx.now()? + duration.as_secs_f64(),
-                attempt,
+                number: attempt,
                 meta,
             };
             put_lease(tx, &lease, revision)?;
@@ -961,7 +961,7 @@ impl BriefStore for SqlRegistry {
     fn recover(
         &self,
         lease: &Lease,
-        max_attempts: u32,
+        max_runs: u32,
         by: &str,
     ) -> io::Result<Option<LeaseRecovery>> {
         validate_registry_key(lease.key())?;
@@ -972,7 +972,7 @@ impl BriefStore for SqlRegistry {
             if !is_claimed(tx, lease.key())? {
                 return Ok(None);
             }
-            if lease.attempt() < max_attempts {
+            if lease.number() < max_runs {
                 tx.execute(
                     "UPDATE ai6_briefs SET state = 'new', revision = $2 WHERE key = $1",
                     &[lease.key().into(), revision.into()],

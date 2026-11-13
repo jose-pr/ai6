@@ -324,15 +324,15 @@ pub(super) enum ResumeOn {
     Stay(OnRoute),
     /// Another route of the same handler, whose account the provider Run can move to.
     Move(OnRoute),
-    /// No route it can move to has room, but another has: a new attempt, saying why.
-    NewAttempt(String),
+    /// No route it can move to has room, but another has: a new run, saying why.
+    NewRun(String),
     /// No route has room: it waits, saying why.
     Wait(String),
 }
 
 /// Applies the resume rule: a Run stays on its route, since its history belongs to the harness
 /// and the source; without room it moves only to a route of the same handler whose accounts carry
-/// that history; otherwise another route means a new attempt. `carried` says whether the account
+/// that history; otherwise another route means a new run. `carried` says whether the account
 /// the Run last held is of a kind that carries it.
 pub(super) fn for_resume(
     state: &DaemonState,
@@ -365,7 +365,7 @@ pub(super) fn for_resume(
     if found.open.is_empty() {
         ResumeOn::Wait(none_open(agent, &found))
     } else {
-        ResumeOn::NewAttempt(why)
+        ResumeOn::NewRun(why)
     }
 }
 

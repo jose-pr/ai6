@@ -45,7 +45,7 @@ pub enum MissionState {
     Held,
     /// Its Run ended done, and the work is kept for someone to check against what the
     /// Mission was to deliver. It leaves this state only by a decision: done, redispatched as
-    /// the next attempt, or failed.
+    /// the next run, or failed.
     Verifying,
 }
 
@@ -136,20 +136,20 @@ pub struct Mission {
     #[serde(default)]
     pub blocked_reason: Option<String>,
     /// Why AI6 failed the Mission without its Agent: a harness that cannot be started, or an
-    /// attempt a standing order's next window superseded. Cleared by the next state change.
+    /// run a standing order's next window superseded. Cleared by the next state change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
     /// What its harness said when it reported the Mission failed, which may quote anything: it
-    /// goes in the attempt's outcome and on no metadata-only record. Cleared by the next state
+    /// goes in the run's outcome and on no metadata-only record. Cleared by the next state
     /// change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported_failure: Option<String>,
-    /// Why this attempt starts a new Run though its order says to resume: the provider could
-    /// not resume the last one. Cleared by the next attempt.
+    /// Why this run starts a new Run though its order says to resume: the provider could
+    /// not resume the last one. Cleared by the next run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_refused: Option<String>,
-    /// Whether the attempt before this one ended failed or blown, as this Station's book had it
-    /// when the Mission was queued again: this attempt does not take up that attempt's Run.
+    /// Whether the run before this one ended failed or blown, as this Station's book had it
+    /// when the Mission was queued again: this run does not take up that run's Run.
     /// The book says so before the Run record does.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub after_failure: bool,
@@ -183,12 +183,12 @@ pub struct Mission {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
     /// The content digest of the Registry brief this Station runs it from: another brief for
-    /// a Mission that ended here is its next attempt, and the same one claimed again is a lapse
+    /// a Mission that ended here is its next run, and the same one claimed again is a lapse
     /// recovered. `None` for a Mission not run from the Registry's queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief_digest: Option<String>,
     /// What each redispatch said was wrong and what to do differently, oldest first: the next
-    /// attempt's task is its brief followed by these. Unlike the brief, they are not what the
+    /// run's task is its brief followed by these. Unlike the brief, they are not what the
     /// Registry filed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub amendments: Vec<String>,
@@ -252,7 +252,7 @@ pub(crate) struct RunHold {
     /// AI6's identifier for the Run, the key of the Registry record.
     pub(crate) id: String,
     /// Which try at the Mission this Run is.
-    pub(crate) attempt: u32,
+    pub(crate) number: u32,
     /// The fencing token presented with every write.
     pub(crate) fence: u64,
 }
@@ -559,7 +559,7 @@ impl MissionStore {
     }
 
     /// Records where the Mission's brief came from. The first record stands: a later
-    /// attempt at the same Mission keeps it.
+    /// run at the same Mission keeps it.
     pub fn record_provenance(
         &mut self,
         mission_id: &str,
@@ -672,7 +672,7 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Records that the provider could not resume the Run this attempt would have taken up,
+    /// Records that the provider could not resume the Run this run would have taken up,
     /// so its next start begins a new one.
     pub fn refuse_resume(&mut self, mission_id: &str, why: &str) -> Result<Mission, MissionError> {
         let mut next = self.missions.clone();
@@ -802,7 +802,7 @@ impl MissionStore {
             .collect()
     }
 
-    /// Hands an interrupted Mission to another Agent as a new attempt: it is queued again
+    /// Hands an interrupted Mission to another Agent as a new run: it is queued again
     /// with `agent_id` assigned and keeps its Runs and safe house.
     pub fn requeue_for(
         &mut self,
@@ -836,9 +836,9 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Queues a stalled or finished Mission again as a new attempt, for `agent_id` when
+    /// Queues a stalled or finished Mission again as a new run, for `agent_id` when
     /// given and otherwise for the Agent it had. It keeps its Runs and safe house, so the
-    /// next attempt continues the work; a quarantined Mission waits for its release instead.
+    /// next run continues the work; a quarantined Mission waits for its release instead.
     pub fn retry(
         &mut self,
         mission_id: &str,
@@ -909,9 +909,9 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Queues a Mission that ended as its next attempt, from another brief (its `digest`), which
+    /// Queues a Mission that ended as its next run, from another brief (its `digest`), which
     /// may say more than the last (`prompt`): an item's new comments, a Sleeper's next window. Unlike
-    /// [`retry`](Self::retry), the attempt does not continue an interrupted one: this Station's
+    /// [`retry`](Self::retry), the run does not continue an interrupted one: this Station's
     /// hold on the last Run is let go, and the next start records a new one after it.
     pub fn reopen(
         &mut self,
@@ -962,9 +962,9 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Queues a Mission that is verifying as its next attempt for `agent_id`, told `amendment` after
-    /// its brief. The attempt starts a new provider Run and, like a failed one, does not take
-    /// up the last one; the safe house the last attempt kept stays.
+    /// Queues a Mission that is verifying as its next run for `agent_id`, told `amendment` after
+    /// its brief. The run starts a new provider Run and, like a failed one, does not take
+    /// up the last one; the safe house the last run kept stays.
     pub fn redispatch(
         &mut self,
         mission_id: &str,
@@ -1643,7 +1643,7 @@ mod tests {
                 "held-1",
                 RunHold {
                     id: "s-1".to_owned(),
-                    attempt: 2,
+                    number: 2,
                     fence: 7,
                 },
             )
@@ -1651,6 +1651,6 @@ mod tests {
         }
         let reopened = MissionStore::open(&path).unwrap();
         let hold = reopened.operation("held-1").unwrap().run.unwrap();
-        assert_eq!((hold.id.as_str(), hold.attempt, hold.fence), ("s-1", 2, 7));
+        assert_eq!((hold.id.as_str(), hold.number, hold.fence), ("s-1", 2, 7));
     }
 }

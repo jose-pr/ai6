@@ -1052,8 +1052,8 @@ impl Gateway {
                 .unwrap_or_default(),
             None => Vec::new(),
         };
-        // A later attempt may resume the provider's Run: the board lists it once, as the
-        // latest attempt stands.
+        // A later run may resume the provider's Run: the board lists it once, as the
+        // latest run stands.
         let mut latest = HashMap::<String, ai6::RunRecord>::new();
         for record in recorded {
             let Some(provider) = record.provider_id.clone() else {
@@ -1061,7 +1061,7 @@ impl Gateway {
             };
             if latest
                 .get(&provider)
-                .is_none_or(|held| held.attempt <= record.attempt)
+                .is_none_or(|held| held.number <= record.number)
             {
                 latest.insert(provider, record);
             }
@@ -1164,14 +1164,14 @@ impl Gateway {
             missions = tokio::task::spawn_blocking(move || {
                 let mut attempts = registry
                     .runs()
-                    .map(attempts_by_mission)
+                    .map(runs_by_mission)
                     .unwrap_or_default();
                 for mission in &mut missions {
                     mission.usage = registry
                         .mission_usage(Some(&mission.operation_id), &mission.mission_id)
                         .ok()
                         .flatten();
-                    mission.attempts = attempts.remove(&mission.mission_id).unwrap_or_default();
+                    mission.history = attempts.remove(&mission.mission_id).unwrap_or_default();
                     if let Ok(Some(found)) = registry.resolve_mission(&mission.mission_id)
                         && found.mission_id == mission.mission_id
                     {
@@ -2527,7 +2527,7 @@ async fn mission_detail(
     if let Some(registry) = gateway.registry.clone() {
         let (operation, mission_id) = (mission.operation_id.clone(), mission.mission_id.clone());
         let (usage, mut attempts) = tokio::task::spawn_blocking(move || {
-            let mut attempts = attempts_by_mission(registry.runs()?);
+            let mut attempts = runs_by_mission(registry.runs()?);
             for attempt in attempts.get_mut(&mission_id).into_iter().flatten() {
                 attempt.final_report = registry
                     .final_report(&attempt.run_id)?
@@ -2542,7 +2542,7 @@ async fn mission_detail(
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
         mission.usage = usage;
-        mission.attempts = attempts.remove(&mission.mission_id).unwrap_or_default();
+        mission.history = attempts.remove(&mission.mission_id).unwrap_or_default();
     }
     Ok(Json(mission))
 }
@@ -3252,7 +3252,7 @@ fn group_missions(runs: Vec<BoardRun>) -> Vec<BoardMission> {
             runs,
             brief: None,
             usage: None,
-            attempts: Vec::new(),
+            history: Vec::new(),
             pending: None,
         })
         .collect()
@@ -5399,29 +5399,29 @@ pub struct BoardMission {
     /// Tokens and cost the Mission's Runs consumed, from the shared Registry ledger;
     /// absent until a provider reports usage.
     pub usage: Option<MissionUsage>,
-    /// Every attempt at the Mission, first first, from the shared Run records; empty
+    /// Every run at the Mission, first first, from the shared Run records; empty
     /// when no Run was recorded.
-    pub attempts: Vec<MissionAttempt>,
+    pub history: Vec<MissionRun>,
     /// Where a Mission with no Run stands: queued, waiting, retrying a start or failed
     /// before one; absent once it has a Run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<unstarted::BoardPending>,
 }
 
-/// One attempt at a Mission: which Station ran it on which Theater, and how it stands.
+/// One run at a Mission: which Station ran it on which Theater, and how it stands.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct MissionAttempt {
+pub struct MissionRun {
     /// Which try at the Mission this is, starting at 1.
-    pub attempt: u32,
+    pub number: u32,
     /// AI6's Run ID: the run's UID.
     pub run_id: String,
-    /// The run's handle, `<mission handle>.<attempt>`, as the Mission was called when it
+    /// The run's handle, `<mission handle>.<run>`, as the Mission was called when it
     /// opened.
     pub handle: Option<String>,
     /// The provider's Run ID, once issued.
     pub provider_id: Option<String>,
-    /// The AI6 Run ID of the attempt this one replaced.
+    /// The AI6 Run ID of the run this one replaced.
     pub predecessor: Option<String>,
     /// The Station that holds, or last held, the Run.
     pub station: String,
@@ -5429,7 +5429,7 @@ pub struct MissionAttempt {
     pub theater: Option<String>,
     /// `active`, `parked`, `ended` or `lost`.
     pub status: String,
-    /// Why the attempt was lost; set only when `status` is `lost`.
+    /// Why the run was lost; set only when `status` is `lost`.
     pub lost: Option<String>,
     /// The branch its work was last checkpointed to, when it was.
     pub checkpoint_branch: Option<String>,
@@ -5440,7 +5440,7 @@ pub struct MissionAttempt {
     /// What a person found when they checked how it ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<ai6::MissionVerdict>,
-    /// What the Mission was to deliver, as `kind` or `kind:target`, once the attempt ended done
+    /// What the Mission was to deliver, as `kind` or `kind:target`, once the run ended done
     /// and went to be verified.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub deliverables: Vec<String>,
@@ -5450,7 +5450,7 @@ pub struct MissionAttempt {
     /// When a probe was asked for, as Unix seconds, until the Station has run it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
-    /// What an Operation's charge at `desk` clearance advises for the verifying attempt, which a
+    /// What an Operation's charge at `desk` clearance advises for the verifying run, which a
     /// person confirms by deciding it the same way.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<ai6::MissionVerdict>,
@@ -5460,7 +5460,7 @@ pub struct MissionAttempt {
     pub final_report: Option<String>,
 }
 
-impl MissionAttempt {
+impl MissionRun {
     fn from_record(record: &ai6::RunRecord) -> Self {
         Self {
             route: record.launch.as_ref().map(|launch| {
@@ -5481,7 +5481,7 @@ impl MissionAttempt {
             probe_requested: record.probe_requested,
             recommendation: record.recommendation.clone(),
             final_report: None,
-            attempt: record.attempt,
+            number: record.number,
             run_id: record.id.clone(),
             handle: record.handle.clone(),
             provider_id: record.provider_id.clone(),
@@ -5501,17 +5501,17 @@ impl MissionAttempt {
     }
 }
 
-/// The attempts at each Mission among `records`, in attempt order.
-fn attempts_by_mission(records: Vec<ai6::RunRecord>) -> BTreeMap<String, Vec<MissionAttempt>> {
-    let mut attempts = BTreeMap::<String, Vec<MissionAttempt>>::new();
+/// The runs at each Mission among `records`, in run order.
+fn runs_by_mission(records: Vec<ai6::RunRecord>) -> BTreeMap<String, Vec<MissionRun>> {
+    let mut attempts = BTreeMap::<String, Vec<MissionRun>>::new();
     for record in &records {
         attempts
             .entry(record.mission_id.clone())
             .or_default()
-            .push(MissionAttempt::from_record(record));
+            .push(MissionRun::from_record(record));
     }
     for list in attempts.values_mut() {
-        list.sort_by_key(|attempt| attempt.attempt);
+        list.sort_by_key(|attempt| attempt.number);
     }
     attempts
 }
@@ -9724,7 +9724,7 @@ mod tests {
                 1_790_000_000,
             )
             .unwrap();
-        // The first attempt was lost with its Station; the second runs elsewhere.
+        // The first run was lost with its Station; the second runs elsewhere.
         let registry = FileRegistry::open(directory.path());
         registry
             .open_run(
@@ -9741,7 +9741,7 @@ mod tests {
                 ai6::NewRun::new("attempt-2", "mission-g", "worker")
                     .with_theater("local")
                     .with_provider_id("run-g")
-                    .with_attempt(2, Some("attempt-1".to_owned()))
+                    .with_number(2, Some("attempt-1".to_owned()))
                     .with_account(ai6::AccountRef::new("gateway", "key"))
                     .with_launch(
                         ai6::RunLaunch::new("claude", "pipe", "/work")
@@ -9820,7 +9820,7 @@ mod tests {
             .open_run(
                 ai6::NewRun::new("record-g", "mission-g", "worker")
                     .with_provider_id("run-g")
-                    .with_attempt(3, None)
+                    .with_number(3, None)
                     .with_exposure(vec![ai6::Exposure {
                         source: "tool:WebFetch".to_owned(),
                         at: 1_790_000_000.0,

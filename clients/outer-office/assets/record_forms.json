@@ -8037,7 +8037,7 @@
               "description": "Seconds a lease on a Mission's brief or Run lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery.",
               "default": 180.0
             },
-            "intake_attempts": {
+            "intake_runs": {
               "type": "integer",
               "minimum": 0,
               "maximum": 4294967295,
@@ -8126,7 +8126,7 @@
             "retry_backoff_max": 600.0,
             "check_in": 15.0,
             "lease": 180.0,
-            "intake_attempts": 3,
+            "intake_runs": 3,
             "role_catalog_bytes": 524288,
             "provider_catalog_bytes": 524288,
             "found_libraries": 64,

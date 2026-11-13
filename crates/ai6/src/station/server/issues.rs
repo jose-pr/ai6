@@ -1542,7 +1542,7 @@ async fn tell(state: &DaemonState, mission_id: &str, text: String, resume_if_end
 }
 
 /// Marks the Mission's Run exposed by an issue of `tracker`, live or, when it has ended,
-/// in the Registry, so later attempts start exposed too.
+/// in the Registry, so later runs start exposed too.
 fn expose(state: &DaemonState, mission_id: &str, tracker: &str, now: f64) {
     let limit = state.intake.limits().runs.exposure_source_bytes;
     let source = issue_source(tracker, limit);

@@ -10,7 +10,7 @@ import 'package:outer_office/main.dart';
 
 import 'shell_navigation.dart';
 
-/// A signed-in board whose gateway shows one Mission with an earlier, queued attempt and a
+/// A signed-in board whose gateway shows one Mission with an earlier, queued run and a
 /// later, working one; every request is kept in [requests].
 Future<MissionBoard> signedIn(
   List<http.Request> requests, {

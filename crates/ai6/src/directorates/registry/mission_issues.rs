@@ -1755,7 +1755,7 @@ mod tests {
         unlinking_refuses_the_entries_still_waiting,
         only_the_sending_term_may_settle_an_entry,
         a_new_term_adopts_what_the_old_one_left_sending,
-        a_retry_waits_and_fails_after_the_attempts_allowed,
+        a_retry_waits_and_fails_after_the_runs_allowed,
     );
 
     fn link(mission: &str, tracker: &str, item: &str) -> IssueLink {
@@ -2238,7 +2238,7 @@ mod tests {
         assert!(registry.adopt_outbox_send(&queued.id, 3).unwrap().is_none());
     }
 
-    fn a_retry_waits_and_fails_after_the_attempts_allowed(store: &dyn Store) {
+    fn a_retry_waits_and_fails_after_the_runs_allowed(store: &dyn Store) {
         let registry = store.handle();
         registry.link_issue(&link("m1", "github", "o/r#1")).unwrap();
         let queued = registry

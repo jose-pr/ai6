@@ -111,7 +111,7 @@ async fn a_verifying_mission_whose_leases_ran_out_waits_for_its_verdict() {
 
     let extraction = recovery::extract(&state, &lapsed);
     assert!(matches!(extraction, recovery::Extraction::Wait));
-    assert_eq!(extraction.max_attempts(3), None);
+    assert_eq!(extraction.max_runs(3), None);
     let record = state.intake.latest_run(&mission_id).unwrap().unwrap();
     assert!(!record.status.is_closed(), "its Run is not given up");
     assert_eq!(
@@ -133,7 +133,7 @@ async fn a_verdict_of_done_settles_a_mission_filed_lost_while_its_station_was_aw
     let root = tempfile::tempdir().unwrap();
     let (state, mission_id) = verifying(root.path(), "lost").await;
     let lapsed = lapse_brief_lease(&state, &mission_id);
-    // Recovery as it was before a verifying Mission waited: the last attempt spent.
+    // Recovery as it was before a verifying Mission waited: the last run spent.
     assert_eq!(
         state.intake.recover(&lapsed, 0, "hq").unwrap(),
         Some(LeaseRecovery::Failed)

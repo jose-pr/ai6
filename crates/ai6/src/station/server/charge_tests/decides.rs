@@ -258,7 +258,7 @@ fn attempt(state: &DaemonState, mission: &str, attempt: u32) -> crate::RunRecord
         .runs()
         .unwrap()
         .into_iter()
-        .find(|record| record.mission_id == mission && record.attempt == attempt)
+        .find(|record| record.mission_id == mission && record.number == attempt)
         .unwrap()
 }
 
@@ -295,7 +295,7 @@ fn person_decides(state: &DaemonState, tag: &str, mission: &str, verdict: Outcom
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_its_next_attempt_runs()
+async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_its_next_run_runs()
  {
     let root = tempfile::tempdir().unwrap();
     let tag = "d1";
@@ -348,8 +348,8 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
         crate::directorates::registry::logbook::Severity::Warning
     );
 
-    // Its probes are the Mission's evidence, and the decision is the attempt's verdict, audited,
-    // on the timeline, counted against the attempt's Agent, and told to the next attempt.
+    // Its probes are the Mission's evidence, and the decision is the run's verdict, audited,
+    // on the timeline, counted against the run's Agent, and told to the next run.
     let first = attempt(&state, &mission, 1);
     assert_eq!(
         first
@@ -408,7 +408,7 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
         "{task}"
     );
 
-    // The next attempt runs. A repository would be given a safe house, which this Station's test
+    // The next run runs. A repository would be given a safe house, which this Station's test
     // providers do not include.
     std::fs::remove_dir_all(root.path().join("checkout").join(".git")).unwrap();
     start_mission_by_id(&state, &mission).await;

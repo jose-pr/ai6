@@ -39,7 +39,7 @@ burst = 50
 
 | Action | Grants | To |
 | --- | --- | --- |
-| `mission.status` | IDs, states, roles, Agent codenames, attempts and times, with no text | both |
+| `mission.status` | IDs, states, roles, Agent codenames, runs and times, with no text | both |
 | `mission.read` | The brief as well, and for a person what `mission.read` means anywhere; implies `mission.status` | both |
 | `product.read` | The filed outcome, the CX report and the refs | both |
 | `cable.send` | Sending Cables there | both |
@@ -97,7 +97,7 @@ tools when it starts, so a Run read in later sees them when it resumes.
 | Tool | Needs | Answers |
 | --- | --- | --- |
 | `compartments` | Holding one | Each one's ID, description, what it grants, and the Operations and Missions it reaches |
-| `missions_in(operation` or `compartment, limit)` | `mission.status` | Each Mission's ID, Operation, state, role, Agent, attempts, creation time and why it is blocked. Never a brief, a Run ID, a Station, a Theater, a safe house, a launch manifest, usage or cost |
+| `missions_in(operation` or `compartment, limit)` | `mission.status` | Each Mission's ID, Operation, state, role, Agent, runs, creation time and why it is blocked. Never a brief, a Run ID, a Station, a Theater, a safe house, a launch manifest, usage or cost |
 | `mission_brief(mission)` | `mission.read` | The status and the brief's text |
 | `mission_products(mission)` | `product.read` | The status, the outcome's `state`, `reason`, `branch` and `summary`, the CX report and the refs, each text cut at `max_product_bytes` |
 

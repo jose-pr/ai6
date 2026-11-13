@@ -145,7 +145,7 @@ async fn queued_waiting_retrying_and_failed_missions_are_listed_with_their_reaso
         .unwrap();
     assert!(other.as_array().unwrap().is_empty());
 
-    // Its detail answers, with no attempts.
+    // Its detail answers, with no runs.
     let detail = get(
         &served.base,
         &served.viewer,

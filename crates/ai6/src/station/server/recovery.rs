@@ -1,11 +1,11 @@
 //! The Station's side of recovery ("extraction"): what the Headquarters does with a Mission
 //! whose Station went dark, how a Station adopts a Run it is handed, and the notes and
-//! checkpoints a later attempt's hand-off is made of.
+//! checkpoints a later run's hand-off is made of.
 //!
 //! A Run a runner supervises on a Theater other Stations reach is adopted: another
 //! Station takes its lease and re-attaches, so nothing is launched twice. Any other Run
 //! ended with its Station, so it is marked lost and its brief is queued again; the next
-//! attempt links to it, starts from its last checkpoint and is told what it was doing.
+//! run links to it, starts from its last checkpoint and is told what it was doing.
 //!
 //! A live Station gives up a Run the same way when its runner, or wrapped harness, stays
 //! out of reach past the Operation's `lost_after_secs` and a last probe fails, or when a
@@ -50,7 +50,7 @@ pub(super) enum Extraction {
     HandedOver,
     /// The Run's own lease is still live; decide once it lapses too.
     Wait,
-    /// The Run was lost; queue the brief again for a new attempt, or file it as failed
+    /// The Run was lost; queue the brief again for a new run, or file it as failed
     /// when the Operation says so.
     Lost {
         /// The Operation's response.
@@ -59,14 +59,14 @@ pub(super) enum Extraction {
 }
 
 impl Extraction {
-    /// The attempt limit to recover the brief lease with, `intake_attempts` when it is queued
+    /// The run limit to recover the brief lease with, `intake_runs` when it is queued
     /// again, or `None` to leave it alone.
-    pub(super) fn max_attempts(&self, intake_attempts: u32) -> Option<u32> {
+    pub(super) fn max_runs(&self, intake_runs: u32) -> Option<u32> {
         match self {
             Self::Requeue
             | Self::Lost {
                 on_lost: OnLost::Retry,
-            } => Some(intake_attempts),
+            } => Some(intake_runs),
             // Recovering at a limit of zero files the brief as lost.
             Self::Lost { .. } => Some(0),
             Self::HandedOver | Self::Wait => None,
@@ -74,7 +74,7 @@ impl Extraction {
     }
 }
 
-/// Whether the attempt ended and its Mission waits for a person: it is being verified or held.
+/// Whether the run ended and its Mission waits for a person: it is being verified or held.
 fn waits_for_verdict(record: &RunRecord) -> bool {
     record
         .result
@@ -90,7 +90,7 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
     };
     let record = match state.intake.latest_run(mission_id) {
         // A Mission waiting on a person has no harness to lose, so its Station going dark spends
-        // no attempt; the verdict settles it once the Station is back.
+        // no run; the verdict settles it once the Station is back.
         Ok(Some(record)) if waits_for_verdict(&record) => return Extraction::Wait,
         Ok(Some(record)) if !record.status.is_closed() => record,
         // A live Station that gave its Run up lets the brief lease lapse as well.
@@ -172,7 +172,7 @@ pub(super) fn reach_watch(state: &DaemonState, operation_id: Option<&str>) -> Re
 ///
 /// The Station stops acting on it and lets its leases lapse: the Run is marked lost with
 /// `reason`, and the Mission's brief goes back to the Registry, which queues it again as a new
-/// attempt or files it under the Operation's `on_lost`, as for a Run lost with its
+/// run or files it under the Operation's `on_lost`, as for a Run lost with its
 /// Station. A Mission that came from no brief has nothing to queue again and fails. `run`
 /// is the harness the caller reads, when it reads one; another one is left alone.
 pub(super) fn give_up(
@@ -197,7 +197,7 @@ pub(super) fn give_up(
     eprintln!("ai6: Mission {mission_id:?} lost its Run: {reason}");
     if let Some(operation) = &operation {
         operation.gate.close();
-        // A runner that comes back keeps nothing for this Station; the next attempt ends it.
+        // A runner that comes back keeps nothing for this Station; the next run ends it.
         if let Some(runner) = &operation.runner {
             runner
                 .detached
@@ -222,7 +222,7 @@ pub(super) fn give_up(
     }
     let to = hand_back(state, mission_id);
     if let Some(hold) = &hold {
-        super::agents::count_lost(state, mission_id, hold.attempt);
+        super::agents::count_lost(state, mission_id, hold.number);
     }
     // The loss is counted and its reason queued before the Mission ends, so whoever sees it
     // ended also sees why.
@@ -304,9 +304,9 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
         OnLost::Fail => MissionState::Failed,
     };
     let limits = state.station.limits();
-    let max_attempts = Extraction::Lost { on_lost }
-        .max_attempts(limits.scheduler.intake_attempts)
-        .unwrap_or(limits.scheduler.intake_attempts);
+    let max_runs = Extraction::Lost { on_lost }
+        .max_runs(limits.scheduler.intake_runs)
+        .unwrap_or(limits.scheduler.intake_runs);
     for _ in 0..limits.recovery.give_up_tries {
         let Some(lease) = ours() else {
             // Another Headquarters recovered it once it lapsed.
@@ -319,7 +319,7 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
         if let Ok(Some(lapsed)) = state.intake.lease(lease.key())
             && lapsed.station() == station
         {
-            match state.intake.recover(&lapsed, max_attempts, station) {
+            match state.intake.recover(&lapsed, max_runs, station) {
                 Ok(Some(LeaseRecovery::Requeued)) => return MissionState::Abandoned,
                 Ok(Some(_)) => {
                     super::standing::recovered_failed(state, lapsed.key());
@@ -340,10 +340,10 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
     handed
 }
 
-/// Whether a lost attempt at a Mission this Station had left behind is what a new brief lease
+/// Whether a lost run at a Mission this Station had left behind is what a new brief lease
 /// asks it to run: the Mission ended here, holds no Run, and its latest Run is lost. One
 /// AI6 failed itself ended for a reason trying again will not change.
-pub(super) fn retries_lost_attempt(state: &DaemonState, mission_id: &str) -> bool {
+pub(super) fn retries_lost_run(state: &DaemonState, mission_id: &str) -> bool {
     let failed_here = state.missions.lock().ok().is_some_and(|missions| {
         missions
             .get(mission_id)
@@ -510,7 +510,7 @@ pub(super) enum Adoption {
 
 /// Takes over the Run a brief lease handed to this Station: takes its lease, records the
 /// Mission as its last Station launched it, and queues the re-attach. A Run that ended
-/// in the meantime is not adopted, so the Mission starts as a new attempt instead.
+/// in the meantime is not adopted, so the Mission starts as a new run instead.
 pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
     let (Some(run_id), Some(mission_id)) =
         (meta_str(lease, ADOPT_KEY), meta_str(lease, "mission_id"))
@@ -588,7 +588,7 @@ fn record_adopted(
         mode: launch.mode,
         run: Some(RunHold {
             id: record.id.clone(),
-            attempt: record.attempt,
+            number: record.number,
             fence: record.fence,
         }),
         runner: launch.runner,
@@ -633,8 +633,8 @@ fn record_adopted(
     Ok(())
 }
 
-/// The latest earlier attempt at a Mission recorded in the shared Registry, which a new
-/// attempt replaces.
+/// The latest earlier run at a Mission recorded in the shared Registry, which a new
+/// run replaces.
 pub(super) fn predecessor(state: &DaemonState, mission_id: &MissionId) -> Option<RunRecord> {
     state
         .intake
@@ -645,22 +645,22 @@ pub(super) fn predecessor(state: &DaemonState, mission_id: &MissionId) -> Option
         })
 }
 
-/// Where a new attempt finds the work of the lost attempt it replaces.
+/// Where a new run finds the work of the lost run it replaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WorkFrom {
-    /// Its working directory starts from the lost attempt's last checkpoint.
+    /// Its working directory starts from the lost run's last checkpoint.
     Checkpoint,
-    /// It works in the directory the lost attempt worked in, as that attempt left it.
+    /// It works in the directory the lost run worked in, as that run left it.
     Place,
-    /// Nothing of the lost attempt's work is here.
+    /// Nothing of the lost run's work is here.
     Nothing,
 }
 
-/// The brief a new attempt is given about the lost attempt it replaces.
+/// The brief a new run is given about the lost run it replaces.
 pub(super) fn hand_off(lost: &RunRecord, work: WorkFrom) -> String {
     let mut lines = vec![format!(
         "This Mission continues attempt {}, which was lost: {}.",
-        lost.attempt,
+        lost.number,
         lost.lost
             .as_deref()
             .unwrap_or("its Station went dark")
@@ -747,7 +747,7 @@ pub(super) fn record_launch(state: &DaemonState, mission_id: &str) {
     }
 }
 
-/// What a Run has recently done, kept in its record so a later attempt can be told if
+/// What a Run has recently done, kept in its record so a later run can be told if
 /// this one is lost. The event pump owns one per Run.
 #[derive(Default)]
 pub(super) struct Notes {
@@ -1258,7 +1258,7 @@ mod tests {
         assert_eq!(lease.meta()[ADOPT_KEY], first.id.as_str());
         let adopted = run_hold(&b, &mission_id).expect("station-b holds the Run");
         assert_eq!(
-            (adopted.id.as_str(), adopted.attempt),
+            (adopted.id.as_str(), adopted.number),
             (first.id.as_str(), 1)
         );
         assert!(adopted.fence > first.fence, "station-a is fenced out");
@@ -1312,7 +1312,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
         let operation = "workspace = { provider = \"mock-safehouse\", settings = { checkpoint_remote = \"origin\", checkpoint_secs = 1 } }\n";
-        // Each Station posts 007 on its own handler, so the attempts get distinct provider IDs.
+        // Each Station posts 007 on its own handler, so the runs get distinct provider IDs.
         let a = station(
             root.path(),
             "station-a",
@@ -1336,7 +1336,7 @@ mod tests {
         schedule_queued_once(&a).await;
         wait_for_state(&a, &mission_id, MissionState::Blocked).await;
         let first = run_hold(&a, &mission_id).unwrap();
-        assert_eq!(first.attempt, 1);
+        assert_eq!(first.number, 1);
         let handle = |id: &str| a.intake.run(id).unwrap().unwrap().handle;
         assert_eq!(handle(&first.id), Some(format!("{mission_id}.1")));
 
@@ -1366,7 +1366,7 @@ mod tests {
         assert_eq!(saved.remote, "origin");
 
         // Station A was also the Theater: nothing can re-attach, so the Run is lost and
-        // the brief goes to Station B as a second attempt.
+        // the brief goes to Station B as a second run.
         go_dark(&a, &mission_id);
         publish_station_check_in(&b);
         assert!(schedule_intake_once(&b));
@@ -1379,17 +1379,17 @@ mod tests {
             "{reason}"
         );
         let lease = b.intake.leases().unwrap().pop().unwrap();
-        assert_eq!((lease.station(), lease.attempt()), ("station-b", 2));
+        assert_eq!((lease.station(), lease.number()), ("station-b", 2));
         assert!(!lease.meta().contains_key(ADOPT_KEY));
 
         schedule_queued_once(&b).await;
         wait_for_state(&b, &mission_id, MissionState::Blocked).await;
         let second = run_hold(&b, &mission_id).unwrap();
-        assert_eq!(second.attempt, 2);
+        assert_eq!(second.number, 2);
         assert_eq!(handle(&second.id), Some(format!("{mission_id}.2")));
         let record = b.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(
-            (record.attempt, record.predecessor.as_deref()),
+            (record.number, record.predecessor.as_deref()),
             (2, Some(first.id.as_str()))
         );
         assert_eq!(record.station, "station-b");
@@ -1496,17 +1496,17 @@ mod tests {
         assert!(a.intake.leases().unwrap().is_empty(), "the brief went back");
         assert_eq!(a.intake.list_new().unwrap().len(), 1);
 
-        // The runner answers again; Headquarters posts the brief anew as a second attempt.
+        // The runner answers again; Headquarters posts the brief anew as a second run.
         fs::write(runner_dir.join("runner.json"), saved).unwrap();
         publish_station_check_in(&a);
         assert!(schedule_intake_once(&a));
         let lease = a.intake.leases().unwrap().pop().unwrap();
-        assert_eq!((lease.station(), lease.attempt()), ("station-a", 2));
+        assert_eq!((lease.station(), lease.number()), ("station-a", 2));
         schedule_queued_once(&a).await;
         let second = run_hold(&a, &mission_id).expect("the second attempt holds a Run");
         let record = a.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(
-            (record.attempt, record.predecessor.as_deref()),
+            (record.number, record.predecessor.as_deref()),
             (2, Some(first.id.as_str()))
         );
         let hand_off = latest_hand_off(&mission_id).expect("the second attempt is briefed");
@@ -1588,17 +1588,17 @@ mod tests {
         assert_eq!(b.intake.list_new().unwrap().len(), 1, "the brief went back");
         while pop_event(&b, &mission_id).is_some() {}
 
-        // With its runner back, the Mission runs again as a second attempt on Station B.
+        // With its runner back, the Mission runs again as a second run on Station B.
         fs::write(runner_dir.join("runner.json"), saved).unwrap();
         publish_station_check_in(&b);
         assert!(schedule_intake_once(&b));
         let lease = b.intake.leases().unwrap().pop().unwrap();
-        assert_eq!((lease.station(), lease.attempt()), ("station-b", 2));
+        assert_eq!((lease.station(), lease.number()), ("station-b", 2));
         schedule_queued_once(&b).await;
         let second = run_hold(&b, &mission_id).expect("the second attempt holds a Run");
         let record = b.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(
-            (record.attempt, record.predecessor.as_deref()),
+            (record.number, record.predecessor.as_deref()),
             (2, Some(first.id.as_str()))
         );
         assert!(
@@ -1615,13 +1615,13 @@ mod tests {
         let fail = Extraction::Lost {
             on_lost: OnLost::Fail,
         };
-        assert_eq!(fail.max_attempts(3), Some(0));
+        assert_eq!(fail.max_runs(3), Some(0));
         let retry = Extraction::Lost {
             on_lost: OnLost::Retry,
         };
-        assert_eq!(retry.max_attempts(3), Some(3));
-        assert_eq!(Extraction::Wait.max_attempts(3), None);
-        assert_eq!(Extraction::HandedOver.max_attempts(3), None);
+        assert_eq!(retry.max_runs(3), Some(3));
+        assert_eq!(Extraction::Wait.max_runs(3), None);
+        assert_eq!(Extraction::HandedOver.max_runs(3), None);
     }
 
     #[test]

@@ -30,7 +30,7 @@ Map<String, Object?> _evidence(String result, String detail, double at) => {
   'at': at,
 };
 
-/// A board whose Mission m1 of Operation G is verifying at attempt 2 with the deliverables
+/// A board whose Mission m1 of Operation G is verifying at run 2 with the deliverables
 /// `branch` and `file:docs/report.md`; the requests the app makes are kept in [calls], and a
 /// request to `probe` or `verify` is answered with [refuse] when it is given.
 Future<MissionBoard> _board(

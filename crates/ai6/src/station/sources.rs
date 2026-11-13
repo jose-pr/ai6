@@ -90,7 +90,7 @@ pub(crate) struct InstanceKeys {
     #[schema(title = "Priority map")]
     #[map(default)]
     pub priority_map: BTreeMap<String, String>,
-    /// What queues an item whose Mission settled again, as the Mission's next attempt.
+    /// What queues an item whose Mission settled again, as the Mission's next run.
     #[schema(title = "Reopen a settled item on")]
     #[map(default)]
     pub reopen: Reopen,
@@ -108,7 +108,7 @@ impl InstanceKeys {
 }
 
 /// What reopens an item whose Mission settled. A reopened item is queued again as the same
-/// Mission's next attempt, from the item as it reads then; never while an attempt is in flight.
+/// Mission's next run, from the item as it reads then; never while a run is in flight.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "lowercase")]
 pub(crate) enum Reopen {
@@ -184,7 +184,7 @@ pub(crate) struct PollSummary {
     pub updated: usize,
     pub unchanged: usize,
     pub skipped: usize,
-    /// Settled items queued again as their Mission's next attempt.
+    /// Settled items queued again as their Mission's next run.
     pub reopened: usize,
 }
 
@@ -743,9 +743,9 @@ fn reopen_on_labels(
     reopened
 }
 
-/// Queues the settled `item` again as its Mission's next attempt, from the item as it reads now
+/// Queues the settled `item` again as its Mission's next run, from the item as it reads now
 /// and the `comments` made on it since, and records `why` on the timeline and in the audit log.
-/// Whether it was queued: an attempt in flight, or an item that never entered, is left alone.
+/// Whether it was queued: a run in flight, or an item that never entered, is left alone.
 pub(crate) fn reopen_item(
     registry: &dyn RegistryBackend,
     station: &str,
@@ -1093,7 +1093,7 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
 
 /// Queues the report of each finished source Mission as an outbox entry on its source issue.
 ///
-/// A report that cannot be queued is retried on later passes, up to the Registry's attempt
+/// A report that cannot be queued is retried on later passes, up to the Registry's run
 /// limit; the Headquarters Station sends what is queued.
 pub(crate) fn report_finished(
     registry: &dyn RegistryBackend,
@@ -2805,7 +2805,7 @@ title = \"Update dependencies\"
     }
 
     #[test]
-    fn a_window_that_passes_with_an_attempt_in_flight_is_recorded_when_the_next_one_comes() {
+    fn a_window_that_passes_with_an_run_in_flight_is_recorded_when_the_next_one_comes() {
         let (_dir, roster, sleeper) = order("0 3 * * *", "standing = true\n");
         let state = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(state.path());
@@ -3602,7 +3602,7 @@ mod reopen_tests {
     };
 
     backend_tests!(
-        a_finished_item_with_its_label_added_again_is_its_missions_next_attempt,
+        a_finished_item_with_its_label_added_again_is_its_missions_next_run,
         an_item_that_never_reopens_stays_finished,
         a_comment_reopens_a_settled_item_and_one_ai6_wrote_does_not,
     );
@@ -3735,7 +3735,7 @@ mod reopen_tests {
             .claim_with_lease(None, "station-a", crate::DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .expect("the item's brief is queued");
-        assert_eq!(lease.attempt(), attempt);
+        assert_eq!(lease.number(), attempt);
         let brief = registry.read_claimed(lease.key()).unwrap().unwrap();
         assert_eq!(brief.handle.as_deref(), Some("G-gh-7"));
         registry
@@ -3763,7 +3763,7 @@ mod reopen_tests {
             .collect()
     }
 
-    fn a_finished_item_with_its_label_added_again_is_its_missions_next_attempt(store: &dyn Store) {
+    fn a_finished_item_with_its_label_added_again_is_its_missions_next_run(store: &dyn Store) {
         let handle = store.handle();
         let registry: &dyn RegistryBackend = handle.as_ref();
         registry.elect("station-a", crate::DEFAULT_LEASE).unwrap();
@@ -3805,7 +3805,7 @@ mod reopen_tests {
             1
         );
 
-        // Put back, it reopens the same Mission as its next attempt, once.
+        // Put back, it reopens the same Mission as its next run, once.
         issue.label(&["ai6", "ai6:done"]);
         assert_eq!(poll(registry, &issue, &setup).reopened, 1);
         let queued = registry.list_new().unwrap();

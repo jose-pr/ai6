@@ -970,7 +970,7 @@ pub(super) enum Rotation {
     /// Another account of a kind that carries the provider Run has room: resume it there.
     Resume,
     /// Another account has room but the provider Run cannot move to it: start a new
-    /// attempt.
+    /// run.
     Retry,
     /// No account has room: wait for the limit to reset.
     Wait,
@@ -2282,7 +2282,7 @@ secret = "keep-limited-a"
     }
 
     #[tokio::test]
-    async fn a_limit_on_a_route_history_cannot_leave_starts_a_new_attempt_on_another() {
+    async fn a_limit_on_a_route_history_cannot_leave_starts_a_new_run_on_another() {
         let root = tempfile::tempdir().unwrap();
         let agents = r#"[agent.007]
 balance = "priority"
@@ -2330,7 +2330,7 @@ secrets = ["second"]
             "first",
             "the board can say which route it is"
         );
-        // The attempt it replaces closes just after the Mission is queued.
+        // The run it replaces closes just after the Mission is queued.
         schedule_queued_once(&state).await;
         wait_for_done(&state, "route-fresh").await;
         let made = calls("route-fresh");
@@ -2384,7 +2384,7 @@ secrets = ["second"]
             "same handler, an account kind that carries the history"
         );
         assert!(
-            matches!(resume(false, &one), routes::ResumeOn::NewAttempt(why) if why.contains("name-one")),
+            matches!(resume(false, &one), routes::ResumeOn::NewRun(why) if why.contains("name-one")),
             "the last account cannot carry it"
         );
         let gone = crate::directorates::m::roster::RouteRef::new(
@@ -2393,7 +2393,7 @@ secrets = ["second"]
             None,
         );
         assert!(
-            matches!(resume(false, &gone), routes::ResumeOn::NewAttempt(why) if why.contains("no longer")),
+            matches!(resume(false, &gone), routes::ResumeOn::NewRun(why) if why.contains("no longer")),
         );
         state
             .intake
@@ -2701,7 +2701,7 @@ secret = "codex-b"
         .await
         .expect("the limited Mission is queued again");
         let first = run_hold(&state, "pooled-codex").unwrap();
-        // The Mission is queued again before the attempt it replaces is closed.
+        // The Mission is queued again before the run it replaces is closed.
         tokio::time::timeout(Duration::from_secs(60), async {
             while state.intake.run(&first.id).unwrap().unwrap().status != RunStatus::Ended {
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -2737,7 +2737,7 @@ secret = "codex-b"
             "the login stays in the home, out of the OS keyring"
         );
         let second = run_hold(&state, "pooled-codex").unwrap();
-        assert_eq!(second.attempt, 2);
+        assert_eq!(second.number, 2);
         assert_eq!(
             state.intake.run(&second.id).unwrap().unwrap().account,
             Some(AccountRef::new("codex-team", "b"))

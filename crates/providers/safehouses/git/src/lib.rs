@@ -41,7 +41,7 @@ pub struct GitConfig {
     #[schema(title = "A copy for each Mission", section = "operation")]
     #[map(default = true)]
     pub isolate: bool,
-    /// The git remote, by name or address, each Mission's work is saved to, so a later attempt
+    /// The git remote, by name or address, each Mission's work is saved to, so a later run
     /// on another Station carries on from it. Empty pushes nothing.
     #[schema(title = "Save work to remote", section = "operation")]
     pub checkpoint_remote: Option<String>,

@@ -16,7 +16,7 @@ import 'oo_freshness.dart';
 import 'oo_link.dart';
 import 'oo_shell.dart';
 
-/// One Mission, read-only: its state and the Run that sets it, every attempt with its
+/// One Mission, read-only: its state and the Run that sets it, every run with its
 /// Station and Theater (each a link), the brief and timeline, the actions the person has, and
 /// for a queued Mission the placement its Operation would get now.
 ///
@@ -47,7 +47,7 @@ class MissionDetail extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final operationId = mission.operationId;
     final attempts = board.attempts(operationId, mission.missionId);
-    final current = board.currentAttempt(operationId, mission.missionId);
+    final current = board.currentRun(operationId, mission.missionId);
     final brief = board.missionBrief(operationId, mission.missionId);
     final latest = mission.latest;
     final held = {for (final attempt in attempts) attempt.station};
@@ -152,7 +152,7 @@ class MissionDetail extends StatelessWidget {
           const SizedBox(height: 20),
           if (mission.state == 'verifying')
             MissionVerificationPanel(
-              // Keyed so that opening another Mission reads its own attempt.
+              // Keyed so that opening another Mission reads its own run.
               key: ValueKey(('verifying', operationId, mission.missionId)),
               board: board,
               operationId: operationId,
@@ -172,7 +172,7 @@ class MissionDetail extends StatelessWidget {
               style: TextStyle(color: tokens.muted),
             ),
           for (final attempt in attempts)
-            _AttemptCard(
+            _RunCard(
               attempt: attempt,
               runs: [
                 for (final run in mission.runs)
@@ -253,8 +253,8 @@ class MissionDetail extends StatelessWidget {
   }
 }
 
-class _AttemptCard extends StatelessWidget {
-  const _AttemptCard({
+class _RunCard extends StatelessWidget {
+  const _RunCard({
     required this.attempt,
     required this.runs,
     required this.pages,
@@ -262,9 +262,9 @@ class _AttemptCard extends StatelessWidget {
     required this.onOpenRun,
   });
 
-  final MissionAttemptSummary attempt;
+  final MissionRunSummary attempt;
 
-  /// The Runs the board holds on this attempt's Station.
+  /// The Runs the board holds on this run's Station.
   final List<RunSummary> runs;
   final List<OoPage> pages;
   final ValueChanged<OoRoute> onRoute;

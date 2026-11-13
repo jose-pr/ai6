@@ -4,7 +4,7 @@
 //! A Mission, and each run of it, is keyed by a UID: a UUIDv7 in lower-case text, which every
 //! Registry key, relation and route uses and which never changes. What people see is its
 //! handle: the Operation and either a number from the Operation's counter or the tracker's code
-//! (`ai6-42`, `ai6-nightly-43`, `ai6-gh-63`, `ai6-AI6-64`); a run's is `<handle>.<attempt>`. A
+//! (`ai6-42`, `ai6-nightly-43`, `ai6-gh-63`, `ai6-AI6-64`); a run's is `<handle>.<run>`. A
 //! handle can be renamed, and nothing reads a code or a number back out of one.
 //!
 //! The Registry keeps a book of every handle it gave, current and former, each naming its
@@ -63,7 +63,7 @@ pub fn is_uid(text: &str) -> bool {
     uuid::Uuid::parse_str(text).is_ok_and(|uid| uid.hyphenated().to_string() == text)
 }
 
-/// A run's handle: its Mission's handle when the run opened, and its attempt, `ai6-42.2`.
+/// A run's handle: its Mission's handle when the run opened, and its run, `ai6-42.2`.
 pub fn run_handle(mission_handle: &str, attempt: u32) -> String {
     format!("{mission_handle}.{attempt}")
 }
@@ -184,7 +184,7 @@ impl MissionEntry {
     }
 
     /// A standing Sleeper's one Mission, per Station when it holds a round on each:
-    /// `<operation>-<sleeper>-<n>`, the same one for every window, each window an attempt of it.
+    /// `<operation>-<sleeper>-<n>`, the same one for every window, each window a run of it.
     pub fn standing(operation: &str, name: &str, station: Option<&str>) -> Self {
         Self::of(
             Some(operation),
@@ -302,7 +302,7 @@ impl MissionEntry {
 
 /// A name as it may stand in a handle: only ASCII letters, digits, `_` and `-`. A `.` goes too:
 /// it is what makes `..`, a trailing `.lock` and a trailing dot, and it separates a run's
-/// attempt.
+/// run.
 fn part(text: &str) -> String {
     let mut safe = String::with_capacity(text.len());
     let mut replacing = false;
@@ -518,7 +518,7 @@ mod tests {
         a_brief_never_reentered_keeps_its_count_of_lapses,
     );
 
-    /// Claims the only queued brief as `attempt`, lets its lease lapse and recovers it under a
+    /// Claims the only queued brief as `run`, lets its lease lapse and recovers it under a
     /// limit of two claims.
     fn lapse_claim(
         registry: &dyn crate::directorates::registry::suite::TestRegistry,
@@ -528,7 +528,7 @@ mod tests {
             .claim_with_lease(None, "hq", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .expect("a brief is queued");
-        assert_eq!(lease.attempt(), attempt);
+        assert_eq!(lease.number(), attempt);
         let lapsed = crate::directorates::registry::suite::lapse(registry, lease.key(), "hq");
         registry
             .recover(&lapsed, 2, "other")
@@ -547,7 +547,7 @@ mod tests {
             .claim_with_lease(None, "hq", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .unwrap();
-        assert_eq!(lease.attempt(), 2, "the first attempt spent its count");
+        assert_eq!(lease.number(), 2, "the first attempt spent its count");
         let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
         registry
             .finish(&claimed, &serde_json::json!({}), true, None, Some("hq"))
@@ -568,7 +568,7 @@ mod tests {
             Reentry::Queued(_)
         ));
         assert_eq!(
-            registry.filed_brief(lease.key()).unwrap().unwrap().attempts,
+            registry.filed_brief(lease.key()).unwrap().unwrap().runs,
             0,
             "the next attempt has made no claim yet"
         );
@@ -588,7 +588,7 @@ mod tests {
         assert_eq!(lapse_claim(registry.as_ref(), 1), LeaseRecovery::Requeued);
         assert_eq!(lapse_claim(registry.as_ref(), 2), LeaseRecovery::Failed);
         let filed = registry.filed_brief(&entered.key()).unwrap().unwrap();
-        assert_eq!((filed.state.as_str(), filed.attempts), ("failed", 2));
+        assert_eq!((filed.state.as_str(), filed.runs), ("failed", 2));
     }
 
     fn follow_ups_take_the_items_handle_and_a_number_from_two(store: &dyn Store) {
@@ -827,7 +827,7 @@ mod tests {
         assert_eq!(ingest(&changed), Ingest::Finished);
         assert!(registry.list_new().unwrap().is_empty());
 
-        // Reopened, the item is the same Mission's next attempt, and only from a finished brief.
+        // Reopened, the item is the same Mission's next run, and only from a finished brief.
         let reopened = crate::directorates::registry::sources::reopened_brief(
             ("ai6", "github"),
             &changed,
@@ -856,7 +856,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            (again.key(), again.attempt()),
+            (again.key(), again.number()),
             (key.as_str(), 1),
             "the next attempt counts its claims from one"
         );
@@ -880,7 +880,7 @@ mod tests {
         );
         assert!(matches!(
             registry.reenter_brief(&reopened, &entry, &|_| false).unwrap(),
-            Reentry::Unchanged(filed) if filed.state == "done" && filed.attempts == 1
+            Reentry::Unchanged(filed) if filed.state == "done" && filed.runs == 1
         ));
         let unknown = crate::directorates::registry::sources::source_entry(
             "ai6",
@@ -1110,7 +1110,7 @@ mod tests {
             .claim_with_lease(Some(&key), "hq", DEFAULT_LEASE, BTreeMap::new())
             .unwrap()
             .unwrap();
-        assert_eq!(again.attempt(), 2);
+        assert_eq!(again.number(), 2);
         assert_eq!(person(registry.as_ref(), Some("G")), "G-2");
     }
 
@@ -1408,7 +1408,7 @@ mod tests {
             registry.open_run(
                 NewRun::new(new_uid(), &uid, "hq")
                     .with_handle(handle)
-                    .with_attempt(attempt, None),
+                    .with_number(attempt, None),
                 DEFAULT_LEASE,
             )
         };
@@ -1437,12 +1437,12 @@ mod tests {
         );
         let next = NewRun::new(new_uid(), &uid, "hq")
             .with_handle("G-fix")
-            .with_attempt(2, None)
-            .next_attempt()
+            .with_number(2, None)
+            .next_run()
             .unwrap();
         let third = registry.open_run(next, DEFAULT_LEASE).unwrap();
         assert_eq!(
-            (third.attempt, third.handle.as_deref()),
+            (third.number, third.handle.as_deref()),
             (3, Some("G-fix.3"))
         );
         assert_ne!(third.id, second.id);

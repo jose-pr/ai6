@@ -392,8 +392,8 @@ fn control_target(
         return Ok(Routing::Unknown);
     }
     let latest = records.into_iter().max_by(|left, right| {
-        left.attempt
-            .cmp(&right.attempt)
+        left.number
+            .cmp(&right.number)
             .then(left.lease_expires.total_cmp(&right.lease_expires))
     });
     let run = latest
@@ -1546,7 +1546,7 @@ pub(crate) mod tests {
         ] {
             let mut new = NewRun::new(record, mission, "worker")
                 .with_provider_id("p-1")
-                .with_attempt(attempt, None);
+                .with_number(attempt, None);
             if let Some(operation) = operation {
                 new = new.with_operation(operation);
             }

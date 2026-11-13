@@ -1,6 +1,6 @@
 //! Exposure: which Runs have read input an attacker could have written.
 //!
-//! A Run is marked the moment it reads such input and stays marked; a later attempt at
+//! A Run is marked the moment it reads such input and stays marked; a later run at
 //! the same Mission inherits the mark. Marking is always on. What a marked Run may then
 //! do is the Operation's [`ExposurePolicy`]: the `strict` preset (the default) restricts it,
 //! `observe` only records it, and every restriction can be chosen individually.

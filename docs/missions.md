@@ -76,8 +76,8 @@ is written: the branch of its safe house, a tracker comment, a report. A rename 
 them.
 
 A **run** is one Run record of a Mission. It has a UID of its own, and a handle
-`<mission handle>.<attempt>` from the handle the Mission had when the run opened: `ai6-42.1`,
-`ai6-42.2`. A Mission has one record per attempt. The run keeps its handle through a resume and
+`<mission handle>.<run>` from the handle the Mission had when the run opened: `ai6-42.1`,
+`ai6-42.2`. A Mission has one record per run. The run keeps its handle through a resume and
 a rename, and the provider's Run ID stays apart from it, shown as it always was.
 
 A **name** sits beside the handle and is no part of it: a person's title, or an issue's title on
@@ -157,7 +157,7 @@ its Station:
 | Action | Accepted when the Mission is | Effect |
 | --- | --- | --- |
 | `cancel` | any state | The live Run is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below), and one that already ended stays as it is and answers `applied` with its state. |
-| `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
+| `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new run, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
 | `resume` | parked, blocked or stalled | The Mission resumes now on its provider Run, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
 | `interrupt` | working | The Run's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
 
@@ -236,7 +236,7 @@ still runs.
 
 A Mission that was working when the Station stopped is checked the same way at start: a brief that
 ended or went elsewhere ends the Mission without resuming it, and one whose Run record is gone,
-ended, lost or another Station's has its attempt handed back as "Run lost at restart" under the
+ended, lost or another Station's has its run handed back as "Run lost at restart" under the
 Operation's `on_lost`.
 
 A start that cannot succeed whatever is tried fails the Mission at once with that reason, and its
@@ -258,12 +258,12 @@ record what they found.
 **The final report.** The message an Agent ends its turn with is filed against its Run, up to
 `[registry.limits.runs] final_report_bytes` (64 KiB) with a cut marked, and goes into the Mission's
 outcome as `final_report` when its brief is filed. A later turn replaces it. Everyone who may read the
-Mission reads it, in `GET /v1/operations/{operation_id}/missions/{mission_id}` (each attempt's
+Mission reads it, in `GET /v1/operations/{operation_id}/missions/{mission_id}` (each run's
 `final_report`; the list of Missions leaves it out), in `ai6ctl mission ID` and in the Outcome section
 of the Mission's page. It is the Agent's own account, as data. What another Operation may read of a
 Mission through a [compartment](compartments.md) does not include it.
 
-**A verdict.** A person with `mission.verify` on the Operation gives one on the latest attempt, once
+**A verdict.** A person with `mission.verify` on the Operation gives one on the latest run, once
 it has ended `done` or `held`, or is [verifying](#verifying); anything else is refused (`409`, saying how
 it stands):
 
@@ -282,11 +282,11 @@ ai6ctl missions verdict "$MISSION" disputed --note "not on main"
 | `disputed` | Stays `done`, and shows it | Becomes `failed` | Disputed: a failure of that Agent |
 | `failed-verification` | Stays `done`, and shows it | Becomes `failed` | Disputed: a failure of that Agent |
 
-A later verdict replaces the earlier one while the attempt stands `done` or `held`. The verdict is kept
-on the attempt's Run record, so a retry starts clean and the failure stays with the Agent that ran
+A later verdict replaces the earlier one while the run stands `done` or `held`. The verdict is kept
+on the run's Run record, so a retry starts clean and the failure stays with the Agent that ran
 it. M's holds and proposals read the same scorecard. It is audited as `mission.verdict` (target
 `MISSION VERDICT`, never the note) and goes on the timeline (kind `verdict`, action the verdict). The
-Mission's page and the board's attempts show it.
+Mission's page and the board's runs show it.
 
 **Requiring a decision.** A role that sets
 
@@ -297,7 +297,7 @@ policy = "..."
 require_approval_before_done = true          # default false
 ```
 
-holds its Missions' `done`: a Run that ends done with no green ink request decided in that attempt,
+holds its Missions' `done`: a Run that ends done with no green ink request decided in that run,
 approved or refused, by a person or a class authorisation, leaves the Mission `held` with the reason
 `no approval was decided` instead. A request that expired was not decided. What a brief or a prompt
 says it will do cannot be read, so this is what can be enforced: the role that must ask, and did not.
@@ -341,7 +341,7 @@ ai6ctl missions create --operation G --title "Fix the build" --prompt "..." \
   --deliverable branch --deliverable file:docs/report.md
 ```
 
-The Station records the list on the attempt when it goes `verifying` (`deliverables` in the Mission's
+The Station records the list on the run when it goes `verifying` (`deliverables` in the Mission's
 detail), the role's first, then the brief's, each once.
 
 **Probes.** The Station provides the means to look and decides nothing about what it finds. Each
@@ -349,7 +349,7 @@ probe reports `found`, `missing` (the place was read and the thing is not there,
 (this Station cannot look: the work is on a Theater it does not reach, or no tracker item is linked) or
 `failed` (the look failed or ran out of time, so nothing is known). Each has its timeout in the Station's
 `[probes]` table (`git_timeout`, `http_timeout`, `tracker_timeout`, `file_timeout`), and what each
-found is kept on the attempt as `evidence`, oldest first, up to `[registry.limits.runs]
+found is kept on the run as `evidence`, oldest first, up to `[registry.limits.runs]
 evidence_entries`. A tracker probe works where the Station holds the tracker's credentials, and an
 `artifact` probe makes a request from the Station to the address the role or brief names.
 
@@ -368,24 +368,24 @@ ai6ctl missions verify "$MISSION" redispatch --reason "no branch on the remote" 
 `POST /v1/user/operations/{operation_id}/missions/{mission_id}/probe` and `.../verify` (body
 `{"decision": "done"|"redispatch"|"failed", "reason", "amendment"?}`) are the routes. A decision needs
 its reason, is audited first (`mission.verify`, target `MISSION DECISION`, never the reason), goes on the
-timeline (kind `verify`) and is refused with `409` unless the Mission's latest attempt is verifying.
+timeline (kind `verify`) and is refused with `409` unless the Mission's latest run is verifying.
 Its Station then settles the Mission within a scheduler pass:
 
-| Decision | The Mission | The attempt |
+| Decision | The Mission | The run |
 | --- | --- | --- |
 | `done` | Becomes `done` | Counts as done on the scorecard |
 | `failed` | Becomes `failed` | Disputed: a failure of that Agent |
-| `redispatch` | Is queued as attempt N+1 of the same Mission, for the best qualified Agent, in the safe house the last attempt kept, with a new provider Run told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
+| `redispatch` | Is queued as run N+1 of the same Mission, for the best qualified Agent, in the safe house the last run kept, with a new provider Run told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
 
 The charge's decision takes this same path: it is audited (`mission.verify`, by `charge:operation:CODENAME`),
-recorded as the attempt's verdict, put on the timeline and counted on the scorecard, and a redispatch is a
-failure of the attempt's Agent. A charge whose clearance has been lowered to `desk` only recommends:
+recorded as the run's verdict, put on the timeline and counted on the scorecard, and a redispatch is a
+failure of the run's Agent. A charge whose clearance has been lowered to `desk` only recommends:
 the recommendation is audited (`mission.recommend`) and shown as `recommendation` in the Mission's detail and
 by `ai6ctl missions probe`, settles nothing, and a person confirms it by deciding the same way. A charge never
 replaces a decision a person has given.
 
 A person who gives a verdict on a `verifying` Mission with `ai6ctl missions verdict` settles it the same
-way as `confirmed` or `failed-verification`; only `verify` redispatches. A standing order whose attempt is
+way as `confirmed` or `failed-verification`; only `verify` redispatches. A standing order whose run is
 `verifying` waits for the decision like one that is held: its next window does not fire over it.
 
 ## Green ink
@@ -511,7 +511,7 @@ nobody to tell: the approval is still recorded, and a retry of the Mission can u
 
 Two things hold a step an Agent takes without green ink.
 
-The **harness gate** turns an attempt into a request. Before Claude Code runs a shell
+The **harness gate** turns a run into a request. Before Claude Code runs a shell
 command (a `PreToolUse` hook running `ai6 green-ink gate`), whenever Codex asks to run one
 (a gated Codex thread asks before every command it does not consider a safe read), and before
 the Station's own `theater_run` runs a command on a remote-hands Theater, AI6 names the
@@ -568,7 +568,7 @@ from `GET /v1/user/operations/{operation_id}/timeline` or Outer Office's Timelin
 | `lifecycle` | Universal Exports | A Mission's state changed, on which Run and Station. |
 | `control` | Universal Exports | A cancel, retry, resume or interrupt was applied, rejected or expired, and the state after. |
 | `cable` | the sending Station | An Agent sent a Cable: sender, scope and recipient count. |
-| `sleeper` | the Registry, the Stations | A Sleeper was authorized or revoked, and by whom; a window was `skipped` and why, or fired `late`; an attempt `started` or `resumed` its Run, `attempt-failed` or was `superseded`. |
+| `sleeper` | the Registry, the Stations | A Sleeper was authorized or revoked, and by whom; a window was `skipped` and why, or fired `late`; a run `started` or `resumed` its Run, `run-failed` or was `superseded`. |
 | `green_ink` | the Station | An Agent asked for green ink (`requested`), or was told the decision (`approved`, `rejected`, `expired`): the step, its target and the request, and who signed. |
 | `audit` | Universal Exports | Mission requests and controls, proposal decisions, Agent role, quarantine and Station settings changes. |
 
@@ -657,8 +657,8 @@ tradecraft word is *extraction*).
 ### Run records and fencing
 
 Besides the Station's own `missions.json`, every Run has a record in the shared
-Registry (`runs/`). It holds AI6's Run ID, the run's UID and its handle `<mission handle>.<attempt>` (distinct from the provider's), the
-provider ID, the Station that supervises it, its Theater, the attempt number and the
+Registry (`runs/`). It holds AI6's Run ID, the run's UID and its handle `<mission handle>.<run>` (distinct from the provider's), the
+provider ID, the Station that supervises it, its Theater, the run number and the
 ID of the Run it replaced, its exposure to untrusted input, its status (`active`,
 `parked`, `ended` or `lost`), how its harness was launched (handler, terminal, working
 directory, model, effort, mode and the runner's key), the last 20 things it was seen doing
@@ -682,7 +682,7 @@ Mission (a brief whose Mission never started is simply queued again):
 
 - **Adopted.** The harness ran on a Theater's [field runner](theaters.md#the-field-runner),
   so it is still running. The Headquarters hands the brief's lease (same claim, same
-  attempt) to a live Station that reaches that runner, placed as a new Run would be
+  run) to a live Station that reaches that runner, placed as a new Run would be
   but only on that Theater and never on the dark Station. That Station takes the Run's
   lease with a larger fencing token, records the Mission as the dark Station launched it
   and re-attaches to the runner Run, receiving every event the dark Station did not
@@ -690,7 +690,7 @@ Mission (a brief whose Mission never started is simply queued again):
 - **Lost.** The harness ran on the dark Station's own host (Theater `local`), or with no
   runner, so it ended with the Station. Its record is marked `lost` with the reason, its
   fencing token moves on so the Station is refused if it comes back, and the brief is
-  queued again for a [new attempt](#lost-runs-a-new-attempt-with-a-hand-off). An
+  queued again for a [new run](#lost-runs-a-new-run-with-a-hand-off). An
   Operation with `on_lost = "fail"` files the brief as lost instead. A brief that has
   already been tried three times is filed as lost either way.
 
@@ -710,7 +710,7 @@ Run up:
 - it stops reading the harness and lets its Run lease lapse, so the record is marked
   `lost` with the reason (the last events it saw are kept for the hand-off);
 - it hands the brief back, which the Registry queues again as a [new
-  attempt](#lost-runs-a-new-attempt-with-a-hand-off), or files when the Operation says
+  run](#lost-runs-a-new-run-with-a-hand-off), or files when the Operation says
   `on_lost = "fail"`; the Mission is `abandoned` in this Station's book, or `failed` when it
   came from no brief;
 - the Mission's events end with a `lost` event naming the reason.
@@ -725,18 +725,18 @@ tries again after 5 seconds, then 10, 20 and 40, and every minute after that; on
 have failed for `lost_after_secs`, it probes the runner (or the Theater) and gives the
 Run up the same way when the probe fails too.
 
-When the next attempt runs on the Theater the lost one ran on, its Station first ends the
+When the next run runs on the Theater the lost one ran on, its Station first ends the
 lost harness if the runner still has it, so the two never work side by side.
 
-### Lost Runs: a new attempt with a hand-off
+### Lost Runs: a new run with a hand-off
 
-The Station that takes the brief starts the Mission as attempt N+1, linked to the lost
+The Station that takes the brief starts the Mission as run N+1, linked to the lost
 Run as its predecessor, with new AI6 and provider IDs (provider transcripts stay
 on the Theater that held them, so the provider Run cannot be resumed). The Agent is told
-about the attempt it continues:
+about the run it continues:
 
 ```text
-This Mission continues attempt 1, which was lost: Station "alpha" went dark with Theater
+This Mission continues run 1, which was lost: Station "alpha" went dark with Theater
 "local"; its harness ran on that Station's own host.
 Its work was last saved as commit 3f2a9c01d4e7 on branch mission-7-fix of origin; your
 working directory starts from it. Inspect it before you continue: changes made after that
@@ -752,13 +752,13 @@ house every `checkpoint_secs`: one commit on top of the branch's own commits tha
 holds the uncommitted changes, pushed to the Mission's branch on that remote, without
 touching the Agent's worktree, staging area or `HEAD`. The commit follows the Operation's
 cover (no Agent or model named, the cover's footer, the `cover_identity` as author). The
-next attempt's safe house is then a new worktree on that branch at that commit, so the
+next run's safe house is then a new worktree on that branch at that commit, so the
 `git` provider fetches it from the remote; a provider without history starts from the base.
-An attempt that works where the lost one did (the safe house its Station kept, or the same
+A run that works where the lost one did (the safe house its Station kept, or the same
 directory on the same Theater) is told to inspect the work it finds there instead. Otherwise
 the hand-off says the work could not be recovered.
 
-The attempts are on the Mission: `GET /v1/missions` and the Mission detail list each one's
+The runs are on the Mission: `GET /v1/missions` and the Mission detail list each one's
 Station, Theater, status, why it was lost and the branch it was checkpointed to, and
 Outer Office shows them on the Mission card.
 
@@ -795,16 +795,16 @@ An Operation chooses the response with `on_limit` ([settings](operations.md#prov
   credential, moving to another environment credential) is parked only until the next
   scheduler pass and resumed, same provider Run, on that account; otherwise (a Codex or
   `config-dir` Run, or no environment account with headroom) it is queued again as a new
-  attempt,
+  run,
   told it continues an earlier one, and starts on the other account. The timeline records
   `account` / `limited` with the account, the reset and what happens next. A Run with no
   pool account, or whose pools have no account with headroom, parks as for `wait`.
 - `wait` parks as above.
 - `backup` posts the next qualified Agent, as [Organization](organization.md) describes,
   among those whose handler differs from the limited one. The Mission is queued again for
-  that Agent as a **new attempt** (a new Run record whose predecessor is the limited
+  that Agent as a **new run** (a new Run record whose predecessor is the limited
   one), starting a new provider Run in the same safe house with a note that an earlier
-  attempt stopped at a limit. With no such Agent available it parks instead.
+  run stopped at a limit. With no such Agent available it parks instead.
 
 The Outer Office board shows `parked` as a Run state, and the stream of Mission events
 carries the `limit` event.
@@ -930,7 +930,7 @@ the charge, or a person, decides it** ([Items are Reports](#items-are-reports)).
   With `intake = "direct"` the brief is made as soon as the item is polled; otherwise once the
   item is decided `mission`.
   Once a Station has claimed it, polling leaves it alone, so a Mission is never duplicated. A
-  finished item can only come back as the same Mission's next attempt ([reopening](#reopening-a-settled-item)).
+  finished item can only come back as the same Mission's next run ([reopening](#reopening-a-settled-item)).
 - **Untrusted text.** The brief's title is generated. The tracker's own title, labels and
   description are placed between fenced markers and introduced as data that cannot change
   the Agent's task or permissions. A description cannot close the fence. Labels are information
@@ -993,7 +993,7 @@ no one deciding; it is a non-default, listed at start (`ai6: Operation "G": inta
 ### Reopening a settled item
 
 An item whose Mission settled (its report was written on the item) is queued again, as the
-**same Mission's next attempt** (same UID and handle, a run `<handle>.<attempt>` after the last),
+**same Mission's next run** (same UID and handle, a run `<handle>.<run>` after the last),
 when the instance's `reopen` says so:
 
 | `reopen` | What reopens it |
@@ -1002,10 +1002,10 @@ when the instance's `reopen` says so:
 | `comment` | As `label`, and also a comment AI6 did not write, by someone the tracker lets answer for the item (its author, a member, someone `reply_authors` names). |
 | `never` | Nothing: a settled item stays settled. |
 
-The attempt is briefed from the item as it reads now, and from the comments that reopened it,
-quoted as untrusted data as the item is. Nothing reopens while an attempt is queued, held or
-running. Each attempt has its own count of claims, so `intake_attempts` bounds the lapses of
-that attempt alone, here and for a standing Sleeper's windows. Each reopen is audited (`mission.reopened`) and on the Operation's timeline (`source`,
+The run is briefed from the item as it reads now, and from the comments that reopened it,
+quoted as untrusted data as the item is. Nothing reopens while a run is queued, held or
+running. Each run has its own count of claims, so `intake_runs` bounds the lapses of
+that run alone, here and for a standing Sleeper's windows. Each reopen is audited (`mission.reopened`) and on the Operation's timeline (`source`,
 `reopened`, with the reason).
 
 To see a label taken off, the Headquarters Station reads the newest settled items of each such
@@ -1053,7 +1053,7 @@ their text. The Station that holds the Mission delivers a
 permitted reply as untrusted text in the same fence as an issue's body: a message to a live
 Run, a resume of one that ended its turn while it waited. A stalled, parked or quarantined
 Mission keeps the reply until it goes on; a queued or finished one is not told. The Run is
-marked exposed (`issue:TRACKER`), which a later attempt inherits. One
+marked exposed (`issue:TRACKER`), which a later run inherits. One
 question per issue may be open. Nobody answering within `reply_ttl_secs` (3 days) resumes the
 Agent told so (`on_timeout = "resume"`), fails the Mission (`"fail"`) or keeps waiting
 (`"wait"`); an operator who resumes or stops the Mission withdraws the question.
@@ -1164,35 +1164,35 @@ ai6 sleeper revoke G nightly-deps
   checks in again within the window. This is how the [Head of
   Station](stations.md#head-of-station) runs.
 - **A standing Mission.** With `standing = true` the sleeper is one Mission (one per Station with
-  `each_station`), `<operation>-<sleeper>-<n>`, and each window is a new attempt of it: the run
-  `<handle>.<attempt>` records the window it answers (`window` on its Run record), and the
-  board and scorecards show one Mission with a run history. A window that comes while an attempt
-  is queued, held or running does not fire; it fires when the attempt settles if it is still the
+  `each_station`), `<operation>-<sleeper>-<n>`, and each window is a new run of it: the run
+  `<handle>.<run>` records the window it answers (`window` on its Run record), and the
+  board and scorecards show one Mission with a run history. A window that comes while a run
+  is queued, held or running does not fire; it fires when the run settles if it is still the
   latest window and within `catch_up`, and is on the timeline as skipped otherwise.
-  With `resume = true` as well, an attempt resumes the last attempt's provider Run when that
-  attempt ran on the same handler, did not fail, and its provider gave it an ID, and starts a new
+  With `resume = true` as well, a run resumes the last run's provider Run when that
+  run ran on the same handler, did not fail, and its provider gave it an ID, and starts a new
   Run otherwise, as it does when the provider refuses the resume; the timeline says which
   (`sleeper`, `resumed` or `started`, with the window). `resume` without `standing` is refused when
   the roster loads.
-- **A failed attempt.** A failed attempt leaves the order standing: the next window fires as the
-  next attempt, and the reason is in the attempt's outcome. The attempt of any Sleeper that fails
-  is on the timeline (`sleeper`, `attempt-failed`, with the window and the reason, or a line saying
+- **A failed run.** A failed run leaves the order standing: the next window fires as the
+  next run, and the reason is in the run's outcome. The run of any Sleeper that fails
+  is on the timeline (`sleeper`, `run-failed`, with the window and the reason, or a line saying
   the harness's words are in the outcome) and, with a provider Run, on the board (reason
-  `order-attempt-failed`). It asks for no approval. Cancelling an attempt is not a failure, and leaves
+  `order-run-failed`). It asks for no approval. Cancelling a run is not a failure, and leaves
   the order standing too; `ai6 sleeper revoke` stops it.
-- **A stalled attempt.** The Station holding a standing Mission's attempt looks at each check-in:
-  when the order's next window has come and the attempt is `stalled` (past its Agent's
+- **A stalled run.** The Station holding a standing Mission's run looks at each check-in:
+  when the order's next window has come and the run is `stalled` (past its Agent's
   `stall_timeout`), has no live Run on the Station and no re-attach that may still bring one
-  back, or did not start, the window supersedes it. The attempt fails with that reason, its harness
+  back, or did not start, the window supersedes it. The run fails with that reason, its harness
   stopped, audited (`sleeper.superseded`) and on the timeline (`sleeper`, `superseded`), and the
-  window fires as the next attempt. It is not charged to the Agent. An attempt waiting for a person
+  window fires as the next run. It is not charged to the Agent. A run waiting for a person
   (`blocked` with a reason), a provider's limit (`parked`) or an operator's release (`quarantined`)
   is left alone, and its windows are recorded as skipped.
 - **A missed window.** The latest window that has not fired fires once, late, while it is within
   `[registry.limits.sleepers] catch_up`: by default its own period, the time since the window before
   it; `none` keeps no limit. It is never more than one. Every other window that passes unfired is on
   the timeline when a later one comes (`sleeper`, `skipped`, with the window and why: not authorized,
-  the scheduler was not running, the last attempt was in flight, no Station could take it, or older
+  the scheduler was not running, the last run was in flight, no Station could take it, or older
   than its catch-up bound), up to `skipped_events` of them, the older ones as one event. A window
   before an order's first approval never fires and is not recorded. An edit withdraws the approval,
   and the approval given again may fire what the order missed once; a revoke ends what was owed.

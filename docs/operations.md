@@ -47,7 +47,7 @@ recorded in the Mission report.
 | `settings.base` | `HEAD` | Revision a safe house starts from |
 | `settings.branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
 | `settings.isolate` | `true` | `false` works in `source` itself instead of a separate copy |
-| `settings.checkpoint_remote` | none | A Git remote (name or URL) each running Mission's safe house is checkpointed to, on its own branch, so a later attempt on another Station starts from its work. Unset pushes nothing |
+| `settings.checkpoint_remote` | none | A Git remote (name or URL) each running Mission's safe house is checkpointed to, on its own branch, so a later run on another Station starts from its work. Unset pushes nothing |
 | `settings.checkpoint_secs` | `300` | Seconds between checkpoints while a Run runs. Must be above zero |
 
 Two providers ship: `git` (a worktree on its own branch; commits are audited) and `copy`
@@ -85,7 +85,7 @@ pools = ["claude-team"]    # the account pools its Missions may draw from; defau
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `on_limit` | `rotate` | `rotate` moves the Run to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Run on an environment credential resumes the same provider Run there; a Codex or `config-dir` Run, whose history stays with its account, is tried again as a new attempt with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same provider Run when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new attempt in the same safe house, and parks only when there is none |
+| `on_limit` | `rotate` | `rotate` moves the Run to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Run on an environment credential resumes the same provider Run there; a Codex or `config-dir` Run, whose history stays with its account, is tried again as a new run with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same provider Run when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new run in the same safe house, and parks only when there is none |
 | `pools` | every pool | The account pools whose own `operations` admit this Operation that its Missions may use; an empty list uses none |
 | `limit_fallback_secs` | `1800` | Seconds to park when the provider reports no reset time (or one already past). Must be above zero |
 
@@ -106,7 +106,7 @@ lost_after_secs = 45
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `on_lost` | `retry` | `retry` queues the brief again as a new attempt on an eligible Station, starting from the last checkpoint (see `workspace.checkpoint_remote`) with a hand-off about the lost attempt, up to three attempts in all. `fail` files the brief as lost |
+| `on_lost` | `retry` | `retry` queues the brief again as a new run on an eligible Station, starting from the last checkpoint (see `workspace.checkpoint_remote`) with a hand-off about the lost run, up to three runs in all. `fail` files the brief as lost |
 | `lost_after_secs` | `45` | Seconds a Run's runner or wrapped harness may stay out of reach (three Station check-ins) before its Station probes it once more through the Theater's transport and, if it is still gone, marks the Run lost. Must be above zero |
 
 An unknown value fails the load. See [Station loss](missions.md#station-loss-adoption) and
@@ -210,7 +210,7 @@ lists its own (`reply_authors` and `labels` on all three, `reply_min_access` on 
 | `agent_labels` | none | **Labels Agents may touch.** The only labels an Agent may add or remove on a linked issue. |
 | `agent_transitions` | none | **Transitions Agents may make.** The workflow transitions an Agent may make without green ink. |
 | `priority_map` | none | **Priority map.** The priority a mirrored issue takes here, by the priority it has where it comes from. |
-| `reopen` | `label` | **Reopen a settled item on.** What queues an item whose Mission settled again, as the Mission's next attempt. |
+| `reopen` | `label` | **Reopen a settled item on.** What queues an item whose Mission settled again, as the Mission's next run. |
 <!-- schema:record.source:end -->
 
 `status_labels` and `status_transitions` name a label or a workflow transition for `working`,
@@ -390,11 +390,11 @@ authorizes them with `ai6 sleeper authorize`. See [Sleepers](missions.md#sleeper
 schedule = "0 3 * * *"
 title = "Update dependencies"
 prompt = "Update the lockfile and run the tests."
-standing = true   # optional: one Mission, each window an attempt of it
-resume = true     # optional, needs standing: resume the last attempt's Run
+standing = true   # optional: one Mission, each window a run of it
+resume = true     # optional, needs standing: resume the last run's Run
 ```
 
-A failed attempt leaves a standing order standing; a stalled one is superseded by the next window;
+A failed run leaves a standing order standing; a stalled one is superseded by the next window;
 one late firing follows a missed window, within `[registry.limits.sleepers] catch_up`; and every
 window that passes unfired is on the timeline, with why. See [Sleepers](missions.md#sleepers).
 

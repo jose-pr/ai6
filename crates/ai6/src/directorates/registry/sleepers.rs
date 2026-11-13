@@ -82,15 +82,15 @@ pub struct Sleeper {
     #[map(default)]
     pub each_station: bool,
     /// One standing Mission for the Sleeper (one per Station with `each_station`), each window
-    /// a new attempt of it, instead of a Mission per window. A window that comes while an
-    /// attempt is in flight is skipped, unless that attempt has stalled: the window then supersedes
-    /// it. A failed attempt leaves the order standing.
+    /// a new run of it, instead of a Mission per window. A window that comes while an
+    /// run is in flight is skipped, unless that run has stalled: the window then supersedes
+    /// it. A failed run leaves the order standing.
     #[serde(default, skip_serializing_if = "is_false")]
     #[schema(title = "One standing Mission")]
     #[map(default)]
     pub standing: bool,
-    /// Each window's attempt resumes the last attempt's provider Run when its handler can and
-    /// that attempt did not fail, else starts a new one, as it does when the resume is refused.
+    /// Each window's run resumes the last run's provider Run when its handler can and
+    /// that run did not fail, else starts a new one, as it does when the resume is refused.
     /// Needs `standing`.
     #[serde(default, skip_serializing_if = "is_false")]
     #[schema(title = "Resume the last attempt's Run")]
@@ -230,7 +230,7 @@ pub enum Fire {
     Queued,
     /// The window's brief already exists, queued, running or finished.
     AlreadyFired,
-    /// A standing Sleeper's attempt of an earlier window is still queued, held or running, so
+    /// A standing Sleeper's run of an earlier window is still queued, held or running, so
     /// this window has not fired.
     InFlight,
 }
@@ -550,7 +550,7 @@ pub trait SleeperStore {
 }
 
 /// Where one round of a sleeper enters: the window's own Mission, or for a standing Sleeper the
-/// one Mission all its windows are attempts of.
+/// one Mission all its windows are runs of.
 pub(super) fn round_entry(
     operation: &str,
     name: &str,
@@ -750,8 +750,8 @@ pub(super) mod tests {
         a_window_fires_once_however_many_stations_evaluate_it,
         approval_covers_one_exact_definition,
         each_station_s_round_is_its_own_brief_narrowed_to_it,
-        a_standing_sleeper_s_windows_are_attempts_of_one_mission,
-        a_standing_sleeper_past_the_attempt_limit_still_requeues_a_lapse,
+        a_standing_sleeper_s_windows_are_runs_of_one_mission,
+        a_standing_sleeper_past_the_run_limit_still_requeues_a_lapse,
         a_mark_lives_on_its_approval,
     );
 
@@ -802,7 +802,7 @@ pub(super) mod tests {
         );
     }
 
-    fn a_standing_sleeper_s_windows_are_attempts_of_one_mission(store: &dyn Store) {
+    fn a_standing_sleeper_s_windows_are_runs_of_one_mission(store: &dyn Store) {
         let headquarters = store.handle();
         let takeover = store.handle();
         let standing = Sleeper {
@@ -832,7 +832,7 @@ pub(super) mod tests {
                 .claim_with_lease(None, "hq", crate::DEFAULT_LEASE, BTreeMap::new())
                 .unwrap()
                 .unwrap();
-            assert_eq!((lease.key(), lease.attempt()), (key.as_str(), 1));
+            assert_eq!((lease.key(), lease.number()), (key.as_str(), 1));
             let claimed = headquarters.read_claimed(&key).unwrap().unwrap();
             assert_eq!(
                 window_of(&claimed),
@@ -887,7 +887,7 @@ pub(super) mod tests {
         assert_eq!(rounds, ["G-deps-2", "G-deps-3"]);
     }
 
-    fn a_standing_sleeper_past_the_attempt_limit_still_requeues_a_lapse(store: &dyn Store) {
+    fn a_standing_sleeper_past_the_run_limit_still_requeues_a_lapse(store: &dyn Store) {
         use crate::directorates::registry::store::LeaseRecovery;
         use crate::directorates::registry::suite::lapse;
         const LIMIT: u32 = 2;
@@ -911,7 +911,7 @@ pub(super) mod tests {
         for day in 0..=i64::from(LIMIT) {
             assert_eq!(fire(day), Fire::Queued);
             let lease = claim();
-            assert_eq!(lease.attempt(), 1, "window {day}");
+            assert_eq!(lease.number(), 1, "window {day}");
             let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
             registry
                 .finish(
@@ -934,7 +934,7 @@ pub(super) mod tests {
             "a window's first lapse, however many windows came before"
         );
         let again = claim();
-        assert_eq!((again.key(), again.attempt()), (key.as_str(), 2));
+        assert_eq!((again.key(), again.number()), (key.as_str(), 2));
         let lapsed = lapse(registry.as_ref(), &key, "hq");
         assert_eq!(
             registry.recover(&lapsed, LIMIT, "other").unwrap(),

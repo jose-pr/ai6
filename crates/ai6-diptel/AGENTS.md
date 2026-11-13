@@ -72,7 +72,7 @@ pub fn valid_reason(reason: &str) -> bool;   // 1..=64 bytes of a-z 0-9 - _ .
 
 All fields above are public. `RunState` is non-exhaustive and carries the state
 of the Mission the Run serves: `Queued` means the Mission waits for another
-attempt (this Run will not run again), `Abandoned` that an operator or AI6
+run (this Run will not run again), `Abandoned` that an operator or AI6
 withdrew it, and `Held` that it ended done with something its role requires missing, for
 a person's verdict (reason `no-approval`). `reason` is an optional field of the lifecycle frame: `green-ink` on a
 `Blocked` Run whose Agent waits for a person's approval of an irreversible step,
@@ -110,7 +110,7 @@ impl MissionControl {
 
 A control is what Universal Exports hands the Station holding a Mission. `Cancel` stops
 the live Run and abandons the Mission, `Retry` queues a stalled or finished Mission
-as a new attempt (optionally for `agent`), `Resume` resumes a parked, blocked or stalled
+as a new run (optionally for `agent`), `Resume` resumes a parked, blocked or stalled
 Mission (optionally with `message`) and `Interrupt` stops the current turn. `run_id`
 names the provider Run the requester expects to be current. `with_agent` refuses a
 blank codename, one over `MAX_ID_BYTES` or one with control characters; `with_message`

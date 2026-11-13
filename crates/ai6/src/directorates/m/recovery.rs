@@ -4,7 +4,7 @@
 //! A Run whose harness a runner supervises on a Theater other Stations reach outlives its
 //! Station: another Station takes the Run lease and re-attaches to the runner (adoption).
 //! Any other Run ended with its Station's host, so it is lost and the Mission is tried
-//! again as a new attempt. [`adopter`] decides which, with the reason when no Station may
+//! again as a new run. [`adopter`] decides which, with the reason when no Station may
 //! adopt.
 //!
 //! A live Station whose runner, or wrapped harness, stays out of reach for an Operation's

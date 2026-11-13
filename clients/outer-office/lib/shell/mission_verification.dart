@@ -26,15 +26,15 @@ class MissionVerificationPanel extends StatefulWidget {
 }
 
 class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
-  late Future<MissionAttemptSummary?> _latest = _load();
+  late Future<MissionRunSummary?> _latest = _load();
   bool _busy = false;
   String? _refusal;
 
   /// What was said when the person last decided, until the Station settles the Mission.
   String? _recorded;
 
-  Future<MissionAttemptSummary?> _load() =>
-      widget.board.loadLatestAttempt(widget.operationId, widget.missionId);
+  Future<MissionRunSummary?> _load() =>
+      widget.board.loadLatestRun(widget.operationId, widget.missionId);
 
   @override
   void didUpdateWidget(MissionVerificationPanel oldWidget) {
@@ -88,7 +88,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
   });
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<MissionAttemptSummary?>(
+  Widget build(BuildContext context) => FutureBuilder<MissionRunSummary?>(
     future: _latest,
     builder: (context, snapshot) {
       final text = Theme.of(context).textTheme;
@@ -98,7 +98,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
       final number =
           attempt?.attempt ??
           widget.board
-              .currentAttempt(widget.operationId, widget.missionId)
+              .currentRun(widget.operationId, widget.missionId)
               ?.attempt;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,7 +260,7 @@ class _DeliverableRow extends StatelessWidget {
   }
 }
 
-/// Asks why, records [decision] on the Mission (the attempt it is on, when known), and says where
+/// Asks why, records [decision] on the Mission (the run it is on, when known), and says where
 /// the Mission stands after, in a message too. `null` when the person cancels; the gateway's
 /// own words are thrown when it refuses.
 Future<String?> decideMission(

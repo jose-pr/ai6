@@ -7,7 +7,7 @@
 //! what each did; the Missions, Runs and audit records stay the detail. Promotion and the
 //! operator choosing a backup read them.
 //!
-//! Each report carries a key naming the event (a Mission attempt and its outcome, a
+//! Each report carries a key naming the event (a Mission run and its outcome, a
 //! quarantine), and a key already counted is not counted again, so every Station may report
 //! what it saw.
 

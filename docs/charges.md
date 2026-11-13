@@ -5,7 +5,7 @@ deployment, an Operation's charge (its 00 Agent in charge) keeps its Operation, 
 charge (its Chief of Station) keeps that Station. It runs on a loop: the Station wakes it with the
 events of its area, it takes one turn, and it waits for the next wake.
 
-**A charge is not a Mission.** It has no Mission record, brief, placement, attempt, verdict,
+**A charge is not a Mission.** It has no Mission record, brief, placement, run, verdict,
 scorecard credit or board card, and no Sleeper queues it. Its Run is recorded in the charge's
 own record in the Registry, which names its scope where a Mission's Run record names the
 Mission.
@@ -134,14 +134,14 @@ The Chief of Station's other tools come with the phases that give each charge it
 ## Deciding Missions
 
 The Operation's 00 Agent in charge answers for its Operation's outcome; the Station only runs and
-provides. When a Mission of the Operation enters `verifying`, the charge is woken with the attempt's
+provides. When a Mission of the Operation enters `verifying`, the charge is woken with the run's
 final report and brief (text written outside AI6, marked untrusted) and its declared deliverables.
 It verifies them itself: `deliverable_probe` reads every deliverable back, read-only, and keeps what
 it found as the Mission's evidence, and `mission_detail` and the rest of its harness let it read the
 work. Then it decides:
 
 - `verify_mission(mission, done|failed, reason)`;
-- `redispatch(mission, brief_amendment?, reason)`: the Mission's next attempt, told the reason and
+- `redispatch(mission, brief_amendment?, reason)`: the Mission's next run, told the reason and
   the amendment.
 
 The decision is a person's decision made by the charge ([Missions](missions.md#verifying)): audited,

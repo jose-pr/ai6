@@ -5,7 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../shell/oo_link.dart';
 
-/// What the scorecard calls an attempt's outcome, in the order a row lists them, with the words
+/// What the scorecard calls a run's outcome, in the order a row lists them, with the words
 /// a person reads. The first five are the Agent's own and are judged; the rest are shown and
 /// not held against it.
 const scorecardJudgments = <(String, String)>[
@@ -24,22 +24,22 @@ const scorecardJudgments = <(String, String)>[
   ('unrecorded', 'no outcome recorded'),
 ];
 
-/// One attempt behind a number.
+/// One run behind a number.
 @immutable
-class ScorecardAttempt {
-  const ScorecardAttempt({required this.missionId, required this.runId});
+class ScorecardRun {
+  const ScorecardRun({required this.missionId, required this.runId});
 
   final String missionId;
   final String runId;
 
-  factory ScorecardAttempt.fromJson(Map<String, dynamic> json) =>
-      ScorecardAttempt(
+  factory ScorecardRun.fromJson(Map<String, dynamic> json) =>
+      ScorecardRun(
         missionId: json['mission_id'] as String,
         runId: json['run_id'] as String,
       );
 }
 
-/// What a group of attempts came to.
+/// What a group of runs came to.
 @immutable
 class ScorecardStanding {
   const ScorecardStanding({
@@ -53,12 +53,12 @@ class ScorecardStanding {
     this.wallSecs = 0,
   });
 
-  /// The attempts of each judgment, by its wire name.
-  final Map<String, List<ScorecardAttempt>> attempts;
+  /// The runs of each judgment, by its wire name.
+  final Map<String, List<ScorecardRun>> attempts;
   final int judged;
   final double? failureRate;
 
-  /// Too few judged attempts to rank on.
+  /// Too few judged runs to rank on.
   final bool smallSample;
   final int refusedTools;
   final int tokens;
@@ -73,7 +73,7 @@ class ScorecardStanding {
             in (json['attempts'] as Map<String, dynamic>? ?? const {}).entries)
           entry.key: [
             for (final attempt in entry.value as List<dynamic>)
-              ScorecardAttempt.fromJson(attempt as Map<String, dynamic>),
+              ScorecardRun.fromJson(attempt as Map<String, dynamic>),
           ],
       },
       judged: json['judged'] as int? ?? 0,
@@ -108,7 +108,7 @@ class ScorecardStanding {
   ].join(' · ');
 }
 
-/// One row of the scorecard: a name and what its attempts came to.
+/// One row of the scorecard: a name and what its runs came to.
 @immutable
 class ScorecardRow {
   const ScorecardRow({
@@ -138,7 +138,7 @@ class ScorecardSummary {
   final List<ScorecardRow> agents;
   final List<ScorecardRow> models;
 
-  /// Attempts whose record names no Agent.
+  /// Runs whose record names no Agent.
   final int unattributed;
 
   factory ScorecardSummary.fromJson(Map<String, dynamic> json) {
@@ -386,7 +386,7 @@ class _RowTile extends StatelessWidget {
                       unawaited(
                         showDialog<void>(
                           context: context,
-                          builder: (_) => _AttemptsDialog(
+                          builder: (_) => _RunsDialog(
                             title: '${row.title}: $words',
                             missions: opened,
                           ),
@@ -410,8 +410,8 @@ class _RowTile extends StatelessWidget {
   }
 }
 
-class _AttemptsDialog extends StatelessWidget {
-  const _AttemptsDialog({required this.title, required this.missions});
+class _RunsDialog extends StatelessWidget {
+  const _RunsDialog({required this.title, required this.missions});
 
   final String title;
 

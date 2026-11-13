@@ -26,7 +26,7 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
 - The Missions page is the queue (with no Mission yet, **New Mission in …** starts the first):
   one row per Mission with its state as a word and icon
   (and why, when the Station says), its Operation and Mission, the Station and Theater of its
-  current attempt, when the board last heard of it (relative, the exact local time and zone
+  current run, when the board last heard of it (relative, the exact local time and zone
   on hover) and the Agent and role its brief names, newest update first unless the route
   sorts, ties in Operation and Mission order so rows stay put between refreshes. Its state filter
   and counts go by a Mission's state, that of the Run updated last, as Overview and an
@@ -37,7 +37,7 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   Station has taken, or failed before it started, each with the reason the Station gave; Overview's
   Upcoming lists the queued ones. **Mission details** (route
   `missions?operation_id=…&mission_id=…`) opens a read-only detail beside the queue, or in
-  place of it in a narrow window: the state and the Run that sets it, every attempt (its
+  place of it in a narrow window: the state and the Run that sets it, every run (its
   Station and Theater as links, why it was lost, its checkpoint branch, the Runs on it
   to open), the brief and the Timeline, the actions the person has and, for a queued
   Mission, the Operation's placement now (what it rules out; hidden when the gateway refuses
@@ -63,7 +63,7 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   Its Roles tab holds the Operation-scoped Agent roles (purpose and policy).
 - A Station (route `stations?station_id=…`) is a charge: Online or Dark, the last check-in,
   its roles, running Runs of its capacity, resources as last sampled (**Not reported**
-  when it sends none), and **Runs here**, each Mission with an active attempt there as a
+  when it sends none), and **Runs here**, each Mission with an active run there as a
   link to its detail.
 - An Operation (route `operations?operation_id=…`) opens a summary: what the person may do
   there, its Missions counted by state (each count links to the Missions in that state), the
@@ -139,7 +139,7 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   page shows its Agent's final message and any verdict, and takes one with `mission.verify`.
   The Missions board counts `verifying` Missions, those waiting for a decision. Such a Mission's page
   shows each deliverable with the latest probe of it (found, missing, unprobed or failed), the final
-  report, and, with `mission.verify`, Probe now and Verify done, Redispatch (as the next attempt,
+  report, and, with `mission.verify`, Probe now and Verify done, Redispatch (as the next run,
   with an amendment) and Failed, each with a required reason, and the verdict (confirmed, disputed,
   failed verification); the same three decisions are in the Mission's actions menu on the board and in
   the table. Without `mission.verify` the page says what deciding needs. After a decision a message

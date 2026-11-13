@@ -27,10 +27,10 @@ class MissionOutcomeSection extends StatefulWidget {
 }
 
 class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
-  late Future<MissionAttemptSummary?> _latest = _load();
+  late Future<MissionRunSummary?> _latest = _load();
 
-  Future<MissionAttemptSummary?> _load() =>
-      widget.board.loadLatestAttempt(widget.operationId, widget.missionId);
+  Future<MissionRunSummary?> _load() =>
+      widget.board.loadLatestRun(widget.operationId, widget.missionId);
 
   @override
   void didUpdateWidget(MissionOutcomeSection oldWidget) {
@@ -74,7 +74,7 @@ class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<MissionAttemptSummary?>(
+  Widget build(BuildContext context) => FutureBuilder<MissionRunSummary?>(
     future: _latest,
     builder: (context, snapshot) {
       final text = Theme.of(context).textTheme;

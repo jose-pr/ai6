@@ -218,7 +218,7 @@ says so. When the person signs out, her tools stop working.
 | `compartments` | The compartments you may read: what each grants, what it covers and who is read in, leaving out what you may not see |
 | `attention` | What needs your attention, the answer the Overview page gives: each item current, historical (a refusal a later revision replaced) or unverified, with its link, the scope checked and when, and what could not be checked or is not visible to you |
 | `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Run |
-| `missions`, `mission` | Missions with their Runs, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
+| `missions`, `mission` | Missions with their Runs, runs, brief and usage; `mission` also the issues it is linked to and what it posted |
 | `source_item`, `source_items` | An Operation's tracker items as they are now: one with its state, labels, assignees, latest comments (each author's role and date) and the Missions linked to it; or the items its sources find, by title |
 | `timeline` | An Operation's activity |
 | `pools` | Account pools: Runs, quota windows, tokens today |

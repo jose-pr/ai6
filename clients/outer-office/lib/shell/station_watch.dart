@@ -82,7 +82,7 @@ class StationOverview extends StatelessWidget {
   );
 }
 
-/// The Missions with an active attempt on [stationId]: each with an active attempt there, and the
+/// The Missions with an active run on [stationId]: each with an active run there, and the
 /// with the Run of it the board holds there, by Operation then Mission.
 List<(MissionGroup, RunSummary?)> runsHere(
   MissionBoard board,
@@ -426,7 +426,7 @@ class _StationStatus extends StatelessWidget {
   }
 }
 
-/// The Missions with an active attempt on a Station, each opening its detail.
+/// The Missions with an active run on a Station, each opening its detail.
 class _RunsHere extends StatelessWidget {
   const _RunsHere({
     required this.station,

@@ -14,7 +14,7 @@
 //! between turns and its provider Run resumed after a restart or a takeover; when the
 //! handler cannot resume it, a fresh Run starts with the charge's logbook.
 //!
-//! A charge is not a Mission: none of this makes a Mission, a brief, a placement or an attempt.
+//! A charge is not a Mission: none of this makes a Mission, a brief, a placement or a run.
 //!
 //! An Operation's charge is its 00 Agent in charge, and it decides the Operation's Missions: woken
 //! for each one entering `verifying` with the final report, the brief and the declared
@@ -500,9 +500,9 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
     );
 }
 
-/// An attempt as a charge reads it to verify: its brief and final report (untrusted text), what it
+/// A run as a charge reads it to verify: its brief and final report (untrusted text), what it
 /// was to deliver, what the probes found, and what has been decided or recommended.
-fn attempt_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
+fn run_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
     let report = state
         .intake
         .final_report(&record.id)
@@ -518,7 +518,7 @@ fn attempt_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value 
     serde_json::json!({
         "mission": record.mission_id,
         "handle": record.handle,
-        "attempt": record.attempt,
+        "attempt": record.number,
         "station": record.station,
         "state": record.result.as_ref().map(|result| result.state.as_str()),
         "agent": record.launch.as_ref().and_then(|launch| launch.agent.as_deref()),
@@ -558,7 +558,7 @@ fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEv
                 }) {
                     // The final report and the brief are text written outside AI6.
                     found.push(
-                        ChargeEvent::new("verifying", true, attempt_detail(state, &run))
+                        ChargeEvent::new("verifying", true, run_detail(state, &run))
                             .keyed(format!("verifying:{}", run.id)),
                     );
                 }

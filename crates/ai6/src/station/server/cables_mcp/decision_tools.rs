@@ -31,9 +31,9 @@ struct VerifyArgs {
 struct RedispatchArgs {
     /// The Mission's UID or its handle.
     mission: String,
-    /// What the next attempt is told beyond its brief and your reason: what to do differently.
+    /// What the next run is told beyond its brief and your reason: what to do differently.
     brief_amendment: Option<String>,
-    /// Why the attempt does not stand, from what you verified.
+    /// Why the run does not stand, from what you verified.
     reason: String,
 }
 

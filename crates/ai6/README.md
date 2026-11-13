@@ -175,7 +175,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::access` | The shared `coqui-access` kinds and `coqui-roles` authorizer, AI6's scope kinds and actions, the access policy (built-in roles, the chief, the guards on changing it) and the `access.toml` reader |
 | `ai6::directorates::m::vetting` | Vetting: deterministic checks on a brief before it is placed, and the Operation's settings for them |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
-| `ai6::directorates::registry::runs` | Shared, fenced Run records: lease, fencing token, attempt and predecessor |
+| `ai6::directorates::registry::runs` | Shared, fenced Run records: lease, fencing token, run and predecessor |
 | `ai6::directorates::registry::sleepers` | Sleepers: cron standing orders, their authorization and per-window briefs |
 | `ai6::directorates::registry::sources` | The Source kind (trackers and CI), brief ingestion, cursors and CX reports |
 | `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
@@ -212,7 +212,7 @@ dropped link.
 Each Run also has a record in the shared Registry, held by a lease whose fencing token
 refuses a Station that lost it. When a provider usage limit stops a Run the Mission is
 parked until the quota resets and resumes the same provider Run; an Operation may instead
-set `on_limit = "backup"` to post the next qualified Agent as a new attempt.
+set `on_limit = "backup"` to post the next qualified Agent as a new run.
 Medical records what Runs consume and enforces optional budgets (a Mission that reaches
 one is blocked, not failed), marks Runs that read untrusted input and restricts them under
 the default `strict` policy, and quarantines an Agent that keeps stalling, loops, blows its

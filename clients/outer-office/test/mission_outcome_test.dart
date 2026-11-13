@@ -9,7 +9,7 @@ import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/mission_outcome.dart';
 import 'package:outer_office/theme/oo_theme.dart';
 
-/// A Mission of Operation G whose one attempt filed [report], with [verdict] on it; a verdict
+/// A Mission of Operation G whose one run filed [report], with [verdict] on it; a verdict
 /// given is kept in [given] and answered back.
 Future<MissionBoard> _board(
   List<String> actions, {

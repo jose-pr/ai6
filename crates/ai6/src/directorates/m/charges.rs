@@ -3,7 +3,7 @@
 //! M's charge (`m`) keeps the whole deployment from the Headquarters Station, an Operation's charge
 //! (`operation:P`) its Operation from a Station the Operation allows, and a Station's charge
 //! (`station:S`) that Station from itself. A charge is not a Mission: it has no brief, placement,
-//! attempt, scorecard credit or board card, and no Sleeper queues it. `[charge.<scope>]` names the
+//! run, scorecard credit or board card, and no Sleeper queues it. `[charge.<scope>]` names the
 //! Agent that keeps it and paces it ([`ChargeDefinition`]); the Station runs it.
 
 use std::collections::BTreeMap;

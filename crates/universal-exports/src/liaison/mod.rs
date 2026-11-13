@@ -1205,7 +1205,7 @@ impl Iterator for Follow {
 }
 
 fn watching(caller: &Caller<'_>) -> Open {
-    let charge = caller.charge();
+    let charge = caller.watch();
     Arc::new(move || !charge.is_closed())
 }
 

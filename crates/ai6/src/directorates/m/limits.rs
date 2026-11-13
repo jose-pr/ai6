@@ -25,14 +25,14 @@ pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 30 * 60;
 pub enum OnLimit {
     /// Move the Run to another account of its pools that has headroom: the same provider
     /// Run where its history goes with it (Claude's environment credentials), else a new
-    /// attempt with a hand-off. Without a pool account to move to, the same as `Wait`.
+    /// run with a hand-off. Without a pool account to move to, the same as `Wait`.
     #[default]
     #[schema(label = "Move to another account in its pools")]
     Rotate,
     /// Park the Run and resume the same provider Run when the limit resets.
     #[schema(label = "Wait for the limit to reset")]
     Wait,
-    /// Post the next qualified Agent as a new attempt; park only if there is none.
+    /// Post the next qualified Agent as a new run; park only if there is none.
     #[schema(label = "Hand over to the next qualified Agent")]
     Backup,
 }

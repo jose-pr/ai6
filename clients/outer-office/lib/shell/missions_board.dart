@@ -428,7 +428,7 @@ class MissionCard extends StatelessWidget {
               case final attempts
               when attempts.length > 1 ||
                   attempts.any((attempt) => attempt.status == 'lost'))
-            _AttemptHistory(attempts: attempts),
+            _RunHistory(attempts: attempts),
           if (board.controls[(mission.operationId, mission.missionId)]
               case final control?)
             Padding(
@@ -495,7 +495,7 @@ class MissionNameLine extends StatelessWidget {
 }
 
 /// What the queue says of a Mission in a line: its state as a word with its icon and the
-/// reason, the Station and Theater of its current attempt, when the board last heard of it,
+/// reason, the Station and Theater of its current run, when the board last heard of it,
 /// and the Agent and role its brief names.
 class MissionFacts extends StatelessWidget {
   const MissionFacts({required this.mission, required this.board, super.key});
@@ -507,7 +507,7 @@ class MissionFacts extends StatelessWidget {
   Widget build(BuildContext context) {
     final muted = Theme.of(context).textTheme.bodySmall
         ?.copyWith(color: OoTokens.of(context).muted);
-    final attempt = board.currentAttempt(
+    final attempt = board.currentRun(
       mission.operationId,
       mission.missionId,
     );
@@ -561,11 +561,11 @@ class MissionFacts extends StatelessWidget {
   }
 }
 
-/// Every attempt at a Mission, first first, with why a lost one was lost.
-class _AttemptHistory extends StatelessWidget {
-  const _AttemptHistory({required this.attempts});
+/// Every run at a Mission, first first, with why a lost one was lost.
+class _RunHistory extends StatelessWidget {
+  const _RunHistory({required this.attempts});
 
-  final List<MissionAttemptSummary> attempts;
+  final List<MissionRunSummary> attempts;
 
   @override
   Widget build(BuildContext context) {

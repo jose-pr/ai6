@@ -660,7 +660,7 @@ names its Agent (`launch.agent`), when it opened and closed, and how its Mission
 write (`result`: the state, the reason when AI6 knows one, and the tools its harness refused), and
 what a person found when they checked it (`verdict`).
 
-Each attempt (one Run) gets one judgment, by whose doing the outcome was:
+Each run (one Run) gets one judgment, by whose doing the outcome was:
 
 | Judgment | Meaning | Judged? |
 | --- | --- | --- |
@@ -675,10 +675,10 @@ Each attempt (one Run) gets one judgment, by whose doing the outcome was:
 | `running`, `unrecorded` | Still working; or closed with no outcome written. | No |
 
 A start that never got a Run (a failed checkout, a brief with no Agent) leaves no record and so
-no attempt. A row's failure rate is failed, blown, stalled and disputed over judged attempts; below
-`small_sample` judged attempts a row says so and nothing should be ranked on it. Each row also has
-tokens and cost from the ledger, wall time of the closed attempts (parked time included), and how many
-tools the harness refused, and **lists the attempts behind every number**, so a person can open the
+no run. A row's failure rate is failed, blown, stalled and disputed over judged runs; below
+`small_sample` judged runs a row says so and nothing should be ranked on it. Each row also has
+tokens and cost from the ledger, wall time of the closed runs (parked time included), and how many
+tools the harness refused, and **lists the runs behind every number**, so a person can open the
 Missions. Rows are per Agent, per route within an Agent (handler, model, pool) and per model across
 Agents. Grades compare within one Operation's work; they are not a claim about a model in general.
 
@@ -688,8 +688,8 @@ Scorecard section on Outer Office's Agents page, where each count opens a list o
 
 ```toml
 [operation.G.scorecard]            # these are the defaults
-window_days = 30                   # attempts of the last 30 days; 0 covers every attempt on record
-small_sample = 5                   # judged attempts below which a row ranks nothing
+window_days = 30                   # runs of the last 30 days; 0 covers every run on record
+small_sample = 5                   # judged runs below which a row ranks nothing
 ```
 
 #### What M does with it
@@ -928,7 +928,7 @@ a person approved.
   take the last place of an account, and it drops any claim the Mission held on another
   account. A resumed Run keeps its account while it has room, and moves only to an
   account whose kind carries its history: from one environment kind to another, never to or
-  from a `config-dir` or Codex account (those are tried again as a new attempt instead).
+  from a `config-dir` or Codex account (those are tried again as a new run instead).
 - **Balancing**: `headroom` skips accounts that are limited or at `max_concurrent`, then
   takes the one whose most used quota window is lowest (an account whose provider has
   reported nothing counts as half used, the `station` record's `[accounts]
@@ -1102,12 +1102,12 @@ a model at all; an Agent that needs another model's behaviour is another Agent.
   runs it, and so which handlers it has, is decided later.
 - **A Run keeps its route.** A resume stays on it, since history belongs to the harness and the
   source. Without room there, a resume moves only to a route of the same handler whose accounts
-  carry the history, from an account that does; otherwise it is a new attempt on another route, and
+  carry the history, from an account that does; otherwise it is a new run on another route, and
   the Agent is told, as a limit moves work. A running harness is never moved.
 - **`on_limit`**: `rotate` (the default) moves a limited Run by the rule above; `wait` parks it
   and `backup` hands it to the next Agent, whatever other routes it has.
 - **What is shown**: the Run record's `launch` names the handler, model and pool, and its
-  `account` the account. So do the board's attempts, `ai6ctl mission` and the Mission page. The
+  `account` the account. So do the board's runs, `ai6ctl mission` and the Mission page. The
   timeline has `route` / `chosen` and `route` / `moved`, and the Agents page and `ai6ctl agents` list
   each route.
 - **A review** is issued no credential, so a route that needs one is not chosen for it, and an

@@ -42,7 +42,7 @@ pub struct SafeHouseSpec {
     pub state_root: String,
     /// A report from an earlier open: re-attach to that safe house instead of creating one.
     pub reopen: Option<SafeHouseReport>,
-    /// Work an earlier attempt saved elsewhere: start the new safe house from its commit, on
+    /// Work an earlier run saved elsewhere: start the new safe house from its commit, on
     /// its branch, instead of from `base`. A provider without checkpoints ignores it.
     pub checkpoint: Option<SafeHouseCheckpoint>,
     /// Make the working directory a clone of `source` (a repository URL, `user@host:path`,

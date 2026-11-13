@@ -518,7 +518,7 @@ async fn a_cancel_ends_a_mission_looping_in_its_start() {
 /// A Mission AI6 failed itself stays failed, though its last Run on record was lost: its
 /// reason would fail the next try alike, and each try would queue the one after.
 #[tokio::test]
-async fn a_mission_ai6_failed_is_not_taken_for_a_lost_attempt_to_try_again() {
+async fn a_mission_ai6_failed_is_not_taken_for_a_lost_run_to_try_again() {
     use crate::directorates::registry::runs::{NewRun, RunError};
 
     let root = tempfile::tempdir().unwrap();
@@ -592,7 +592,7 @@ async fn a_retry_an_operator_asked_for_runs_though_its_brief_is_settled() {
 }
 
 #[tokio::test]
-async fn an_agent_with_no_path_fails_its_brief_after_one_attempt_and_says_why() {
+async fn an_agent_with_no_path_fails_its_brief_after_one_run_and_says_why() {
     let root = tempfile::tempdir().unwrap();
     let key = "no-loadout";
     let state = empty_book(
@@ -628,7 +628,7 @@ async fn an_agent_with_no_path_fails_its_brief_after_one_attempt_and_says_why() 
     schedule_intake_once(&state);
     let filed = state.intake.filed_brief(&brief.key()).unwrap().unwrap();
     assert_eq!(filed.state, "failed");
-    assert_eq!(filed.attempts, 1);
+    assert_eq!(filed.runs, 1);
     let outcome = filed.outcome.unwrap();
     assert_eq!(outcome["state"], "failed");
     assert_eq!(outcome["reason"], reason.as_str());
@@ -902,7 +902,7 @@ async fn a_mission_retried_after_its_settlement_runs_on() {
         state.intake.filed_brief(&key).unwrap().unwrap().state,
         "failed"
     );
-    // The Mission had a Run the settlement did not name: a later attempt.
+    // The Mission had a Run the settlement did not name: a later run.
     {
         let mut missions = state.missions.lock().unwrap();
         missions.transition(&key, MissionState::Working).unwrap();
@@ -1193,7 +1193,7 @@ async fn a_restart_does_not_resume_a_settled_brief() {
     );
 }
 
-/// A Mission whose Run record has ended is not waited on: its attempt is lost at restart.
+/// A Mission whose Run record has ended is not waited on: its run is lost at restart.
 #[tokio::test]
 async fn a_restart_settles_a_mission_whose_run_is_gone() {
     let root = tempfile::tempdir().unwrap();

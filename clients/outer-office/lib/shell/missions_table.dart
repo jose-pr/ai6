@@ -146,7 +146,7 @@ class MissionsTable extends StatelessWidget {
           label: 'Station and Theater',
           flex: 2,
           cell: (context, mission) {
-            final attempt = board.currentAttempt(
+            final attempt = board.currentRun(
               mission.operationId,
               mission.missionId,
             );

@@ -55,7 +55,7 @@ origin leaves the public roots alone.
   WAITING_ON_PERSON BUDGET_STOP PARKED LOST HANDED_OFF WITHDRAWN RUNNING UNRECORDED`) and
   `REFUSED_TOOLS TOKENS COST_USD WALL_SECS`: per Agent (`ROUTE` `all`), per route (`HANDLER MODEL
   POOL`) and per model (`AGENT` `(model)`). `SAMPLE` is `SMALL` under the Operation's line. `--show`
-  adds one line per attempt behind that judgment (`MISSION`, `RUN`). Needs `agent.read` and
+  adds one line per run behind that judgment (`MISSION`, `RUN`). Needs `agent.read` and
   `roster.read`.
 - `ai6ctl agents lower <AGENT> <CLEARANCE> --reason <TEXT> [--expires-in-secs N] --operation
   <ID>` puts `.../agents/{agent}/clearance` and prints `AGENT: held at CLEARANCE in ID`;
@@ -96,15 +96,15 @@ origin leaves the public roots alone.
   or any handle it had, compared without case; the gateway looks it up (`GET
   /v1/missions?mission=`), so a handle from before a rename still finds it.
 - `ai6ctl missions verdict <MISSION> <confirmed|disputed|failed-verification> [--note <TEXT>]
-  [--operation <ID>]` (`mission.verify`) posts `.../verdict` and prints `MISSION attempt N: VERDICT by
+  [--operation <ID>]` (`mission.verify`) posts `.../verdict` and prints `MISSION run N: VERDICT by
   PERSON`; a refusal prints the gateway's words. `ai6ctl mission <ID>` also prints a `VERDICT` line under
-  a run and, from the Mission's detail, a `FINAL REPORT`, the latest attempt's `DELIVERABLES` and its
+  a run and, from the Mission's detail, a `FINAL REPORT`, the latest run's `DELIVERABLES` and its
   `EVIDENCE` (`DELIVERABLE RESULT DETAIL`).
 - `ai6ctl missions probe <MISSION> [--wait <SECS>] [--operation <ID>]` (`mission.verify`, default wait
   60 s) posts `.../probe`, waits for the Station to answer (`probe_requested` clears in the Mission's
   detail) and prints the findings made since; at the end of the wait it says the Station has not
   answered. `ai6ctl missions verify <MISSION> <done|redispatch|failed> --reason <TEXT> [--amend <TEXT>]
-  [--operation <ID>]` posts `.../verify` and prints `MISSION attempt N: DECISION by PERSON`; `--reason` is
+  [--operation <ID>]` posts `.../verify` and prints `MISSION run N: DECISION by PERSON`; `--reason` is
   required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation charge at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
   repeatable.
 - `ai6ctl reports file|list|show|clearance` use the gateway's `/v1/reports` routes (see its page);
@@ -234,7 +234,7 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   Mission; one no Station has taken yet is withdrawn, and one that already ended stays as it is, and
   the control comes back `applied`.
 - `ai6ctl mission retry <MISSION_ID> [--agent <CODENAME>]` queues a stalled or finished
-  Mission again as a new attempt, for `--agent` when given, else for the Agent the roster gives
+  Mission again as a new run, for `--agent` when given, else for the Agent the roster gives
   it now.
 - `ai6ctl mission withdraw <MISSION_ID> [--note <TEXT>] [--operation <ID>]` posts
   `POST /v1/user/operations/{operation}/missions/{mission}/withdraw` and prints

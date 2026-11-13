@@ -162,7 +162,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/user/operations/{operation_id}/green-ink/sources` | Require `approval.decide`; where the Operation's Sources are read on the web. |
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/verdict` | Require `mission.verify`; say what you found when you checked the Mission's outcome. |
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/probe` | Require `mission.verify`; ask the Station to read back what a verifying Mission was to deliver. |
-| `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/verify` | Require `mission.verify`; decide a verifying Mission: `done`, `redispatch` (its next attempt) or `failed`, with a reason. |
+| `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/verify` | Require `mission.verify`; decide a verifying Mission: `done`, `redispatch` (its next run) or `failed`, with a reason. |
 | `GET`, `POST` | `/v1/user/operations/{operation_id}/class-authorizations` | Require `approval.class`; list, or grant as the caller, standing approvals of a kind of step on a target glob for named Agents or roles. |
 | `DELETE` | `/v1/user/operations/{operation_id}/class-authorizations/{id}` | Require `approval.class`; revoke one. |
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Require `mission.control`; audit and queue a cancel, retry, resume or interrupt for the Station holding the Mission. Body: `{"action":"retry","agent":"008","idempotency_key":"…"}` (`agent` only with `retry`, `message` only with `resume`, optional `run_id`). Returns `202` and a `ControlStatus`, or `200` and the first one for a repeated key. |

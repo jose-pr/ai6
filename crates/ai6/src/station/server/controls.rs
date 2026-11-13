@@ -208,7 +208,7 @@ async fn retry(
     let mission_id = mission.mission_id.as_str();
     stop_live_run(state, mission_id).await;
     if let Some(hold) = run_hold(state, mission_id) {
-        // The stopped attempt is over; the next start records its replacement.
+        // The stopped run is over; the next start records its replacement.
         let _ = state.intake.update_run(
             &hold.id,
             &state.station_id,
@@ -356,7 +356,7 @@ fn has_live_run(state: &DaemonState, mission: &Mission) -> bool {
         .is_ok_and(|runs| runs.contains_key(mission.mission_id.as_str()))
 }
 
-/// Closes a Mission's live provider Run and leaves its safe house for the next attempt.
+/// Closes a Mission's live provider Run and leaves its safe house for the next run.
 async fn stop_live_run(state: &DaemonState, mission_id: &str) {
     let operation = state.runs.lock().ok().and_then(|mut runs| {
         runs
@@ -380,7 +380,7 @@ pub(super) const CANCEL_UNCONFIRMED: &str = "cancelled; the Station did not conf
 /// On the Headquarters Station: files each claimed brief whose cancel was asked for at least
 /// `[registry.limits.briefs] cancel_settle_after` ago as failed, releasing its lease, when its
 /// Station has not finished it. The outcome names the Mission's Run at the time, which tells
-/// the Station holding the Mission which attempt to stop.
+/// the Station holding the Mission which run to stop.
 pub(super) fn settle_unconfirmed_cancels(state: &DaemonState) {
     let Ok(requests) = state.intake.cancel_requests() else {
         return;
@@ -438,7 +438,7 @@ pub(super) fn settle_unconfirmed_cancels(state: &DaemonState) {
 }
 
 /// Stops each Mission in this Station's book whose brief Headquarters settled after an
-/// unconfirmed cancel, when it is still on the attempt the settlement names. A Mission retried
+/// unconfirmed cancel, when it is still on the run the settlement names. A Mission retried
 /// since is queued, or on a new Run, and runs on.
 pub(super) async fn stop_settled(state: &DaemonState) {
     let candidates: Vec<Mission> = state
@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retry_queues_a_new_attempt_for_another_qualified_agent() {
+    async fn retry_queues_a_new_run_for_another_qualified_agent() {
         let root = tempfile::tempdir().unwrap();
         let state = state_in(root.path(), TWO_AGENTS);
         blocked_mission(&state).await;
@@ -747,12 +747,12 @@ mod tests {
         assert_eq!(queued.agent_id.as_deref(), Some("008"));
         assert_eq!(queued.run_ids[0].as_str(), PROVIDER_ID);
 
-        // The scheduler starts it as the second attempt, continuing the first.
+        // The scheduler starts it as the second run, continuing the first.
         schedule_queued_once(&state).await;
         wait_for_state(&state, "mission-1", MissionState::Working).await;
         let second = run_hold(&state, "mission-1").unwrap();
         let record = state.intake.run(&second.id).unwrap().unwrap();
-        assert_eq!(record.attempt, 2);
+        assert_eq!(record.number, 2);
         assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
         assert_eq!(record.station, "test");
         assert_eq!(

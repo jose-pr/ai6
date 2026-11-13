@@ -418,7 +418,7 @@ pub struct Lease {
     pub(super) key: String,
     pub(super) station: String,
     pub(super) expires: f64,
-    pub(super) attempt: u32,
+    pub(super) number: u32,
     pub(super) meta: BTreeMap<String, serde_json::Value>,
 }
 
@@ -427,7 +427,7 @@ impl PartialEq for Lease {
         self.key == other.key
             && self.station == other.station
             && self.expires == other.expires
-            && self.attempt == other.attempt
+            && self.number == other.number
     }
 }
 
@@ -447,9 +447,9 @@ impl Lease {
         self.expires
     }
 
-    /// Returns the number of leased attempts for this brief.
-    pub fn attempt(&self) -> u32 {
-        self.attempt
+    /// Returns the number of leased runs for this brief.
+    pub fn number(&self) -> u32 {
+        self.number
     }
 
     /// Returns the assignment metadata shared with other Registry users.
@@ -629,7 +629,7 @@ impl HeadquartersLease {
 struct LeaseRecord {
     station: String,
     expires: f64,
-    attempt: u32,
+    number: u32,
     #[serde(default)]
     meta: BTreeMap<String, serde_json::Value>,
 }
@@ -639,7 +639,7 @@ impl LeaseRecord {
         Self {
             station: lease.station.clone(),
             expires: lease.expires,
-            attempt: lease.attempt,
+            number: lease.number,
             meta: lease.meta.clone(),
         }
     }
@@ -652,7 +652,7 @@ impl LeaseRecord {
             key,
             station: self.station,
             expires: self.expires,
-            attempt: self.attempt,
+            number: self.number,
             meta: self.meta,
         })
     }
@@ -662,9 +662,9 @@ impl LeaseRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LeaseRecovery {
-    /// The brief was returned to `new/` for another attempt.
+    /// The brief was returned to `new/` for another run.
     Requeued,
-    /// The attempt limit was reached and the brief was filed in `failed/`.
+    /// The run limit was reached and the brief was filed in `failed/`.
     Failed,
 }
 
@@ -1077,7 +1077,7 @@ pub struct FiledBrief {
     /// `new`, `held`, `claimed`, `done` or `failed`.
     pub state: String,
     /// How many times it was claimed.
-    pub attempts: u32,
+    pub runs: u32,
     /// The outcome filed for it, once it finished.
     pub outcome: Option<serde_json::Value>,
 }
@@ -1086,7 +1086,7 @@ pub struct FiledBrief {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reentry {
-    /// Queued again as its Mission's next attempt; the brief as queued.
+    /// Queued again as its Mission's next run; the brief as queued.
     Queued(Brief),
     /// The Mission's brief as filed, left as it was: queued, held or claimed, or finished and
     /// not to be replaced.
@@ -1199,11 +1199,11 @@ pub trait BriefStore {
     /// invalid brief or Registry I/O failures.
     fn enter_brief(&self, brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>;
 
-    /// Queues `brief` as the next attempt of the Mission `entry` already names, when that
+    /// Queues `brief` as the next run of the Mission `entry` already names, when that
     /// Mission's brief finished and `again` accepts the brief as filed. The Mission keeps its UID
-    /// and its handle; the count of its claims starts again, so the `max_attempts` a
-    /// [`recover`](Self::recover) is given bounds the lapses of this attempt alone, and what the
-    /// last attempt filed (its outcome, its report and its spent provenance) is dropped. The
+    /// and its handle; the count of its claims starts again, so the `max_runs` a
+    /// [`recover`](Self::recover) is given bounds the lapses of this run alone, and what the
+    /// last run filed (its outcome, its report and its spent provenance) is dropped. The
     /// provenance is `brief`'s own.
     ///
     /// # Errors
@@ -1231,7 +1231,7 @@ pub trait BriefStore {
     /// # Errors
     ///
     /// Returns an error for invalid lease settings, Registry I/O failures or a corrupted
-    /// attempt count.
+    /// run count.
     fn claim_with_lease(
         &self,
         key: Option<&str>,
@@ -1282,7 +1282,7 @@ pub trait BriefStore {
 
     /// Recovers an unchanged expired lease, requeueing it or filing a lost outcome.
     ///
-    /// `max_attempts` is the maximum number of claims before the brief is failed. `by` is
+    /// `max_runs` is the maximum number of claims before the brief is failed. `by` is
     /// recorded as the recovering station. A changed, renewed or unexpired lease returns `None`.
     ///
     /// # Errors
@@ -1291,12 +1291,12 @@ pub trait BriefStore {
     fn recover(
         &self,
         lease: &Lease,
-        max_attempts: u32,
+        max_runs: u32,
         by: &str,
     ) -> io::Result<Option<LeaseRecovery>>;
 
     /// Gives an unchanged expired lease to another Station, which carries on the same claim:
-    /// the brief stays claimed and the attempt count is unchanged. `meta` entries are added
+    /// the brief stays claimed and the run count is unchanged. `meta` entries are added
     /// to the lease's metadata.
     ///
     /// Returns the new lease, or `None` for a changed, renewed or unexpired lease.
@@ -1396,8 +1396,8 @@ pub(crate) fn newest_first(mut briefs: Vec<FiledBrief>, limit: usize) -> Vec<Fil
 }
 
 impl FileRegistry {
-    /// The attempts recorded for `key`.
-    fn attempts_of(&self, key: &str) -> u32 {
+    /// The runs recorded for `key`.
+    fn runs_of(&self, key: &str) -> u32 {
         fs::read_to_string(self.root.join("attempts").join(format!("{key}.json")))
             .ok()
             .and_then(|text| text.trim().parse().ok())
@@ -1431,7 +1431,7 @@ impl FileRegistry {
         Ok(Some(FiledBrief {
             brief,
             state: state.to_owned(),
-            attempts: self.attempts_of(key),
+            runs: self.runs_of(key),
             outcome,
         }))
     }
@@ -1957,7 +1957,7 @@ impl BriefStore for FileRegistry {
             let source = self.root.join("new").join(format!("{key}.json"));
             let destination = destination_dir.join(format!("{key}.json"));
             let attempts_path = self.root.join("attempts").join(format!("{key}.json"));
-            let previous_attempt = match fs::read_to_string(&attempts_path) {
+            let previous_run = match fs::read_to_string(&attempts_path) {
                 Ok(value) => value
                     .trim()
                     .parse::<u32>()
@@ -1965,7 +1965,7 @@ impl BriefStore for FileRegistry {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
                 Err(error) => return Err(error),
             };
-            let attempt = previous_attempt
+            let attempt = previous_run
                 .checked_add(1)
                 .ok_or_else(|| invalid_data("Registry attempt count is exhausted"))?;
             let expires = unix_time()? + duration.as_secs_f64();
@@ -1985,7 +1985,7 @@ impl BriefStore for FileRegistry {
                 key: key.clone(),
                 station: station.to_owned(),
                 expires,
-                attempt,
+                number: attempt,
                 meta,
             };
             let record = LeaseRecord::from_lease(&lease);
@@ -2118,7 +2118,7 @@ impl BriefStore for FileRegistry {
     fn recover(
         &self,
         lease: &Lease,
-        max_attempts: u32,
+        max_runs: u32,
         by: &str,
     ) -> io::Result<Option<LeaseRecovery>> {
         validate_registry_key(lease.key())?;
@@ -2130,7 +2130,7 @@ impl BriefStore for FileRegistry {
             .root
             .join("claimed")
             .join(format!("{}.json", lease.key()));
-        if lease.attempt() < max_attempts {
+        if lease.number() < max_runs {
             match fs::rename(
                 &source,
                 self.root.join("new").join(format!("{}.json", lease.key())),
@@ -3231,11 +3231,11 @@ pub(super) fn is_lost(outcome: Option<&serde_json::Value>) -> bool {
     outcome.is_some_and(|outcome| outcome["state"] == "lost")
 }
 
-/// The outcome filed for a brief whose last allowed attempt was lost with its Station.
+/// The outcome filed for a brief whose last allowed run was lost with its Station.
 pub(super) fn lost_outcome(lease: &Lease, by: &str) -> serde_json::Value {
     serde_json::json!({
         "state": "lost",
-        "reason": format!("station {} went dark; {} attempts spent", lease.station(), lease.attempt()),
+        "reason": format!("station {} went dark; {} attempts spent", lease.station(), lease.number()),
         "recovered_by": by,
     })
 }
@@ -3981,9 +3981,9 @@ mod tests {
         finish_requires_the_current_station_and_files_the_outcome,
         a_cancel_is_kept_from_its_first_request_until_the_brief_finishes,
         a_filed_brief_is_read_in_any_state,
-        expired_leases_requeue_or_fail_at_the_attempt_limit,
+        expired_leases_requeue_or_fail_at_the_run_limit,
         a_brief_filed_lost_is_refiled_only_as_lost,
-        an_expired_lease_is_handed_over_once_with_its_claim_and_attempt,
+        an_expired_lease_is_handed_over_once_with_its_claim_and_run,
         leased_claim_is_exclusive_and_registry_keys_are_checked,
         cable_store_is_idempotent_and_rejects_conflicting_retries,
         cable_inbox_and_delivery_updates_follow_run_and_expiry,
@@ -4438,7 +4438,7 @@ mod tests {
             .unwrap();
         assert_eq!(lease.key(), "manual--brief-1");
         assert_eq!(lease.station(), "operation-01");
-        assert_eq!(lease.attempt(), 1);
+        assert_eq!(lease.number(), 1);
         assert_eq!(lease.meta(), &meta);
         assert!(registry.list_new().unwrap().is_empty());
         assert!(registry.read_claimed(lease.key()).unwrap().is_some());
@@ -4447,7 +4447,7 @@ mod tests {
         let reopened = other.lease(lease.key()).unwrap().unwrap();
         assert_eq!(reopened.key(), lease.key());
         assert_eq!(reopened.station(), lease.station());
-        assert_eq!(reopened.attempt(), lease.attempt());
+        assert_eq!(reopened.number(), lease.number());
         assert_eq!(reopened.meta(), lease.meta());
         assert!((reopened.expires() - lease.expires()).abs() < 0.000_001);
         let listed = other.leases().unwrap();
@@ -4483,7 +4483,7 @@ mod tests {
         let queued = of("queued", "B");
         registry.submit_brief(&queued).unwrap();
         let filed = registry.filed_brief(&queued.key()).unwrap().unwrap();
-        assert_eq!((filed.state.as_str(), filed.attempts), ("new", 0));
+        assert_eq!((filed.state.as_str(), filed.runs), ("new", 0));
         assert_eq!(filed.outcome, None);
         assert_eq!(filed.brief.title, queued.title);
 
@@ -4499,7 +4499,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let claimed = registry.filed_brief(lease.key()).unwrap().unwrap();
-        assert_eq!((claimed.state.as_str(), claimed.attempts), ("claimed", 1));
+        assert_eq!((claimed.state.as_str(), claimed.runs), ("claimed", 1));
         registry
             .finish(
                 &claimed.brief,
@@ -4510,7 +4510,7 @@ mod tests {
             )
             .unwrap();
         let done = registry.filed_brief(&worked.key()).unwrap().unwrap();
-        assert_eq!((done.state.as_str(), done.attempts), ("done", 1));
+        assert_eq!((done.state.as_str(), done.runs), ("done", 1));
         assert_eq!(done.outcome.unwrap()["branch"], "work");
 
         let elsewhere = of("elsewhere", "C");
@@ -4667,8 +4667,8 @@ mod tests {
         );
     }
 
-    fn expired_leases_requeue_or_fail_at_the_attempt_limit(store: &dyn Store) {
-        for (id, max_attempts, expected) in [
+    fn expired_leases_requeue_or_fail_at_the_run_limit(store: &dyn Store) {
+        for (id, max_runs, expected) in [
             ("o/r#requeue", 3, LeaseRecovery::Requeued),
             ("o/r#fail", 1, LeaseRecovery::Failed),
         ] {
@@ -4683,7 +4683,7 @@ mod tests {
             let key = lease.key().to_owned();
             assert_eq!(
                 registry
-                    .recover(&lease, max_attempts, "operation-02")
+                    .recover(&lease, max_runs, "operation-02")
                     .unwrap(),
                 None
             );
@@ -4695,13 +4695,13 @@ mod tests {
             assert_eq!(
                 store
                     .handle()
-                    .recover(&expired[0], max_attempts, "operation-02")
+                    .recover(&expired[0], max_runs, "operation-02")
                     .unwrap(),
                 Some(expected)
             );
             assert_eq!(
                 registry
-                    .recover(&expired[0], max_attempts, "operation-02")
+                    .recover(&expired[0], max_runs, "operation-02")
                     .unwrap(),
                 None,
                 "a lease is recovered once"
@@ -4714,7 +4714,7 @@ mod tests {
                         .claim_with_lease(None, "operation-02", DEFAULT_LEASE, BTreeMap::new())
                         .unwrap()
                         .unwrap();
-                    assert_eq!(again.attempt(), 2);
+                    assert_eq!(again.number(), 2);
                     registry
                         .finish(
                             &registry.read_claimed(&key).unwrap().unwrap(),
@@ -4741,7 +4741,7 @@ mod tests {
         }
     }
 
-    fn an_expired_lease_is_handed_over_once_with_its_claim_and_attempt(store: &dyn Store) {
+    fn an_expired_lease_is_handed_over_once_with_its_claim_and_run(store: &dyn Store) {
         let registry = store.handle();
         registry.submit_brief(&brief("hand-over")).unwrap();
         let meta = BTreeMap::from([("mission_id".to_owned(), serde_json::json!("m-1"))]);
@@ -4767,13 +4767,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(handed.station(), "station-b");
-        assert_eq!(handed.attempt(), lease.attempt());
+        assert_eq!(handed.number(), lease.number());
         assert_eq!(handed.meta()["mission_id"], "m-1");
         assert_eq!(handed.meta()["adopt"], "s-1");
         let stored = registry.lease(lease.key()).unwrap().unwrap();
         assert_eq!(
-            (stored.station(), stored.attempt(), stored.meta()),
-            (handed.station(), handed.attempt(), handed.meta())
+            (stored.station(), stored.number(), stored.meta()),
+            (handed.station(), handed.number(), handed.meta())
         );
         assert!(registry.read_claimed(lease.key()).unwrap().is_some());
 

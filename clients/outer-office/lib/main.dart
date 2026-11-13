@@ -287,9 +287,9 @@ class MissionBoard extends ChangeNotifier
           ),
         ),
       ];
-      missionAttempts = const {
+      missionRuns = const {
         ('G', 'mission-007'): [
-          MissionAttemptSummary(
+          MissionRunSummary(
             attempt: 1,
             station: 'station-remote-02',
             theater: 'local',
@@ -299,7 +299,7 @@ class MissionBoard extends ChangeNotifier
                 'its harness ran on that Station\'s own host',
             checkpointBranch: 'mission-007-review',
           ),
-          MissionAttemptSummary(
+          MissionRunSummary(
             attempt: 2,
             station: 'station-control-01',
             theater: 'local',
@@ -447,8 +447,8 @@ class MissionBoard extends ChangeNotifier
   List<RunSummary> runs = const [];
   List<MissionBriefSummary> missionBriefs = const [];
 
-  /// Every attempt at each Mission, by (Operation, Mission), first first.
-  Map<(String, String), List<MissionAttemptSummary>> missionAttempts = const {};
+  /// Every run at each Mission, by (Operation, Mission), first first.
+  Map<(String, String), List<MissionRunSummary>> missionRuns = const {};
 
   /// What each Mission is called now, by (Operation, Mission UID).
   Map<(String, String), String> missionHandles = const {};
@@ -3102,12 +3102,12 @@ class MissionBoard extends ChangeNotifier
               )
               .whereType<MissionBriefSummary>()
               .toList(growable: false);
-          missionAttempts = {
+          missionRuns = {
             for (final item in missions.cast<Map<String, dynamic>>())
               (item['operation_id'] as String, item['mission_id'] as String): [
                 for (final attempt
                     in (item['attempts'] as List<dynamic>? ?? const []))
-                  MissionAttemptSummary.fromJson(
+                  MissionRunSummary.fromJson(
                     attempt as Map<String, dynamic>,
                   ),
               ],
@@ -3235,7 +3235,7 @@ class MissionBoard extends ChangeNotifier
     _cadence?.forget();
     runs = const [];
     missionBriefs = const [];
-    missionAttempts = const {};
+    missionRuns = const {};
     missionHandles = const {};
     missionPending = const {};
     auditEntries = const [];
@@ -3261,8 +3261,8 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
-  List<MissionAttemptSummary> attempts(String operationId, String missionId) =>
-      missionAttempts[(operationId, missionId)] ?? const [];
+  List<MissionRunSummary> attempts(String operationId, String missionId) =>
+      missionRuns[(operationId, missionId)] ?? const [];
 
   /// What a Mission is called: its handle, else its ID. Routes and links keep the ID.
   String handleOf(String operationId, String missionId) =>
@@ -3333,13 +3333,13 @@ class MissionBoard extends ChangeNotifier
     return now;
   }
 
-  /// The latest attempt at a Mission with its final report, which only the Mission's own detail
+  /// The latest run at a Mission with its final report, which only the Mission's own detail
   /// carries; `null` before one is recorded and in preview.
-  Future<MissionAttemptSummary?> loadLatestAttempt(
+  Future<MissionRunSummary?> loadLatestRun(
     String operationId,
     String missionId,
   ) async {
-    if (demo) return currentAttempt(operationId, missionId);
+    if (demo) return currentRun(operationId, missionId);
     final response = await _userRequest(
       'GET',
       '/v1/operations/${Uri.encodeComponent(operationId)}'
@@ -3356,9 +3356,9 @@ class MissionBoard extends ChangeNotifier
     return (mission['attempts'] as List<dynamic>? ?? const [])
         .map(
           (attempt) =>
-              MissionAttemptSummary.fromJson(attempt as Map<String, dynamic>),
+              MissionRunSummary.fromJson(attempt as Map<String, dynamic>),
         )
-        .fold<MissionAttemptSummary?>(
+        .fold<MissionRunSummary?>(
           null,
           (latest, attempt) =>
               latest == null || attempt.attempt > latest.attempt
@@ -3401,7 +3401,7 @@ class MissionBoard extends ChangeNotifier
   }
 
   /// Asks the Station to probe a verifying Mission's deliverables; the findings arrive on the
-  /// attempt's evidence once it has run them.
+  /// run's evidence once it has run them.
   Future<void> probeMission({
     required String operationId,
     required String missionId,
@@ -3417,8 +3417,8 @@ class MissionBoard extends ChangeNotifier
   }
 
   /// Decides a verifying Mission: `done`, `redispatch` (with an optional [amendment] for the
-  /// next attempt) or `failed`, each with its [reason]. Returns the decision as recorded, with
-  /// the attempt it is on.
+  /// next run) or `failed`, each with its [reason]. Returns the decision as recorded, with
+  /// the run it is on.
   Future<Map<String, dynamic>> verifyMission({
     required String operationId,
     required String missionId,
@@ -3466,10 +3466,10 @@ class MissionBoard extends ChangeNotifier
     );
   }
 
-  /// The latest attempt at a Mission, whose Run sets its state; `null` before one is
+  /// The latest run at a Mission, whose Run sets its state; `null` before one is
   /// recorded.
-  MissionAttemptSummary? currentAttempt(String operationId, String missionId) =>
-      attempts(operationId, missionId).fold<MissionAttemptSummary?>(
+  MissionRunSummary? currentRun(String operationId, String missionId) =>
+      attempts(operationId, missionId).fold<MissionRunSummary?>(
         null,
         (latest, attempt) => latest == null || attempt.attempt > latest.attempt
             ? attempt
@@ -4917,9 +4917,9 @@ String verdictWords(String verdict) => switch (verdict) {
   _ => verdict,
 };
 
-/// What a person found when they checked how an attempt ended.
-class AttemptVerdictSummary {
-  const AttemptVerdictSummary({
+/// What a person found when they checked how a run ended.
+class RunVerdictSummary {
+  const RunVerdictSummary({
     required this.verdict,
     required this.by,
     this.note,
@@ -4930,8 +4930,8 @@ class AttemptVerdictSummary {
   final String by;
   final String? note;
 
-  factory AttemptVerdictSummary.fromJson(Map<String, dynamic> json) =>
-      AttemptVerdictSummary(
+  factory RunVerdictSummary.fromJson(Map<String, dynamic> json) =>
+      RunVerdictSummary(
         verdict: json['verdict'] as String,
         by: json['by'] as String,
         note: json['note'] as String?,
@@ -5046,9 +5046,9 @@ class PendingMission {
   }
 }
 
-/// One attempt at a Mission: where it ran and how it stands.
-class MissionAttemptSummary {
-  const MissionAttemptSummary({
+/// One run at a Mission: where it ran and how it stands.
+class MissionRunSummary {
+  const MissionRunSummary({
     required this.attempt,
     required this.station,
     required this.status,
@@ -5070,7 +5070,7 @@ class MissionAttemptSummary {
   /// AI6's ID for this run, its UID, apart from the provider's Run ID.
   final String? runId;
 
-  /// The run's handle, `<mission handle>.<attempt>`, as the Mission was called when it opened.
+  /// The run's handle, `<mission handle>.<run>`, as the Mission was called when it opened.
   final String? handle;
   final String station;
   final String? theater;
@@ -5078,7 +5078,7 @@ class MissionAttemptSummary {
   /// `active`, `parked`, `ended` or `lost`.
   final String status;
 
-  /// Why the attempt was lost, when it was.
+  /// Why the run was lost, when it was.
   final String? lost;
 
   /// The branch its work was last checkpointed to, when it was.
@@ -5088,7 +5088,7 @@ class MissionAttemptSummary {
   final String? route;
 
   /// What a person found when they checked how it ended.
-  final AttemptVerdictSummary? verdict;
+  final RunVerdictSummary? verdict;
 
   /// The last message its Agent ended a turn with, as data; only one Mission's detail has it.
   final String? finalReport;
@@ -5112,8 +5112,8 @@ class MissionAttemptSummary {
     ].join(' ');
   }
 
-  factory MissionAttemptSummary.fromJson(Map<String, dynamic> json) =>
-      MissionAttemptSummary(
+  factory MissionRunSummary.fromJson(Map<String, dynamic> json) =>
+      MissionRunSummary(
         attempt: json['attempt'] as int,
         runId: json['run_id'] as String?,
         handle: json['handle'] as String?,
@@ -5124,7 +5124,7 @@ class MissionAttemptSummary {
         checkpointBranch: json['checkpoint_branch'] as String?,
         route: _routeOf(json['route'] as Map<String, dynamic>?),
         verdict: switch (json['verdict']) {
-          final Map<String, dynamic> verdict => AttemptVerdictSummary.fromJson(
+          final Map<String, dynamic> verdict => RunVerdictSummary.fromJson(
             verdict,
           ),
           _ => null,

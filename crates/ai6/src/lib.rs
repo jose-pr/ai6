@@ -99,7 +99,7 @@ pub use directorates::m::roster::{
     RouteRef, Workspace,
 };
 pub use directorates::m::scorecard::{
-    AgentCard, AttemptRef, DEFAULT_SMALL_SAMPLE, DEFAULT_WINDOW_DAYS, Judgment, ModelCard,
+    AgentCard, RunRef, DEFAULT_SMALL_SAMPLE, DEFAULT_WINDOW_DAYS, Judgment, ModelCard,
     RouteCard, Scorecard, ScorecardDefinition, ScorecardPolicy, Standing,
     from_registry as scorecard_from, judge,
 };

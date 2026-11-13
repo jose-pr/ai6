@@ -2,9 +2,9 @@
 //! someone decides it, and the Station only provides what a decision is made from.
 //!
 //! The Station records what the Mission was to deliver, reads those things back on request with
-//! read-only probes (`station::probes`), keeps what each found as evidence on the attempt, and
+//! read-only probes (`station::probes`), keeps what each found as evidence on the run, and
 //! carries out the decision a person (later, the Operation's 00) records in the Registry: done,
-//! failed, or the next attempt with the reason. It never decides whether the work is enough.
+//! failed, or the next run with the reason. It never decides whether the work is enough.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -65,7 +65,7 @@ pub(super) fn verify_done(
     event
 }
 
-/// Records on the Mission's latest attempt what it was to deliver: its role's deliverables and its
+/// Records on the Mission's latest run what it was to deliver: its role's deliverables and its
 /// brief's.
 pub(super) fn begin(state: &DaemonState, mission_id: &str) {
     let Some(hold) = run_hold(state, mission_id) else {
@@ -310,7 +310,7 @@ fn comment(
     last
 }
 
-/// Probes every deliverable of the attempt `mission_id` is on and keeps what was found as its
+/// Probes every deliverable of the run `mission_id` is on and keeps what was found as its
 /// evidence, answering the request for it.
 pub(super) fn probe_and_record(state: &DaemonState, mission_id: &str) -> Result<usize, String> {
     let mission = state
@@ -338,7 +338,7 @@ pub(super) fn probe_and_record(state: &DaemonState, mission_id: &str) -> Result<
 }
 
 /// Files what the probes found as a Report of the Mission's Operation, linked to the Mission.
-/// Reading the same attempt back again updates the one Report. Anything not found makes it a
+/// Reading the same run back again updates the one Report. Anything not found makes it a
 /// warning.
 fn report_readback(state: &DaemonState, mission: &Mission, attempt: &str, evidence: &[Evidence]) {
     let Some(operation) = mission.operation_id.as_deref() else {
@@ -437,8 +437,8 @@ pub(super) fn answer_probe_requests(state: &DaemonState) {
     }
 }
 
-/// Queues a verifying Mission as its next attempt, told what the person who decided said was
-/// wrong. The attempt that was verified is over: it keeps its verdict, and so counts against its
+/// Queues a verifying Mission as its next run, told what the person who decided said was
+/// wrong. The run that was verified is over: it keeps its verdict, and so counts against its
 /// Agent.
 pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &MissionVerdict) {
     let mission_id = mission.mission_id.as_str();
@@ -449,7 +449,7 @@ pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &Missi
             return;
         }
     };
-    let attempt = run_hold(state, mission_id).map_or(1, |hold| hold.attempt);
+    let attempt = run_hold(state, mission_id).map_or(1, |hold| hold.number);
     let mut told = format!(
         "Attempt {attempt} of this Mission was not accepted by {}: {}",
         verdict.by,
@@ -684,7 +684,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_decision_settles_done_redispatches_as_the_next_attempt_or_fails() {
+    async fn a_decision_settles_done_redispatches_as_the_next_run_or_fails() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
         let (done, failed, again) = (
@@ -719,7 +719,7 @@ mod tests {
         wait_for_state(&state, &done, MissionState::Done).await;
         wait_for_state(&state, &failed, MissionState::Failed).await;
 
-        // The redispatched Mission is queued as the next attempt, told why.
+        // The redispatched Mission is queued as the next run, told why.
         let queued = state.missions.lock().unwrap().get(&again).cloned().unwrap();
         assert_eq!(queued.state, MissionState::Queued);
         assert_eq!(queued.prompt, "do the work", "the brief is as filed");
@@ -731,7 +731,7 @@ mod tests {
             "{task}"
         );
         let first = latest(&state, &again);
-        assert_eq!(first.attempt, 1);
+        assert_eq!(first.number, 1);
         assert!(first.status.is_closed(), "the verified attempt is over");
         assert_eq!(
             scorecard::judge(&first),
@@ -742,7 +742,7 @@ mod tests {
         super::super::schedule_queued_once(&state).await;
         wait_for_verifying(&state, &again).await;
         let second = latest(&state, &again);
-        assert_eq!(second.attempt, 2);
+        assert_eq!(second.number, 2);
         assert_eq!(
             second.predecessor.as_deref(),
             Some(first.id.as_str())

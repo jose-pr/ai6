@@ -365,7 +365,7 @@ mod tests {
         format!("{SETTINGS}[operation.G.scorecard]\nsmall_sample = 3\n{rules}\n")
     }
 
-    /// Ends `n` attempts of `agent` in `state` ("done" or "failed").
+    /// Ends `n` runs of `agent` in `state` ("done" or "failed").
     fn attempts(state: &DaemonState, agent: &str, done: usize, failed: usize) {
         for (index, outcome) in std::iter::repeat_n("done", done)
             .chain(std::iter::repeat_n("failed", failed))

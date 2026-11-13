@@ -3,7 +3,7 @@
 //!
 //! The charge is the Operation's 00 Agent in charge, so it verifies and the Station only provides.
 //! A decision takes the path a person's does ([`decisions::decide`]): audited, recorded as the
-//! attempt's verdict, on the timeline, and applied by the Mission's Station, which counts it on
+//! run's verdict, on the timeline, and applied by the Mission's Station, which counts it on
 //! the scorecard. A charge whose clearance has been lowered to `desk` recommends instead, and a
 //! person confirms. A person's decision replaces a charge's, and a charge never replaces a person's.
 
@@ -58,7 +58,7 @@ impl DecisionDesk {
         format!("{BY_PREFIX}{}", self.operation)
     }
 
-    /// The latest attempt at the Mission `name` names (a UID or a handle), when the Operation is
+    /// The latest run at the Mission `name` names (a UID or a handle), when the Operation is
     /// the charge's.
     fn latest(&self, name: &str) -> Result<RunRecord, String> {
         let intake = &self.state.intake;
@@ -79,7 +79,7 @@ impl DecisionDesk {
             .ok_or_else(|| "that is not a Mission of your Operation".to_owned())
     }
 
-    /// Your Operation's Missions that are not settled: the latest attempt of each, with its state.
+    /// Your Operation's Missions that are not settled: the latest run of each, with its state.
     pub(in crate::station::server) fn missions(&self) -> Result<String, String> {
         let mut latest: BTreeMap<String, RunRecord> = BTreeMap::new();
         for record in self
@@ -91,7 +91,7 @@ impl DecisionDesk {
             .filter(|record| record.operation.as_deref() == Some(self.operation.as_str()))
         {
             match latest.get(&record.mission_id) {
-                Some(held) if held.attempt >= record.attempt => {}
+                Some(held) if held.number >= record.number => {}
                 _ => {
                     latest.insert(record.mission_id.clone(), record);
                 }
@@ -104,7 +104,7 @@ impl DecisionDesk {
                 json!({
                     "mission": record.mission_id,
                     "handle": record.handle,
-                    "attempt": record.attempt,
+                    "attempt": record.number,
                     "state": record.result.as_ref().map(|result| result.state.as_str()),
                     "agent": record.launch.as_ref().and_then(|launch| launch.agent.as_deref()),
                     "decided": record.verdict.is_some(),
@@ -115,13 +115,13 @@ impl DecisionDesk {
         Ok(fenced("operation_missions", &Value::Array(rows)))
     }
 
-    /// One Mission's latest attempt: its brief, its final report, what it was to deliver, what
+    /// One Mission's latest run: its brief, its final report, what it was to deliver, what
     /// the probes found and what has been decided.
     pub(in crate::station::server) fn detail(&self, name: &str) -> Result<String, String> {
         let record = self.latest(name)?;
         Ok(fenced(
             "mission_detail",
-            &super::attempt_detail(&self.state, &record),
+            &super::run_detail(&self.state, &record),
         ))
     }
 
@@ -132,13 +132,13 @@ impl DecisionDesk {
             "deliverables",
             &json!({
                 "mission": record.mission_id,
-                "attempt": record.attempt,
+                "attempt": record.number,
                 "deliverables": record.deliverables,
             }),
         ))
     }
 
-    /// Reads every deliverable of the verifying attempt back and keeps what was found as its
+    /// Reads every deliverable of the verifying run back and keeps what was found as its
     /// evidence. A Mission another Station holds is asked of that Station, which answers on its
     /// next pass.
     pub(in crate::station::server) fn probe(&self, name: &str) -> Result<String, String> {
@@ -241,7 +241,7 @@ impl DecisionDesk {
         decisions::decide(store, &decision).map_err(|error| error.to_string())?;
         Ok(json!({
             "decided": word,
-            "attempt": record.attempt,
+            "attempt": record.number,
             "note": "the Mission's Station settles it, or queues the next attempt, on its next pass",
         })
         .to_string())

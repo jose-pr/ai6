@@ -148,7 +148,7 @@ const _labels = {
 
 /// The latest of [runs], the one carrying a Mission's current state: the highest `updatedAt`,
 /// none counting as oldest and the first of equals winning. Never `sequence`: that is a cursor
-/// within one provider Run, so a long first attempt would outrank the newer retry after it.
+/// within one provider Run, so a long first run would outrank the newer retry after it.
 /// Universal Exports' `Route::shows_mission` decides the same.
 RunSummary? currentRun(Iterable<RunSummary> runs) {
   RunSummary? current;
@@ -319,7 +319,7 @@ class MissionActionsMenu extends StatelessWidget {
           operationId: operationId,
           missionId: missionId,
           decision: action.substring('verify-'.length),
-          attempt: board.currentAttempt(operationId, missionId)?.attempt,
+          attempt: board.currentRun(operationId, missionId)?.attempt,
         );
       } on Object catch (error) {
         messenger?.showSnackBar(SnackBar(content: Text(error.toString())));

@@ -534,7 +534,7 @@ pub struct AgentRole {
     #[serde(default, skip_serializing_if = "review_choice_is_empty")]
     pub review: ReviewChoice,
     /// Whether a Run of this role that ends done with no green ink request decided in that
-    /// attempt is held for a person's verdict instead of being `done`.
+    /// run is held for a person's verdict instead of being `done`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub require_approval_before_done: bool,
     /// What every Mission of this role is to deliver, each `kind` or `kind:target` (see
@@ -718,7 +718,7 @@ pub struct Workspace {
     /// Whether each Mission gets its own copy. `false` works in the source in place.
     pub isolate: bool,
     /// The Git remote, by name or URL, a Mission's safe house is checkpointed to, so a
-    /// later attempt on another Station starts from its work. `None` (the default) pushes
+    /// later run on another Station starts from its work. `None` (the default) pushes
     /// nothing.
     pub checkpoint_remote: Option<String>,
     /// Seconds between checkpoints while a Run runs.
@@ -762,8 +762,8 @@ impl Default for Workspace {
 #[serde(rename_all = "snake_case")]
 #[map(rename_all = "snake_case")]
 pub enum OnLost {
-    /// Try again as a new attempt on another eligible Station, with a hand-off brief, until
-    /// the Registry's attempt limit.
+    /// Try again as a new run on another eligible Station, with a hand-off brief, until
+    /// the Registry's run limit.
     #[default]
     #[schema(label = "Try again on another Station, with a hand-off")]
     Retry,
@@ -2675,7 +2675,7 @@ pub(crate) struct AgentRoleDefinition {
     #[form(form)]
     review: ReviewChoice,
     /// Whether a Run of this role that ends done with no green ink request decided in that
-    /// attempt is held for a person's verdict instead of being done.
+    /// run is held for a person's verdict instead of being done.
     #[schema(title = "Require a decision before done", advanced)]
     #[map(default)]
     require_approval_before_done: bool,

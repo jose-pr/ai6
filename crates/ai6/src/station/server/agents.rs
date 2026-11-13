@@ -439,7 +439,7 @@ fn launched(state: &DaemonState, mission_id: &str) -> Option<(Mission, Option<St
 }
 
 /// Counts the Mission's state into its Agent's record when it is a finished or stalled one,
-/// for Run `attempt`, which this Station holds. The Mission, the attempt and the outcome
+/// for Run `run`, which this Station holds. The Mission, the run and the outcome
 /// name the event, so a state seen twice, or by the Station that adopted the Run, counts
 /// once. Chief of Staff reviews are not the Agent's own work and are not counted.
 pub(super) fn count_mission(state: &DaemonState, mission_id: &str, attempt: u32) {
@@ -462,7 +462,7 @@ pub(super) fn count_mission(state: &DaemonState, mission_id: &str, attempt: u32)
     );
 }
 
-/// Counts Run `attempt` of a Mission as lost with its Station or runner: the
+/// Counts Run `run` of a Mission as lost with its Station or runner: the
 /// infrastructure's doing, never charged as the Agent's failure, even when the Mission fails.
 pub(super) fn count_lost(state: &DaemonState, mission_id: &str, attempt: u32) {
     let Some((mission, launched)) = launched(state, mission_id) else {
@@ -731,14 +731,14 @@ mod tests {
             .unwrap();
     }
 
-    /// Gives `mission` a Run record held by this Station, attempt `attempt`, launched with
+    /// Gives `mission` a Run record held by this Station, run `run`, launched with
     /// `model`.
     fn launch(state: &super::DaemonState, mission: &str, model: &str, attempt: u32) {
         let record = state
             .intake
             .open_run(
                 NewRun::new(format!("s-{mission}-{attempt}"), mission, "test")
-                    .with_attempt(attempt, None),
+                    .with_number(attempt, None),
                 std::time::Duration::from_secs(600),
             )
             .unwrap();
@@ -755,7 +755,7 @@ mod tests {
             mode: Default::default(),
             run: Some(RunHold {
                 id: record.id,
-                attempt: record.attempt,
+                number: record.number,
                 fence: record.fence,
             }),
             runner: None,
@@ -799,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn a_held_run_counts_once_per_attempt_and_outcome_under_its_launch_model() {
+    fn a_held_run_counts_once_per_run_and_outcome_under_its_launch_model() {
         let root = tempfile::tempdir().unwrap();
         // The roster now names sonnet; the Runs were launched with opus.
         let state = test_state(root.path(), "", &AGENTS.replace("opus", "sonnet"));

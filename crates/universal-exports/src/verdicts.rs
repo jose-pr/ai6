@@ -1,4 +1,4 @@
-//! A person's verdict on a Mission's outcome: the latest attempt that ended done or held is marked
+//! A person's verdict on a Mission's outcome: the latest run that ended done or held is marked
 //! confirmed, disputed or failed verification, under `mission.verify`.
 //!
 //! The scorecard reads it from the Run record; a Station settles a held Mission by it. A
@@ -6,7 +6,7 @@
 //!
 //! A Mission whose Run ended done is `verifying`, and nothing but a decision settles it: the
 //! same action asks the Station to probe what it was to deliver (`probe`) and decides it (`verify`:
-//! done, redispatch as the next attempt, or failed), each with its reason.
+//! done, redispatch as the next run, or failed), each with its reason.
 
 use ai6::directorates::registry::decisions::{self, VerifyingDecision};
 use ai6::{
@@ -34,7 +34,7 @@ pub(crate) struct VerdictRequest {
     note: Option<String>,
 }
 
-/// A verdict as recorded, with the attempt it is on.
+/// A verdict as recorded, with the run it is on.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GivenVerdict {
@@ -42,9 +42,9 @@ pub struct GivenVerdict {
     pub operation_id: String,
     /// The Mission's UID.
     pub mission_id: String,
-    /// The attempt it is on.
-    pub attempt: u32,
-    /// AI6's Run ID of that attempt.
+    /// The run it is on.
+    pub number: u32,
+    /// AI6's Run ID of that run.
     pub run_id: String,
     /// What was found, by whom and when.
     #[serde(flatten)]
@@ -64,7 +64,7 @@ fn refused_by(error: RunError) -> Refused {
 
 /// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verdict` with
 /// `{"verdict", "note"?}`: `mission.verify`. A later verdict replaces it. A refusal is
-/// `{"error": TEXT}`: 409 when the latest attempt has not ended done or held.
+/// `{"error": TEXT}`: 409 when the latest run has not ended done or held.
 pub(crate) async fn give(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -116,7 +116,7 @@ pub(crate) async fn give(
     Ok(Json(GivenVerdict {
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
-        attempt: record.attempt,
+        number: record.number,
         run_id: record.id,
         verdict,
     }))
@@ -127,13 +127,13 @@ pub(crate) async fn give(
 pub(crate) struct VerifyRequest {
     /// `done`, `redispatch` or `failed`.
     decision: String,
-    /// Why, for the record and for the next attempt when it is redispatched.
+    /// Why, for the record and for the next run when it is redispatched.
     reason: String,
-    /// For a redispatch, what the next attempt is told beyond its brief and the reason.
+    /// For a redispatch, what the next run is told beyond its brief and the reason.
     amendment: Option<String>,
 }
 
-/// A decision on a verifying Mission as recorded, with the attempt it is on.
+/// A decision on a verifying Mission as recorded, with the run it is on.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GivenDecision {
@@ -141,9 +141,9 @@ pub struct GivenDecision {
     pub operation_id: String,
     /// The Mission's UID.
     pub mission_id: String,
-    /// The attempt it is on.
-    pub attempt: u32,
-    /// AI6's Run ID of that attempt.
+    /// The run it is on.
+    pub number: u32,
+    /// AI6's Run ID of that run.
     pub run_id: String,
     /// `done`, `redispatch` or `failed`.
     pub decision: String,
@@ -154,8 +154,8 @@ pub struct GivenDecision {
 
 /// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verify` with
 /// `{"decision", "reason", "amendment"?}`: `mission.verify`. It decides a Mission whose latest
-/// attempt is verifying; its Station then settles it done or failed, or queues the next attempt.
-/// 409 when the latest attempt is not verifying.
+/// run is verifying; its Station then settles it done or failed, or queues the next run.
+/// 409 when the latest run is not verifying.
 pub(crate) async fn verify(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -200,7 +200,7 @@ pub(crate) async fn verify(
     Ok(Json(GivenDecision {
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
-        attempt: record.attempt,
+        number: record.number,
         run_id: record.id,
         decision: request.decision,
         verdict,
@@ -215,9 +215,9 @@ pub struct ProbeRequested {
     pub operation_id: String,
     /// The Mission's UID.
     pub mission_id: String,
-    /// The attempt whose deliverables will be probed.
-    pub attempt: u32,
-    /// AI6's Run ID of that attempt.
+    /// The run whose deliverables will be probed.
+    pub number: u32,
+    /// AI6's Run ID of that run.
     pub run_id: String,
     /// When it was asked for, as Unix seconds.
     pub requested_at: f64,
@@ -225,8 +225,8 @@ pub struct ProbeRequested {
 
 /// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/probe`: `mission.verify`. Asks
 /// the Station holding a verifying Mission to read back what it was to deliver; the findings
-/// appear as the latest attempt's `evidence` in the Mission's detail, and `probe_requested`
-/// clears when they have. 409 when the latest attempt is not verifying.
+/// appear as the latest run's `evidence` in the Mission's detail, and `probe_requested`
+/// clears when they have. 409 when the latest run is not verifying.
 pub(crate) async fn probe(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -260,13 +260,13 @@ pub(crate) async fn probe(
     Ok(Json(ProbeRequested {
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
-        attempt: record.attempt,
+        number: record.number,
         run_id: record.id,
         requested_at: at,
     }))
 }
 
-/// Why `latest`, the latest attempt at a Mission, cannot take a verdict in `operation`.
+/// Why `latest`, the latest run at a Mission, cannot take a verdict in `operation`.
 fn check_settled(latest: &Option<RunRecord>, operation: &str) -> Result<(), RunError> {
     match latest {
         Some(record) if record.operation.as_deref() == Some(operation) => record.takes_verdict(),
@@ -506,7 +506,7 @@ mod tests {
         .await;
         assert_eq!(denied.status(), 403);
 
-        // Only an attempt being verified is decided here.
+        // Only a run being verified is decided here.
         let not_verifying = act(
             &served,
             &served.operator,
@@ -600,7 +600,7 @@ mod tests {
             "{timeline:?}"
         );
 
-        // The verdict route does not redispatch: that needs the reason and the next attempt.
+        // The verdict route does not redispatch: that needs the reason and the next run.
         let word = verdict_route_redispatch(&served).await;
         assert_eq!(word, 400);
     }
@@ -690,7 +690,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_probe_is_asked_for_by_a_person_with_mission_verify_on_a_verifying_attempt() {
+    async fn a_probe_is_asked_for_by_a_person_with_mission_verify_on_a_verifying_run() {
         let served = served_with(ROLES).await;
         ended(&served, "m-verifying", "verifying");
         ended(&served, "m-done", "done");

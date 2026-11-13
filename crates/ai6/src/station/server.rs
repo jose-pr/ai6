@@ -1887,10 +1887,10 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
     if is_headquarters && let Ok(expired) = state.intake.expired() {
         for lease in expired {
             if lease.station() != station
-                && let Some(max_attempts) = recovery::extract(state, &lease)
-                    .max_attempts(state.station.limits().scheduler.intake_attempts)
+                && let Some(max_runs) = recovery::extract(state, &lease)
+                    .max_runs(state.station.limits().scheduler.intake_runs)
                 && let Ok(Some(LeaseRecovery::Failed)) =
-                    state.intake.recover(&lease, max_attempts, station)
+                    state.intake.recover(&lease, max_runs, station)
             {
                 standing::recovered_failed(state, lease.key());
             }
@@ -2118,7 +2118,7 @@ async fn schedule_recovered_once(state: &DaemonState) {
 
 /// Settles a Mission the restart found working when nothing is left to resume: its brief ended
 /// or went to another Station, or its Run record is gone, ended, lost or another Station's.
-/// The Mission ends here, an attempt lost at restart is handed back to the Registry under the
+/// The Mission ends here, a run lost at restart is handed back to the Registry under the
 /// Operation's `on_lost`, and `true` is answered. `false` leaves the Mission to be resumed.
 async fn settle_at_restart(state: &DaemonState, mission_id: &str) -> bool {
     let worker = state.clone();
@@ -2241,7 +2241,7 @@ fn sync_run_record(state: &DaemonState, mission_id: &str) {
         .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
         // Only the Station that holds the Run counts what its Agent did.
-        Ok(_) | Err(RunError::Ended) => agents::count_mission(state, mission_id, hold.attempt),
+        Ok(_) | Err(RunError::Ended) => agents::count_mission(state, mission_id, hold.number),
         Err(RunError::Stale | RunError::HeldBy(_)) => fence_out(state, mission_id),
         Err(error) => eprintln!("ai6: Run record {:?} not updated: {error}", hold.id),
     }
@@ -2267,11 +2267,11 @@ fn acquire_run_hold(
     let record = match taken {
         Ok(record) => record,
         Err(RunError::NotFound) => {
-            let attempt = existing.as_ref().map_or(1, |hold| hold.attempt);
+            let attempt = existing.as_ref().map_or(1, |hold| hold.number);
             let mut new_run = NewRun::new(new_uid(), mission_id, state.station_id.as_str())
                 .with_handle(current_handle(state, mission_id))
                 .with_provider_id(provider_id.as_str())
-                .with_attempt(attempt, None);
+                .with_number(attempt, None);
             if let Some(operation) = &mission.operation_id {
                 new_run = new_run.with_operation(operation.as_str());
             }
@@ -2284,7 +2284,7 @@ fn acquire_run_hold(
     };
     let hold = RunHold {
         id: record.id,
-        attempt: record.attempt,
+        number: record.number,
         fence: record.fence,
     };
     if existing.as_ref() != Some(&hold) {
@@ -2314,8 +2314,8 @@ fn current_handle(state: &DaemonState, mission_id: &str) -> String {
         .unwrap_or_else(|| mission_id.to_owned())
 }
 
-/// Opens a run's Run record, as the next attempt when this one already has a record: one
-/// another Station wrote, for a Mission this Station knows of no earlier attempt at.
+/// Opens a run's Run record, as the next run when this one already has a record: one
+/// another Station wrote, for a Mission this Station knows of no earlier run at.
 fn open_run(state: &DaemonState, mut run: NewRun) -> Result<RunRecord, RunError> {
     loop {
         match state
@@ -2323,7 +2323,7 @@ fn open_run(state: &DaemonState, mut run: NewRun) -> Result<RunRecord, RunError>
             .open_run(run.clone(), state.mission_lease())
         {
             Err(RunError::Exists) => {
-                run = run.next_attempt().ok_or(RunError::Exists)?;
+                run = run.next_run().ok_or(RunError::Exists)?;
             }
             opened => return opened,
         }
@@ -3744,11 +3744,11 @@ fn configured_agent_role(
         .map_err(|error| error.to_string())
 }
 
-/// Whether `brief` is the next attempt of `existing`, a Mission of this Station's book that
+/// Whether `brief` is the next run of `existing`, a Mission of this Station's book that
 /// ended: another brief for it, a reopened item or a standing Sleeper's next window. The same
-/// brief claimed again is a lapse recovered, not an attempt. A Mission that records no brief
+/// brief claimed again is a lapse recovered, not a run. A Mission that records no brief
 /// is judged by what it was told.
-fn is_next_attempt(existing: &Mission, operation_id: &str, brief: &Brief) -> bool {
+fn is_next_run(existing: &Mission, operation_id: &str, brief: &Brief) -> bool {
     is_terminal_state(existing.state)
         && existing.operation_id.as_deref() == Some(operation_id)
         && match &existing.brief_digest {
@@ -3763,7 +3763,7 @@ fn create_intake_mission(
     mission_id: &MissionId,
     (operation_id, agent_id, role_id): (String, String, Option<String>),
 ) -> Result<(), String> {
-    // An attempt this Station gave up as lost may come back to it as the next one.
+    // A run this Station gave up as lost may come back to it as the next one.
     let (ended_here, again) = state
         .missions
         .lock()
@@ -3774,10 +3774,10 @@ fn create_intake_mission(
                 is_terminal_state(existing.state)
                     && existing.operation_id.as_deref() == Some(operation_id.as_str())
                     && existing.prompt == brief.prompt(),
-                is_next_attempt(existing, &operation_id, brief),
+                is_next_run(existing, &operation_id, brief),
             )
         });
-    let retry = ended_here && recovery::retries_lost_attempt(state, mission_id.as_str());
+    let retry = ended_here && recovery::retries_lost_run(state, mission_id.as_str());
     let naming = review::naming_of(state, brief);
     let mut missions = state
         .missions
@@ -3871,7 +3871,7 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
         .read_claimed(lease.key())
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "claimed brief file is missing".to_owned())?;
-    // Read on its own, so the book is unlocked when a lost attempt is looked up below.
+    // Read on its own, so the book is unlocked when a lost run is looked up below.
     let existing = state
         .missions
         .lock()
@@ -3880,12 +3880,12 @@ fn ensure_leased_mission(state: &DaemonState, lease: &Lease) -> Result<(), Strin
         .cloned();
     if let Some(existing) = existing {
         let operation = existing.operation_id.as_deref().unwrap_or_default();
-        if !is_next_attempt(&existing, operation, &brief) {
+        if !is_next_run(&existing, operation, &brief) {
             if existing.prompt != brief.prompt() {
                 return Err(format!("Mission ID {mission_id} is already in use"));
             }
             if !is_terminal_state(existing.state)
-                || !recovery::retries_lost_attempt(state, mission_id.as_str())
+                || !recovery::retries_lost_run(state, mission_id.as_str())
             {
                 return Ok(());
             }
@@ -4756,7 +4756,7 @@ fn resolve_working_area(
         &mission.prompt,
         state_root,
         isolate,
-        // A later attempt continues in the safe house the earlier one left.
+        // A later run continues in the safe house the earlier one left.
         mission.safe_house.clone().filter(|report| report.kept),
         checkpoint,
     )
@@ -4771,7 +4771,7 @@ fn resolve_working_area(
 /// Opens an Operation's safe house through its provider; `None` when it has no provider.
 /// `name`, the Mission's handle when it opens, names its branch and directory. `reopen`
 /// re-attaches to a safe house an earlier run left behind on this Station; `checkpoint` starts
-/// from the work a lost attempt saved elsewhere.
+/// from the work a lost run saved elsewhere.
 #[allow(clippy::too_many_arguments)]
 fn open_safe_house(
     plugins: &plugins::Plugins,
@@ -5177,12 +5177,12 @@ async fn start_mission(
     let area_mission = mission.clone();
     let remote_hands = plan.mode == ExecutionMode::RemoteHands;
     let (area_theater, area_root) = (theater_id.clone(), plan.root.clone());
-    // An earlier attempt another Station recorded, when this Station holds none of its own.
+    // An earlier run another Station recorded, when this Station holds none of its own.
     let earlier = match run_hold(&state, &mission_id) {
         Some(_) => None,
         None => recovery::predecessor(&state, &mission.mission_id),
     };
-    // A lost attempt's checkpoint, when there is no safe house here to continue in.
+    // A lost run's checkpoint, when there is no safe house here to continue in.
     let checkpoint = earlier
         .as_ref()
         .filter(|record| record.status == RunStatus::Lost && mission.safe_house.is_none())
@@ -5474,7 +5474,7 @@ async fn start_mission(
     {
         return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
     }
-    // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
+    // A Mission started again (a later run) keeps the lease of the run it replaces
     // until the new Run is recorded.
     let previous_hold = run_hold(&state, &mission_id);
     // Recorded before the harness starts, so a Station that dies while it starts can find it.
@@ -5551,7 +5551,7 @@ async fn start_mission(
         .await;
         (project.load, project.mcp)
     };
-    // A standing Sleeper's window may take up the provider Run its last attempt left.
+    // A standing Sleeper's window may take up the provider Run its last run left.
     let window_run = standing::of(&state, mission_id.as_str());
     let resume_from = window_run.as_ref().and_then(|run| {
         standing::resume_from(
@@ -5609,7 +5609,7 @@ async fn start_mission(
         detached: Arc::new(AtomicBool::new(false)),
     });
     let reach = recovery::reach_watch(&state, mission.operation_id.as_deref());
-    // The lost attempt's harness, if its runner kept it, must not work beside this one.
+    // The lost run's harness, if its runner kept it, must not work beside this one.
     let stale_runner_run = earlier
         .as_ref()
         .filter(|record| {
@@ -5771,18 +5771,18 @@ async fn start_mission(
 
     let (attempt, predecessor) = previous_hold
         .as_ref()
-        .map(|hold| (hold.attempt, hold.id.clone()))
+        .map(|hold| (hold.number, hold.id.clone()))
         .or_else(|| {
             earlier
                 .as_ref()
-                .map(|record| (record.attempt, record.id.clone()))
+                .map(|record| (record.number, record.id.clone()))
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
     let mut new_run =
         NewRun::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
             .with_handle(current_handle(&state, mission_id.as_str()))
             .with_theater(theater_id.as_str())
-            .with_attempt(attempt, predecessor)
+            .with_number(attempt, predecessor)
             .with_exposure(exposure.exposures());
     if let Some(run) = &window_run {
         new_run = new_run.with_window(run.window.as_str());
@@ -5810,7 +5810,7 @@ async fn start_mission(
     let hold = match open_run(&state, new_run) {
         Ok(record) => RunHold {
             id: record.id,
-            attempt: record.attempt,
+            number: record.number,
             fence: record.fence,
         },
         Err(error) => {
@@ -5930,7 +5930,7 @@ async fn start_mission(
 /// The route `mission`'s resume runs on, for a routed `agent`: the one its Run ran on, while
 /// its harness is still held here or by a runner; otherwise by the resume rule
 /// ([`routes::for_resume`]), which may leave it on the route with room, move it, queue a new
-/// attempt or leave it waiting. The last two refuse this resume with the reason.
+/// run or leave it waiting. The last two refuse this resume with the reason.
 fn resume_route(
     state: &DaemonState,
     mission: &Mission,
@@ -6002,7 +6002,7 @@ fn resume_route(
             routes::record_chosen(state, operation, mission_id, &agent.id, "moved", &on);
             Ok(Some(on))
         }
-        routes::ResumeOn::NewAttempt(why) => {
+        routes::ResumeOn::NewRun(why) => {
             if hand_off(state, mission_id, agent.id.clone()) {
                 eprintln!("ai6: Mission {mission_id:?} starts a new attempt: {why}");
             }
@@ -7932,7 +7932,7 @@ fn denied_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> 
     denied.then_some(DENIED_REASON)
 }
 
-/// The reason an ended attempt of a Sleeper's order is published with, so the board says it is an
+/// The reason an ended run of a Sleeper's order is published with, so the board says it is an
 /// order that failed rather than one Mission.
 #[cfg(feature = "publisher")]
 fn order_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
@@ -7991,7 +7991,7 @@ const LIMIT_RESET_MESSAGE: &str =
 
 /// Stops a Run a provider limit ended, then parks the Mission until the quota resets or,
 /// when the Operation asks for it and another qualified Agent is available, hands it to
-/// that Agent as a new attempt. The safe house stays: either way the work continues in it.
+/// that Agent as a new run. The safe house stays: either way the work continues in it.
 fn handle_limit(
     state: &DaemonState,
     mission_id: &str,
@@ -8100,10 +8100,10 @@ fn handle_limit(
     }
 }
 
-/// Queues an interrupted Mission again for `agent` as a new attempt and closes the attempt
+/// Queues an interrupted Mission again for `agent` as a new run and closes the run
 /// it replaces; the next start records the replacement. Whether it was queued.
 fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
-    // Taken before the requeue: once queued, a scheduler pass may record the next attempt.
+    // Taken before the requeue: once queued, a scheduler pass may record the next run.
     let replaced = run_hold(state, mission_id);
     let handed_off = state
         .missions
@@ -10423,7 +10423,7 @@ queue = 1
             record.provider_id.as_deref(),
             Some("provider-id-007")
         );
-        assert_eq!((record.attempt, record.predecessor), (1, None));
+        assert_eq!((record.number, record.predecessor), (1, None));
         assert_eq!(record.fence, hold.fence);
 
         // Another Station opening the same Registry sees the same record.
@@ -10652,7 +10652,7 @@ queue = 1
     }
 
     #[tokio::test]
-    async fn a_backup_policy_posts_the_next_qualified_agent_as_a_new_attempt() {
+    async fn a_backup_policy_posts_the_next_qualified_agent_as_a_new_run() {
         let root = tempfile::tempdir().unwrap();
         let (state, _now) = limited_state(
             root.path(),
@@ -10694,7 +10694,7 @@ queue = 1
         schedule_queued_once(&state).await;
         wait_for_state(&state, "mission-1", MissionState::Blocked).await;
         let second = run_hold(&state, "mission-1").unwrap();
-        assert_eq!((second.attempt, first.attempt), (2, 1));
+        assert_eq!((second.number, first.number), (2, 1));
         let record = state.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
         assert_eq!(record.status, RunStatus::Active);
@@ -12752,7 +12752,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn a_run_whose_attempt_already_has_a_record_takes_the_next() {
+    async fn a_run_whose_run_already_has_a_record_takes_the_next() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-spend\"\n");
         let brief: Brief = serde_json::from_value(serde_json::json!({
@@ -12766,9 +12766,9 @@ theater = \"other-box\"
             ("G".to_owned(), "007".to_owned(), None),
         )
         .unwrap();
-        // Another Station's first attempt: this one holds nothing and its record is closed to
+        // Another Station's first run: this one holds nothing and its record is closed to
         // nobody's knowledge here, so the start must not fail on the ID it would have used.
-        let other = NewRun::new("mission-t.1", "mission-t", "other").with_attempt(1, None);
+        let other = NewRun::new("mission-t.1", "mission-t", "other").with_number(1, None);
         let open = state.intake.open_run(other, DEFAULT_LEASE).unwrap();
         state
             .intake
@@ -12781,7 +12781,7 @@ theater = \"other-box\"
             .unwrap();
         start_mission_by_id(&state, "mission-t").await;
         let hold = run_hold(&state, "mission-t").unwrap();
-        assert_eq!(hold.attempt, 2);
+        assert_eq!(hold.number, 2);
         assert!(crate::is_uid(&hold.id), "{}", hold.id);
         let record = state.intake.run(&hold.id).unwrap().unwrap();
         assert_eq!(record.predecessor.as_deref(), Some("mission-t.1"));
@@ -12789,10 +12789,10 @@ theater = \"other-box\"
 
         let opened = open_run(
             &state,
-            NewRun::new(crate::new_uid(), "mission-t", "here").with_attempt(2, None),
+            NewRun::new(crate::new_uid(), "mission-t", "here").with_number(2, None),
         )
         .unwrap();
-        assert_eq!(opened.attempt, 3, "a Mission has one record per attempt");
+        assert_eq!(opened.number, 3, "a Mission has one record per attempt");
         assert_ne!(opened.id, hold.id);
         state.stopping.store(true, Ordering::Release);
     }
@@ -13013,7 +13013,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn a_tool_the_operation_lists_exposes_the_run_and_a_later_attempt_inherits_it() {
+    async fn a_tool_the_operation_lists_exposes_the_run_and_a_later_run_inherits_it() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(
             root.path(),
@@ -14738,7 +14738,7 @@ theater = \"other-box\"
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             let hold = request.environment.get("AI6_DRIP_HOLD").cloned();
             RECORDED_STARTS.lock().unwrap().push(request);
-            // Each start is a new provider Run, so a later attempt can be told apart.
+            // Each start is a new provider Run, so a later run can be told apart.
             static STARTS: AtomicUsize = AtomicUsize::new(0);
             let start = STARTS.fetch_add(1, Ordering::Relaxed);
             Ok(DripRun::new(

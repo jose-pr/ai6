@@ -1,7 +1,7 @@
-//! Deciding a Mission whose latest attempt is verifying: the one path a person (through the
+//! Deciding a Mission whose latest run is verifying: the one path a person (through the
 //! gateway) and an Operation's charge both take.
 //!
-//! A decision is audited first, then recorded as the attempt's verdict, then put on the
+//! A decision is audited first, then recorded as the run's verdict, then put on the
 //! Operation's timeline. A charge held at `desk` clearance does not decide: it recommends, which
 //! is audited and timelined the same way and settles nothing.
 
@@ -10,7 +10,7 @@ use super::runs::{MissionVerdict, OutcomeVerdict, RunError, RunRecord};
 use super::store::AuditRecord;
 use super::timeline::TimelineEvent;
 
-/// What `by` found of the Mission's verifying attempt.
+/// What `by` found of the Mission's verifying run.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerifyingDecision<'a> {
@@ -20,9 +20,9 @@ pub struct VerifyingDecision<'a> {
     pub mission: &'a str,
     /// `Confirmed` (done), `FailedVerification` (failed) or `Redispatch`.
     pub verdict: OutcomeVerdict,
-    /// Why; the next attempt of a redispatch is told it.
+    /// Why; the next run of a redispatch is told it.
     pub reason: &'a str,
-    /// For a redispatch, what the next attempt is told beyond the brief and the reason.
+    /// For a redispatch, what the next run is told beyond the brief and the reason.
     pub amendment: Option<&'a str>,
     /// Who decided: a person ID, or `charge:operation:<codename>`.
     pub by: &'a str,
@@ -51,7 +51,7 @@ impl<'a> VerifyingDecision<'a> {
         }
     }
 
-    /// This decision with what a redispatch tells the next attempt.
+    /// This decision with what a redispatch tells the next run.
     #[must_use]
     pub fn with_amendment(mut self, amendment: Option<&'a str>) -> Self {
         self.amendment = amendment;
@@ -83,12 +83,12 @@ impl<'a> VerifyingDecision<'a> {
     }
 }
 
-/// Why `latest`, the latest attempt at a Mission, is not one `operation` may decide, recommend
+/// Why `latest`, the latest run at a Mission, is not one `operation` may decide, recommend
 /// on or probe: it is not the Operation's, or not verifying.
 ///
 /// # Errors
 ///
-/// `NotFound` for no attempt or another Operation's; `Unsettled` with its state otherwise.
+/// `NotFound` for no run or another Operation's; `Unsettled` with its state otherwise.
 pub fn check_verifying(
     latest: &Option<RunRecord>,
     operation: &str,
@@ -136,13 +136,13 @@ fn timeline(
     let _ = store.record_event(&event);
 }
 
-/// Decides the verifying attempt: audited, recorded as its verdict, and on the timeline. The
-/// Mission's Station then settles it done or failed, or queues the next attempt. A later decision
+/// Decides the verifying run: audited, recorded as its verdict, and on the timeline. The
+/// Mission's Station then settles it done or failed, or queues the next run. A later decision
 /// replaces this one until then.
 ///
 /// # Errors
 ///
-/// `NotFound`, or `Unsettled` when the latest attempt is not verifying; `Io` for a decision out of
+/// `NotFound`, or `Unsettled` when the latest run is not verifying; `Io` for a decision out of
 /// bounds, an audit that cannot be written, or a Registry failure.
 pub fn decide(
     store: &dyn RegistryBackend,
@@ -160,7 +160,7 @@ pub fn decide(
     Ok(record)
 }
 
-/// Records what a charge at `desk` clearance advises for the verifying attempt, as `decide` does a
+/// Records what a charge at `desk` clearance advises for the verifying run, as `decide` does a
 /// decision, except that nothing is settled: a person confirms it by deciding the same way.
 ///
 /// # Errors

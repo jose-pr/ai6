@@ -17,7 +17,7 @@ pub const CUT_MARKER: &str = "… [cut]";
 const OUTCOME_KEYS: [&str; 4] = ["state", "reason", "branch", "summary"];
 
 /// What any holder of `mission.status` sees of `filed`: its ID, Operation, state, role, Agent
-/// codename, attempts, creation time and why it is blocked. Never a brief, a Run ID, a
+/// codename, runs, creation time and why it is blocked. Never a brief, a Run ID, a
 /// Station, a Theater, a safe house, a launch manifest, usage or cost.
 pub fn mission_status(registry: &dyn RegistryBackend, filed: &FiledBrief) -> Value {
     let key = filed.brief.key();
@@ -41,7 +41,7 @@ pub fn mission_status(registry: &dyn RegistryBackend, filed: &FiledBrief) -> Val
                 .map(str::to_owned)
         })
         .or_else(|| filed.brief.agent.clone());
-    let attempts = lease.as_ref().map_or(filed.attempts, Lease::attempt);
+    let attempts = lease.as_ref().map_or(filed.runs, Lease::number);
     let mut answer = json!({
         "mission": key,
         "operation": filed.brief.operation,
@@ -64,7 +64,7 @@ fn latest_run(registry: &dyn RegistryBackend, key: &str) -> Option<RunRecord> {
         .ok()?
         .into_iter()
         .filter(|run| run.mission_id == key)
-        .max_by_key(|run| run.attempt)
+        .max_by_key(|run| run.number)
 }
 
 /// Why a Mission is not moving, as a word: held by vetting, or its Run parked or lost.

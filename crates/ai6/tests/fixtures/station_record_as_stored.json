@@ -112,7 +112,7 @@
   "scheduler": {
     "check_in": 15.0,
     "event_queue": null,
-    "intake_attempts": 3,
+    "intake_runs": 3,
     "interval": 0.5,
     "retry_backoff": 5.0,
     "retry_backoff_max": 600.0,

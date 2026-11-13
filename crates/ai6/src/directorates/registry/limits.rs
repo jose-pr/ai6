@@ -1059,15 +1059,15 @@ pub struct RunLimits {
     #[schema(title = "Longest verdict note", format = "bytes")]
     #[map(default = RunLimits::default().verdict_note_bytes)]
     pub verdict_note_bytes: Limit,
-    /// Bytes of what a redispatch adds to the next attempt's task.
+    /// Bytes of what a redispatch adds to the next run's task.
     #[schema(title = "Longest redispatch amendment", format = "bytes")]
     #[map(default = RunLimits::default().amendment_bytes)]
     pub amendment_bytes: Limit,
-    /// Deliverables kept on one attempt.
+    /// Deliverables kept on one run.
     #[schema(title = "Deliverables per attempt")]
     #[map(default = RunLimits::default().deliverables)]
     pub deliverables: Limit,
-    /// Probe findings kept on one attempt; the oldest go first.
+    /// Probe findings kept on one run; the oldest go first.
     #[schema(title = "Probe findings per attempt")]
     #[map(default = RunLimits::default().evidence_entries)]
     pub evidence_entries: Limit,

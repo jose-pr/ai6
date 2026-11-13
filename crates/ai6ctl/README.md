@@ -72,14 +72,14 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized provider Runs, filtered |
 | `run <RUN_ID>` | One provider Run |
 | `mission cancel <MISSION_ID>` | Stops the live Run, if any, and abandons the Mission |
-| `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new attempt |
+| `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new run |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |
 | `run interrupt <RUN_ID>` | Stops the Run's current turn; its Mission waits, blocked |
 | `green-ink list --operation <ID> [--expired]` | The steps Agents wait to take with green ink (`approval.decide`), or those that expired undecided |
 | `green-ink rearm <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Opens an expired, undecided step again |
 | `missions verdict <MISSION> <confirmed\|disputed\|failed-verification> [--note <TEXT>] [--operation <ID>]` | Says what you found when you checked a Mission's outcome (`mission.verify`) |
 | `missions probe <MISSION> [--wait <SECS>] [--operation <ID>]` | Asks the Station to read back what a verifying Mission was to deliver and prints what it found (`mission.verify`) |
-| `missions verify <MISSION> <done\|redispatch\|failed> --reason <TEXT> [--amend <TEXT>] [--operation <ID>]` | Decides a Mission whose Run ended done: settles it, fails it, or queues its next attempt (`mission.verify`) |
+| `missions verify <MISSION> <done\|redispatch\|failed> --reason <TEXT> [--amend <TEXT>] [--operation <ID>]` | Decides a Mission whose Run ended done: settles it, fails it, or queues its next run (`mission.verify`) |
 | `green-ink approve <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Signs a waiting step as you, for an hour unless chosen |
 | `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
 | `green-ink revoke <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Withdraws an approval before it expires |

@@ -49,7 +49,7 @@ poll` (default 5, 0 off) `StationConfig::with_config_poll`.
 The access kinds, their models and the first-match role authorizer belong to the shared
 [`coqui-access`](https://github.com/Boriken-Dev/coqui-access) and `coqui-roles` crates
 (their API headers describe every field and method) and are re-exported here and at the
-`ai6` root: `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `Attempt`, `Lookup`,
+`ai6` root: `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `Run`, `Lookup`,
 `Verdict`, `Person`, `AuthorizationRequest`, `AuthorizationDecision`, `AccountInfo`,
 `AccountPut`, `PutOutcome`, `Waiting`, `Description`, `KIND_PREFIX`, `Role`, `Rule`,
 `RolePolicy`, `RolePolicyError`, `RoleAuthorizer` and `RoleAuthorizerBuilder`. The Guatiao
@@ -411,19 +411,19 @@ The `station` record's tables, kept by a Station as it starts (they apply at res
 table derives `ToValue`, `FromValue` and `Schema` with `deny_unknown_fields`; its keys, titles,
 defaults and units are its declaration, which `ai6 config schema record.station.<table>` prints and
 `docs/configuration.md` renders. Counts and sizes are `Limit`, ceilings on durations `TimeLimit`,
-other durations `Seconds`; a queue, page or attempt count is a plain integer. Not re-exported at
+other durations `Seconds`; a queue, page or run count is a plain integer. Not re-exported at
 the crate root: several table names repeat the Registry's (`AccountLimits`, `ApprovalLimits`,
 `AuditLimits`, `SourceLimits`, `StationLimits`).
 
 ```rust
 pub struct StationLimits { /* one field per table, and */ pub providers: BTreeMap<String, serde_json::Value> }
-impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero queues/pages/attempts, a non-table provider
+impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero queues/pages/runs, a non-table provider
 ```
 
 `ProbeLimits` (`[probes]`, the timeouts of a verifier's reads of a Mission's deliverables: `git_timeout` 30 s,
 `http_timeout` 20 s, `tracker_timeout` 30 s, `file_timeout` 5 s, and `comments` 100, the latest comments a
 tracker probe reads). `[registry.limits.runs]` also holds `amendment_bytes` (8 KiB), `deliverables` (32 per
-attempt), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300).
+run), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300).
 
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
 `bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false, `context_bytes` 24 KiB, `fetch_timeout` 300 s,
@@ -655,7 +655,7 @@ pub struct AgentRole {
     pub id: String,
     pub purpose: String,
     pub policy: String,
-    pub require_approval_before_done: bool,       // a done with no green ink decided in that attempt is held
+    pub require_approval_before_done: bool,       // a done with no green ink decided in that run is held
     pub deliverables: Vec<String>,                // each `kind` or `kind:target` every Mission of the role owes; validated
 }
 impl AgentRole {
@@ -1910,9 +1910,9 @@ the policy, the Run's pool account is marked limited until the reset (or
 `fallback_secs` from now) and freed. `Rotate`, when another account of the Agent's pools has
 room, parks the Mission until now so the next scheduler pass resumes the same provider
 Run on another account (an account kind that `carries_run`), or queues the Mission
-again for the same Agent as a new attempt (Codex and `config-dir` kinds); otherwise it waits.
+again for the same Agent as a new run (Codex and `config-dir` kinds); otherwise it waits.
 `Wait` parks the Mission and resumes the same provider Run; `Backup` posts the next
-qualified Agent whose handler differs from the limited one as a new attempt, and parks when
+qualified Agent whose handler differs from the limited one as a new run, and parks when
 none exists.
 
 ## Registry backend (`ai6::directorates::registry::backend`)
@@ -1923,7 +1923,7 @@ every type that implements each family (a blanket impl: nothing to write for it)
 
 ```rust
 pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs);
-                             // filed_brief(key), filed_briefs(operation, limit) -> FiledBrief { brief, state, attempts, outcome }
+                             // filed_brief(key), filed_briefs(operation, limit) -> FiledBrief { brief, state, runs, outcome }
                              // refile_lost(key, outcome, ok) -> bool: replaces the outcome of a brief filed as lost (its Station was dark) with the one the Station settled; false when not filed as lost
                              // request_cancel(key, at) -> io::Result<bool>: keeps the first time a cancel of the
                              //   claimed brief was asked (false: not claimed); finishing forgets it, a lapse back to
@@ -2220,7 +2220,7 @@ rename_mission(mission_id: &str, handle: &str) -> io::Result<MissionHandle>  // 
 enter_brief(brief: &Brief, entry: &MissionEntry) -> io::Result<Brief>  // AlreadyExists when the entry's brief is in any state
 reenter_brief(brief: &Brief, entry: &MissionEntry, again: &dyn Fn(&Brief) -> bool) -> io::Result<Reentry>
     // the Mission `entry` names, finished and accepted by `again`, queued again as `brief`: same UID
-    // and handle; the claim count starts again, so `recover`'s `max_attempts` bounds this attempt's
+    // and handle; the claim count starts again, so `recover`'s `max_runs` bounds this run's
     // lapses alone; its outcome, report marks and spent provenance dropped; provenance is the brief's own
 #[non_exhaustive] pub enum Reentry { Queued(Brief), Unchanged(FiledBrief) /* in flight, or refused */, Unknown }
 claim_with_lease(key: Option<&str>, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>
@@ -2229,8 +2229,8 @@ read_claimed(key: &str) -> io::Result<Option<Brief>>
 leases() -> io::Result<Vec<Lease>>
 expired() -> io::Result<Vec<Lease>>
 renew(key: &str, station: &str, duration: Duration) -> io::Result<bool>
-recover(lease: &Lease, max_attempts: u32, by: &str) -> io::Result<Option<LeaseRecovery>>
-hand_over(lease: &Lease, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>  // same claim and attempt; None if the lease changed or is live
+recover(lease: &Lease, max_runs: u32, by: &str) -> io::Result<Option<LeaseRecovery>>
+hand_over(lease: &Lease, station: &str, duration: Duration, meta: BTreeMap<String, serde_json::Value>) -> io::Result<Option<Lease>>  // same claim and run; None if the lease changed or is live
 finish(brief: &Brief, outcome: &serde_json::Value, ok: bool, transcript: Option<&[u8]>, station: Option<&str>) -> io::Result<bool>
 ```
 
@@ -2252,7 +2252,7 @@ pub struct MissionHandle { pub mission_id: String, pub handle: String }  // UID 
 pub fn new_uid() -> String;                        // UUIDv7, lower-case
 pub fn is_uid(text: &str) -> bool;                 // hyphenated lower-case UUID text
 pub fn valid_handle(handle: &str) -> bool;         // [A-Za-z0-9_-], no '-' at either end, <= 240, not a UID
-pub fn run_handle(mission_handle: &str, attempt: u32) -> String;  // `<handle>.<attempt>`
+pub fn run_handle(mission_handle: &str, run: u32) -> String;  // `<handle>.<run>`
 pub struct MissionEntry;  // where a brief enters; all of these are the only way a handle is made
 impl MissionEntry {
     pub fn person(operation: Option<&str>) -> Self;              // <operation>-<n>; `mission` with none
@@ -2469,12 +2469,12 @@ impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
 #[non_exhaustive] pub struct RunRecord {
     pub run_id: String,                  // AI6's ID, the run's UID (not the provider's)
     pub mission_id: String,                  // the Mission's UID
-    pub handle: Option<String>,              // `<mission handle>.<attempt>` when it opened; a rename leaves it
+    pub handle: Option<String>,              // `<mission handle>.<run>` when it opened; a rename leaves it
     pub operation: Option<String>,           // the Mission's Operation, as the opening Station knew it
     pub provider_id: Option<String>,
     pub station: String,                     // the lease holder
     pub theater: Option<String>,
-    pub attempt: u32,                        // from 1
+    pub run: u32,                        // from 1
     pub predecessor: Option<String>,         // AI6 ID of the Run this one replaced
     pub status: RunStatus,
     pub parked_until: Option<f64>,           // Unix seconds
@@ -2491,10 +2491,10 @@ impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub result: Option<RunResult>,       // how its Mission stood at the holder's last write
     pub window: Option<String>,              // the standing Sleeper's window the run answers
     pub verdict: Option<MissionVerdict>,     // what a person found; needs no lease, the latest stands
-    pub deliverables: Vec<Deliverable>,      // what the Mission was to deliver; set when the attempt goes verifying
+    pub deliverables: Vec<Deliverable>,      // what the Mission was to deliver; set when the run goes verifying
     pub evidence: Vec<Evidence>,             // what probes found of them, oldest first, bounded (evidence_entries)
     pub probe_requested: Option<f64>,        // when a person asked for a probe, until the Station ran it
-    pub recommendation: Option<MissionVerdict>,   // what a `desk` charge advises for a verifying attempt; settles nothing
+    pub recommendation: Option<MissionVerdict>,   // what a `desk` charge advises for a verifying run; settles nothing
 }
 #[non_exhaustive] pub enum ProbeResult { Found, Missing, Unprobed, Failed }   // serde kebab-case; as_str()
     // Missing: the place was read and it is not there. Failed: the look failed or timed out, nothing is known.
@@ -2511,15 +2511,15 @@ impl RunRecord { pub fn leased_at(&self, now: f64) -> bool;   // false once clos
     pub fn takes_verdict(&self) -> Result<(), RunError> }   // Unsettled unless it ended done or held, or is verifying
 #[non_exhaustive] pub enum OutcomeVerdict { Confirmed, Disputed, FailedVerification, Redispatch }   // serde kebab-case;
     // ALL, as_str(), from_name(), is_fault() (every verdict but Confirmed). Redispatch only settles a verifying Mission:
-    // its next attempt, told the note and the amendment; the verified attempt counts against its Agent.
+    // its next run, told the note and the amendment; the verified run counts against its Agent.
 #[non_exhaustive] pub struct MissionVerdict { pub verdict: OutcomeVerdict, pub note: Option<String>,
     pub amendment: Option<String> /* a redispatch's, within amendment_bytes (8 KiB) */,
     pub by: String, pub at: f64 }   // new(verdict, by, at, note) .with_amendment(Option<String>); note within verdict_note_bytes (4 KiB)
 #[non_exhaustive] pub struct FinalReport { pub run_id: String, pub mission_id: String, pub text: String,
     pub at: f64 }   // new(run_id, mission_id, text, at, limit): a longer text is cut, the cut marked
-pub struct NewRun   // NewRun::new(run_id, mission_id, station); next_attempt() -> Option<Self>
-                        //   (a new UID, the next attempt) .with_handle(mission_handle) .attempt()
-                        //   .with_provider_id(id) .with_theater(id) .with_attempt(n, predecessor)
+pub struct NewRun   // NewRun::new(run_id, mission_id, station); next_run() -> Option<Self>
+                        //   (a new UID, the next run) .with_handle(mission_handle) .run()
+                        //   .with_provider_id(id) .with_theater(id) .with_number(n, predecessor)
                         //   .with_operation(id)
                         //   .with_exposure(Vec<Exposure>) .with_launch(RunLaunch) .with_account(AccountRef)
                         //   .with_window(label)
@@ -2533,7 +2533,7 @@ pub struct RunUpdate  // default() .provider_id(id) .status(RunStatus) .parked_u
     Io(io::Error) }
 
 pub trait RunStore {
-    fn open_run(&self, new: NewRun, ttl: Duration) -> Result<RunRecord, RunError>  // Exists: the ID, or the Mission's attempt, has a record
+    fn open_run(&self, new: NewRun, ttl: Duration) -> Result<RunRecord, RunError>  // Exists: the ID, or the Mission's run, has a record
     fn run(&self, id: &str) -> io::Result<Option<RunRecord>>
     fn runs(&self) -> io::Result<Vec<RunRecord>>          // stable ID order
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Run of the Mission, earliest first
@@ -2541,14 +2541,14 @@ pub trait RunStore {
     fn renew_run(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<RunRecord, RunError>
     fn update_run(&self, id: &str, station: &str, fence: u64, update: RunUpdate) -> Result<RunRecord, RunError>
     fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError>
-    fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>>  // highest attempt
+    fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>>  // highest run
     fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<RunRecord, RunError>
-        // on the latest attempt; NotFound, or Unsettled when it has not ended done or held or is not verifying
+        // on the latest run; NotFound, or Unsettled when it has not ended done or held or is not verifying
     fn record_recommendation(&self, operation, mission_id, &MissionVerdict) -> Result<RunRecord, RunError>
-        // on a verifying latest attempt; no lease; NotFound, or Unsettled when it is not verifying
+        // on a verifying latest run; no lease; NotFound, or Unsettled when it is not verifying
     fn request_probe(&self, operation, mission_id, at: f64) -> Result<RunRecord, RunError>
-        // asks the Station that holds a verifying latest attempt to probe its deliverables; no lease needed;
-        // NotFound, or Unsettled when the attempt is not verifying
+        // asks the Station that holds a verifying latest run to probe its deliverables; no lease needed;
+        // NotFound, or Unsettled when the run is not verifying
     fn file_final_report(&self, &FinalReport) -> io::Result<()>   // replaces the Run's; SQL: ai6_final_reports
     fn final_report(&self, run_id) -> io::Result<Option<FinalReport>>
 }
@@ -2578,7 +2578,7 @@ events (at most every 15 seconds) and, when the Operation sets
 Recovery (`ai6::directorates::m::recovery`): when a Station's brief lease and its Run's
 lease have both lapsed, the Headquarters Station either hands the brief's lease to a Station
 that adopts the Run or marks the Run lost and queues the brief again (or files it,
-`on_lost = "fail"`). A new attempt links to the lost Run, starts its safe house from the
+`on_lost = "fail"`). A new run links to the lost Run, starts its safe house from the
 lost one's checkpoint and is told what it was doing.
 
 A live Station gives a Run up the same way when its runner (or detached-wrapper harness)
@@ -2591,7 +2591,7 @@ lease lapse and marks it lost, then lets its brief lease lapse and recovers it u
 Station). Its Mission book says `abandoned` (or `failed` when filed, or without a brief),
 and a `lost` event carries the reason. The Headquarters treats an expired brief lease whose
 latest Run is already `lost` under `on_lost`. A Station handed the brief back re-queues
-its own `abandoned` copy of the Mission (`MissionStore::retry`) and the new attempt, on the
+its own `abandoned` copy of the Mission (`MissionStore::retry`) and the new run, on the
 same Theater, first closes the lost runner Run. Re-attach tries after a restart or an
 adoption back off by `reattach_delay`; once they have failed for `lost_after_secs`, the
 runner (or the Theater's transport) is probed and the Run given up the same way.
@@ -2643,10 +2643,10 @@ skips the named Agents; the Station passes the quarantined ones.
 
 How each Agent, route and model has done in an Operation over a window, computed on demand from
 the Run records and the usage ledger; nothing is stored. `judge(&RunRecord)` gives each
-attempt one `Judgment` by whose doing the outcome was; only `done`, `failed`, `blown`, `stalled` and
+run one `Judgment` by whose doing the outcome was; only `done`, `failed`, `blown`, `stalled` and
 `disputed` (a person's verdict, whatever the state) are judged, and a limit, a lost Station, a
-hand-off, a person's stop or wait and a spending limit are listed but never held against the Agent. An attempt with no Run record (a failed checkout, a
-brief with no Agent) is not an attempt.
+hand-off, a person's stop or wait and a spending limit are listed but never held against the Agent. A run with no Run record (a failed checkout, a
+brief with no Agent) is not a run.
 
 ```rust
 #[non_exhaustive] pub enum Judgment { Done, Failed, Blown, Stalled, Disputed, WaitingOnPerson, BudgetStop,
@@ -2655,24 +2655,24 @@ impl Judgment { pub const ALL: [Self; 13]; pub fn as_str(self) -> &'static str;
     pub fn is_judged(self) -> bool; pub fn is_fault(self) -> bool /* failed, blown, stalled, disputed */ }
 pub fn judge(record: &RunRecord) -> Judgment;
 pub const DEFAULT_WINDOW_DAYS: u64 /* 30 */; pub const DEFAULT_SMALL_SAMPLE: u64 /* 5 */;
-pub struct ScorecardDefinition;   // [operation.ID.scorecard]: window_days (0 = every attempt), small_sample
+pub struct ScorecardDefinition;   // [operation.ID.scorecard]: window_days (0 = every run), small_sample
 impl ScorecardDefinition { pub fn resolve(&self) -> ScorecardPolicy }
 #[non_exhaustive] pub struct ScorecardPolicy { pub window_days: u64, pub small_sample: u64 }  // Operation.scorecard,
                                   // and OperationPolicy.scorecard in the check-in
-#[non_exhaustive] pub struct AttemptRef { pub mission_id: String, pub run_id: String, pub attempt: u32 }
+#[non_exhaustive] pub struct RunRef { pub mission_id: String, pub run_id: String, pub run: u32 }
 #[non_exhaustive] pub struct Standing {
-    pub attempts: BTreeMap<Judgment, Vec<AttemptRef>>,   // the numbers are their lengths
+    pub runs: BTreeMap<Judgment, Vec<RunRef>>,   // the numbers are their lengths
     pub judged: u64, pub failure_rate: Option<f64>,      // faults / judged
     pub small_sample: bool,                              // judged < the policy's small_sample
-    pub refused_tools: u64, pub attempts_with_refusals: u64,
-    pub usage: UsageTotals, pub wall_secs: f64 }         // closed attempts; parked time included
+    pub refused_tools: u64, pub runs_with_refusals: u64,
+    pub usage: UsageTotals, pub wall_secs: f64 }         // closed runs; parked time included
 impl Standing { pub fn count(&self, Judgment) -> u64 }
 #[non_exhaustive] pub struct AgentCard { pub agent: String, pub standing: Standing, pub routes: Vec<RouteCard> }
 #[non_exhaustive] pub struct RouteCard { pub route: RouteRef, pub standing: Standing }
 #[non_exhaustive] pub struct ModelCard { pub model: Option<String>, pub standing: Standing }
 #[non_exhaustive] pub struct Scorecard { pub operation: String, pub window_days: u64, pub from: Option<f64>,
     pub until: f64, pub small_sample: u64, pub agents: Vec<AgentCard>, pub models: Vec<ModelCard>,
-    pub unattributed: u64 /* attempts whose launch names no Agent: counted toward their model only */ }
+    pub unattributed: u64 /* runs whose launch names no Agent: counted toward their model only */ }
 impl Scorecard { pub fn build(operation: &str, records: &[RunRecord],
     usage: &BTreeMap<String /* AI6 Run ID */, UsageTotals>, policy: &ScorecardPolicy, now: f64) -> Self }
 ```
@@ -3453,8 +3453,8 @@ unfenced. `ingest_source_item` gives the item its Mission ID, queues the brief, 
 `new/` when its fingerprint (title, text, labels, `updated`) changed, and leaves a claimed
 (`InFlight`) or finished brief alone. Cursors are stored under `sources/`.
 `unreported_source_briefs` lists finished source briefs without a report mark (at most
-`[registry.limits.sources] report_attempts`, five, attempts each); `mark_source_reported`
-records an attempt. A finished brief from anywhere else is marked as owing no report when it
+`[registry.limits.sources] report_attempts`, five, runs each); `mark_source_reported`
+records a run. A finished brief from anywhere else is marked as owing no report when it
 finishes.
 
 On the Station, the Headquarters holder runs a source desk: per Operation and instance
@@ -3548,7 +3548,7 @@ pub enum OutboxKind { Status, Report, Comment, Question, Update, Create, Link }
 pub enum OutboxState { Pending, Held, Sending, Posted, Refused, Failed }
 pub struct OutboxEntry { pub id: String, operation, mission_id, tracker, item: String, kind: OutboxKind,
     actor: String, body: String, payload: serde_json::Value, coalesce: Option<String>, state: OutboxState,
-    attempts: u32, result: Option<OutboxResult>, error: Option<String>, at: f64, not_before: f64,
+    runs: u32, result: Option<OutboxResult>, error: Option<String>, at: f64, not_before: f64,
     sent_at: Option<f64>, fence: Option<u64> }       // OutboxEntry::new(operation, mission, tracker, item, kind, actor, at)
 pub enum QuestionState { Open, Answered, Expired, Withdrawn }
 pub struct IssueQuestion { pub id: String /* q-… when empty */, mission_id, tracker, item, entry: String, asked_at: f64, expires_at: f64, state: QuestionState }
@@ -3560,7 +3560,7 @@ pub struct OutboxResult { pub comment_id: Option<String>, url: Option<String>, c
 // ProposedIssue::mission: Option<Brief>: a person's Mission created with the issue; once the issue
 // exists the Headquarters Station enters it with MissionEntry::source (numbered by the issue) and
 // links it as its source, audited `mission.create.entered`
-pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_attempts: u32 } }
+pub enum OutboxSettle { Posted(OutboxResult), Refused(String), Retry { error: String, not_before: f64, max_runs: u32 } }
 pub trait MissionIssueStore {   // on FileRegistry and SqlRegistry; part of RegistryBackend
     fn link_issue(&self, link: &IssueLink) -> io::Result<IssueLink>;      // upsert by (Mission, tracker, item); at most [registry.limits.issues] links_per_mission live ones
     fn issue_links(&self, mission_id: &str) -> io::Result<Vec<IssueLink>>;
@@ -3668,7 +3668,7 @@ its one declaration gives its parsing, defaults and schema. `source_setups` stri
 `agent_labels`, `agent_transitions`, `priority_map`, `reopen`) before a provider sees the table.
 
 `reopen` (`label` default, `comment`, `never`) decides what queues a settled item again as its
-Mission's next attempt (`BriefStore::reenter_brief`, only over the item's own Source brief): a poll
+Mission's next run (`BriefStore::reenter_brief`, only over the item's own Source brief): a poll
 that finds a label the item's Source link snapshot lacks, AI6's status and Agent labels aside;
 with `comment`, also a permitted reply AI6 did not write on a settled Source link, read by the
 reply round, which then marks the reply delivered. The snapshot is refreshed while the Mission is
@@ -3693,8 +3693,8 @@ pub struct Sleeper {
     pub priority: i64,
     pub stations: Vec<String>,   // narrows its briefs, like Brief.stations; empty adds no limit
     pub each_station: bool,      // one round per eligible Station per window (default false)
-    pub standing: bool,          // one Mission, each window an attempt of it (default false)
-    pub resume: bool,            // needs standing: resume the last attempt's provider Run
+    pub standing: bool,          // one Mission, each window a run of it (default false)
+    pub resume: bool,            // needs standing: resume the last run's provider Run
 }   // standing and resume are left out of the serialized form when false, so the fingerprint
     // of a Sleeper that sets neither is what it was before they existed
 impl Sleeper {
@@ -3707,7 +3707,7 @@ impl Sleeper {
 pub struct SleeperAuthorization { pub fingerprint: String, pub authorized_by: String, pub at: i64, pub mark: Option<SleeperMark> }
 pub struct SleeperMark { pub since: i64, pub window: i64, pub settled: bool, pub why: Option<String> }
 impl SleeperMark { pub fn new(since: i64, window: i64) -> Self; }   // settled when window <= since
-pub enum Fire { Queued, AlreadyFired, InFlight /* a standing Sleeper's earlier attempt is still in flight */ }
+pub enum Fire { Queued, AlreadyFired, InFlight /* a standing Sleeper's earlier run is still in flight */ }
 pub fn window_of(brief: &Brief) -> Option<&str>;   // the window a Sleeper's brief was queued for
 pub const SLEEPER_BRIEF_SOURCE: &str = "sleeper";
 
@@ -3737,7 +3737,7 @@ never matches within a year (`0 0 30 2 *`) parses but never fires.
 brief exists in `new`, `claimed`, `done` or `failed`, which is what makes a window, or one
 Station's round in it, fire once across Stations. A `standing` Sleeper enters its first window
 with `MissionEntry::standing` and every later one through `reenter_brief`: `AlreadyFired` when the
-brief is for that window, `InFlight` (logged once per window) when an earlier window's attempt is
+brief is for that window, `InFlight` (logged once per window) when an earlier window's run is
 queued, held or claimed. Its data's `sleeper` object also carries `standing` and `resume`; a
 start whose claimed brief says `resume`, with the Registry's Sleeper provenance, resumes the
 latest run's provider Run when that run had the same handler, and records `sleeper`/
@@ -3758,8 +3758,8 @@ the window's own period; `TimeLimit::UNBOUNDED`, no limit). Each window that pas
 recorded as `sleeper`/`skipped` (details `sleeper`, `window`, `why`) once a later window comes, or at
 once when past the bound; `skipped_events` (64) are named one by one and any older ones are one
 event. A late firing is `sleeper`/`late`. A Sleeper brief filed as failed records
-`sleeper`/`attempt-failed` (details `sleeper`, `window`, `reason`; never a harness's words, which
-are in the outcome with `reason_from_harness`). A Station holding a standing attempt that is stalled,
+`sleeper`/`run-failed` (details `sleeper`, `window`, `reason`; never a harness's words, which
+are in the outcome with `reason_from_harness`). A Station holding a standing run that is stalled,
 has no live Run or re-attach pending, or failed to start, when the next window is due, fails it,
 audits `sleeper.superseded` (target `<mission> <window>`) and records `sleeper`/`superseded`.
 
@@ -3804,7 +3804,7 @@ LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         /
 A charge is one standing Run per scope (`m`, `operation:<codename>`, `station:<id>`), run by
 the Station the scope names (M's on the Headquarters Station, an Operation's on an execution
 Station it allows, a Station's on itself) and woken by its area's events, one turn per wake. It is
-not a Mission: no Mission record, brief, placement, attempt or Run record names it. Its record
+not a Mission: no Mission record, brief, placement, run or Run record names it. Its record
 (`charges/<hex of scope>.json`, SQL table `ai6_charges`) holds its lease, fence, provider Run
 and handler, logbook, last wake, the turns of the last hour, what it was told, and controls.
 `docs/charges.md` has the behaviour. `Charge`, `ChargeDefinition` and `ChargeScope` are at the crate
@@ -5273,7 +5273,7 @@ already parked Mission (parking again moves the time; `transition` refuses `Park
 it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent.
 `retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
-`Abandoned` Mission again as a new attempt, for `agent_id` when given and otherwise its
+`Abandoned` Mission again as a new run, for `agent_id` when given and otherwise its
 Agent; it keeps `run_ids` and the safe house report, and refuses every other state
 with `InvalidTransition`. `retry_past_brief(id, agent_id)` is that on the Station's own word, and
 sets `Mission.runs_past_brief` until it starts: such a Mission starts whatever its brief was filed as,
@@ -5283,12 +5283,12 @@ outcome; `refuse_resume(id, why)` sets `Mission.resume_refused`, so the next sta
 `reopen` sets `Mission.after_failure` when the Mission ended `Failed` or `Blown`, and a standing
 Sleeper's resume then starts a new Run too, whatever the last Run record says yet.
 `reopen(id, agent_id, prompt, digest)` queues a `Done`, `Failed`,
-`Blown` or `Abandoned` Mission as its next attempt for a later claim of its brief (a reopened
+`Blown` or `Abandoned` Mission as its next run for a later claim of its brief (a reopened
 item, a standing Sleeper's window): the new prompt, the Agent, `Mission.brief_digest`, and the launch
 manifest's Run hold and runner let go, so the next start records a run after the last
 (`InvalidTransition` otherwise). `record_brief_digest(id, digest)` records `Mission.brief_digest`
 (`Option<String>`, serde default: the brief the Mission runs from; the same brief claimed
-again is a lapse recovered, not an attempt). A
+again is a lapse recovered, not a run). A
 parked Mission leaves `Parked` through `Working`, `Failed`, `Abandoned` or `requeue_for`,
 and any transition clears `parked_until`.
 `quarantined` means Medical or an operator stopped the work because its Agent is
@@ -5345,7 +5345,7 @@ pub fn declared(role: &[String], brief_data: &BTreeMap<String, serde_json::Value
     -> Result<Vec<Deliverable>, InvalidDeliverable>   // the role's, then the brief's, each once
 ```
 
-`AgentRole::deliverables` is validated with the role. The Station records `declared(..)` on the attempt's
+`AgentRole::deliverables` is validated with the role. The Station records `declared(..)` on the run's
 `RunRecord::deliverables` when it goes verifying. Probes (crate-private, `station::probes`) read them
 back, each within its `[probes]` timeout, and never say whether they are enough: `branch` is `git ls-remote
 --exit-code --heads origin` in the Mission's working directory (else its Operation's checkout), `commit_on`
@@ -5353,14 +5353,14 @@ adds a fetch of the branch to read its history, `file` stays inside the working 
 http(s) GET with the body unread, `approval` is a decided, approved, unrevoked green ink request,
 `comment` reads the linked tracker item back by id and looks for the text (only a Station that holds the
 tracker's credentials can). Work on a Theater this Station cannot read is `unprobed`; a read that failed or
-timed out is `failed`, never `missing`. `RunStore::request_probe` asks the Station holding the attempt
+timed out is `failed`, never `missing`. `RunStore::request_probe` asks the Station holding the run
 to run them on its next pass; the findings are appended to `RunRecord::evidence`.
 
-A decision is a verdict on the verifying attempt (`record_verdict`): `Confirmed` settles the Mission done,
-`Disputed` and `FailedVerification` fail it, `Redispatch` queues its next attempt: attempt N+1 of the same
+A decision is a verdict on the verifying run (`record_verdict`): `Confirmed` settles the Mission done,
+`Disputed` and `FailedVerification` fail it, `Redispatch` queues its next run: run N+1 of the same
 Mission for the best qualified Agent (`MissionStore::redispatch(id, agent, amendment)`, which keeps the safe
 house and starts a new provider Run), told the person's reason and amendment after its brief
-(`Mission::task()`). The verified attempt keeps its verdict and counts against its Agent on the scorecard.
+(`Mission::task()`). The verified run keeps its verdict and counts against its Agent on the scorecard.
 Nothing else leaves `verifying`.
 
 `ai6::directorates::registry::decisions` is the one path a decision takes, for the gateway's `verify`
@@ -5505,7 +5505,7 @@ would be, and M's scorecard proposal (`scorecard`, `probe:scorecard`, linked `de
 request). The Head of Station's findings were already Reports.
 
 An Operation's charge is its 00 Agent in charge: `Roster` refuses an `operation:` charge whose Agent's
-configured clearance is not `00`. Its `verifying` event carries the attempt (brief and final report,
+configured clearance is not `00`. Its `verifying` event carries the run (brief and final report,
 untrusted; deliverables; evidence; verdict; recommendation). Its Cable endpoint gets `operation_missions`,
 `mission_detail`, `deliverables`, `deliverable_probe` (probes locally and keeps the evidence, or asks the
 holding Station through `request_probe`), `verify_mission(mission, done|failed, reason)` and
@@ -5520,7 +5520,7 @@ background scheduler starts assigned queued Missions and leases file-backed Regi
 briefs, resolving their Operation and Agent before creating durable Mission records.
 Global, Station and Agent concurrency limits apply to Run starts; transient failures
 retry after five seconds. Active leases renew every 30 seconds. Expired leases from other
-Stations are recovered after three attempts, and invalid assignments or terminal Missions
+Stations are recovered after three runs, and invalid assignments or terminal Missions
 are filed under `failed/` or `done/` with an outcome record (in a SQL Registry, as the
 `failed` or `done` state of their `ai6_briefs` row). The scheduler's Registry calls run on
 Tokio's blocking pool, so a slow Registry does not stall the async workers.
@@ -5681,7 +5681,7 @@ source with room), picks by `balance` (`choose_route`) and goes on as `Agent::on
 Run read, and one with no pool claims an account of its own (`route-<digest>`/`login`,
 `AccountKind::HarnessLogin`), so its limit is shared. `LaunchManifest` and `RunLaunch` carry the
 `pool`. With no route open the Mission waits, naming each. A resume stays, moves to a route of the
-same handler whose accounts carry the history, or queues a new attempt.
+same handler whose accounts carry the history, or queues a new run.
 
 Pool accounts: when the Agent's handler has pools (`choose_pools` with the Operation's
 `pools` and the Agent's `pool`), loadout secrets whose `env` is a credential variable are not
@@ -6093,7 +6093,7 @@ pub struct SafeHouseSpec {
     pub isolate: bool,     // false: work in `source` itself
     pub state_root: String,
     pub reopen: Option<SafeHouseReport>, // re-attach to a safe house kept by an earlier run
-    pub checkpoint: Option<SafeHouseCheckpoint>, // start a new one from a lost attempt's work
+    pub checkpoint: Option<SafeHouseCheckpoint>, // start a new one from a lost run's work
     pub clone: Option<SafeHouseClone>, // a clone of `source` on branch `base` instead; overrides the rest
 }
 pub struct SafeHouseClone {
@@ -6139,7 +6139,7 @@ run: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
 after `DEFAULT_CACHE_AGE`, 7 days) has `with_caches(names) -> Result<Self, SafeHouseError>`
 (plain directory names only: not empty, `.`, `..`, `.git`, nor holding `/`, `\` or `:`),
 `with_cache_age(Duration)`, `caches()`, `cache_age()` and `is_cache(name)`. The Station
-offers a lost attempt's checkpoint only when it opens a new isolated safe house. Only isolated safe houses are recorded on
+offers a lost run's checkpoint only when it opens a new isolated safe house. Only isolated safe houses are recorded on
 the Mission and finished by the daemon, under the Station's state directory
 (`StationConfig::with_state_dir`, default `ai6::bootstrap::platform_state_dir()`).
 

@@ -88,7 +88,7 @@ pub struct Proposal {
     pub target: String,
     /// Why, with the numbers it rests on.
     pub reason: String,
-    /// Judged attempts the proposal rests on, so a refused one is asked again only when the
+    /// Judged runs the proposal rests on, so a refused one is asked again only when the
     /// sample has grown.
     pub judged: u64,
 }
@@ -127,13 +127,13 @@ fn percent(rate: f64) -> String {
 
 fn evidence(standing: &Standing, window_days: u64) -> String {
     let faults: u64 = standing
-        .attempts
+        .runs
         .iter()
         .filter(|(judgment, _)| judgment.is_fault())
         .map(|(_, list)| list.len() as u64)
         .sum();
     let missions: BTreeSet<&str> = standing
-        .attempts
+        .runs
         .iter()
         .filter(|(judgment, _)| judgment.is_fault())
         .flat_map(|(_, list)| list.iter().map(|attempt| attempt.mission_id.as_str()))
@@ -349,17 +349,17 @@ mod tests {
 
     use super::*;
     use crate::directorates::m::scorecard::{
-        AgentCard, AttemptRef, Judgment, RouteCard, Scorecard,
+        AgentCard, RunRef, Judgment, RouteCard, Scorecard,
     };
 
     fn standing(done: usize, failed: usize) -> Standing {
         let mut attempts = BTreeMap::new();
-        let refs = |prefix: &str, n: usize| -> Vec<AttemptRef> {
+        let refs = |prefix: &str, n: usize| -> Vec<RunRef> {
             (0..n)
-                .map(|index| AttemptRef {
+                .map(|index| RunRef {
                     mission_id: format!("{prefix}-{index}"),
                     run_id: format!("{prefix}-{index}.1"),
-                    attempt: 1,
+                    number: 1,
                 })
                 .collect()
         };
@@ -367,7 +367,7 @@ mod tests {
         attempts.insert(Judgment::Failed, refs("f", failed));
         let judged = (done + failed) as u64;
         Standing {
-            attempts,
+            runs: attempts,
             judged,
             failure_rate: (judged > 0).then(|| failed as f64 / judged as f64),
             small_sample: judged < 5,

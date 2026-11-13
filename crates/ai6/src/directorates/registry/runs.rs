@@ -37,7 +37,7 @@ pub enum RunStatus {
     Parked,
     /// The Run finished; it can no longer be taken or written.
     Ended,
-    /// Its Station went dark and nothing could re-attach to the harness; a later attempt
+    /// Its Station went dark and nothing could re-attach to the harness; a later run
     /// replaces it. Closed like `Ended`.
     Lost,
 }
@@ -166,7 +166,7 @@ pub struct RunRecord {
     pub id: String,
     /// The UID of the Mission the Run works for.
     pub mission_id: String,
-    /// The run's handle, `<mission handle>.<attempt>`, from the handle the Mission had when the
+    /// The run's handle, `<mission handle>.<run>`, from the handle the Mission had when the
     /// run opened; a rename of the Mission later leaves it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
@@ -180,8 +180,8 @@ pub struct RunRecord {
     /// The Theater the harness runs in, when known.
     pub theater: Option<String>,
     /// Which try at the Mission this is, starting at 1.
-    pub attempt: u32,
-    /// The AI6 ID of the Run this one replaced, when it is a later attempt.
+    pub number: u32,
+    /// The AI6 ID of the Run this one replaced, when it is a later run.
     pub predecessor: Option<String>,
     /// Current status.
     pub status: RunStatus,
@@ -191,14 +191,14 @@ pub struct RunRecord {
     pub lease_expires: f64,
     /// The fencing token of the current lease; it only grows.
     pub fence: u64,
-    /// The untrusted input the Run has read; it only grows and a later attempt at the
+    /// The untrusted input the Run has read; it only grows and a later run at the
     /// Mission inherits it.
     pub exposure: Vec<Exposure>,
     /// How the harness was launched, which another Station needs to re-attach to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<RunLaunch>,
     /// What the holder last saw the Run do, oldest first and bounded: the hand-off a
-    /// later attempt is briefed with when this one is lost.
+    /// later run is briefed with when this one is lost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent: Vec<String>,
     /// The last checkpoint of the Run's safe house.
@@ -226,10 +226,10 @@ pub struct RunRecord {
     /// The window (`20261025T0300Z`) a standing Sleeper's run answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<String>,
-    /// What a person found when they checked how the attempt ended; the latest one stands.
+    /// What a person found when they checked how the run ended; the latest one stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verdict: Option<MissionVerdict>,
-    /// What its Mission was to deliver, when the attempt ended done and went to be checked.
+    /// What its Mission was to deliver, when the run ended done and went to be checked.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deliverables: Vec<Deliverable>,
     /// What the Station's probes found of those, oldest first and bounded.
@@ -239,7 +239,7 @@ pub struct RunRecord {
     /// has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
-    /// What a charge held at `desk` clearance advises for a verifying attempt; it settles
+    /// What a charge held at `desk` clearance advises for a verifying run; it settles
     /// nothing, and a person's decision confirms it or overrides it. The latest stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<MissionVerdict>,
@@ -272,7 +272,7 @@ impl ProbeResult {
     }
 }
 
-/// What one probe of one deliverable found, kept on the attempt it was run for.
+/// What one probe of one deliverable found, kept on the run it was run for.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -316,7 +316,7 @@ pub enum OutcomeVerdict {
     Disputed,
     /// The person checked, and the work does not hold up.
     FailedVerification,
-    /// The work did not deliver what it was to: the Mission goes to its next attempt, told why.
+    /// The work did not deliver what it was to: the Mission goes to its next run, told why.
     Redispatch,
 }
 
@@ -355,7 +355,7 @@ impl OutcomeVerdict {
     }
 }
 
-/// A person's verdict on how an attempt at a Mission ended.
+/// A person's verdict on how a run at a Mission ended.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -365,7 +365,7 @@ pub struct MissionVerdict {
     /// Why, in their words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// For a redispatch, what the next attempt is told beyond its brief and the reason.
+    /// For a redispatch, what the next run is told beyond its brief and the reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amendment: Option<String>,
     /// The authenticated person.
@@ -391,7 +391,7 @@ impl MissionVerdict {
         }
     }
 
-    /// This verdict with what a redispatch tells the next attempt.
+    /// This verdict with what a redispatch tells the next run.
     #[must_use]
     pub fn with_amendment(mut self, amendment: Option<String>) -> Self {
         self.amendment = amendment;
@@ -448,7 +448,7 @@ fn cut_report(text: &str, limit: Limit) -> String {
     format!("{}{CUT_MARKER}", &text[..end])
 }
 
-/// How a Mission stood at its Run's last write: what a scorecard judges the attempt by.
+/// How a Mission stood at its Run's last write: what a scorecard judges the run by.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -457,7 +457,7 @@ pub struct RunResult {
     /// `failed`, `blown`, `abandoned`, `parked`, `quarantined`).
     pub state: String,
     /// Why it stands there when AI6 knows: a blocked Mission's reason (`green-ink`, `budget`,
-    /// `interrupted`), or `handed-off` for an attempt another replaced.
+    /// `interrupted`), or `handed-off` for a run another replaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// How many tools its harness refused in its last turn.
@@ -466,7 +466,7 @@ pub struct RunResult {
 }
 
 impl RunResult {
-    /// The reason of an attempt another replaced after a limit: no outcome of its Agent's.
+    /// The reason of a run another replaced after a limit: no outcome of its Agent's.
     pub const HANDED_OFF: &'static str = "handed-off";
 
     /// A result in `state`.
@@ -494,7 +494,7 @@ impl RunResult {
 }
 
 impl RunRecord {
-    /// Whether a person may give a verdict on the attempt: it ended done or held, or is being
+    /// Whether a person may give a verdict on the run: it ended done or held, or is being
     /// verified.
     ///
     /// # Errors
@@ -531,7 +531,7 @@ pub struct NewRun {
     station: String,
     provider_id: Option<String>,
     theater: Option<String>,
-    attempt: u32,
+    number: u32,
     predecessor: Option<String>,
     exposure: Vec<Exposure>,
     launch: Option<RunLaunch>,
@@ -540,7 +540,7 @@ pub struct NewRun {
 }
 
 impl NewRun {
-    /// Starts a first attempt held by `station`.
+    /// Starts a first run held by `station`.
     pub fn new(
         run_id: impl Into<String>,
         mission_id: impl Into<String>,
@@ -554,7 +554,7 @@ impl NewRun {
             station: station.into(),
             provider_id: None,
             theater: None,
-            attempt: 1,
+            number: 1,
             predecessor: None,
             exposure: Vec::new(),
             launch: None,
@@ -570,15 +570,15 @@ impl NewRun {
     }
 
     /// Names the run by the Mission's handle now: the record's handle is
-    /// `<mission_handle>.<attempt>`.
+    /// `<mission_handle>.<run>`.
     pub fn with_handle(mut self, mission_handle: impl Into<String>) -> Self {
         self.mission_handle = Some(mission_handle.into());
         self
     }
 
-    /// The attempt this Run would be.
-    pub fn attempt(&self) -> u32 {
-        self.attempt
+    /// The run this Run would be.
+    pub fn number(&self) -> u32 {
+        self.number
     }
 
     /// Records the Operation the Mission belongs to.
@@ -617,17 +617,17 @@ impl NewRun {
         self
     }
 
-    /// Marks this as a later attempt that replaces the Run `predecessor`.
-    pub fn with_attempt(mut self, attempt: u32, predecessor: Option<String>) -> Self {
-        self.attempt = attempt.max(1);
+    /// Marks this as a later run that replaces the Run `predecessor`.
+    pub fn with_number(mut self, attempt: u32, predecessor: Option<String>) -> Self {
+        self.number = attempt.max(1);
         self.predecessor = predecessor;
         self
     }
 
-    /// This Run as the attempt after it, with a new UID, replacing the record this one
-    /// would have been; `None` past the last attempt a record can count.
-    pub fn next_attempt(mut self) -> Option<Self> {
-        self.attempt = self.attempt.checked_add(1)?;
+    /// This Run as the run after it, with a new UID, replacing the record this one
+    /// would have been; `None` past the last run a record can count.
+    pub fn next_run(mut self) -> Option<Self> {
+        self.number = self.number.checked_add(1)?;
         self.predecessor = Some(std::mem::replace(&mut self.run_id, new_uid()));
         Some(self)
     }
@@ -736,7 +736,7 @@ pub enum RunError {
     Exists,
     /// The Run finished and is closed to every Station.
     Ended,
-    /// The attempt has not ended done or held, so there is no outcome to give a verdict on; the
+    /// The run has not ended done or held, so there is no outcome to give a verdict on; the
     /// state it stands in.
     Unsettled(String),
     /// Another Station holds a live lease on the Run.
@@ -907,10 +907,10 @@ impl FileRegistry {
     }
 }
 
-/// Whether `record` is the run `new` would be: the same attempt at the same Mission, which has
+/// Whether `record` is the run `new` would be: the same run at the same Mission, which has
 /// one record whatever its UID.
 pub(super) fn same_run(record: &RunRecord, new: &NewRun) -> bool {
-    record.mission_id == new.mission_id && record.attempt == new.attempt
+    record.mission_id == new.mission_id && record.number == new.number
 }
 
 /// Checks the identities of a Run to record.
@@ -925,14 +925,14 @@ pub(super) fn opened(new: NewRun, ttl: Duration, now: f64, term: u64) -> RunReco
     RunRecord {
         handle: new
             .mission_handle
-            .map(|handle| run_handle(&handle, new.attempt)),
+            .map(|handle| run_handle(&handle, new.number)),
         id: new.run_id,
         mission_id: new.mission_id,
         operation: new.operation,
         provider_id: new.provider_id,
         station: new.station,
         theater: new.theater,
-        attempt: new.attempt,
+        number: new.number,
         predecessor: new.predecessor,
         status: RunStatus::Active,
         parked_until: None,
@@ -1149,7 +1149,7 @@ pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &RunLimits) -> 
     Ok(())
 }
 
-/// Puts `verdict` on the attempt that ended done or held; a verdict already there is replaced.
+/// Puts `verdict` on the run that ended done or held; a verdict already there is replaced.
 pub(super) fn apply_verdict(
     record: &mut RunRecord,
     verdict: MissionVerdict,
@@ -1159,7 +1159,7 @@ pub(super) fn apply_verdict(
     Ok(())
 }
 
-/// Puts `recommendation` on the attempt; only one being verified takes it.
+/// Puts `recommendation` on the run; only one being verified takes it.
 pub(super) fn apply_recommendation(
     record: &mut RunRecord,
     recommendation: MissionVerdict,
@@ -1175,7 +1175,7 @@ pub(super) fn apply_recommendation(
     Ok(())
 }
 
-/// Marks `record` as asked to be probed; only an attempt being verified takes the request.
+/// Marks `record` as asked to be probed; only a run being verified takes the request.
 pub(super) fn apply_probe_request(record: &mut RunRecord, at: f64) -> Result<(), RunError> {
     let state = record
         .result
@@ -1225,11 +1225,11 @@ pub(super) fn merged_exposure(records: impl IntoIterator<Item = RunRecord>) -> V
     merged
 }
 
-/// The highest attempt among `records`.
+/// The highest run among `records`.
 pub(super) fn latest(records: impl IntoIterator<Item = RunRecord>) -> Option<RunRecord> {
     records.into_iter().max_by(|left, right| {
-        left.attempt
-            .cmp(&right.attempt)
+        left.number
+            .cmp(&right.number)
             .then(left.lease_expires.total_cmp(&right.lease_expires))
     })
 }
@@ -1240,7 +1240,7 @@ pub trait RunStore {
     ///
     /// # Errors
     ///
-    /// `Exists` when the ID is taken or the Mission already has a record of that attempt; `Io`
+    /// `Exists` when the ID is taken or the Mission already has a record of that run; `Io`
     /// for an invalid ID, record or Registry failure.
     fn open_run(&self, new: NewRun, ttl: Duration) -> Result<RunRecord, RunError>;
 
@@ -1249,7 +1249,7 @@ pub trait RunStore {
 
     /// Every way any Run of a Mission was exposed, earliest first, one entry per source.
     ///
-    /// A later attempt inherits this, so exposure cannot be shed by starting again.
+    /// A later run inherits this, so exposure cannot be shed by starting again.
     ///
     /// # Errors
     ///
@@ -1309,19 +1309,19 @@ pub trait RunStore {
     /// `NotFound`, `Ended` for a closed Run, `HeldBy` while its lease is live, or `Io`.
     fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError>;
 
-    /// The latest attempt at a Mission: the Run record with the highest attempt number.
+    /// The latest run at a Mission: the Run record with the highest run number.
     ///
     /// # Errors
     ///
     /// Returns an error when the Run records cannot be read.
     fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>>;
 
-    /// Records a person's verdict on the latest attempt at a Mission of `operation`, replacing any
+    /// Records a person's verdict on the latest run at a Mission of `operation`, replacing any
     /// it has. It needs no lease: a person's word, not a holder's write.
     ///
     /// # Errors
     ///
-    /// `NotFound` when the Operation has no attempt at the Mission; `Unsettled` when the latest
+    /// `NotFound` when the Operation has no run at the Mission; `Unsettled` when the latest
     /// has not ended done or held; `Io` for a verdict out of bounds or a Registry failure.
     fn record_verdict(
         &self,
@@ -1330,12 +1330,12 @@ pub trait RunStore {
         verdict: &MissionVerdict,
     ) -> Result<RunRecord, RunError>;
 
-    /// Records what a charge held at `desk` clearance advises for the latest attempt at a Mission
+    /// Records what a charge held at `desk` clearance advises for the latest run at a Mission
     /// of `operation`, replacing any it has. It settles nothing and needs no lease.
     ///
     /// # Errors
     ///
-    /// `NotFound` when the Operation has no attempt at the Mission; `Unsettled` when the latest
+    /// `NotFound` when the Operation has no run at the Mission; `Unsettled` when the latest
     /// is not being verified; `Io` for a recommendation out of bounds or a Registry failure.
     fn record_recommendation(
         &self,
@@ -1344,13 +1344,13 @@ pub trait RunStore {
         recommendation: &MissionVerdict,
     ) -> Result<RunRecord, RunError>;
 
-    /// Asks for the latest attempt at a Mission of `operation` to have its deliverables probed;
+    /// Asks for the latest run at a Mission of `operation` to have its deliverables probed;
     /// the Station that holds it does so on its next pass and clears the request. It needs no
     /// lease: a person's word, not a holder's write.
     ///
     /// # Errors
     ///
-    /// `NotFound` when the Operation has no attempt at the Mission; `Unsettled` when the latest
+    /// `NotFound` when the Operation has no run at the Mission; `Unsettled` when the latest
     /// is not being verified; `Io` for a Registry failure.
     fn request_probe(
         &self,
@@ -1562,7 +1562,7 @@ pub(super) fn parse_run(bytes: &[u8], limits: &RunLimits) -> io::Result<RunRecor
     }
     let record: RunRecord = serde_json::from_slice(bytes)
         .map_err(|error| invalid_data(format!("invalid Run record: {error}")))?;
-    if !record.lease_expires.is_finite() || record.attempt == 0 {
+    if !record.lease_expires.is_finite() || record.number == 0 {
         return Err(invalid_data("invalid Run record"));
     }
     Ok(record)
@@ -1594,7 +1594,7 @@ mod tests {
 
     backend_tests!(
         two_stations_sharing_a_registry_see_the_same_record,
-        a_later_attempt_links_to_its_predecessor,
+        a_later_run_links_to_its_predecessor,
         a_stale_fencing_token_is_refused,
         a_live_lease_cannot_be_taken_but_the_holder_renews_it,
         the_fencing_token_follows_the_headquarters_term_and_only_grows,
@@ -1602,10 +1602,10 @@ mod tests {
         a_run_keeps_its_agent_times_and_the_result_of_its_last_write,
         only_a_lapsed_run_is_lost_and_its_holder_is_fenced_out,
         the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
-        the_latest_run_is_the_highest_attempt,
+        the_latest_run_is_the_highest_run,
         unsafe_ids_are_rejected_before_touching_the_filesystem,
-        a_verdict_lands_on_the_latest_attempt_that_ended,
-        a_verdict_is_refused_on_an_attempt_with_no_outcome,
+        a_verdict_lands_on_the_latest_run_that_ended,
+        a_verdict_is_refused_on_an_run_with_no_outcome,
         a_final_report_is_kept_by_its_run_and_cut_when_long,
     );
 
@@ -1628,7 +1628,7 @@ mod tests {
         assert_eq!(seen.station, "station-a");
         assert_eq!(seen.theater.as_deref(), Some("local"));
         assert_eq!(seen.provider_id.as_deref(), Some("provider-1"));
-        assert_eq!(seen.attempt, 1);
+        assert_eq!(seen.number, 1);
         assert_eq!(second.runs().unwrap(), vec![seen]);
         assert!(matches!(
             second.open_run_at(new_run(), TTL, NOW),
@@ -1636,19 +1636,19 @@ mod tests {
         ));
     }
 
-    fn a_later_attempt_links_to_its_predecessor(store: &dyn Store) {
+    fn a_later_run_links_to_its_predecessor(store: &dyn Store) {
         let registry = store.handle();
         registry.open_run_at(new_run(), TTL, NOW).unwrap();
         let next = registry
             .open_run_at(
                 NewRun::new("s-2", "mission-1", "station-a")
-                    .with_attempt(2, Some("s-1".to_owned())),
+                    .with_number(2, Some("s-1".to_owned())),
                 TTL,
                 NOW,
             )
             .unwrap();
         assert_eq!(
-            (next.attempt, next.predecessor.as_deref()),
+            (next.number, next.predecessor.as_deref()),
             (2, Some("s-1"))
         );
     }
@@ -1730,12 +1730,12 @@ mod tests {
         assert!(again.fence > taken.fence);
     }
 
-    /// A Mission of Operation `G` whose attempt `attempt` stands in `state`.
-    fn attempt_in(store: &dyn Store, mission: &str, attempt: u32, state: &str) -> RunRecord {
+    /// A Mission of Operation `G` whose run `run` stands in `state`.
+    fn run_in(store: &dyn Store, mission: &str, attempt: u32, state: &str) -> RunRecord {
         let registry = store.handle();
         let new = NewRun::new(format!("{mission}-{attempt}"), mission, "station-a")
             .with_operation("G")
-            .with_attempt(attempt, None);
+            .with_number(attempt, None);
         let opened = registry.open_run_at(new, TTL, NOW).unwrap();
         registry
             .write_fenced(
@@ -1749,10 +1749,10 @@ mod tests {
             .unwrap()
     }
 
-    fn a_verdict_lands_on_the_latest_attempt_that_ended(store: &dyn Store) {
+    fn a_verdict_lands_on_the_latest_run_that_ended(store: &dyn Store) {
         let registry = store.handle();
-        attempt_in(store, "m-1", 1, "failed");
-        let last = attempt_in(store, "m-1", 2, "done");
+        run_in(store, "m-1", 1, "failed");
+        let last = run_in(store, "m-1", 2, "done");
         let verdict = MissionVerdict::new(
             OutcomeVerdict::Disputed,
             "person-1",
@@ -1774,7 +1774,7 @@ mod tests {
         assert_eq!(judged.verdict, Some(confirmed));
         assert_eq!(judged.result.unwrap().state, "done", "its state stays");
 
-        let held = attempt_in(store, "m-2", 1, "held");
+        let held = run_in(store, "m-2", 1, "held");
         let judged = registry
             .record_verdict(
                 "G",
@@ -1785,14 +1785,14 @@ mod tests {
         assert_eq!(judged.id, held.id);
     }
 
-    fn a_verdict_is_refused_on_an_attempt_with_no_outcome(store: &dyn Store) {
+    fn a_verdict_is_refused_on_an_run_with_no_outcome(store: &dyn Store) {
         let registry = store.handle();
         let verdict = MissionVerdict::new(OutcomeVerdict::Disputed, "p", NOW, None);
         assert!(matches!(
             registry.record_verdict("G", "m-none", &verdict),
             Err(RunError::NotFound)
         ));
-        attempt_in(store, "m-1", 1, "done");
+        run_in(store, "m-1", 1, "done");
         assert!(
             matches!(
                 registry.record_verdict("other", "m-1", &verdict),
@@ -1802,15 +1802,15 @@ mod tests {
         );
         for state in ["working", "blocked", "failed", "abandoned"] {
             let mission = format!("m-{state}");
-            attempt_in(store, &mission, 1, state);
+            run_in(store, &mission, 1, state);
             match registry.record_verdict("G", &mission, &verdict) {
                 Err(RunError::Unsettled(found)) => assert_eq!(found, state),
                 other => panic!("{state}: {other:?}"),
             }
         }
-        // A later attempt that has not ended stands in the way of the earlier one's outcome.
-        attempt_in(store, "m-retried", 1, "done");
-        attempt_in(store, "m-retried", 2, "working");
+        // A later run that has not ended stands in the way of the earlier one's outcome.
+        run_in(store, "m-retried", 1, "done");
+        run_in(store, "m-retried", 2, "working");
         assert!(matches!(
             registry.record_verdict("G", "m-retried", &verdict),
             Err(RunError::Unsettled(_))
@@ -2069,14 +2069,14 @@ mod tests {
         assert_eq!(registry.run("s-1").unwrap().unwrap(), written);
     }
 
-    fn the_latest_run_is_the_highest_attempt(store: &dyn Store) {
+    fn the_latest_run_is_the_highest_run(store: &dyn Store) {
         let registry = store.handle();
         assert_eq!(registry.latest_run("mission-1").unwrap(), None);
         registry.open_run_at(new_run(), TTL, NOW).unwrap();
         registry
             .open_run_at(
                 NewRun::new("s-0", "mission-1", "station-b")
-                    .with_attempt(2, Some("s-1".to_owned())),
+                    .with_number(2, Some("s-1".to_owned())),
                 TTL,
                 NOW,
             )
@@ -2085,7 +2085,7 @@ mod tests {
             .open_run_at(NewRun::new("s-9", "mission-2", "station-b"), TTL, NOW)
             .unwrap();
         let latest = registry.latest_run("mission-1").unwrap().unwrap();
-        assert_eq!((latest.id.as_str(), latest.attempt), ("s-0", 2));
+        assert_eq!((latest.id.as_str(), latest.number), ("s-0", 2));
     }
 
     #[test]

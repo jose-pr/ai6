@@ -71,7 +71,7 @@ fn pending_mission(
             runs: Vec::new(),
             brief: None,
             usage: None,
-            attempts: Vec::new(),
+            history: Vec::new(),
             pending: Some(pending),
         },
     )

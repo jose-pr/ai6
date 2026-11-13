@@ -861,7 +861,7 @@ async fn agents_lift_ends_a_hold_on_the_agent_or_on_one_route() {
 }
 
 #[tokio::test]
-async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
+async fn agents_scorecard_prints_each_row_and_the_runs_behind_a_judgment() {
     let (server, shutdown, token, directory) = start_gateway().await;
     let registry = FileRegistry::open(directory.path());
     for (mission, state) in [("m-1", "done"), ("m-2", "failed"), ("m-3", "abandoned")] {
@@ -1778,7 +1778,7 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
         "{said}"
     );
 
-    // A decision needs its reason and is the attempt's verdict.
+    // A decision needs its reason and is the run's verdict.
     let bare = run(
         vec!["verify", "redispatch", "--operation", "station-01"],
         key.to_owned(),

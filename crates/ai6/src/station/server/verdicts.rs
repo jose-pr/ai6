@@ -41,7 +41,7 @@ pub(super) fn file_final_report(state: &DaemonState, mission_id: &str, text: Opt
 }
 
 /// Whether a Mission's `done` stands in the way of its role's requirement: the role wants a green
-/// ink request decided in this attempt, and none was. A request that expired was not decided. What
+/// ink request decided in this run, and none was. A request that expired was not decided. What
 /// cannot be read counts as none: a person's look costs less than a false `done`.
 fn lacks_decision(state: &DaemonState, mission: &Mission) -> bool {
     if vetting::is_review_mission(mission) || review::is_panel_mission(mission) {
@@ -104,7 +104,7 @@ pub(super) fn hold_unapproved(
 }
 
 /// Settles each held or verifying Mission a person gave a verdict on: `done` when they confirmed
-/// it, `failed` otherwise, and for a verifying one asked to be redispatched, its next attempt. Its
+/// it, `failed` otherwise, and for a verifying one asked to be redispatched, its next run. Its
 /// brief is filed on the next intake pass.
 pub(super) fn settle_held(state: &DaemonState) {
     let retry = UNFILED
@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_decision_in_this_attempt_lets_a_done_stand() {
+    fn only_a_decision_in_this_run_lets_a_done_stand() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
         let now = state.clock.now() as f64;

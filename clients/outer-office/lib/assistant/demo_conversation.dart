@@ -199,7 +199,7 @@ class DemoAssistantChannel implements AssistantChannel {
     ];
   }
 
-  /// Operation G as the sample's second view: its attempts as a schedule, where it runs as a
+  /// Operation G as the sample's second view: its runs as a schedule, where it runs as a
   /// graph, Missions by state and Runs by Station as charts, and a drawing.
   static const Map<String, Object?> _operationG = {
     'version': 1,

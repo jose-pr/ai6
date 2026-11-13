@@ -83,7 +83,7 @@ This is for an Agent doing work: [Moneypenny's conversations carry no exposure](
 and a Cable from her exposes no one.
 
 Exposure is recorded in the Run's Registry record, never goes away, and is inherited by
-a later attempt at the same Mission. Outer Office shows an `EXPOSED` chip on the Run and
+a later run at the same Mission. Outer Office shows an `EXPOSED` chip on the Run and
 `ai6ctl` lists the sources. Marking is always on; what an exposed Run may then do is the
 Operation's policy:
 

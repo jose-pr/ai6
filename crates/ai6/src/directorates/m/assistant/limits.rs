@@ -766,7 +766,7 @@ impl AssistantLimits {
 }
 
 impl AssistantDeskLimits {
-    /// Checks what cannot work: a job size or report attempt count of zero.
+    /// Checks what cannot work: a job size or report run count of zero.
     ///
     /// # Errors
     ///

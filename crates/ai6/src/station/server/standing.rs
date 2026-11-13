@@ -1,6 +1,6 @@
-//! A standing Sleeper's runs: each window is a new attempt of the Sleeper's one Mission, and one
-//! that resumes takes up the provider Run the last attempt left. A Sleeper's attempt that fails
-//! says so on the timeline and the board, and a window that finds its order's attempt stalled
+//! A standing Sleeper's runs: each window is a new run of the Sleeper's one Mission, and one
+//! that resumes takes up the provider Run the last run left. A Sleeper's run that fails
+//! says so on the timeline and the board, and a window that finds its order's run stalled
 //! supersedes it.
 
 use super::{DaemonState, is_terminal_state, run_hold};
@@ -15,18 +15,18 @@ use crate::directorates::registry::store::{AuditRecord, Brief};
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::{AgentResume, AgentStart, RunId};
 
-/// The key an attempt's outcome sets when its `reason` is what its harness said, which may quote
+/// The key a run's outcome sets when its `reason` is what its harness said, which may quote
 /// anything and stays off the timeline.
 pub(super) const HARNESS_SAID: &str = "reason_from_harness";
 
-/// The reason the board gets with a Sleeper's failed attempt.
+/// The reason the board gets with a Sleeper's failed run.
 #[cfg(feature = "publisher")]
 pub(super) const ORDER_FAILED_REASON: &str = "order-attempt-failed";
 
-/// The reason on the Run record of an attempt a later window superseded.
+/// The reason on the Run record of a run a later window superseded.
 const SUPERSEDED: &str = "superseded";
 
-/// The window a standing Sleeper's run answers, and whether it resumes the last attempt.
+/// The window a standing Sleeper's run answers, and whether it resumes the last run.
 pub(super) struct WindowRun {
     /// The window, as its label (`20261025T0300Z`).
     pub(super) window: String,
@@ -50,9 +50,9 @@ pub(super) fn of(state: &DaemonState, mission_id: &str) -> Option<WindowRun> {
     })
 }
 
-/// The provider Run a run that resumes takes up: the last attempt's, when that attempt ran on
+/// The provider Run a run that resumes takes up: the last run's, when that run ran on
 /// `handler`, did not fail, and its provider gave it an ID, unless the provider `refused` it this
-/// attempt. A failed attempt's Run may be why it failed, and resuming it could fail every
+/// run. A failed run's Run may be why it failed, and resuming it could fail every
 /// window alike. That it failed is read from its Run record, or `after_failure` from this
 /// Station's book, which can say so first. Which it does goes on the timeline.
 pub(super) fn resume_from(
@@ -132,7 +132,7 @@ pub(super) fn resume_request(start: AgentStart, run_id: RunId) -> AgentResume {
     }
 }
 
-/// Notes that the provider could not resume the Run this attempt would have taken up: the
+/// Notes that the provider could not resume the Run this run would have taken up: the
 /// scheduler's next try starts a new one, rather than asking again for what will not come back.
 pub(super) fn resume_refused(state: &DaemonState, mission_id: &str, why: &str) {
     eprintln!("ai6: Mission {mission_id:?} could not resume its last Run: {why}");
@@ -143,7 +143,7 @@ pub(super) fn resume_refused(state: &DaemonState, mission_id: &str, why: &str) {
     }
 }
 
-/// Puts a failed attempt of a Sleeper on the timeline, needing no one's approval: the order stands
+/// Puts a failed run of a Sleeper on the timeline, needing no one's approval: the order stands
 /// and its next window fires, so nothing else would tell of it. A cancel is an operator's own doing.
 pub(super) fn attempt_failed(state: &DaemonState, brief: &Brief, outcome: &serde_json::Value) {
     if outcome["state"] == "abandoned" {
@@ -188,7 +188,7 @@ pub(super) fn attempt_failed(state: &DaemonState, brief: &Brief, outcome: &serde
     }
 }
 
-/// [`attempt_failed`] for a brief a recovered lease filed, when its Station was lost.
+/// [`run_failed`] for a brief a recovered lease filed, when its Station was lost.
 pub(super) fn recovered_failed(state: &DaemonState, key: &str) {
     if let Ok(Some(filed)) = state.intake.filed_brief(key)
         && let Some(outcome) = &filed.outcome
@@ -197,20 +197,20 @@ pub(super) fn recovered_failed(state: &DaemonState, key: &str) {
     }
 }
 
-/// An attempt a later window takes the place of.
+/// A run a later window takes the place of.
 struct Stalled {
     mission_id: String,
     operation: String,
-    /// The window the attempt answers.
+    /// The window the run answers.
     window: String,
     /// The window that supersedes it.
     next: String,
     why: String,
-    /// Whether a stall of its Agent's was already counted for this attempt.
+    /// Whether a stall of its Agent's was already counted for this run.
     counted: bool,
 }
 
-/// Why `mission`, an attempt held by this Station, cannot be expected to end by itself. The stall
+/// Why `mission`, a run held by this Station, cannot be expected to end by itself. The stall
 /// bound is its Agent's `stall_timeout`, which is what makes it `stalled`. A Mission waiting for a
 /// person, a provider's limit or an operator's release is not stalled, nor is one a re-attach may
 /// still bring back.
@@ -248,8 +248,8 @@ fn why_stalled(state: &DaemonState, mission: &Mission) -> Option<String> {
     }
 }
 
-/// The attempts in this Station's book whose order's next window has come while they cannot end.
-fn stalled_attempts(state: &DaemonState) -> Vec<Stalled> {
+/// The runs in this Station's book whose order's next window has come while they cannot end.
+fn stalled_mission_runs(state: &DaemonState) -> Vec<Stalled> {
     let book: Vec<Mission> = state
         .missions
         .lock()
@@ -307,12 +307,12 @@ fn stalled_attempts(state: &DaemonState) -> Vec<Stalled> {
         .collect()
 }
 
-/// Settles each attempt in this Station's book whose order's next window finds it stalled: it fails
+/// Settles each run in this Station's book whose order's next window finds it stalled: it fails
 /// with that reason, audited, its harness stopped, and the next intake pass files its brief, which
-/// lets the window fire as the next attempt. Without this the order waits for a person.
+/// lets the window fire as the next run. Without this the order waits for a person.
 pub(super) async fn supersede_stalled(state: &DaemonState) {
     let reading = state.clone();
-    let stalled = tokio::task::spawn_blocking(move || stalled_attempts(&reading))
+    let stalled = tokio::task::spawn_blocking(move || stalled_mission_runs(&reading))
         .await
         .unwrap_or_default();
     for attempt in stalled {
@@ -352,7 +352,7 @@ async fn supersede(state: &DaemonState, attempt: Stalled) {
             eprintln!("ai6: Run record {:?} not updated: {error}", hold.id);
         }
         if !attempt.counted {
-            super::agents::count_lost(state, id, hold.attempt);
+            super::agents::count_lost(state, id, hold.number);
         }
     }
     super::publish_lifecycle(state, id, MissionState::Failed);
@@ -408,7 +408,7 @@ pub(super) mod testing {
     /// The brief context of each start or resume, as (Mission, context), in the order they came.
     pub(in crate::station::server) static BRIEFS: Mutex<Vec<(String, Vec<String>)>> =
         Mutex::new(Vec::new());
-    /// The Missions whose first attempt has gone the way its prompt asks.
+    /// The Missions whose first run has gone the way its prompt asks.
     static FIRST_DONE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
     fn event(kind: &str, text: &str) -> AgentEvent {
@@ -424,7 +424,7 @@ pub(super) mod testing {
 
     /// A harness that resumes by provider ID, as Claude Code does: each start is a new
     /// provider Run and each turn completes the Mission. A word in the prompt changes that:
-    /// `first-attempt-fails`, `first-attempt-stalls` and `first-attempt-blocks` for a Mission's
+    /// `first-run-fails`, `first-run-stalls` and `first-run-blocks` for a Mission's
     /// first start, `resume-refused` and `resume-dead` for every resume.
     #[derive(Default, Provider)]
     #[provider(
@@ -550,7 +550,7 @@ mod tests {
             .expect("the standing Mission entered")
     }
 
-    /// Runs the queued attempt of the standing Mission to its end and files it.
+    /// Runs the queued run of the standing Mission to its end and files it.
     async fn run_attempt(state: &DaemonState) -> String {
         assert!(schedule_intake_once(state));
         let mission = standing_mission(state);
@@ -564,7 +564,7 @@ mod tests {
         mission
     }
 
-    /// Fires the window at `window` and runs its attempt to its end; the standing Mission.
+    /// Fires the window at `window` and runs its run to its end; the standing Mission.
     async fn run_window(state: &DaemonState, window: i64, warned: &mut BTreeSet<String>) -> String {
         assert_eq!(
             fire_due_sleepers(
@@ -589,12 +589,12 @@ mod tests {
             .into_iter()
             .filter(|record| record.mission_id == mission)
             .collect();
-        runs.sort_by_key(|record| record.attempt);
+        runs.sort_by_key(|record| record.number);
         runs
     }
 
     #[tokio::test]
-    async fn three_windows_are_attempts_of_one_mission_and_an_overlapping_one_is_skipped() {
+    async fn three_windows_are_runs_of_one_mission_and_an_overlapping_one_is_skipped() {
         let root = tempfile::tempdir().unwrap();
         let state = standing_state(root.path(), false);
         let mut warned = BTreeSet::new();
@@ -619,7 +619,7 @@ mod tests {
         let labels = [FIRST, FIRST + DAY, FIRST + 2 * DAY].map(window_label);
         assert_eq!(
             runs.iter()
-                .map(|run| (run.attempt, run.handle.as_deref(), run.window.as_deref()))
+                .map(|run| (run.number, run.handle.as_deref(), run.window.as_deref()))
                 .collect::<Vec<_>>(),
             [
                 (1, Some("G-nightly-1.1"), Some(labels[0].as_str())),
@@ -751,7 +751,7 @@ mod tests {
     }
 
     /// A lease that lapsed after its Mission ended here, recovered and claimed again, is the
-    /// same attempt: its outcome is filed and nothing runs twice.
+    /// same run: its outcome is filed and nothing runs twice.
     #[tokio::test]
     async fn the_same_brief_claimed_again_after_a_lapse_is_filed_and_not_run_again() {
         let root = tempfile::tempdir().unwrap();
@@ -781,7 +781,7 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         };
-        assert_eq!(lapsed.attempt(), 1);
+        assert_eq!(lapsed.number(), 1);
         state.intake.recover(&lapsed, 5, "other").unwrap().unwrap();
 
         assert!(schedule_intake_once(&state));
@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_resuming_window_takes_up_the_last_attempts_provider_id() {
+    async fn a_resuming_window_takes_up_the_last_runs_provider_id() {
         let root = tempfile::tempdir().unwrap();
         let state = standing_state(root.path(), true);
         let mut warned = BTreeSet::new();
@@ -863,7 +863,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_attempt_leaves_the_order_standing_and_says_why() {
+    async fn a_failed_run_leaves_the_order_standing_and_says_why() {
         let root = tempfile::tempdir().unwrap();
         let state = order_state(root.path(), "first-attempt-fails the tree.", false);
         let mut warned = BTreeSet::new();
@@ -917,15 +917,15 @@ mod tests {
         );
         let runs = runs(&state, &mission);
         assert_eq!(
-            runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            runs.iter().map(|run| run.number).collect::<Vec<_>>(),
             [1, 2]
         );
         stop(&state);
     }
 
-    /// A cancelled attempt is an operator's own doing, and asks for no alert.
+    /// A cancelled run is an operator's own doing, and asks for no alert.
     #[test]
-    fn a_cancelled_attempt_raises_no_alert() {
+    fn a_cancelled_run_raises_no_alert() {
         let root = tempfile::tempdir().unwrap();
         let state = standing_state(root.path(), false);
         let sleeper = state.roster.operation("G").unwrap().sleepers["nightly"].clone();
@@ -940,7 +940,7 @@ mod tests {
         assert!(told(&state, "attempt-failed").is_empty());
     }
 
-    /// A provider that refuses the resume leaves the attempt to start a new Run, and the
+    /// A provider that refuses the resume leaves the run to start a new Run, and the
     /// order does not sit in the start's retries.
     #[tokio::test]
     async fn a_resume_the_provider_refuses_falls_back_to_a_new_run_and_says_so() {
@@ -964,7 +964,7 @@ mod tests {
 
         let runs = runs(&state, &mission);
         assert_eq!(
-            runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            runs.iter().map(|run| run.number).collect::<Vec<_>>(),
             [1, 2]
         );
         assert_ne!(runs[0].provider_id, runs[1].provider_id);
@@ -986,8 +986,8 @@ mod tests {
         stop(&state);
     }
 
-    /// The book says an attempt failed before its Run record does: the record's result is
-    /// written after the Mission's state, so a start in between still reads the attempt as done.
+    /// The book says a run failed before its Run record does: the record's result is
+    /// written after the Mission's state, so a start in between still reads the run as done.
     #[tokio::test]
     async fn a_failure_the_book_holds_keeps_the_next_window_off_its_run() {
         let root = tempfile::tempdir().unwrap();
@@ -1023,7 +1023,7 @@ mod tests {
     /// A harness can take the resume and then fail on it, each window alike; only a new Run
     /// gets the order out of that.
     #[tokio::test]
-    async fn a_run_whose_attempt_failed_is_not_resumed_by_the_next_window() {
+    async fn a_run_whose_run_failed_is_not_resumed_by_the_next_window() {
         let root = tempfile::tempdir().unwrap();
         let state = order_state(root.path(), "resume-dead the tree.", true);
         let mut warned = BTreeSet::new();
@@ -1053,7 +1053,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_window_supersedes_a_stalled_attempt_and_runs_as_the_next_attempt() {
+    async fn a_window_supersedes_a_stalled_run_and_runs_as_the_next_run() {
         let root = tempfile::tempdir().unwrap();
         let mut state = order_state(root.path(), "first-attempt-stalls the tree.", false);
         let mut warned = BTreeSet::new();
@@ -1105,7 +1105,7 @@ mod tests {
         run_attempt(&state).await;
         let runs = runs(&state, &mission);
         assert_eq!(
-            runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+            runs.iter().map(|run| run.number).collect::<Vec<_>>(),
             [1, 2]
         );
         assert_eq!(
@@ -1120,7 +1120,7 @@ mod tests {
     /// failed it may still come back; a harness that cannot be re-attached wedges the order until
     /// the next window.
     #[tokio::test]
-    async fn a_window_supersedes_an_attempt_with_no_live_run_after_a_restart() {
+    async fn a_window_supersedes_an_run_with_no_live_run_after_a_restart() {
         let root = tempfile::tempdir().unwrap();
         let mut state = order_state(root.path(), "first-attempt-blocks the tree.", false);
         let mut warned = BTreeSet::new();

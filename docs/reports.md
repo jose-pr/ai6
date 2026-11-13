@@ -129,7 +129,7 @@ ai6ctl reports assess report-0f3c... duplicate --of coqui-41 --reason "the same 
 | The Head of Station | the finding's | its Station |
 | A person | their own | the scope they name |
 
-A producer files beside the record it already keeps (the evidence on the attempt, the hold on the
+A producer files beside the record it already keeps (the evidence on the run, the hold on the
 brief, the green ink request), not in place of it, and files again for the same thing as an
 update: a probe run twice, or a hold seen on every pass, is one Report. A Report that cannot be
 stored is logged and never stops the check.

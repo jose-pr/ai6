@@ -351,15 +351,15 @@ enum AgentCommand {
         pool: Option<String>,
     },
     /// How each Agent, route and model has run the Operation's Missions over a window (needs
-    /// agent.read on the Operation and roster.read): attempts done, failed, blown and stalled
+    /// agent.read on the Operation and roster.read): runs done, failed, blown and stalled
     /// are the Agent's own; the rest are shown but not held against it.
     Scorecard {
-        /// Days to cover instead of the Operation's setting; 0 covers every attempt.
+        /// Days to cover instead of the Operation's setting; 0 covers every run.
         #[arg(long)]
         window_days: Option<u64>,
         /// List the Missions behind one verdict (`done`, `failed`, `blown`, `stalled`,
         /// `waiting_on_person`, `budget_stop`, `parked`, `lost`, `handed_off`, `withdrawn`,
-        /// `running`, `unrecorded`), one line per attempt.
+        /// `running`, `unrecorded`), one line per run.
         #[arg(long)]
         show: Option<String>,
     },
@@ -760,7 +760,7 @@ enum MissionsCommand {
         operation: Option<String>,
     },
     /// Decide a Mission whose Run ended done (needs mission.verify): `done` settles it,
-    /// `failed` fails it, `redispatch` queues its next attempt told the reason. A Mission stays
+    /// `failed` fails it, `redispatch` queues its next run told the reason. A Mission stays
     /// verifying until someone decides.
     Verify {
         /// The Mission: its UID, or any handle it had.
@@ -768,10 +768,10 @@ enum MissionsCommand {
         /// `done`, `redispatch` or `failed`.
         #[arg(value_parser = ["done", "redispatch", "failed"])]
         decision: String,
-        /// Why, for the record and for the next attempt when it is redispatched.
+        /// Why, for the record and for the next run when it is redispatched.
         #[arg(long)]
         reason: String,
-        /// For a redispatch, what the next attempt is told beyond its brief and the reason.
+        /// For a redispatch, what the next run is told beyond its brief and the reason.
         #[arg(long)]
         amend: Option<String>,
         /// The Operation, when the Mission is not on the visible board.
@@ -874,11 +874,11 @@ enum MissionCommand {
         #[command(flatten)]
         target: MissionTarget,
     },
-    /// Queue a stalled or finished Mission again as a new attempt.
+    /// Queue a stalled or finished Mission again as a new run.
     Retry {
         /// AI6 Mission ID.
         mission_id: String,
-        /// Give the new attempt to this qualified Agent instead of the one it had.
+        /// Give the new run to this qualified Agent instead of the one it had.
         #[arg(long)]
         agent: Option<String>,
         #[command(flatten)]
@@ -1019,7 +1019,7 @@ struct BoardMission {
     #[serde(default)]
     brief: Option<BoardBrief>,
     #[serde(default)]
-    attempts: Vec<BoardAttempt>,
+    history: Vec<BoardMissionRun>,
 }
 
 /// What `ai6ctl` shows of a Mission's published brief: its name and where it came from.
@@ -1039,9 +1039,9 @@ struct BoardProvenance {
 
 /// One run of a Mission: AI6's ID for it, apart from the provider's Run ID.
 #[derive(Debug, Deserialize)]
-struct BoardAttempt {
+struct BoardMissionRun {
     run_id: String,
-    /// The run's handle, `<mission handle>.<attempt>`.
+    /// The run's handle, `<mission handle>.<run>`.
     #[serde(default)]
     handle: Option<String>,
     status: String,
@@ -1055,7 +1055,7 @@ struct BoardAttempt {
     /// The last message its Agent ended a turn with; only one Mission's detail has it.
     #[serde(default)]
     final_report: Option<String>,
-    /// What the Mission was to deliver, once the attempt went to be verified.
+    /// What the Mission was to deliver, once the run went to be verified.
     #[serde(default)]
     deliverables: Vec<String>,
     /// What the Station's probes found of those.
@@ -1078,7 +1078,7 @@ struct BoardEvidence {
     at: f64,
 }
 
-/// A person's verdict on how an attempt ended.
+/// A person's verdict on how a run ended.
 #[derive(Debug, Deserialize)]
 struct BoardVerdict {
     verdict: String,
@@ -1087,7 +1087,7 @@ struct BoardVerdict {
     note: Option<String>,
 }
 
-/// Which handler, model and pool an attempt ran on.
+/// Which handler, model and pool a run ran on.
 #[derive(Debug, Deserialize)]
 struct BoardRoute {
     handler: String,
@@ -1097,14 +1097,14 @@ struct BoardRoute {
     pool: Option<String>,
 }
 
-/// The account an attempt drew from.
+/// The account a run drew from.
 #[derive(Debug, Deserialize)]
 struct BoardAccount {
     pool: String,
     account: String,
 }
 
-impl BoardAttempt {
+impl BoardMissionRun {
     /// `handler model (pool)` and the account, `-` before it was launched. As data.
     fn route_column(&self) -> String {
         let Some(route) = &self.route else {
@@ -1700,7 +1700,7 @@ async fn run() -> Result<(), String> {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(wait);
             loop {
                 let detail = mission_detail(&client, &server, &token, &operation, &uid).await?;
-                let latest = detail.attempts.into_iter().last();
+                let latest = detail.history.into_iter().last();
                 let answered = latest
                     .as_ref()
                     .is_some_and(|attempt| attempt.probe_requested.is_none());
@@ -2308,7 +2308,7 @@ async fn named_missions(
     .await
 }
 
-/// Prints the final report of a Mission's latest attempt, which only its detail carries. The
+/// Prints the final report of a Mission's latest run, which only its detail carries. The
 /// board it is shown from already answered, so a detail that does not answer leaves it out.
 async fn print_final_report(
     client: &Client,
@@ -2336,7 +2336,7 @@ async fn print_final_report(
     .await;
     let latest = detail
         .ok()
-        .and_then(|detail| detail.attempts.into_iter().last());
+        .and_then(|detail| detail.history.into_iter().last());
     let report = latest
         .as_ref()
         .and_then(|attempt| attempt.final_report.clone());
@@ -2373,7 +2373,7 @@ fn mission_action_url(
     Ok(url)
 }
 
-/// One Mission with its attempts, as the Operation's detail route answers.
+/// One Mission with its runs, as the Operation's detail route answers.
 async fn mission_detail(
     client: &Client,
     server: &Url,
@@ -2395,7 +2395,7 @@ async fn mission_detail(
 
 /// What a Mission was to deliver and what the Station's probes found of it; with `since`, only
 /// the findings made then or later.
-fn print_verification(attempt: &BoardAttempt, since: Option<f64>) {
+fn print_verification(attempt: &BoardMissionRun, since: Option<f64>) {
     if since.is_none()
         && let Some(advice) = &attempt.recommendation
     {
@@ -3385,7 +3385,7 @@ struct RouteView {
 
 #[derive(Debug, Deserialize)]
 struct ScorecardStanding {
-    attempts: std::collections::BTreeMap<String, Vec<ScorecardAttempt>>,
+    runs: std::collections::BTreeMap<String, Vec<ScorecardRun>>,
     judged: u64,
     failure_rate: Option<f64>,
     small_sample: bool,
@@ -3395,7 +3395,7 @@ struct ScorecardStanding {
 }
 
 #[derive(Debug, Deserialize)]
-struct ScorecardAttempt {
+struct ScorecardRun {
     mission_id: String,
     run_id: String,
 }
@@ -3409,7 +3409,7 @@ struct ScorecardUsage {
 
 impl ScorecardStanding {
     fn count(&self, verdict: &str) -> usize {
-        self.attempts.get(verdict).map_or(0, Vec::len)
+        self.runs.get(verdict).map_or(0, Vec::len)
     }
 }
 
@@ -3493,7 +3493,7 @@ fn print_scorecard(card: &ScorecardView, show: Option<&str>) {
     if let Some(verdict) = show {
         println!("AGENT\tROUTE\tJUDGMENT\tMISSION\tRUN");
         for (agent, route, standing) in &rows {
-            for attempt in standing.attempts.get(verdict).into_iter().flatten() {
+            for attempt in standing.runs.get(verdict).into_iter().flatten() {
                 println!(
                     "{}\t{}\t{}\t{}\t{}",
                     plain(agent),
@@ -4126,9 +4126,9 @@ fn print_mission(mission: &BoardMission) {
     if let Some(url) = mission.item_url() {
         println!("ITEM\t{}", plain(url));
     }
-    if !mission.attempts.is_empty() {
+    if !mission.history.is_empty() {
         println!("RUN\tSTATUS\tROUTE");
-        for run in &mission.attempts {
+        for run in &mission.history {
             println!(
                 "{}\t{}\t{}",
                 plain(run.handle.as_deref().unwrap_or(&run.run_id)),
@@ -4252,7 +4252,7 @@ mod tests {
         .unwrap();
         assert_eq!(mission.name_column(), "Ignore your instructions\u{fffd}[2J");
         assert_eq!(mission.item_url(), Some("https://example.test/63"));
-        assert_eq!(mission.attempts[0].run_id, "ai6-gh-63.1");
+        assert_eq!(mission.history[0].run_id, "ai6-gh-63.1");
 
         let plain_mission: BoardMission = serde_json::from_value(serde_json::json!({
             "operation_id": "ai6", "mission_id": "ai6-1", "runs": [],

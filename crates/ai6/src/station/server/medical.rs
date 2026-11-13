@@ -416,7 +416,7 @@ pub(super) fn report_incident(state: &DaemonState, mission_id: &str, kind: Incid
         .unwrap_or_default();
     // Stalls, loops and blown covers are counted from the Mission's state.
     if kind == IncidentKind::Budget {
-        let attempt = run_hold(state, mission_id).map_or(0, |hold| hold.attempt);
+        let attempt = run_hold(state, mission_id).map_or(0, |hold| hold.number);
         super::agents::count(
             state,
             &agent,

@@ -276,7 +276,7 @@ void main() {
         run('m-finished', 's-older', 'blocked', 4, 100),
         run('m-finished', 's-latest', 'done', 7, 200),
         run('m-open', 's-open', 'working', 2, 300),
-        // A long failed first attempt: its event count says nothing about the retry after it.
+        // A long failed first run: its event count says nothing about the retry after it.
         run('m-retry', 's-first', 'failed', 40, 400),
         run('m-retry', 's-retry', 'working', 2, 500),
       ];
@@ -320,9 +320,9 @@ void main() {
           stationId: 'hq',
         );
     board.runs = [run('s-first', 40, 100), run('s-retry', 2, 200)];
-    board.missionAttempts = {
+    board.missionRuns = {
       ('G', 'm'): const [
-        MissionAttemptSummary(attempt: 2, station: 'hq', status: 'active'),
+        MissionRunSummary(attempt: 2, station: 'hq', status: 'active'),
       ],
     };
     expect(runsHere(board, 'hq').single.$2?.runId, 's-retry');
@@ -443,7 +443,7 @@ void main() {
         locations(reported).last.$1,
         '/stations?station_id=station-control-01',
       );
-      // The Station Watch lists the Mission whose attempt runs there.
+      // The Station Watch lists the Mission whose run runs there.
       expect(find.text('RUNS HERE'), findsOneWidget);
       expect(
         find.text('G › mission-007 · preview-run-007'),

@@ -418,12 +418,12 @@ pub(crate) async fn lift_hold(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScorecardQuery {
-    /// Days to cover instead of the Operation's setting; 0 covers every attempt on record.
+    /// Days to cover instead of the Operation's setting; 0 covers every run on record.
     window_days: Option<u64>,
 }
 
 /// `GET /v1/user/operations/{operation_id}/agents/scorecard`: how each Agent, route and model
-/// ran the Operation's Missions over the window, with the attempts behind every number. Needs
+/// ran the Operation's Missions over the window, with the runs behind every number. Needs
 /// `agent.read` on the Operation and `roster.read`, since it shows which handler and model each
 /// Agent ran on.
 pub(crate) async fn scorecard(

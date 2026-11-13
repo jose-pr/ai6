@@ -1,15 +1,15 @@
 //! The scorecard: how each Agent, route and model has done in an Operation over a window.
 //!
 //! It is computed from the shared Run records and the usage ledger every time it is asked
-//! for; nothing is kept besides them. Each attempt gets one [`Judgment`] from [`judge`], and
+//! for; nothing is kept besides them. Each run gets one [`Judgment`] from [`judge`], and
 //! a judgment names whose doing the outcome was: only `done`, `failed`, `blown` and `stalled` are
 //! the Agent's own and are judged, and a person's verdict that a `done` does not hold up turns it
 //! into a failure. A provider limit, a lost Station, a hand-off to another Agent, a person's stop,
 //! an approval someone has not given yet and a spending limit are shown but not held against it.
-//! An attempt that never started (a failed checkout, a brief with no Agent) has no Run record
+//! A run that never started (a failed checkout, a brief with no Agent) has no Run record
 //! and so does not appear.
 //!
-//! Every number lists the attempts behind it, so a person can open the Missions and check.
+//! Every number lists the runs behind it, so a person can open the Missions and check.
 
 use std::collections::BTreeMap;
 
@@ -25,14 +25,14 @@ use crate::directorates::registry::runs::{
 };
 use crate::directorates::registry::usage::UsageStore;
 
-/// Days of attempts a scorecard covers, unless the Operation sets another.
+/// Days of runs a scorecard covers, unless the Operation sets another.
 pub const DEFAULT_WINDOW_DAYS: u64 = 30;
-/// Judged attempts below which a row says its sample is small, unless the Operation sets another.
+/// Judged runs below which a row says its sample is small, unless the Operation sets another.
 pub const DEFAULT_SMALL_SAMPLE: u64 = 5;
 
 const DAY_SECS: f64 = 86_400.0;
 
-/// What one attempt came to, and so whose doing it was.
+/// What one run came to, and so whose doing it was.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,7 +119,7 @@ impl Judgment {
     }
 }
 
-/// The judgment on one attempt, from its Run record.
+/// The judgment on one run, from its Run record.
 pub fn judge(record: &RunRecord) -> Judgment {
     if record.status == RunStatus::Lost {
         return Judgment::Lost;
@@ -163,12 +163,12 @@ pub fn judge(record: &RunRecord) -> Judgment {
 #[derive(Debug, Clone, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub struct ScorecardDefinition {
-    /// Days of attempts a scorecard covers; 0 covers every attempt on record.
+    /// Days of runs a scorecard covers; 0 covers every run on record.
     #[schema(title = "Window")]
     #[form(unit = "days")]
     #[map(default = DEFAULT_WINDOW_DAYS)]
     window_days: u64,
-    /// Judged attempts below which a row says its sample is too small to rank on.
+    /// Judged runs below which a row says its sample is too small to rank on.
     #[schema(title = "Small sample below")]
     #[map(default = DEFAULT_SMALL_SAMPLE)]
     small_sample: u64,
@@ -247,9 +247,9 @@ impl ScorecardDefinition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ScorecardPolicy {
-    /// Days of attempts it covers; 0 covers every attempt on record.
+    /// Days of runs it covers; 0 covers every run on record.
     pub window_days: u64,
-    /// Judged attempts below which a row says its sample is small.
+    /// Judged runs below which a row says its sample is small.
     pub small_sample: u64,
 }
 
@@ -262,61 +262,61 @@ impl Default for ScorecardPolicy {
     }
 }
 
-/// One attempt behind a number, enough to open its Mission.
+/// One run behind a number, enough to open its Mission.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct AttemptRef {
+pub struct RunRef {
     /// The Mission.
     pub mission_id: String,
-    /// AI6's Run ID of the attempt.
+    /// AI6's Run ID of the run.
     pub run_id: String,
     /// Which try at the Mission it was.
-    pub attempt: u32,
+    pub number: u32,
 }
 
-/// What a group of attempts came to.
+/// What a group of runs came to.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Standing {
-    /// The attempts of each judgment, oldest first. The numbers are their lengths.
-    pub attempts: BTreeMap<Judgment, Vec<AttemptRef>>,
-    /// Attempts whose outcome is the Agent's own: done, failed, blown, stalled or disputed.
+    /// The runs of each judgment, oldest first. The numbers are their lengths.
+    pub runs: BTreeMap<Judgment, Vec<RunRef>>,
+    /// Runs whose outcome is the Agent's own: done, failed, blown, stalled or disputed.
     pub judged: u64,
     /// Failed, blown, stalled and disputed among the judged; `None` before any was judged.
     pub failure_rate: Option<f64>,
     /// Whether `judged` is below the Operation's small-sample line, so no ranking should rest
     /// on it.
     pub small_sample: bool,
-    /// Tools its harness refused, summed over the attempts.
+    /// Tools its harness refused, summed over the runs.
     pub refused_tools: u64,
-    /// Attempts in which it refused at least one.
-    pub attempts_with_refusals: u64,
-    /// Input, output and cache tokens its attempts consumed, from the usage ledger.
+    /// Runs in which it refused at least one.
+    pub runs_with_refusals: u64,
+    /// Input, output and cache tokens its runs consumed, from the usage ledger.
     pub usage: UsageTotals,
-    /// Wall time of the closed attempts, in seconds: parked time included.
+    /// Wall time of the closed runs, in seconds: parked time included.
     pub wall_secs: f64,
 }
 
 impl Standing {
-    /// How many attempts had `judgment`.
+    /// How many runs had `judgment`.
     pub fn count(&self, judgment: Judgment) -> u64 {
-        self.attempts
+        self.runs
             .get(&judgment)
             .map_or(0, |list| list.len() as u64)
     }
 
     fn add(&mut self, record: &RunRecord, judgment: Judgment, usage: Option<&UsageTotals>) {
-        self.attempts.entry(judgment).or_default().push(AttemptRef {
+        self.runs.entry(judgment).or_default().push(RunRef {
             mission_id: record.mission_id.clone(),
             run_id: record.id.clone(),
-            attempt: record.attempt,
+            number: record.number,
         });
         let denied = record
             .result
             .as_ref()
             .map_or(0, |result| result.denied_tools);
         self.refused_tools += u64::from(denied);
-        self.attempts_with_refusals += u64::from(denied > 0);
+        self.runs_with_refusals += u64::from(denied > 0);
         if let Some(usage) = usage {
             self.usage.add(usage);
         }
@@ -359,7 +359,7 @@ pub struct AgentCard {
 pub struct RouteCard {
     /// The handler, model and pool it ran on.
     pub route: RouteRef,
-    /// What its attempts came to.
+    /// What its runs came to.
     pub standing: Standing,
 }
 
@@ -369,7 +369,7 @@ pub struct RouteCard {
 pub struct ModelCard {
     /// The model; `None` is a handler's default.
     pub model: Option<String>,
-    /// What its attempts came to.
+    /// What its runs came to.
     pub standing: Standing,
 }
 
@@ -379,19 +379,19 @@ pub struct ModelCard {
 pub struct Scorecard {
     /// The Operation.
     pub operation: String,
-    /// The window it covers, in days; 0 is every attempt on record.
+    /// The window it covers, in days; 0 is every run on record.
     pub window_days: u64,
     /// When the window starts, as Unix seconds; `None` when it is not limited.
     pub from: Option<f64>,
     /// When the scorecard was computed, as Unix seconds.
     pub until: f64,
-    /// The judged-attempts line below which a row's sample is small.
+    /// The judged-runs line below which a row's sample is small.
     pub small_sample: u64,
-    /// Each Agent that ran an attempt, by codename.
+    /// Each Agent that ran a run, by codename.
     pub agents: Vec<AgentCard>,
     /// Each model that ran one.
     pub models: Vec<ModelCard>,
-    /// Attempts in the window whose record names no Agent.
+    /// Runs in the window whose record names no Agent.
     pub unattributed: u64,
 }
 
@@ -544,7 +544,7 @@ mod tests {
             provider_id: None,
             station: "s".to_owned(),
             theater: None,
-            attempt: 1,
+            number: 1,
             predecessor: None,
             status: match state {
                 "done" | "failed" | "blown" | "abandoned" => RunStatus::Ended,
@@ -635,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn a_verdict_changes_what_an_attempt_counts_as() {
+    fn a_verdict_changes_what_an_run_counts_as() {
         use crate::directorates::registry::runs::MissionVerdict;
 
         let judged = |state: &str, verdict: Option<OutcomeVerdict>| {
@@ -753,18 +753,18 @@ mod tests {
         assert_eq!(standing.failure_rate, Some(0.5));
         assert!(standing.small_sample, "4 judged is under 5");
         assert_eq!(
-            (standing.refused_tools, standing.attempts_with_refusals),
+            (standing.refused_tools, standing.runs_with_refusals),
             (3, 2)
         );
         assert_eq!(standing.usage.cost_micro_usd, 750);
         assert_eq!(standing.usage.tokens(), 165);
         assert_eq!(standing.wall_secs, 400.0);
         assert_eq!(
-            standing.attempts[&Judgment::Failed],
-            vec![AttemptRef {
+            standing.runs[&Judgment::Failed],
+            vec![RunRef {
                 mission_id: "m3".to_owned(),
                 run_id: "m3.1".to_owned(),
-                attempt: 1
+                number: 1
             }]
         );
         let routes: Vec<_> = seven
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn the_window_keeps_recent_attempts_and_zero_keeps_all() {
+    fn the_window_keeps_recent_runs_and_zero_keeps_all() {
         let mut old = attempt("old", "007", "x", "done", None);
         old.opened_at = Some(10.0);
         old.closed_at = Some(20.0);

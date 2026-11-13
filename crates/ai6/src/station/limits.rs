@@ -76,7 +76,7 @@ pub struct StationLimits {
 }
 
 impl StationLimits {
-    /// Checks what cannot work: a queue, page or attempt count of zero, or a provider
+    /// Checks what cannot work: a queue, page or run count of zero, or a provider
     /// configuration that is not a table.
     ///
     /// # Errors
@@ -85,8 +85,8 @@ impl StationLimits {
     pub fn validate(&self) -> Result<(), String> {
         for (key, value) in [
             (
-                "scheduler.intake_attempts",
-                u64::from(self.scheduler.intake_attempts),
+                "scheduler.intake_runs",
+                u64::from(self.scheduler.intake_runs),
             ),
             ("publisher.queue", self.publisher.queue as u64),
             (
@@ -163,8 +163,8 @@ pub struct SchedulerLimits {
     pub lease: Seconds,
     /// Times a brief is placed before it is filed as failed.
     #[schema(title = "Tries to place a brief")]
-    #[map(default = SchedulerLimits::default().intake_attempts)]
-    pub intake_attempts: u32,
+    #[map(default = SchedulerLimits::default().intake_runs)]
+    pub intake_runs: u32,
     /// Bytes of the Agent role catalog and of the placement policies a check-in carries; past it,
     /// each is left out.
     #[schema(
@@ -198,7 +198,7 @@ impl Default for SchedulerLimits {
             retry_backoff_max: Seconds::new(600),
             check_in: Seconds::new(15),
             lease: Seconds::new(180),
-            intake_attempts: 3,
+            intake_runs: 3,
             role_catalog_bytes: Limit::at(512 * KIB),
             provider_catalog_bytes: Limit::at(512 * KIB),
             found_libraries: Limit::at(64),
@@ -330,7 +330,7 @@ pub struct SourceLimits {
     #[schema(title = "Tries to send an outbox entry")]
     #[map(default = SourceLimits::default().send_attempts)]
     pub send_attempts: Limit,
-    /// Seconds before a failed send is tried again; each attempt doubles it.
+    /// Seconds before a failed send is tried again; each run doubles it.
     #[schema(title = "Retry a failed send after")]
     #[map(default = SourceLimits::default().retry_backoff)]
     pub retry_backoff: Seconds,

@@ -224,8 +224,8 @@ records = "none"                      # keep every audit record; reported as a w
 | `password` | none | **Database password.** The database password, when the location needs one and gives none. |
 | `poll` | 5 | **Between checks for changes.** Seconds between checks for changes; 0 turns reloading off. |
 | `retry_first` | 1 | **First wait before opening again.** Seconds before the first new attempt to open the configuration provider or the Registry at start, when one cannot be reached. 0 tries again at once. |
-| `retry_factor` | 2 | **Growth of the wait between attempts.** What each wait is multiplied by after a failed attempt. |
-| `retry_longest` | 60 | **Longest wait between attempts.** Seconds the wait stops growing at. |
+| `retry_factor` | 2 | **Growth of the wait between runs.** What each wait is multiplied by after a failed run. |
+| `retry_longest` | 60 | **Longest wait between runs.** Seconds the wait stops growing at. |
 | `retry_for` | see meaning | **How long to keep trying to open.** Seconds to keep trying from the first failure before the Station exits with the last error; 0 exits at the first failure. Default: none, and it tries until it opens or is stopped. A refusal retrying cannot fix (a malformed location, a failed certificate check, a wrong password) exits at once whatever this says. |
 | `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together). |
 | `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
@@ -253,7 +253,7 @@ right.
 | --- | --- | --- |
 | `location` | see meaning | **Where the Registry is.** A directory, `sqlite:PATH` or a `postgres://` URL. Default: the provider's database when the provider is SQL, else `registry` in the reading program's state directory. |
 | `password` | see meaning | **Database password.** The database password, when the location needs one and gives none. Default: the provider's, when the Registry is the provider's database. |
-| `headquarters_lease` | 60 | **Headquarters lease.** Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection attempt after a sixth. |
+| `headquarters_lease` | 60 | **Headquarters lease.** Seconds the Headquarters lease lasts between renewals; a PostgreSQL statement, lock wait and idle transaction end after a quarter of it, a connection run after a sixth. |
 | `sqlite_busy_timeout` | 30 | **SQLite lock wait.** Seconds a SQLite connection waits for another's lock. |
 <!-- schema:registry:end -->
 
@@ -490,9 +490,9 @@ global one.
 | `exposure_sources` | 32 | **Sources of exposure per brief.** Sources of exposure one Run's brief records; the rest are not kept. |
 | `final_report_bytes` | 64 KiB | **Longest final report.** Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and says so. |
 | `verdict_note_bytes` | 4 KiB | **Longest verdict note.** Bytes of the note a person gives with a verdict on a Mission's outcome. |
-| `amendment_bytes` | 8 KiB | **Longest redispatch amendment.** Bytes of what a redispatch adds to the next attempt's task. |
-| `deliverables` | 32 | **Deliverables per attempt.** Deliverables kept on one attempt. |
-| `evidence_entries` | 64 | **Probe findings per attempt.** Probe findings kept on one attempt; the oldest go first. |
+| `amendment_bytes` | 8 KiB | **Longest redispatch amendment.** Bytes of what a redispatch adds to the next run's task. |
+| `deliverables` | 32 | **Deliverables per run.** Deliverables kept on one run. |
+| `evidence_entries` | 64 | **Probe findings per run.** Probe findings kept on one run; the oldest go first. |
 | `evidence_detail_chars` | 300 | **Longest probe finding.** Characters kept of a probe finding's detail. |
 <!-- schema:registry.limits.runs:end -->
 
@@ -1088,7 +1088,7 @@ pending_per_station = 8
 The `station` record's tables bound and pace one Station's work, and apply at restart like
 the rest of the record. They follow the [Limits](#limits) rules: a count or size is a whole
 number or `"none"` (no bound); seconds may be fractional; a key left out keeps its default.
-Only what cannot work is refused: a queue, page or attempt count of 0. Looser values are not
+Only what cannot work is refused: a queue, page or run count of 0. Looser values are not
 reported as weakenings.
 
 ```toml
@@ -1142,7 +1142,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `retry_backoff_max` | 600 | **Longest wait between start retries.** Seconds the wait between tries of a Mission start grows to, at most. |
 | `check_in` | 15 | **Between check-ins with the Registry.** Seconds between the Station's check-ins with the Registry. |
 | `lease` | 180 | **A Mission lease lasts.** Seconds a lease on a Mission's brief or Run lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery. |
-| `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
+| `intake_runs` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
 | `provider_catalog_bytes` | 512 KiB | **Largest provider catalog.** Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out. |
 | `found_libraries` | 64 | **Most unloaded libraries listed.** Libraries found on the plugin paths but not loaded that a check-in lists for a person to approve; past it, the rest are left out. |
@@ -1181,7 +1181,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `reply_every` | 60 | **Read new issue comments every.** Seconds between rounds reading new comments on the issues Missions are linked to. |
 | `outbox_batch` | 20 | **Outbox entries sent per round.** Outbox entries sent in one round. |
 | `send_attempts` | 5 | **Tries to send an outbox entry.** Sends tried before an outbox entry fails. |
-| `retry_backoff` | 30 | **Retry a failed send after.** Seconds before a failed send is tried again; each attempt doubles it. |
+| `retry_backoff` | 30 | **Retry a failed send after.** Seconds before a failed send is tried again; each run doubles it. |
 | `replies_read` | 10 | **Replies shown of a linked issue.** Stored replies `issue_read` shows of a linked issue, newest first. |
 | `reopen_watch_every` | 300 | **Read settled items every.** Seconds between rounds reading the newest settled items again, so a label taken off one is seen and its return reopens it. |
 | `reopen_watch` | 20 | **Settled items read per round.** Settled items read in each of those rounds, per tracker instance, newest first; each is one request to the tracker. |
@@ -1453,7 +1453,7 @@ listed at its check-in with the record's other weakenings:
 (`token_margin`, the waits, retries and margins, `report_attempts`, `unlocked_stale`,
 `token_reuse_margin`, `sweep_every`, `shared_base_wait`) are never weakenings. Only what
 cannot work is refused: a message, context, event count, job size, conversation, live
-conversation or socket bound of 0, no report attempt, an event buffer of 0, a sweep every 0
+conversation or socket bound of 0, no report run, an event buffer of 0, a sweep every 0
 seconds.
 
 ```toml

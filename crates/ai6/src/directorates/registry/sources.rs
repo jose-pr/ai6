@@ -133,7 +133,7 @@ pub fn source_brief(
 /// The brief a settled item is queued again with, as `received_by` read it: the item as it reads
 /// now and the `comments` made on it since its Mission settled, quoted as the item is, with a
 /// Source provenance. [`BriefStore::reenter_brief`](super::store::BriefStore::reenter_brief)
-/// queues it as the Mission's next attempt.
+/// queues it as the Mission's next run.
 pub fn reopened_brief(
     (operation, provider): (&str, &str),
     item: &SourceItem,
@@ -435,7 +435,7 @@ pub trait SourceStore {
     /// Returns an error when a Registry directory cannot be read.
     fn unreported_source_briefs(&self) -> io::Result<Vec<FinishedSourceBrief>>;
 
-    /// Records one attempt to report a finished brief; `reported` ends further attempts.
+    /// Records one run to report a finished brief; `reported` ends further runs.
     ///
     /// # Errors
     ///

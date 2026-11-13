@@ -93,7 +93,7 @@ identity!(ControlId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RunState {
-    /// The Mission is queued for another attempt; this Run will not run again.
+    /// The Mission is queued for another run; this Run will not run again.
     Queued,
     /// The agent operation is running.
     Working,
@@ -164,7 +164,7 @@ pub enum ControlAction {
     /// Stop the live Run, if any, and abandon the Mission; its safe house is finished
     /// with the work kept.
     Cancel,
-    /// Queue a stalled or finished Mission again as a new attempt, optionally for another
+    /// Queue a stalled or finished Mission again as a new run, optionally for another
     /// qualified Agent.
     Retry,
     /// Resume a parked, blocked or stalled Mission now, optionally with a message.
