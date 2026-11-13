@@ -319,6 +319,11 @@ class _RunCard extends StatelessWidget {
               ),
             if (attempt.lost case final lost?)
               Text(lost, style: text.bodySmall?.copyWith(color: tokens.muted)),
+            for (final start in attempt.starts)
+              Text(
+                'Started: ${start.describe()}',
+                style: text.bodySmall?.copyWith(color: tokens.muted),
+              ),
             if (attempt.verdict case final verdict?)
               Text(verdict.describe(), style: text.bodySmall),
             if (attempt.checkpointBranch case final branch?)

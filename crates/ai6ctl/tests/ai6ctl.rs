@@ -1870,3 +1870,90 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
     );
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn a_run_shows_every_start_with_its_handler_history_and_prompt() {
+    let (server, shutdown, access_token, registry_dir) = start_gateway().await;
+    let registry = FileRegistry::open(registry_dir.path());
+    registry
+        .check_in(
+            "worker-01",
+            BTreeMap::from([("operations".to_owned(), serde_json::json!(["station-01"]))]),
+        )
+        .unwrap();
+    let prompt = "Fix the failing test in the parser.";
+    let first = ai6::RunStart::new(
+        1_800_000_000.0,
+        "claude",
+        "worker-01",
+        ai6::RunHistory::Fresh,
+        ai6::PromptRecord::new(prompt, 12),
+    );
+    let digest = first.prompt.sha256.clone();
+    let opened = registry
+        .open_run(
+            ai6::NewRun::new("run-a", "mission-007", "worker-01")
+                .with_operation("station-01")
+                .with_provider_id("provider-id-007")
+                .with_start(first),
+            Duration::from_secs(60),
+        )
+        .unwrap();
+    registry
+        .update_run(
+            &opened.id,
+            "worker-01",
+            opened.fence,
+            ai6::RunUpdate::default().started(ai6::RunStart::new(
+                1_800_000_100.0,
+                "claude",
+                "worker-01",
+                ai6::RunHistory::Resumed {
+                    provider_id: "provider-id-007".to_owned(),
+                },
+                ai6::PromptRecord::new("carry on", 12),
+            )),
+        )
+        .unwrap();
+
+    let shown = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &["mission", "mission-007"],
+    )
+    .await;
+    assert!(
+        shown.status.success(),
+        "{}",
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    let shown = String::from_utf8(shown.stdout).unwrap();
+    assert!(
+        shown.contains("START\tAT\tHANDLER\tSTATION\tHISTORY\tPROMPT_CHARS\tPROMPT_SHA256\tPROMPT"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains(&format!(
+            "START\t1800000000\tclaude\tworker-01\tfresh\t{}\t{digest}\tFix the fail",
+            prompt.chars().count()
+        )),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("START\t1800000100\tclaude\tworker-01\tresumed provider-id-007\t8\t"),
+        "{shown}"
+    );
+
+    let run = ai6ctl(server, Some(access_token), &["run", "provider-id-007"]).await;
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let run = String::from_utf8(run.stdout).unwrap();
+    assert!(
+        run.contains("START	1800000000	claude	worker-01	fresh"),
+        "{run}"
+    );
+    let _ = shutdown.send(());
+}

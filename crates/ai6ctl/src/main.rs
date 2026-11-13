@@ -1081,6 +1081,50 @@ struct BoardMissionRun {
     /// What an Operation's charge at `desk` clearance advises, for a person to confirm.
     #[serde(default)]
     recommendation: Option<BoardVerdict>,
+    /// Each start of the run: what ran, where, from which history and with what prompt.
+    #[serde(default)]
+    starts: Vec<BoardStart>,
+    /// The provider's Run ID, once issued.
+    #[serde(default)]
+    provider_id: Option<String>,
+}
+
+/// One start of a run.
+#[derive(Debug, Deserialize)]
+struct BoardStart {
+    at: f64,
+    handler: String,
+    station: String,
+    history: BoardHistory,
+    prompt: BoardPrompt,
+}
+
+/// Where a start's conversation came from.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BoardHistory {
+    Fresh,
+    Resumed { provider_id: String },
+    HandOff { run: String },
+}
+
+/// The prompt a start gave: an excerpt, and the whole by length and digest.
+#[derive(Debug, Deserialize)]
+struct BoardPrompt {
+    excerpt: String,
+    chars: u64,
+    sha256: String,
+}
+
+impl BoardStart {
+    /// `fresh`, `resumed PROVIDER_ID` or `hand-off RUN`. As data.
+    fn history_column(&self) -> String {
+        match &self.history {
+            BoardHistory::Fresh => "fresh".to_owned(),
+            BoardHistory::Resumed { provider_id } => format!("resumed {}", plain(provider_id)),
+            BoardHistory::HandOff { run } => format!("hand-off {}", plain(run)),
+        }
+    }
 }
 
 /// What one probe found of one deliverable.
@@ -2253,7 +2297,17 @@ async fn run() -> Result<(), String> {
             let Some(run) = runs.into_iter().find(|run| run.run_id == run_id) else {
                 return Err("Run was not found".to_owned());
             };
+            let mission = (run.operation_id.clone(), run.mission_id.clone());
             print_runs(std::iter::once(run));
+            // The start record is the Registry's, so it comes with the Mission's detail.
+            if let Ok(detail) =
+                mission_detail(&client, &server, &token, &mission.0, &mission.1).await
+                && let Some(record) = detail.history.iter().find(|record| {
+                    record.run_id == run_id || record.provider_id.as_deref() == Some(&run_id)
+                })
+            {
+                print_starts(record);
+            }
         }
     }
     Ok(())
@@ -4159,6 +4213,27 @@ fn print_missions(missions: impl IntoIterator<Item = BoardMission>) {
     }
 }
 
+/// The starts of a run: when, what handler on which Station, from which history, and the
+/// prompt by length, digest and excerpt.
+fn print_starts(run: &BoardMissionRun) {
+    if run.starts.is_empty() {
+        return;
+    }
+    println!("START	AT	HANDLER	STATION	HISTORY	PROMPT_CHARS	PROMPT_SHA256	PROMPT");
+    for start in &run.starts {
+        println!(
+            "START	{:.0}	{}	{}	{}	{}	{}	{}",
+            start.at,
+            plain(&start.handler),
+            plain(&start.station),
+            start.history_column(),
+            start.prompt.chars,
+            plain(&start.prompt.sha256),
+            plain(&start.prompt.excerpt)
+        );
+    }
+}
+
 fn print_mission(mission: &BoardMission) {
     println!("STATION\tMISSION\tRUNS\tNAME\tUID");
     println!(
@@ -4181,6 +4256,7 @@ fn print_mission(mission: &BoardMission) {
                 plain(&run.status),
                 run.route_column()
             );
+            print_starts(run);
             if let Some(verdict) = &run.verdict {
                 println!(
                     "VERDICT\t{}\t{}\t{}",

@@ -585,6 +585,8 @@ class _RunHistory extends StatelessWidget {
               if (attempt.route case final route?) ('Route $route', null),
             ], style: Theme.of(context).textTheme.labelMedium),
             if (attempt.lost case final lost?) Text(lost, style: muted),
+            for (final start in attempt.starts)
+              Text('Started: ${start.describe()}', style: muted),
             if (attempt.checkpointBranch case final branch?)
               Text('Checkpointed to branch $branch', style: muted),
           ],

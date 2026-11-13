@@ -949,6 +949,22 @@ void main() {
                     'status': 'active',
                     'lost': null,
                     'checkpoint_branch': null,
+                    'starts': [
+                      {
+                        'at': 1792922500,
+                        'resumed': true,
+                        'handler': 'claude',
+                        'station': 'station-alpha',
+                        'history': {
+                          'resumed': {'provider_id': 'claude-session-123'},
+                        },
+                        'prompt': {
+                          'excerpt': 'carry on',
+                          'chars': 8,
+                          'sha256': '0' * 64,
+                        },
+                      },
+                    ],
                   },
                 ],
               },
@@ -1072,6 +1088,13 @@ void main() {
     expect(find.text('Run 2'), findsOneWidget);
     expect(find.text('Station station-alpha'), findsWidgets);
     expect(find.text('claude-session-123'), findsOneWidget);
+    expect(
+      find.text(
+        'Started: claude on station-alpha, resumed claude-session-123: '
+        '"carry on" (8 characters)',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('codex-session-456'), findsOneWidget);
     expect(find.text('WORKING'), findsOneWidget);
     expect(find.text('BLOCKED'), findsOneWidget);

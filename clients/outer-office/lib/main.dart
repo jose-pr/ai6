@@ -4929,6 +4929,47 @@ class RunVerdictSummary {
       '${verdictWords(verdict)}, by $by${note == null ? '' : ': $note'}';
 }
 
+/// One start of a Run: what ran, where, from which history and with what prompt.
+class RunStartSummary {
+  const RunStartSummary({
+    required this.handler,
+    required this.station,
+    required this.history,
+    required this.promptChars,
+    required this.excerpt,
+  });
+
+  final String handler;
+  final String station;
+
+  /// `fresh`, `resumed PROVIDER_ID` or `hand-off RUN`.
+  final String history;
+  final int promptChars;
+
+  /// The first characters of the prompt, as data.
+  final String excerpt;
+
+  factory RunStartSummary.fromJson(Map<String, dynamic> json) {
+    final history = json['history'];
+    final prompt = json['prompt'] as Map<String, dynamic>;
+    return RunStartSummary(
+      handler: json['handler'] as String,
+      station: json['station'] as String,
+      history: switch (history) {
+        {'resumed': {'provider_id': final String id}} => 'resumed $id',
+        {'hand_off': {'run': final String run}} => 'hand-off $run',
+        _ => 'fresh',
+      },
+      promptChars: (prompt['chars'] as num).toInt(),
+      excerpt: prompt['excerpt'] as String,
+    );
+  }
+
+  /// `claude on station-alpha, resumed provider-id-7: "carry on" (8 characters)`.
+  String describe() =>
+      '$handler on $station, $history: "$excerpt" ($promptChars characters)';
+}
+
 /// What one probe found of one deliverable.
 class ProbeEvidenceSummary {
   const ProbeEvidenceSummary({
@@ -5050,6 +5091,7 @@ class MissionRunSummary {
     this.route,
     this.verdict,
     this.finalReport,
+    this.starts = const [],
   });
 
   final int number;
@@ -5089,6 +5131,9 @@ class MissionRunSummary {
   /// When a probe was asked for, as Unix seconds, until the Station has run it.
   final double? probeRequested;
 
+  /// Every start of the run, oldest first.
+  final List<RunStartSummary> starts;
+
   /// `handler model (pool name)`, from what a Run record says of its route.
   static String? _routeOf(Map<String, dynamic>? route) {
     if (route == null) return null;
@@ -5126,6 +5171,10 @@ class MissionRunSummary {
             ProbeEvidenceSummary.fromJson(item as Map<String, dynamic>),
         ],
         probeRequested: (json['probe_requested'] as num?)?.toDouble(),
+        starts: [
+          for (final item in json['starts'] as List<dynamic>? ?? const [])
+            RunStartSummary.fromJson(item as Map<String, dynamic>),
+        ],
       );
 
   String describe() => [
