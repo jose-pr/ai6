@@ -436,6 +436,7 @@ pub universal_exports::MissionRun::provider_id: core::option::Option<alloc::stri
 pub universal_exports::MissionRun::recommendation: core::option::Option<ai6::directorates::registry::runs::MissionVerdict>
 pub universal_exports::MissionRun::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub universal_exports::MissionRun::run_id: alloc::string::String
+pub universal_exports::MissionRun::starts: alloc::vec::Vec<ai6::directorates::registry::runs::RunStart>
 pub universal_exports::MissionRun::station: alloc::string::String
 pub universal_exports::MissionRun::status: alloc::string::String
 pub universal_exports::MissionRun::theater: core::option::Option<alloc::string::String>

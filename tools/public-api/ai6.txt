@@ -1723,6 +1723,8 @@ pub fn ai6::directorates::m::mission::MissionStore::attach_run(&mut self, &str, 
 pub fn ai6::directorates::m::mission::MissionStore::block_for(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::create(&mut self, ai6::directorates::m::identity::MissionId, core::option::Option<alloc::string::String>, alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::due_parked(&self, i64) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
+pub fn ai6::directorates::m::mission::MissionStore::execute(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::execute_past_brief(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::expose(&mut self, &str, &[alloc::string::String]) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::fail_for(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::fail_reported(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -1745,8 +1747,6 @@ pub fn ai6::directorates::m::mission::MissionStore::redispatch(&mut self, &str, 
 pub fn ai6::directorates::m::mission::MissionStore::refuse_resume(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::reopen(&mut self, &str, alloc::string::String, alloc::string::String, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::requeue_for(&mut self, &str, alloc::string::String) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
-pub fn ai6::directorates::m::mission::MissionStore::retry(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
-pub fn ai6::directorates::m::mission::MissionStore::retry_past_brief(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_cover_report(&mut self, &str, ai6::directorates::m::cover::CoverReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_plan(&mut self, &str, core::option::Option<alloc::string::String>) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::set_safe_house(&mut self, &str, ai6::directorates::q::safehouse::SafeHouseReport) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -6211,10 +6211,12 @@ pub ai6::directorates::registry::limits::RunLimits::exposure_sources: ai6::bound
 pub ai6::directorates::registry::limits::RunLimits::exposures: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::final_report_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::id_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::RunLimits::prompt_excerpt_chars: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::recent_event_chars: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::recent_events: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::record_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::records: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::RunLimits::start_entries: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::RunLimits::verdict_note_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::RunLimits
 pub fn ai6::directorates::registry::limits::RunLimits::default() -> Self
@@ -7066,6 +7068,12 @@ impl core::error::Error for ai6::directorates::registry::runs::RunError
 pub fn ai6::directorates::registry::runs::RunError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for ai6::directorates::registry::runs::RunError
 pub fn ai6::directorates::registry::runs::RunError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::registry::runs::RunHistory
+pub ai6::directorates::registry::runs::RunHistory::Fresh
+pub ai6::directorates::registry::runs::RunHistory::HandOff
+pub ai6::directorates::registry::runs::RunHistory::HandOff::run: alloc::string::String
+pub ai6::directorates::registry::runs::RunHistory::Resumed
+pub ai6::directorates::registry::runs::RunHistory::Resumed::provider_id: alloc::string::String
 #[non_exhaustive] pub enum ai6::directorates::registry::runs::RunStatus
 pub ai6::directorates::registry::runs::RunStatus::Active
 pub ai6::directorates::registry::runs::RunStatus::Ended
@@ -7108,8 +7116,15 @@ pub fn ai6::directorates::registry::runs::NewRun::with_launch(self, ai6::directo
 pub fn ai6::directorates::registry::runs::NewRun::with_number(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_provider_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::runs::NewRun::with_start(self, ai6::directorates::registry::runs::RunStart) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_window(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::runs::PromptRecord
+pub ai6::directorates::registry::runs::PromptRecord::chars: u64
+pub ai6::directorates::registry::runs::PromptRecord::excerpt: alloc::string::String
+pub ai6::directorates::registry::runs::PromptRecord::sha256: alloc::string::String
+impl ai6::directorates::registry::runs::PromptRecord
+pub fn ai6::directorates::registry::runs::PromptRecord::new(&str, usize) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::runs::RunLaunch
 pub ai6::directorates::registry::runs::RunLaunch::agent: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::runs::RunLaunch::clearance: core::option::Option<alloc::string::String>
@@ -7156,6 +7171,7 @@ pub ai6::directorates::registry::runs::RunRecord::provider_id: core::option::Opt
 pub ai6::directorates::registry::runs::RunRecord::recent: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::runs::RunRecord::recommendation: core::option::Option<ai6::directorates::registry::runs::MissionVerdict>
 pub ai6::directorates::registry::runs::RunRecord::result: core::option::Option<ai6::directorates::registry::runs::RunResult>
+pub ai6::directorates::registry::runs::RunRecord::starts: alloc::vec::Vec<ai6::directorates::registry::runs::RunStart>
 pub ai6::directorates::registry::runs::RunRecord::station: alloc::string::String
 pub ai6::directorates::registry::runs::RunRecord::status: ai6::directorates::registry::runs::RunStatus
 pub ai6::directorates::registry::runs::RunRecord::theater: core::option::Option<alloc::string::String>
@@ -7173,6 +7189,15 @@ pub const ai6::directorates::registry::runs::RunResult::HANDED_OFF: &'static str
 pub fn ai6::directorates::registry::runs::RunResult::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_denied_tools(self, usize) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::runs::RunStart
+pub ai6::directorates::registry::runs::RunStart::at: f64
+pub ai6::directorates::registry::runs::RunStart::handler: alloc::string::String
+pub ai6::directorates::registry::runs::RunStart::history: ai6::directorates::registry::runs::RunHistory
+pub ai6::directorates::registry::runs::RunStart::prompt: ai6::directorates::registry::runs::PromptRecord
+pub ai6::directorates::registry::runs::RunStart::resumed: bool
+pub ai6::directorates::registry::runs::RunStart::station: alloc::string::String
+impl ai6::directorates::registry::runs::RunStart
+pub fn ai6::directorates::registry::runs::RunStart::new(f64, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::runs::RunHistory, ai6::directorates::registry::runs::PromptRecord) -> Self
 pub struct ai6::directorates::registry::runs::RunUpdate
 impl ai6::directorates::registry::runs::RunUpdate
 pub fn ai6::directorates::registry::runs::RunUpdate::account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
@@ -7186,6 +7211,7 @@ pub fn ai6::directorates::registry::runs::RunUpdate::probed(self) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::provider_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::result(self, ai6::directorates::registry::runs::RunResult) -> Self
+pub fn ai6::directorates::registry::runs::RunUpdate::started(self, ai6::directorates::registry::runs::RunStart) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::status(self, ai6::directorates::registry::runs::RunStatus) -> Self
 pub trait ai6::directorates::registry::runs::RunStore
 pub fn ai6::directorates::registry::runs::RunStore::file_final_report(&self, &ai6::directorates::registry::runs::FinalReport) -> core::io::error::Result<()>
@@ -10121,6 +10147,12 @@ impl core::error::Error for ai6::directorates::registry::runs::RunError
 pub fn ai6::directorates::registry::runs::RunError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for ai6::directorates::registry::runs::RunError
 pub fn ai6::directorates::registry::runs::RunError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::RunHistory
+pub ai6::RunHistory::Fresh
+pub ai6::RunHistory::HandOff
+pub ai6::RunHistory::HandOff::run: alloc::string::String
+pub ai6::RunHistory::Resumed
+pub ai6::RunHistory::Resumed::provider_id: alloc::string::String
 #[non_exhaustive] pub enum ai6::RunStatus
 pub ai6::RunStatus::Active
 pub ai6::RunStatus::Ended
@@ -12402,6 +12434,7 @@ pub fn ai6::directorates::registry::runs::NewRun::with_launch(self, ai6::directo
 pub fn ai6::directorates::registry::runs::NewRun::with_number(self, u32, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_operation(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_provider_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::runs::NewRun::with_start(self, ai6::directorates::registry::runs::RunStart) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_theater(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_window(self, impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::Operation
@@ -12631,6 +12664,12 @@ pub ai6::PromotionStep::quiet_on: alloc::vec::Vec<ai6::directorates::registry::a
 impl ai6::directorates::m::promotion::PromotionStep
 pub fn ai6::directorates::m::promotion::PromotionStep::after(u64) -> Self
 pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::PromptRecord
+pub ai6::PromptRecord::chars: u64
+pub ai6::PromptRecord::excerpt: alloc::string::String
+pub ai6::PromptRecord::sha256: alloc::string::String
+impl ai6::directorates::registry::runs::PromptRecord
+pub fn ai6::directorates::registry::runs::PromptRecord::new(&str, usize) -> Self
 #[non_exhaustive] pub struct ai6::Proposal
 pub ai6::Proposal::judged: u64
 pub ai6::Proposal::reason: alloc::string::String
@@ -13110,10 +13149,12 @@ pub ai6::RunLimits::exposure_sources: ai6::bounds::Limit
 pub ai6::RunLimits::exposures: ai6::bounds::Limit
 pub ai6::RunLimits::final_report_bytes: ai6::bounds::Limit
 pub ai6::RunLimits::id_bytes: ai6::bounds::Limit
+pub ai6::RunLimits::prompt_excerpt_chars: ai6::bounds::Limit
 pub ai6::RunLimits::recent_event_chars: ai6::bounds::Limit
 pub ai6::RunLimits::recent_events: ai6::bounds::Limit
 pub ai6::RunLimits::record_bytes: ai6::bounds::Limit
 pub ai6::RunLimits::records: ai6::bounds::Limit
+pub ai6::RunLimits::start_entries: ai6::bounds::Limit
 pub ai6::RunLimits::verdict_note_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::RunLimits
 pub fn ai6::directorates::registry::limits::RunLimits::default() -> Self
@@ -13149,6 +13190,7 @@ pub ai6::RunRecord::provider_id: core::option::Option<alloc::string::String>
 pub ai6::RunRecord::recent: alloc::vec::Vec<alloc::string::String>
 pub ai6::RunRecord::recommendation: core::option::Option<ai6::directorates::registry::runs::MissionVerdict>
 pub ai6::RunRecord::result: core::option::Option<ai6::directorates::registry::runs::RunResult>
+pub ai6::RunRecord::starts: alloc::vec::Vec<ai6::directorates::registry::runs::RunStart>
 pub ai6::RunRecord::station: alloc::string::String
 pub ai6::RunRecord::status: ai6::directorates::registry::runs::RunStatus
 pub ai6::RunRecord::theater: core::option::Option<alloc::string::String>
@@ -13186,6 +13228,15 @@ pub ai6::RunSpec::stdin: core::option::Option<guatiao::value::convert::Bytes>
 pub ai6::RunSpec::timeout_ms: u64
 impl core::default::Default for ai6::directorates::q::transport::RunSpec
 pub fn ai6::directorates::q::transport::RunSpec::default() -> Self
+#[non_exhaustive] pub struct ai6::RunStart
+pub ai6::RunStart::at: f64
+pub ai6::RunStart::handler: alloc::string::String
+pub ai6::RunStart::history: ai6::directorates::registry::runs::RunHistory
+pub ai6::RunStart::prompt: ai6::directorates::registry::runs::PromptRecord
+pub ai6::RunStart::resumed: bool
+pub ai6::RunStart::station: alloc::string::String
+impl ai6::directorates::registry::runs::RunStart
+pub fn ai6::directorates::registry::runs::RunStart::new(f64, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::runs::RunHistory, ai6::directorates::registry::runs::PromptRecord) -> Self
 pub struct ai6::RunUpdate
 impl ai6::directorates::registry::runs::RunUpdate
 pub fn ai6::directorates::registry::runs::RunUpdate::account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
@@ -13199,6 +13250,7 @@ pub fn ai6::directorates::registry::runs::RunUpdate::probed(self) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::provider_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::recent(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::result(self, ai6::directorates::registry::runs::RunResult) -> Self
+pub fn ai6::directorates::registry::runs::RunUpdate::started(self, ai6::directorates::registry::runs::RunStart) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::status(self, ai6::directorates::registry::runs::RunStatus) -> Self
 #[non_exhaustive] pub struct ai6::RunnerSettings
 pub ai6::RunnerSettings::command: core::option::Option<alloc::string::String>
