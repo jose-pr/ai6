@@ -163,6 +163,57 @@ fn checked_in(root: &Path, operation_settings: &str) -> DaemonState {
     state
 }
 
+/// Placement decided on one Station counts another's leases against its capacity, except those
+/// of Missions that Station says wait for a person.
+#[test]
+fn another_stations_waiting_missions_do_not_take_its_place() {
+    let root = tempfile::tempdir().unwrap();
+    let state = checked_in(root.path(), "");
+    let mut info = state
+        .intake
+        .stations(Duration::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|record| record.station() == "test")
+        .unwrap()
+        .info()
+        .clone();
+    let worker = "worker-1a2b3c4d";
+    for id in ["verifying", "running"] {
+        let brief = pinned_brief(id, &[worker]);
+        state.intake.submit_brief(&brief).unwrap();
+        let meta = BTreeMap::from([(
+            "mission_id".to_owned(),
+            serde_json::json!(format!("manual--{id}")),
+        )]);
+        state
+            .intake
+            .claim_with_lease(Some(&brief.key()), worker, DEFAULT_LEASE, meta)
+            .unwrap()
+            .unwrap();
+    }
+    let leases = state.intake.leases().unwrap();
+    let load = |info: BTreeMap<String, serde_json::Value>| {
+        state.intake.check_in(worker, info).unwrap();
+        let record = state
+            .intake
+            .stations(Duration::MAX)
+            .unwrap()
+            .into_iter()
+            .find(|record| record.station() == worker)
+            .unwrap();
+        station_load(&state, &leases, &record)
+    };
+
+    info.insert("waiting_missions".to_owned(), serde_json::json!([]));
+    assert_eq!(load(info.clone()), 2);
+    info.insert(
+        "waiting_missions".to_owned(),
+        serde_json::json!(["manual--verifying"]),
+    );
+    assert_eq!(load(info), 1);
+}
+
 #[test]
 fn a_brief_pinned_to_a_station_its_operation_excludes_says_so_once() {
     let root = tempfile::tempdir().unwrap();

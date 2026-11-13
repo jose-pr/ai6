@@ -116,7 +116,9 @@ use crate::directorates::registry::mission_ids::new_uid;
 use crate::directorates::registry::sessions::{
     NewSession, SessionError, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
 };
-use crate::directorates::registry::store::{Brief, DEFAULT_LEASE, Lease, LeaseRecovery};
+use crate::directorates::registry::store::{
+    Brief, DEFAULT_LEASE, Lease, LeaseRecovery, StationRecord,
+};
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
 use crate::directorates::section_00::agent::READ_CLEARANCE;
@@ -2537,6 +2539,11 @@ fn publish_station_check_in(state: &DaemonState) {
         }),
     );
     info.insert("running".to_owned(), serde_json::json!(active_sessions));
+    // Another Station placing work here leaves these out of this Station's load.
+    info.insert(
+        "waiting_missions".to_owned(),
+        serde_json::json!(waiting_missions(state).unwrap_or_default()),
+    );
     info.insert(
         "resources".to_owned(),
         serde_json::json!(crate::station::resources::sample()),
@@ -3404,7 +3411,7 @@ fn place_request(
     let stations: Vec<StationFacts> = records
         .iter()
         .map(|record| {
-            let load = station_load(state, leases, record.station());
+            let load = station_load(state, leases, record);
             StationFacts::from_record(
                 record,
                 now,
@@ -3424,46 +3431,67 @@ fn place_request(
     Err(unplaced_reason(&placed, &request, &stations))
 }
 
-/// How many of `leases` take up a place at `station`. A Mission of this Station whose harness
-/// is not running (verifying, held, or blocked with its Session closed) waits for a person, not
-/// for a place, so its lease does not count; the Station cannot see another Station's Missions,
-/// so that Station's leases all do.
-fn station_load(state: &DaemonState, leases: &[Lease], station: &str) -> usize {
+/// How many of `leases` take up a place at `record`'s Station. A Mission whose harness is not
+/// running (verifying, held, or blocked with its Session closed) waits for a person, not for a
+/// place, so its lease does not count: this Station knows its own, and another Station names
+/// its own in its check-in (`waiting_missions`).
+fn station_load(state: &DaemonState, leases: &[Lease], record: &StationRecord) -> usize {
+    let station = record.station();
+    let waiting: BTreeSet<String> = if station == state.station_id {
+        match waiting_missions(state) {
+            Some(waiting) => waiting,
+            None => return leases.iter().filter(|l| l.station() == station).count(),
+        }
+    } else {
+        record
+            .info()
+            .get("waiting_missions")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    };
+    leases
+        .iter()
+        .filter(|lease| lease.station() == station)
+        .filter(|lease| {
+            lease
+                .meta()
+                .get("mission_id")
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|mission_id| !waiting.contains(mission_id))
+        })
+        .count()
+}
+
+/// This Station's Missions that wait for a person with no harness running: verifying, held, or
+/// blocked with its Session closed. None when its state cannot be read.
+fn waiting_missions(state: &DaemonState) -> Option<BTreeSet<String>> {
     let live: BTreeSet<String> = match (state.starting.lock(), state.sessions.lock()) {
         (Ok(starting), Ok(sessions)) => starting
             .iter()
             .cloned()
             .chain(sessions.keys().cloned())
             .collect(),
-        _ => return leases.iter().filter(|l| l.station() == station).count(),
+        _ => return None,
     };
-    let missions = state.missions.lock().ok();
-    leases
-        .iter()
-        .filter(|lease| lease.station() == station)
-        .filter(|lease| {
-            if station != state.station_id {
-                return true;
-            }
-            let Some(mission_id) = lease
-                .meta()
-                .get("mission_id")
-                .and_then(serde_json::Value::as_str)
-            else {
-                return true;
-            };
-            let waiting = missions
-                .as_ref()
-                .and_then(|missions| missions.get(mission_id))
-                .is_some_and(|mission| {
-                    matches!(
-                        mission.state,
-                        MissionState::Verifying | MissionState::Held | MissionState::Blocked
-                    )
-                });
-            !(waiting && !live.contains(mission_id))
-        })
-        .count()
+    let missions = state.missions.lock().ok()?;
+    Some(
+        missions
+            .list()
+            .into_iter()
+            .filter(|mission| {
+                matches!(
+                    mission.state,
+                    MissionState::Verifying | MissionState::Held | MissionState::Blocked
+                )
+            })
+            .map(|mission| mission.mission_id.to_string())
+            .filter(|mission_id| !live.contains(mission_id))
+            .collect(),
+    )
 }
 
 /// Why placement found nothing that can take a request, one clause per thing it ruled out. A

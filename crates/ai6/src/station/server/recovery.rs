@@ -474,7 +474,7 @@ fn adoption_choice(
     let facts: Vec<StationFacts> = stations
         .iter()
         .map(|station| {
-            let load = super::station_load(state, &leases, station.station());
+            let load = super::station_load(state, &leases, station);
             StationFacts::from_record(
                 station,
                 now,

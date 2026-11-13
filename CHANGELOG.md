@@ -133,6 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A Mission waiting for a decision (verifying, held, or blocked with its harness closed) no longer takes
   up a place in its Station's capacity: with `max_concurrent_missions = 1` the Station starts the next
   Mission instead of waiting for someone to decide the first.
+- That held only when the Station holding the waiting Mission placed the next one: another Station
+  placing work there still counted it. A Station's check-in now names its waiting Missions
+  (`waiting_missions`), and every Station leaves them out of its load.
 - Outer Office shows the held briefs, green ink requests and Mission proposals the Operations that answered
   returned, and names the Operations that could not be read and why (not found, refused or unreachable),
   instead of "could not be read" for the whole section; an Operation the account may not read is left out
