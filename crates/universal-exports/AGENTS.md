@@ -199,6 +199,7 @@ pub struct MissionRun {
     pub checkpoint_branch: Option<String>,   // where its work was last checkpointed
     pub route: Option<ai6::RouteRef>,        // the handler, model and pool it ran on, once launched
     pub account: Option<ai6::AccountRef>,    // the account it drew from, a route's own included
+    pub starts: Vec<ai6::RunStart>,          // every start: handler, Station, history and a bounded prompt excerpt (data); omitted when empty
 }
 
 #[non_exhaustive]

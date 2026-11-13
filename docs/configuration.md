@@ -494,6 +494,8 @@ global one.
 | `deliverables` | 32 | **Deliverables per attempt.** Deliverables kept on one run. |
 | `evidence_entries` | 64 | **Probe findings per attempt.** Probe findings kept on one run; the oldest go first. |
 | `evidence_detail_chars` | 300 | **Longest probe finding.** Characters kept of a probe finding's detail. |
+| `start_entries` | 32 | **Starts per Run.** Starts kept on one Run; the oldest go first. |
+| `prompt_excerpt_chars` | 200 | **Longest prompt excerpt.** Characters kept of the prompt a start gave; its whole length and digest are kept too. |
 <!-- schema:registry.limits.runs:end -->
 
 `[registry.limits.sleepers]`

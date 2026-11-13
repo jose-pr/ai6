@@ -150,7 +150,10 @@ origin leaves the public roots alone.
   used by several Operations.
 - `ai6ctl runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
   authorized `GET /v1/board` response.
-- `ai6ctl run <RUN_ID>` prints one Run.
+- `ai6ctl run <RUN_ID>` prints one Run and, from the Mission's detail, its starts.
+- `ai6ctl mission <ID>` prints a `START` line per start of each run, under it: `AT HANDLER STATION HISTORY
+  PROMPT_CHARS PROMPT_SHA256 PROMPT` (`HISTORY` is `fresh`, `resumed PROVIDER_ID` or `hand-off RUN`; `PROMPT` is
+  the excerpt, as data).
 
 Run listings end with an `EXPOSURE` column: the untrusted input the Run read,
 comma separated, or `-`. A Run state is free text from the board and includes
@@ -255,7 +258,8 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   stalled Mission now, sending `--message` to the Agent.
 - `ai6ctl exec <MISSION_ID|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` executes a Mission or a
   Run through the same controls: a Run ID found on the board resumes (`resume`, `--message`), anything else
-  is a Mission and starts its next Run (`retry`, `--agent`). Needs `mission.control`.
+  is a Mission and starts its next Run (`retry`, `--agent`). Needs `mission.control`. The Station takes both
+  through its one execute step.
 - `ai6ctl run interrupt <RUN_ID>` stops the Run's current turn; it finds the
   Run's Operation and Mission on the board and names the Run, so the request is
   refused (HTTP 409) if the Mission has moved on to another one.

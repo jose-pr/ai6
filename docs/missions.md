@@ -187,9 +187,16 @@ ask, Universal Exports answers that itself. Follow
 the control with `GET .../actions/{control_id}`; one no Station acts on within two minutes
 is `expired`. Repeating a request with the same `idempotency_key` returns the first one.
 
-`ai6ctl mission cancel|retry|resume` and `ai6ctl run interrupt` do the same and wait for
+`ai6ctl mission cancel|retry|resume`, `ai6ctl exec` and `ai6ctl run interrupt` do the same and wait for
 the outcome; Outer Office offers them in each Mission card's menu, with the reason any action
 is unavailable. Closing a Run view never sends a control.
+
+Executing a Mission (`retry`) or a Run that ran (`resume`) is one step on the Station, however it was
+asked for. Every start of a Run, the first and each resume, is recorded on the Run: the handler and
+Station, where its conversation came from (`fresh`, `resumed` from the provider's own history, or a
+`hand-off` from an earlier Run) and the prompt it was given, as an excerpt of
+`[registry.limits.runs] prompt_excerpt_chars` characters with the prompt's whole length and SHA-256.
+`ai6ctl mission MISSION` and `ai6ctl run RUN` print them as `START` lines.
 
 A retry that names no Agent chooses one again from the roster as it is now, as placement would:
 the best posted Agent qualified for the Mission's role and its brief's tags, not quarantined, held

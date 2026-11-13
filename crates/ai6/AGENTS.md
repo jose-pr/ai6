@@ -423,7 +423,8 @@ impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero q
 `ProbeLimits` (`[probes]`, the timeouts of a verifier's reads of a Mission's deliverables: `git_timeout` 30 s,
 `http_timeout` 20 s, `tracker_timeout` 30 s, `file_timeout` 5 s, and `comments` 100, the latest comments a
 tracker probe reads). `[registry.limits.runs]` also holds `amendment_bytes` (8 KiB), `deliverables` (32 per
-run), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300).
+run), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300), `start_entries` (32 starts
+per run, the oldest go first) and `prompt_excerpt_chars` (200, the characters kept of a start's prompt).
 
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
 `bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false, `context_bytes` 24 KiB, `fetch_timeout` 300 s,
@@ -2495,7 +2496,17 @@ impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub evidence: Vec<Evidence>,             // what probes found of them, oldest first, bounded (evidence_entries)
     pub probe_requested: Option<f64>,        // when a person asked for a probe, until the Station ran it
     pub recommendation: Option<MissionVerdict>,   // what a `desk` charge advises for a verifying run; settles nothing
+    pub starts: Vec<RunStart>,               // every start, oldest first, bounded (start_entries, 32)
 }
+#[non_exhaustive] pub struct RunStart { pub at: f64, pub resumed: bool, pub handler: String, pub station: String,
+    pub history: RunHistory, pub prompt: PromptRecord }
+    // new(at, handler, station, history, prompt); `resumed` is true for RunHistory::Resumed. Added at a Run's first
+    // start (NewRun::with_start) and at each resume (RunUpdate::started); a Station records it once the harness is up.
+#[non_exhaustive] pub enum RunHistory { Fresh, Resumed { provider_id: String }, HandOff { run: String } }
+    // serde snake_case: where the conversation came from. HandOff: a new conversation briefed on an earlier Run's work.
+#[non_exhaustive] pub struct PromptRecord { pub excerpt: String, pub chars: u64, pub sha256: String }
+    // new(prompt, excerpt_chars): the first characters (cut again to prompt_excerpt_chars, 200, on write), the whole
+    // prompt's length in characters and its lowercase hex SHA-256.
 #[non_exhaustive] pub enum ProbeResult { Found, Missing, Unprobed, Failed }   // serde kebab-case; as_str()
     // Missing: the place was read and it is not there. Failed: the look failed or timed out, nothing is known.
 #[non_exhaustive] pub struct Evidence { pub deliverable: Deliverable, pub result: ProbeResult,
@@ -2522,13 +2533,13 @@ pub struct NewRun   // NewRun::new(run_id, mission_id, station); next_run() -> O
                         //   .with_provider_id(id) .with_theater(id) .with_number(n, predecessor)
                         //   .with_operation(id)
                         //   .with_exposure(Vec<Exposure>) .with_launch(RunLaunch) .with_account(AccountRef)
-                        //   .with_window(label)
+                        //   .with_window(label) .with_start(RunStart)
 pub struct RunUpdate  // default() .provider_id(id) .status(RunStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
                           //   .launch(RunLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
                           //   .account(AccountRef) .result(RunResult) (closing the status sets closed_at)
                           //   .deliverables(Vec<Deliverable>) (replaces) .evidence(Vec<Evidence>) (appends, bounded)
-                          //   .probed() (answers a probe request)
+                          //   .probed() (answers a probe request) .started(RunStart) (appends, bounded)
 #[non_exhaustive] pub enum RunError { NotFound, Exists, Ended, Unsettled(String), HeldBy(String), Stale,
     Io(io::Error) }
 
@@ -2591,7 +2602,7 @@ lease lapse and marks it lost, then lets its brief lease lapse and recovers it u
 Station). Its Mission book says `abandoned` (or `failed` when filed, or without a brief),
 and a `lost` event carries the reason. The Headquarters treats an expired brief lease whose
 latest Run is already `lost` under `on_lost`. A Station handed the brief back re-queues
-its own `abandoned` copy of the Mission (`MissionStore::retry`) and the new run, on the
+its own `abandoned` copy of the Mission (`MissionStore::execute`) and the new run, on the
 same Theater, first closes the lost runner Run. Re-attach tries after a restart or an
 adoption back off by `reattach_delay`; once they have failed for `lost_after_secs`, the
 runner (or the Theater's transport) is probed and the Run given up the same way.
@@ -5272,10 +5283,10 @@ when it resumes. `MissionStore::park(id, until)` parks a `Working`, `Blocked`, `
 already parked Mission (parking again moves the time; `transition` refuses `Parked` because
 it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent.
-`retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
-`Abandoned` Mission again as a new run, for `agent_id` when given and otherwise its
+`execute(id, agent_id: Option<String>)` executes a `Stalled`, `Done`, `Failed`, `Blown` or
+`Abandoned` Mission: queues it again as its next Run, for `agent_id` when given and otherwise its
 Agent; it keeps `run_ids` and the safe house report, and refuses every other state
-with `InvalidTransition`. `retry_past_brief(id, agent_id)` is that on the Station's own word, and
+with `InvalidTransition`. `execute_past_brief(id, agent_id)` is that on the Station's own word, and
 sets `Mission.runs_past_brief` until it starts: such a Mission starts whatever its brief was filed as,
 while `forget_queued(id)` takes any other out of the book when its brief settled before it started.
 `fail_reported(id, said)` fails it as its harness reported, keeping `Mission.reported_failure` for the
@@ -5879,7 +5890,9 @@ Run ID is observed is queued until registration; overflowing that buffer disable
 publication.
 
 With a publisher, the Station also takes operator controls (cancel, retry, resume,
-interrupt) queued for it: a third thread long-polls
+interrupt) queued for it. `retry` and `resume` are the two spellings of one execute step
+(`controls::execute`: a Mission queues its next Run, a Run that ran resumes), and every
+operator-requested start, including `ai6ctl exec`, goes through it. A third thread long-polls
 `/v1/station/controls/next?station=<id>`, hands each DipTel control to the daemon one at a
 time and posts the outcome to `/v1/station/controls/{id}/result`. The daemon applies it
 only to a Mission in its own book under the control's Operation, while it holds that
@@ -5888,7 +5901,7 @@ Run, while that Run is still the Mission's latest; otherwise it rejects
 with a reason. It acts through the loopback paths: `cancel` is the `abandoned` transition
 (interrupts and closes the live Run, finishes the safe house keeping the work),
 `retry` closes a live stalled Run, ends its Run record and calls
-`MissionStore::retry` (an Agent must be configured for the Operation, qualified for the
+`MissionStore::execute` (an Agent must be configured for the Operation, qualified for the
 Mission's role and not quarantined), `resume` is `/resume` with the message, and
 `interrupt` is `/interrupt` on a working Run. When no live Run reported the new
 state, the daemon publishes it as a lifecycle event on the Mission's latest provider
