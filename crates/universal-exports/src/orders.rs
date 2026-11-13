@@ -259,7 +259,6 @@ mod tests {
             role: None,
             priority: 0,
             stations: Vec::new(),
-            each_station: false,
             standing: false,
             resume: false,
         }

@@ -16,7 +16,6 @@ use std::time::{Duration, Instant};
 use crate::directorates::m::charges::ChargeScope;
 use crate::directorates::m::cover::Disclosure;
 use crate::directorates::m::intake::SourceIntake;
-use crate::directorates::m::placement::{self, OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::roster::{Operation, Roster};
 use crate::directorates::registry::backend::*;
 use crate::directorates::registry::cables::{CablePrincipal, CableRelay};
@@ -1211,7 +1210,6 @@ const DISABLED: &str = "disabled by an operator";
 const SCHEDULER_DOWN: &str = "the scheduler was not running";
 const IN_FLIGHT: &str = "the last run was in flight";
 const PAST_THE_BOUND: &str = "older than its catch-up bound";
-const NO_STATION: &str = "no Station could take it";
 
 /// One standing order as the Headquarters Station reckons with it.
 struct Order<'a> {
@@ -1345,8 +1343,7 @@ pub(crate) fn fire_due_sleepers(
                 match sleeper.due_window(now, mark.since, limits) {
                     Some(window) => {
                         let late = missed || mark.why.is_some();
-                        let fired =
-                            fire_rounds(&order, (window, station), roster, warned, &mut mark);
+                        let fired = fire_window(&order, (window, station), warned, &mut mark);
                         if late && fired > 0 {
                             order.tell("late", window_label(window), None);
                         }
@@ -1371,102 +1368,67 @@ pub(crate) fn fire_due_sleepers(
     queued
 }
 
-/// Offers `window` to the Registry for each of the order's rounds, and notes on `mark` how it went;
-/// how many briefs were queued.
-fn fire_rounds(
+/// Offers `window` to the Registry for the order, and notes on `mark` how it went; how many briefs
+/// were queued.
+fn fire_window(
     order: &Order<'_>,
     (window, station): (i64, &str),
-    roster: &Roster,
     warned: &mut BTreeSet<String>,
     mark: &mut SleeperMark,
 ) -> usize {
     let (registry, operation, name, sleeper) =
         (order.registry, order.operation, order.name, order.sleeper);
-    let rounds = if sleeper.each_station {
-        round_stations(registry, roster, operation, sleeper, order.now)
-            .into_iter()
-            .map(Some)
-            .collect()
-    } else {
-        vec![None]
-    };
+    let before = sleeper
+        .standing
+        .then(|| standing_fingerprint(registry, operation, name))
+        .flatten();
     let mut queued = 0;
-    let (mut in_flight, mut failed) = (false, false);
-    for round in &rounds {
-        let before = sleeper
-            .standing
-            .then(|| standing_fingerprint(registry, operation, name, round.as_deref()))
-            .flatten();
-        match registry.fire_sleeper(
-            operation,
-            name,
-            sleeper,
-            (window, round.as_deref()),
-            station,
-        ) {
-            Ok(Fire::Queued) => {
-                queued += 1;
-                if before.is_some_and(|old| old != sleeper.fingerprint()) {
-                    order.tell(
-                        "revised",
-                        window_label(window),
-                        Some("authorized again after an edit: this run takes the new brief"),
-                    );
-                }
-                match round {
-                    Some(round) => eprintln!(
-                        "ai6: sleeper {name} of Operation {operation} queued the round of Station {round}",
-                    ),
-                    None => {
-                        eprintln!("ai6: sleeper {name} of Operation {operation} queued a brief")
-                    }
-                }
-            }
-            Ok(Fire::InFlight) => {
-                in_flight = true;
-                // Named once per window; only the latest window is remembered.
-                let prefix = format!(
-                    "skipped/{operation}/{name}/{}/",
-                    round.as_deref().unwrap_or_default()
+    match registry.fire_sleeper(operation, name, sleeper, window, station) {
+        Ok(Fire::Queued) => {
+            queued += 1;
+            if before.is_some_and(|old| old != sleeper.fingerprint()) {
+                order.tell(
+                    "revised",
+                    window_label(window),
+                    Some("authorized again after an edit: this run takes the new brief"),
                 );
-                let skipped = format!("{prefix}{}", window_label(window));
-                warned.retain(|seen| !seen.starts_with(&prefix) || *seen == skipped);
-                if warned.insert(skipped) {
-                    eprintln!(
-                        "ai6: sleeper {name} of Operation {operation} has not fired window {}: \
-                         its standing Mission's last run is still in flight",
-                        window_label(window)
-                    );
-                }
             }
-            Ok(Fire::AlreadyFired) => {}
-            Err(error) => {
-                failed = true;
-                eprintln!("ai6: sleeper {name} of Operation {operation}: {error}");
-            }
+            eprintln!("ai6: sleeper {name} of Operation {operation} queued a brief");
+            mark.settled = true;
+            mark.why = None;
         }
-    }
-    if in_flight {
-        mark.why = Some(IN_FLIGHT.to_owned());
-    } else if rounds.is_empty() {
-        mark.why = Some(NO_STATION.to_owned());
-    } else if !failed {
-        mark.settled = true;
-        mark.why = None;
+        Ok(Fire::InFlight) => {
+            // Named once per window; only the latest window is remembered.
+            let prefix = format!("skipped/{operation}/{name}/");
+            let skipped = format!("{prefix}{}", window_label(window));
+            warned.retain(|seen| !seen.starts_with(&prefix) || *seen == skipped);
+            if warned.insert(skipped) {
+                eprintln!(
+                    "ai6: sleeper {name} of Operation {operation} has not fired window {}: \
+                     its standing Mission's last run is still in flight",
+                    window_label(window)
+                );
+            }
+            mark.why = Some(IN_FLIGHT.to_owned());
+        }
+        Ok(Fire::AlreadyFired) => {
+            mark.settled = true;
+            mark.why = None;
+        }
+        Err(error) => eprintln!("ai6: sleeper {name} of Operation {operation}: {error}"),
     }
     queued
 }
 
-/// The fingerprint of the definition the standing Mission of a Sleeper's round was last briefed
-/// from, when it has been.
+/// The fingerprint of the definition the standing Mission of a Sleeper was last briefed from, when
+/// it has been.
 fn standing_fingerprint(
     registry: &dyn RegistryBackend,
     operation: &str,
     name: &str,
-    station: Option<&str>,
 ) -> Option<String> {
     let id = registry
-        .entered_mission_id(&MissionEntry::standing(operation, name, station))
+        .entered_mission_id(&MissionEntry::standing(operation, name))
         .ok()??;
     registry
         .filed_brief(&id)
@@ -1479,67 +1441,118 @@ fn standing_fingerprint(
         .map(str::to_owned)
 }
 
-/// The Stations an `each_station` sleeper holds a round on: every Station whose last check-in
-/// placement accepts for the Operation, within the sleeper's own `stations`, for the Agent or
-/// role it names.
-///
-/// What only delays a brief does not exclude a Station: its load, its resources and Agent
-/// quarantines are left out, so a busy Station still gets its round and runs it when it has
-/// room. A Station that has gone dark gets none; it gets the window's round when it checks
-/// in again while the window may still fire.
-fn round_stations(
-    registry: &dyn RegistryBackend,
-    roster: &Roster,
-    operation: &str,
-    sleeper: &Sleeper,
-    now: i64,
-) -> Vec<String> {
-    let Ok(policy) = OperationPolicy::from_roster(roster, operation) else {
-        return Vec::new();
-    };
-    let records = match registry.stations(Duration::MAX) {
-        Ok(records) => records,
-        Err(error) => {
-            eprintln!("ai6: Stations for the rounds of Operation {operation}: {error}");
-            return Vec::new();
-        }
-    };
-    records
-        .iter()
-        .filter(|record| {
-            sleeper.stations.is_empty() || sleeper.stations.iter().any(|s| s == record.station())
-        })
-        .filter_map(|record| {
-            let mut facts = StationFacts::from_record(
-                record,
-                now as f64,
-                registry.limits().stations.gone_dark_after.0,
-                0,
-            );
-            facts.running = 0;
-            facts.resources = None;
-            let request = PlacementRequest {
-                stations: vec![record.station().to_owned()],
-                agent: sleeper.agent.clone(),
-                role: sleeper.role.clone(),
-                ..PlacementRequest::default()
-            };
-            (!placement::place(&policy, &request, &[facts])
-                .choices
-                .is_empty())
-            .then(|| record.station().to_owned())
-        })
-        .collect()
-}
-
 fn unix_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
+/// How each Source's polls are going, for M's charge: when each began and last finished. One poll
+/// that never returns holds up the desk, so the others stop finishing too.
+#[derive(Default)]
+pub(crate) struct PollBoard {
+    polls: Mutex<BTreeMap<String, PollHealth>>,
+}
+
+/// One Source's polls.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PollHealth {
+    /// Seconds between its polls.
+    pub(crate) every: f64,
+    /// When the poll in flight began, as Unix seconds; `None` when none is.
+    pub(crate) started: Option<f64>,
+    /// When a poll last returned, as Unix seconds.
+    pub(crate) completed: Option<f64>,
+    /// When it was first seen, so a Source that never polls is judged from there.
+    pub(crate) seen: f64,
+    /// What the last poll failed with, when it did.
+    pub(crate) failed: Option<String>,
+}
+
+/// A Source whose polls are not finishing.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub(crate) struct FrozenPoll {
+    /// `<operation>/<source>`.
+    pub(crate) source: String,
+    /// When the stuck poll began, or the last one returned, as Unix seconds.
+    pub(crate) since: f64,
+    /// Why it counts: in flight too long, or none has finished.
+    pub(crate) why: String,
+}
+
+impl PollBoard {
+    /// Notes that the poll of `source` began at `now` (Unix seconds).
+    pub(crate) fn begin(&self, source: &str, every: Duration, now: f64) {
+        if let Ok(mut polls) = self.polls.lock() {
+            let health = polls.entry(source.to_owned()).or_insert(PollHealth {
+                every: every.as_secs_f64(),
+                started: None,
+                completed: None,
+                seen: now,
+                failed: None,
+            });
+            health.every = every.as_secs_f64();
+            health.started = Some(now);
+        }
+    }
+
+    /// Notes that the poll of `source` returned at `now`, with the error it failed with.
+    pub(crate) fn end(&self, source: &str, now: f64, failed: Option<String>) {
+        if let Ok(mut polls) = self.polls.lock()
+            && let Some(health) = polls.get_mut(source)
+        {
+            health.started = None;
+            health.completed = Some(now);
+            health.failed = failed;
+        }
+    }
+
+    /// Forgets the Sources `keep` does not name: one removed from the configuration is not frozen.
+    pub(crate) fn retain(&self, keep: impl Fn(&str) -> bool) {
+        if let Ok(mut polls) = self.polls.lock() {
+            polls.retain(|source, _| keep(source));
+        }
+    }
+
+    /// The Sources whose poll has been in flight for `after`, or none of whose polls has finished
+    /// for its interval and `after`, at `now`.
+    pub(crate) fn frozen(&self, now: f64, after: Duration) -> Vec<FrozenPoll> {
+        let after = after.as_secs_f64();
+        let Ok(polls) = self.polls.lock() else {
+            return Vec::new();
+        };
+        polls
+            .iter()
+            .filter_map(|(source, health)| {
+                if let Some(started) = health.started
+                    && now - started >= after
+                {
+                    return Some(FrozenPoll {
+                        source: source.clone(),
+                        since: started,
+                        why: format!("a poll has been in flight for {:.0} seconds", now - started),
+                    });
+                }
+                let last = health.completed.unwrap_or(health.seen);
+                (health.started.is_none() && now - last >= health.every + after).then(|| {
+                    FrozenPoll {
+                        source: source.clone(),
+                        since: last,
+                        why: format!(
+                            "no poll has finished for {:.0} seconds (every {:.0})",
+                            now - last,
+                            health.every
+                        ),
+                    }
+                })
+            })
+            .collect()
+    }
+}
+
 /// Runs polls, reports and sleepers on a schedule; one pass at a time.
 pub(crate) struct SourceDesk {
+    board: Arc<PollBoard>,
     busy: AtomicBool,
     due: Mutex<BTreeMap<(String, String), Instant>>,
     next_report: Mutex<Instant>,
@@ -1563,6 +1576,7 @@ impl SourceDesk {
             station: station.into(),
             limits,
             cables: None,
+            board: Arc::default(),
             busy: AtomicBool::new(false),
             due: Mutex::new(BTreeMap::new()),
             next_report: Mutex::new(Instant::now()),
@@ -1573,6 +1587,13 @@ impl SourceDesk {
             next_sleepers: Mutex::new(Instant::now()),
             warned: Mutex::new(BTreeSet::new()),
         }
+    }
+
+    /// Notes how each poll goes on `board`, which M's charge reads.
+    #[must_use]
+    pub(crate) fn with_board(mut self, board: Arc<PollBoard>) -> Self {
+        self.board = board;
+        self
     }
 
     /// Tells charges of items through `cables`.
@@ -1684,6 +1705,9 @@ impl SourceDesk {
                 if let Ok(mut due) = self.due.lock() {
                     due.insert(key, Instant::now() + setup.interval);
                 }
+                let polled_as = format!("{}/{}", operation.id, setup.name);
+                self.board
+                    .begin(&polled_as, setup.interval, unix_seconds() as f64);
                 let result = build(&setup.provider, &setup.settings).and_then(|source| {
                     poll_source(
                         registry,
@@ -1695,6 +1719,11 @@ impl SourceDesk {
                         &intake,
                     )
                 });
+                self.board.end(
+                    &polled_as,
+                    unix_seconds() as f64,
+                    result.as_ref().err().cloned(),
+                );
                 match result {
                     Ok(summary)
                         if summary.reported
@@ -2829,102 +2858,6 @@ title = \"Update dependencies\"
                 window_label(MARK + DAY),
                 "the last run was in flight".to_owned()
             )]
-        );
-    }
-
-    #[test]
-    fn an_each_station_sleeper_rounds_every_eligible_station_once_per_window_across_failover() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("operations.toml"),
-            "[operation.H]\nclearance = \"field\"\n\
-             [operation.H.sleepers.rounds]\nschedule = \"0 * * * *\"\ntitle = \"Station round\"\n\
-             role = \"head-of-station\"\neach_station = true\n",
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("agents.toml"),
-            "[agent.M]\nhandler = \"mock\"\nclearance = \"field\"\nroles = [\"head-of-station\"]\n\
-             [role.head-of-station]\npurpose = \"Keep the Station fit.\"\npolicy = \"Report.\"\n",
-        )
-        .unwrap();
-        let roster = Roster::load(dir.path()).unwrap();
-        let sleeper = roster.operation("H").unwrap().sleepers["rounds"].clone();
-        let state = tempfile::tempdir().unwrap();
-        let registry = FileRegistry::open(state.path());
-        let check_in = |station: &str, roles: &[&str], handlers: &[&str], running: usize| {
-            registry
-                .check_in(
-                    station,
-                    BTreeMap::from([
-                        ("roles".to_owned(), serde_json::json!(roles)),
-                        ("capacity".to_owned(), serde_json::json!(2)),
-                        ("running".to_owned(), serde_json::json!(running)),
-                        ("handlers".to_owned(), serde_json::json!(handlers)),
-                        (
-                            "theaters".to_owned(),
-                            serde_json::json!([
-                                crate::directorates::m::theaters::TheaterSummary::local()
-                            ]),
-                        ),
-                    ]),
-                )
-                .unwrap();
-        };
-        // A full Station still gets its round; it runs it when it has room.
-        check_in("station-a", &["execution"], &["mock"], 2);
-        check_in("station-b", &["control", "execution"], &["mock"], 0);
-        check_in("station-c", &["control"], &["mock"], 0);
-        check_in("station-d", &["execution"], &["other"], 0);
-        // Just after the hour, so every call below evaluates the same window while the
-        // check-ins, taken at the real time, are still fresh.
-        let real = unix_seconds();
-        let now = real - real.rem_euclid(3600) + 1;
-        let window = sleeper.due_window(now, 0, &Default::default()).unwrap();
-        registry
-            .authorize_sleeper("H", "rounds", &sleeper, "operator", window - 60)
-            .unwrap();
-
-        let mut warned = BTreeSet::new();
-        assert_eq!(
-            fire_due_sleepers(&registry, &roster, "station-b", now, &mut warned),
-            2
-        );
-        assert_eq!(
-            fire_due_sleepers(&registry, &roster, "station-b", now + 30, &mut warned),
-            0
-        );
-        // The Station that takes over the Headquarters lease fires no second round.
-        let takeover = FileRegistry::open(state.path());
-        let mut fresh = BTreeSet::new();
-        assert_eq!(
-            fire_due_sleepers(&takeover, &roster, "station-a", now + 40, &mut fresh),
-            0
-        );
-        let mut queued = takeover.list_new().unwrap();
-        queued.sort_by_key(|brief| brief.key());
-        let rounds = queued
-            .iter()
-            .map(|brief| (brief.stations.clone(), brief.role.clone()))
-            .collect::<Vec<_>>();
-        let role = Some("head-of-station".to_owned());
-        assert_eq!(
-            rounds,
-            [
-                (vec!["station-a".to_owned()], role.clone()),
-                (vec!["station-b".to_owned()], role)
-            ]
-        );
-        // A Station that has gone dark is held no round.
-        assert!(round_stations(&registry, &roster, "H", &sleeper, real + 600).is_empty());
-        // A sleeper's own `stations` narrows the rounds.
-        let narrowed = Sleeper {
-            stations: vec!["station-b".to_owned()],
-            ..sleeper
-        };
-        assert_eq!(
-            round_stations(&registry, &roster, "H", &narrowed, now),
-            ["station-b"]
         );
     }
 

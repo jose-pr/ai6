@@ -1717,7 +1717,6 @@ mod tests {
             role: None,
             priority: 0,
             stations: Vec::new(),
-            each_station: false,
             standing: false,
             resume: false,
         };
@@ -1726,7 +1725,7 @@ mod tests {
             assert_eq!(
                 state
                     .intake
-                    .fire_sleeper("G", "deps", &nightly, (window, None), "hq")
+                    .fire_sleeper("G", "deps", &nightly, window, "hq")
                     .unwrap(),
                 Fire::Queued
             );

@@ -1651,12 +1651,11 @@ mod tests {
             role: None,
             priority: 0,
             stations: Vec::new(),
-            each_station: false,
             standing: false,
             resume: false,
         };
         let window = |name: &str, at: i64| {
-            let mut brief = sleeper_brief("G", name, &nightly, at, None);
+            let mut brief = sleeper_brief("G", name, &nightly, at);
             brief.provenance =
                 Some(Provenance::new(Origin::Sleeper, &brief, "hq", 1).with_principal(name));
             brief

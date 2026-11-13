@@ -395,6 +395,25 @@ impl Watchdog {
         })
     }
 
+    /// How long the Run has made no progress (provider output or operator input); `None`
+    /// while it is paused, which is waiting on a person and never quiet.
+    pub fn quiet_for(&self) -> Option<Duration> {
+        let state = self.lock_state();
+        state
+            .paused_since
+            .is_none()
+            .then(|| state.last_activity.elapsed())
+    }
+
+    /// Makes the Run look as if it last made progress `by` earlier.
+    #[cfg(test)]
+    pub(crate) fn backdate(&self, by: Duration) {
+        let mut state = self.lock_state();
+        if let Some(earlier) = state.last_activity.checked_sub(by) {
+            state.last_activity = earlier;
+        }
+    }
+
     /// Returns whether the Run has exceeded its quiet period.
     pub fn is_stalled(&self) -> bool {
         let state = self.lock_state();

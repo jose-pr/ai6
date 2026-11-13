@@ -5,8 +5,10 @@
 //! and only when the charge's Agent has a handler here. A charge whose lease another Station took
 //! is closed here, as a Run is fenced out. Then it looks at the charge's area for what the
 //! charge has not been told: a Mission of its Operation entering `verifying`, a quarantine, a
-//! Station gone dark (M's), a control a person asked for. Every round it takes the Cables
-//! waiting for the charge, and wakes it when `wake_every` has passed with nothing else.
+//! control a person asked for; for a Station's charge, a Run that stopped making progress and
+//! what the Operations' 00 Agents asked of the Station; for M's, a Station gone dark and a Source
+//! whose poll is frozen. Every round it takes the Cables waiting for the charge, and wakes it when
+//! `wake_every` has passed with nothing else.
 //!
 //! Each wake is one turn, given the waiting events as its input, those carrying outside text
 //! marked untrusted. Turns are counted per hour on the charge's record, so a storm of events waits
@@ -38,6 +40,7 @@ use crate::directorates::registry::charges::{
     ChargeError, ChargeLogEntry, ChargeRecord, ChargeUpdate, TURN_WINDOW_SECS,
 };
 use crate::directorates::registry::runs::RunRecord;
+use crate::station::sources::PollBoard;
 
 /// How far back M's charge looks for Stations that checked in and went dark, in seconds.
 const DARK_WINDOW_SECS: u64 = 86_400;
@@ -46,6 +49,8 @@ const DARK_WINDOW_SECS: u64 = 86_400;
 #[derive(Default)]
 pub(super) struct ChargeDesk {
     live: Mutex<BTreeMap<String, Arc<Live>>>,
+    /// How the Source polls this Station runs are going, for M's charge.
+    pub(super) polls: Arc<PollBoard>,
 }
 
 impl ChargeDesk {
@@ -83,7 +88,8 @@ impl ChargeDesk {
 /// One event of a charge's area, waiting for its turn.
 #[derive(Debug, Clone, Serialize)]
 struct ChargeEvent {
-    /// `verifying`, `cable`, `health`, `control` or `timer`.
+    /// `verifying`, `cable`, `health`, `control`, `request` (an Operation's ask of a Station),
+    /// `resources` (a Station's answer) or `timer`.
     kind: &'static str,
     /// When the Station saw it, as Unix seconds.
     at: f64,
@@ -407,10 +413,11 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
     #[cfg(feature = "cables-mcp")]
     {
         let station_tools = charge.scope.station().is_some();
-        // A Station's charge with no Operation for its Cables still needs an endpoint for its
-        // Station tools; its Cable tools then act under no Operation's grants.
+        let is_m = charge.scope == ChargeScope::M;
+        // A Station's or M's charge with no Operation for its Cables still needs an endpoint for
+        // its own tools; its Cable tools then act under no Operation's grants.
         let identity = principal.or_else(|| {
-            station_tools
+            (station_tools || is_m)
                 .then(|| {
                     CablePrincipal::try_new(
                         charge.settings.agent.clone(),
@@ -436,8 +443,15 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
             {
                 Ok(endpoint) => {
                     if station_tools {
-                        endpoint.open_station_tools(super::head_of_station::Desk::for_charge(
+                        endpoint.open_station_tools(super::head_of_station::Desk::new(
                             state.clone(),
+                            charge.settings.agent.clone(),
+                        ));
+                    }
+                    if is_m || charge.scope.operation().is_some() {
+                        endpoint.open_resource_tools(super::resources::ResourceDesk::new(
+                            state.clone(),
+                            charge.scope.clone(),
                             charge.settings.agent.clone(),
                         ));
                     }
@@ -532,19 +546,108 @@ fn run_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
     })
 }
 
+/// The Runs of this Station that have made no progress for the charge's `stall_after`, or that
+/// their own watchdog judged stalled: each is told once, by its Run.
+fn stalled_runs(state: &DaemonState, live: &Live) -> Vec<ChargeEvent> {
+    let quiet_after = live.settings().settings.stall_after.get();
+    let missions = state
+        .missions
+        .lock()
+        .map(|missions| missions.list())
+        .unwrap_or_default();
+    missions
+        .into_iter()
+        .filter(|mission| !super::is_terminal_state(mission.state))
+        .filter_map(|mission| {
+            let id = mission.mission_id.to_string();
+            let (quiet, stalled) =
+                super::head_of_station::quiet_of(state, &id, mission.state, quiet_after);
+            let run = state
+                .runs
+                .lock()
+                .ok()
+                .and_then(|runs| runs.get(&id)?.run_id.as_ref().map(ToString::to_string))
+                .unwrap_or_else(|| id.clone());
+            stalled.then(|| {
+                ChargeEvent::new(
+                    "health",
+                    false,
+                    serde_json::json!({
+                        "flag": "run-stalled",
+                        "mission": id,
+                        "operation": mission.operation_id,
+                        "agent": mission.agent_id,
+                        "state": mission.state.as_str(),
+                        "quiet_secs": quiet.map(|quiet| quiet.as_secs()),
+                        "tool": "surrender_claim",
+                    }),
+                )
+                .keyed(format!("stall:{id}:{run}"))
+            })
+        })
+        .collect()
+}
+
+/// The Source polls that are not finishing, told once each from when they began to freeze.
+fn frozen_polls(state: &DaemonState, live: &Live) -> Vec<ChargeEvent> {
+    let Some(after) = live.settings().settings.poll_frozen_after.get() else {
+        return Vec::new();
+    };
+    // A Source taken out of the configuration is not frozen.
+    state.charges.polls.retain(|source| {
+        source.split_once('/').is_some_and(|(operation, name)| {
+            state
+                .roster
+                .operation(operation)
+                .is_ok_and(|operation| operation.sources.contains_key(name))
+        })
+    });
+    state
+        .charges
+        .polls
+        .frozen(unix_now(), after)
+        .into_iter()
+        .map(|frozen| {
+            let key = format!("poll:{}:{}", frozen.source, frozen.since);
+            ChargeEvent::new(
+                "health",
+                false,
+                serde_json::json!({
+                    "flag": "source-poll-frozen",
+                    "source": frozen.source,
+                    "since": frozen.since,
+                    "why": frozen.why,
+                    "tool": "raise_flag",
+                }),
+            )
+            .keyed(key)
+        })
+        .collect()
+}
+
 /// What the charge's area holds that it has not been told: controls, Missions entering
 /// `verifying`, quarantines and dark Stations. Blocks on the Registry.
 fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEvent> {
     let mut found = Vec::new();
     for control in &record.controls {
-        let mut event = ChargeEvent::new(
-            "control",
-            !control.note.is_empty(),
-            serde_json::json!({ "by": control.by, "note": control.note, "asked_at": control.at }),
-        )
+        // A request or an answer made through the tools is told as what it is; any other control
+        // is a person's word.
+        let mut event = match super::resources::classify(state, &live.scope, control) {
+            Some((kind, detail)) => ChargeEvent::new(kind, true, detail),
+            None => ChargeEvent::new(
+                "control",
+                !control.note.is_empty(),
+                serde_json::json!({
+                    "by": control.by, "note": control.note, "asked_at": control.at
+                }),
+            ),
+        }
         .keyed(format!("control:{}", control.id));
         event.control = Some(control.id.clone());
         found.push(event);
+    }
+    if live.scope.station().is_some() {
+        found.extend(stalled_runs(state, live));
     }
     if let ChargeScope::Operation(operation) = &live.scope {
         match state.intake.runs() {
@@ -604,6 +707,7 @@ fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEv
         }
     }
     if live.scope == ChargeScope::M {
+        found.extend(frozen_polls(state, live));
         let window = std::time::Duration::from_secs(DARK_WINDOW_SECS);
         if let (Ok(known), Ok(alive)) = (
             state.intake.stations(window),

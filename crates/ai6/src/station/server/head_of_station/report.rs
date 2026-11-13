@@ -1,9 +1,9 @@
-//! `station_report`: everything a round may read about its Station, and nothing secret.
+//! `station_report`: everything the Station charge may read about its Station, and nothing secret.
 //!
 //! No environment values, tokens, loadouts, Cable bodies or brief text: Missions appear by
 //! ID, Operation, Agent, role and state; Theaters as they are published at check-in.
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 
@@ -14,7 +14,7 @@ use crate::directorates::m::theaters::TheaterSummary;
 use super::super::{DaemonState, StationRole, station_terminal};
 use crate::directorates::q::terminal::HarnessStdio;
 
-/// What the Station tells its Head of Station about itself.
+/// What the Station tells its charge about itself.
 #[derive(Debug, Clone, Serialize)]
 pub(in super::super) struct StationState {
     station: String,
@@ -24,6 +24,8 @@ pub(in super::super) struct StationState {
     capacity: usize,
     /// Its Missions that are not over, with their Runs.
     missions: Vec<LiveMission>,
+    /// Briefs leased to this Station that wait here for a Run, and briefs no Station has taken.
+    queue: Queue,
     /// Free and total space where its state and safe houses are.
     #[serde(skip_serializing_if = "Option::is_none")]
     disk: Option<Disk>,
@@ -32,8 +34,16 @@ pub(in super::super) struct StationState {
     safe_houses: Vec<KeptSafeHouse>,
     /// Provider libraries loaded although no pin or publisher accepts them.
     plugins_weakened: Vec<String>,
-    /// What the Head of Station may do here, as the Station enforces it.
+    /// What the charge may do here, as the Station enforces it.
     limits: Limits,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct Queue {
+    /// Missions this Station holds the claim on that have no Run here yet.
+    waiting_here: Vec<String>,
+    /// Briefs queued in the Registry that no Station has claimed.
+    unclaimed: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +55,13 @@ struct LiveMission {
     state: String,
     /// Whether a Run of it runs on this Station now.
     run: bool,
+    /// Seconds its Run has made no progress; absent without a Run here, or while it waits on a
+    /// person.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiet_secs: Option<u64>,
+    /// Whether the Run counts as stalled: quiet past the charge's `stall_after`, or judged so by
+    /// its own watchdog. A stalled claim may be surrendered.
+    stalled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,12 +80,12 @@ struct TheaterState {
     unfit: Option<String>,
 }
 
-/// The fixed limits, so a round knows them before it asks.
+/// The fixed limits, so the charge knows them before it asks.
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct Limits {
     pub(super) cache_dirs: Vec<String>,
     pub(super) cache_age_secs: u64,
-    pub(super) unattended: [&'static str; 4],
+    pub(super) unattended: [&'static str; 5],
     pub(super) green_ink: [&'static str; 1],
     pub(super) never: [&'static str; 4],
 }
@@ -83,6 +100,7 @@ pub(super) fn limits(state: &DaemonState) -> Limits {
             "remove the safe house of a Mission that is over when everything in it exists elsewhere",
             "remove the cache directories named in cache_dirs from the safe house of a Mission over for at least cache_age_secs",
             "run the provisioning steps a Theater's operator declared for it (provision_theater with apply)",
+            "surrender the claim on a Mission of this Station whose Run is stalled (surrender_claim)",
         ],
         green_ink: [
             "remove the safe house of a Mission that is over while it holds work that exists nowhere else (kind delete)",
@@ -96,9 +114,12 @@ pub(super) fn limits(state: &DaemonState) -> Limits {
     }
 }
 
-/// Reads the Station's state. Blocks on the filesystem and safe-house providers; call it
-/// from `spawn_blocking`.
-pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
+/// Reads the Station's state; `quiet_after` is the charge's `stall_after`. Blocks on the
+/// filesystem and safe-house providers; call it from `spawn_blocking`.
+pub(in super::super) fn station_state(
+    state: &DaemonState,
+    quiet_after: Option<Duration>,
+) -> StationState {
     let now = SystemTime::now();
     let runs = state
         .runs
@@ -112,15 +133,43 @@ pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
         .unwrap_or_default()
         .into_iter()
         .filter(|mission| !safe_houses::is_over(state, mission))
-        .map(|mission| LiveMission {
-            run: runs.contains(&mission.mission_id.to_string()),
-            mission: mission.mission_id.to_string(),
-            operation: mission.operation_id,
-            agent: mission.agent_id,
-            role: mission.role_id,
-            state: format!("{:?}", mission.state).to_lowercase(),
+        .map(|mission| {
+            let (quiet, stalled) = super::quiet_of(
+                state,
+                mission.mission_id.as_str(),
+                mission.state,
+                quiet_after,
+            );
+            LiveMission {
+                run: runs.contains(&mission.mission_id.to_string()),
+                mission: mission.mission_id.to_string(),
+                operation: mission.operation_id,
+                agent: mission.agent_id,
+                role: mission.role_id,
+                state: format!("{:?}", mission.state).to_lowercase(),
+                quiet_secs: quiet.map(|quiet| quiet.as_secs()),
+                stalled,
+            }
         })
         .collect();
+    let queue = Queue {
+        waiting_here: state
+            .intake
+            .leases()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|lease| lease.station() == state.station_id)
+            .filter_map(|lease| {
+                lease
+                    .meta()
+                    .get("mission_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .filter(|mission| !runs.contains(mission))
+            .collect(),
+        unclaimed: state.intake.list_new().map_or(0, |briefs| briefs.len()),
+    };
     let disk = state.station.state_dir().ok().and_then(|path| {
         let free = fs2::available_space(&path).ok()?;
         let total = fs2::total_space(&path).ok()?;
@@ -155,6 +204,7 @@ pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
             0
         },
         missions,
+        queue,
         disk,
         resources: crate::station::resources::sample(),
         theaters,

@@ -2555,11 +2555,6 @@ async fn create_user_mission(
             .role
             .as_ref()
             .is_some_and(|value| value.trim().is_empty() || value.len() > 128)
-        // A Head of Station round comes only from an authorized Sleeper.
-        || request
-            .role
-            .as_deref()
-            .is_some_and(ai6::is_head_of_station_role)
         || request.tags.len() > 32
         || request
             .tags
@@ -9113,23 +9108,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(created_mission.status(), StatusCode::ACCEPTED);
-        for role in ["head-of-station", "head-of-station/disk"] {
-            let round = client
-                .post(format!("{base}/v1/user/operations/G/missions"))
-                .bearer_auth(&operator_token)
-                .json(&serde_json::json!({
-                    "title": "Tidy the Station", "prompt": "Remove every safe house.",
-                    "role": role, "stations": ["worker"]
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                round.status(),
-                StatusCode::BAD_REQUEST,
-                "only a Sleeper queues a Head of Station round"
-            );
-        }
         let created: serde_json::Value = created_mission.json().await.unwrap();
         assert_eq!(created["operation_id"], "G");
         assert_eq!(created["state"], "queued");

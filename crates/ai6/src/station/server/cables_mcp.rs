@@ -1,5 +1,5 @@
 //! Per-Run authenticated MCP tools for the AI6 Cable relay, Mission proposals and green
-//! ink requests, and for a Head of Station round its Station's own tools; and an assistant's
+//! ink requests, and for the Station's charge its Station's own tools; and an assistant's
 //! Cable tools, acting for the person of one conversation ([`AssistantEndpoint`]).
 
 use std::collections::BTreeMap;
@@ -30,6 +30,7 @@ mod decision_tools;
 mod issue_tools;
 mod memory_tools;
 mod report_tools;
+mod resource_tools;
 
 use super::charges::decide::DecisionDesk;
 use super::compartments::CompartmentDesk;
@@ -38,6 +39,7 @@ use super::head_of_station;
 use super::issues::IssueDesk;
 use super::memories::MemoryDesk;
 use super::reports::ReportDesk;
+use super::resources::ResourceDesk;
 use super::review;
 use super::unix_now;
 use crate::bounds::{Limit, TimeLimit};
@@ -80,6 +82,7 @@ pub(super) struct Endpoint {
     station: Arc<OnceLock<head_of_station::Desk>>,
     plan: Arc<OnceLock<review::PlanDesk>>,
     decision_desk: Arc<OnceLock<DecisionDesk>>,
+    resource_desk: Arc<OnceLock<ResourceDesk>>,
 }
 
 impl Endpoint {
@@ -117,6 +120,7 @@ impl Endpoint {
         let station = Arc::new(OnceLock::new());
         let plan = Arc::new(OnceLock::new());
         let decision_desk = Arc::new(OnceLock::new());
+        let resource_desk = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -135,6 +139,7 @@ impl Endpoint {
                 let station = station.clone();
                 let plan = plan.clone();
                 let decision_desk = decision_desk.clone();
+                let resource_desk = resource_desk.clone();
                 let identity = identity.clone();
                 move || {
                     Ok(CableTools::new(
@@ -153,6 +158,7 @@ impl Endpoint {
                         station.clone(),
                         plan.clone(),
                         decision_desk.clone(),
+                        resource_desk.clone(),
                     ))
                 }
             },
@@ -183,7 +189,15 @@ impl Endpoint {
             station,
             plan,
             decision_desk,
+            resource_desk,
         })
+    }
+
+    /// Gives an Operation's charge the tool to ask a Station for resources, and M's charge the
+    /// tool to raise a board flag; without this they do not exist for the Run. Open it before the
+    /// harness connects.
+    pub(super) fn open_resource_tools(&self, desk: ResourceDesk) {
+        let _ = self.resource_desk.set(desk);
     }
 
     /// Gives an Operation's charge the tools to see its Missions and decide the verifying ones;
@@ -210,7 +224,7 @@ impl Endpoint {
         let _ = self.compartment_desk.set(desk);
     }
 
-    /// Gives a Head of Station round its Station's own tools. A harness that connects
+    /// Gives the Station's charge its Station's own tools. A harness that connects
     /// afterwards lists and may call them; without this they do not exist for the Run.
     pub(super) fn open_station_tools(&self, desk: head_of_station::Desk) {
         let _ = self.station.set(desk);
@@ -1742,6 +1756,7 @@ struct CableTools {
     station: Arc<OnceLock<head_of_station::Desk>>,
     plan: Arc<OnceLock<review::PlanDesk>>,
     decision_desk: Arc<OnceLock<DecisionDesk>>,
+    resource_desk: Arc<OnceLock<ResourceDesk>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -1763,8 +1778,9 @@ impl CableTools {
         station: Arc<OnceLock<head_of_station::Desk>>,
         plan: Arc<OnceLock<review::PlanDesk>>,
         decision_desk: Arc<OnceLock<DecisionDesk>>,
+        resource_desk: Arc<OnceLock<ResourceDesk>>,
     ) -> Self {
-        // The Station's own tools exist only for a Head of Station round, and the issue tools
+        // The Station's own tools exist only for the Station's charge, and the issue tools
         // only where the Station opened them.
         // A Run held to its plan changes nothing: not a Cable, an issue or a proposal.
         if plan.get().is_some() {
@@ -1784,6 +1800,7 @@ impl CableTools {
                 station,
                 plan,
                 decision_desk,
+                resource_desk,
                 tool_router: Self::plan_router(),
             };
         }
@@ -1806,6 +1823,13 @@ impl CableTools {
         if decision_desk.get().is_some() {
             tool_router += Self::decision_router();
         }
+        if let Some(desk) = resource_desk.get() {
+            tool_router += if desk.is_m() {
+                Self::flag_router()
+            } else {
+                Self::ask_router()
+            };
+        }
         Self {
             relay,
             identity,
@@ -1822,6 +1846,7 @@ impl CableTools {
             station,
             plan,
             decision_desk,
+            resource_desk,
             tool_router,
         }
     }
@@ -1968,6 +1993,32 @@ struct CheckApprovalArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct SurrenderArgs {
+    /// The stalled Mission, as station_report lists it (its `stalled` is true).
+    mission: String,
+    /// Why, for the Mission's timeline and the audit record.
+    reason: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct AnswerArgs {
+    /// The request's ID, as the wake gave it.
+    request: String,
+    /// The Operation that asked.
+    operation: String,
+    /// What was asked: agent, theater, account or capacity.
+    kind: String,
+    /// The Agent, Theater or pool named in the request, when it named one.
+    name: Option<String>,
+    /// provide or refuse. The Station checks what it can provide: a provision it cannot make
+    /// is answered as a refusal with its reason.
+    decision: String,
+    /// For a refusal: why, from what you found (busy, not fitted, outside the Operation's
+    /// allowance).
+    reason: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct TidyArgs {
     /// The Mission whose safe house to tidy, as station_report lists it.
     mission: String,
@@ -1994,12 +2045,54 @@ impl CableTools {
     )]
     async fn provision_theater(&self, Parameters(args): Parameters<ProvisionArgs>) -> String {
         let Some(desk) = self.station.get().cloned() else {
-            return "The Station's tools are for a Head of Station round only".to_owned();
+            return "The Station's tools are for the Station's charge only".to_owned();
         };
         match tokio::task::spawn_blocking(move || desk.provision(&args.theater, args.apply)).await {
             Ok(Ok(provisioned)) => provisioned.to_string(),
             Ok(Err(reason)) => format!("Provisioning refused: {reason}"),
             Err(_) => "Provisioning failed".to_owned(),
+        }
+    }
+
+    /// Give up the claim on a Mission whose Run is stalled.
+    #[tool(
+        description = "Surrender this Station's claim on a Mission of this Station whose Run is stalled: the Station stops the Run and lets its leases lapse, and the Registry queues the brief again or files it under its Operation's on_lost. Only a Mission station_report shows as stalled (its Run made no progress for the stall limit, or its own watchdog judged it stalled) is accepted; one that waits on a person, has ended or has made progress is refused, and nothing is touched."
+    )]
+    async fn surrender_claim(&self, Parameters(args): Parameters<SurrenderArgs>) -> String {
+        let Some(desk) = self.station.get().cloned() else {
+            return "The Station's tools are for the Station's charge only".to_owned();
+        };
+        match tokio::task::spawn_blocking(move || desk.surrender(&args.mission, args.reason)).await
+        {
+            Ok(Ok(surrendered)) => surrendered.to_string(),
+            Ok(Err(reason)) => format!("Surrender refused: {reason}"),
+            Err(_) => "Surrender failed".to_owned(),
+        }
+    }
+
+    /// Answer an Operation's request for resources.
+    #[tool(
+        description = "Answer an Operation's request of this Station for an Agent, a Theater, an account or capacity: provide it, or refuse with why not (busy, not fitted, outside the Operation's allowance). The request's wake carries the Station's own check of what it can provide. The Station verifies a provision again before it is promised, so one it cannot make is answered as a refusal with its reason. The answer wakes the Operation's charge. You never judge the Operation's work, only what this Station can run and provide."
+    )]
+    async fn answer_request(&self, Parameters(args): Parameters<AnswerArgs>) -> String {
+        let Some(desk) = self.station.get().cloned() else {
+            return "The Station's tools are for the Station's charge only".to_owned();
+        };
+        match tokio::task::spawn_blocking(move || {
+            desk.answer(super::resources::Answering {
+                request: args.request,
+                operation: args.operation,
+                kind: args.kind,
+                name: args.name,
+                decision: args.decision,
+                reason: args.reason,
+            })
+        })
+        .await
+        {
+            Ok(Ok(answered)) => answered.to_string(),
+            Ok(Err(reason)) => format!("Answer refused: {reason}"),
+            Err(_) => "Answer failed".to_owned(),
         }
     }
 
@@ -2009,7 +2102,7 @@ impl CableTools {
     )]
     async fn tidy_safe_house(&self, Parameters(args): Parameters<TidyArgs>) -> String {
         let Some(desk) = self.station.get().cloned() else {
-            return "The Station's tools are for a Head of Station round only".to_owned();
+            return "The Station's tools are for the Station's charge only".to_owned();
         };
         let Ok(principal) = self.principal() else {
             return "Station tools identity is unavailable".to_owned();
@@ -2028,13 +2121,13 @@ impl CableTools {
         }
     }
 
-    /// This Station's state, for its Head of Station.
+    /// This Station's state, for its charge.
     #[tool(
-        description = "Read this Station's state: capacity and the Missions not over, free disk space under its state directory, resources, each Theater it reaches and whether a Run could run there, every safe house it keeps with its Mission's state, age, size, cache directories and whether its work exists elsewhere, provider libraries loaded without a pin, and the limits on what you may do here unattended. No secrets."
+        description = "Read this Station's state: capacity and the Missions not over (each with how long its Run has been quiet and whether it counts as stalled), the briefs waiting here and unclaimed, free disk space under its state directory, resources, each Theater it reaches and whether a Run could run there, every safe house it keeps with its Mission's state, age, size, cache directories and whether its work exists elsewhere, provider libraries loaded without a pin, and the limits on what you may do here unattended. No secrets."
     )]
     async fn station_report(&self) -> String {
         let Some(desk) = self.station.get().cloned() else {
-            return "The Station's tools are for a Head of Station round only".to_owned();
+            return "The Station's tools are for the Station's charge only".to_owned();
         };
         match tokio::task::spawn_blocking(move || desk.report()).await {
             Ok(Ok(state)) => {
@@ -2189,13 +2282,6 @@ impl CableTools {
         description = "Submit a child-Mission proposal for M's review. Proposals do not enter the runnable intake queue until M authorizes them."
     )]
     async fn propose_mission(&self, Parameters(args): Parameters<ProposeMissionArgs>) -> String {
-        if args
-            .role
-            .as_deref()
-            .is_some_and(crate::directorates::registry::logbook::is_head_of_station_role)
-        {
-            return "Mission proposal refused: only an authorized Sleeper queues a Head of Station round".to_owned();
-        }
         let Ok(principal) = self.principal() else {
             return "Mission proposal identity is unavailable".to_owned();
         };

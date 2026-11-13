@@ -7,6 +7,8 @@ mod assess;
 #[cfg(feature = "cables-mcp")]
 mod decides;
 mod sources;
+#[cfg(feature = "cables-mcp")]
+mod station;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;

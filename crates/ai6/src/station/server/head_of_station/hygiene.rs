@@ -1,4 +1,4 @@
-//! `tidy_safe_house`: what a Head of Station may do to the safe houses its Station keeps.
+//! `tidy_safe_house`: what the Station charge may do to the safe houses its Station keeps.
 //!
 //! The limits are fixed here, not in the prompt:
 //!
@@ -10,7 +10,7 @@
 //! - green ink (kind [`SAFE_HOUSE_DELETE`]): remove a safe house that holds work existing
 //!   nowhere else, or whose provider cannot tell. The request is filed under the Operation the
 //!   safe house's Mission belongs to, on that Mission, so its policy and approvers decide and
-//!   any later round finds the decision; no class authorisation ever approves it, and only a
+//!   any later wake finds the decision; no class authorisation ever approves it, and only a
 //!   live, unspent approval removes the safe house;
 //! - refused: a Mission this Station does not keep, one that is not over or is being started,
 //!   and every other action.
@@ -36,7 +36,7 @@ use crate::station::safehouse::SafeHouse;
 use super::super::green_ink::{Asked, Desk as GreenInk};
 use super::super::{DaemonState, StartReservation};
 
-/// What a round asks to do to a safe house.
+/// What the charge asks to do to a safe house.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tidy {
     /// Remove its cache directories.
@@ -57,9 +57,9 @@ impl std::str::FromStr for Tidy {
     }
 }
 
-/// Who asks: the round's Mission and its Run.
-pub(super) struct Round<'a> {
-    pub(super) mission: &'a Mission,
+/// Who asks: the Station charge's Agent and its Run.
+pub(super) struct Asker<'a> {
+    pub(super) agent: &'a str,
     pub(super) run: &'a str,
 }
 
@@ -140,7 +140,7 @@ fn over_and_kept(state: &DaemonState, id: &str) -> Result<(Mission, SafeHouseRep
 /// safe house kept on disk, caches not old enough, or a provider or Registry failure.
 pub(super) fn tidy(
     state: &DaemonState,
-    round: &Round<'_>,
+    asker: &Asker<'_>,
     target: &str,
     action: Tidy,
     reason: Option<String>,
@@ -159,23 +159,23 @@ pub(super) fn tidy(
         None
     });
     match action {
-        Tidy::Caches => remove_caches(state, round, target, exports.as_ref()),
+        Tidy::Caches => remove_caches(state, asker, target, exports.as_ref()),
         Tidy::Remove => {
             let hygiene = &state.station.hygiene;
             if exports
                 .as_ref()
                 .is_some_and(|exports| exports.is_exported(|path| rebuildable(hygiene, path)))
             {
-                return discard(state, round, target, &house, None);
+                return discard(state, asker, target, &house, None);
             }
-            remove_with_green_ink(state, round, (&mission, &house), exports, reason)
+            remove_with_green_ink(state, asker, (&mission, &house), exports, reason)
         }
     }
 }
 
 fn remove_caches(
     state: &DaemonState,
-    round: &Round<'_>,
+    asker: &Asker<'_>,
     target: &str,
     exports: Option<&SafeHouseExports>,
 ) -> Result<Tidied, String> {
@@ -218,7 +218,7 @@ fn remove_caches(
     if !tidied.removed.is_empty() {
         audit(
             state,
-            round,
+            asker,
             &mission,
             "head_of_station.caches_removed",
             &format!("{} {}", mission.mission_id, tidied.removed.join(" ")),
@@ -275,7 +275,7 @@ fn decided(
 
 fn remove_with_green_ink(
     state: &DaemonState,
-    round: &Round<'_>,
+    asker: &Asker<'_>,
     (mission, house): (&Mission, &SafeHouse),
     exports: Option<SafeHouseExports>,
     reason: Option<String>,
@@ -284,17 +284,13 @@ fn remove_with_green_ink(
         .operation_id
         .clone()
         .ok_or("the Mission has no Operation to ask for green ink in")?;
-    let agent = round
-        .mission
-        .agent_id
-        .clone()
-        .ok_or("the round has no Agent")?;
+    let agent = asker.agent.to_owned();
     let scope = scope(state, mission)?;
     let status = match decided(state, &operation, mission, &scope)? {
         Some(ApprovalStatus::Decided(approval)) if approval.decision == Decision::Approved => {
             return discard(
                 state,
-                round,
+                asker,
                 mission.mission_id.as_str(),
                 house,
                 Some((&operation, &approval.request.id)),
@@ -320,17 +316,17 @@ fn remove_with_green_ink(
                 None => "work its provider cannot show exists elsewhere".to_owned(),
             };
             let reason = format!(
-                "Remove the safe house of Mission {} ({:?}), which holds {holds}. Asked by the Head \
-                 of Station round {}. {}",
+                "Remove the safe house of Mission {} ({:?}), which holds {holds}. Asked by the \
+                 charge of Station {}. {}",
                 mission.mission_id,
                 mission.state,
-                round.mission.mission_id,
+                state.station_id,
                 reason.unwrap_or_default()
             );
             let asked = Asked {
                 operation: operation.clone(),
                 mission: mission.mission_id.to_string(),
-                run: round.run.to_owned(),
+                run: asker.run.to_owned(),
                 agent,
                 kind: scope.kind.clone(),
                 target: scope.target.clone(),
@@ -365,7 +361,7 @@ fn remove_with_green_ink(
 /// reservation the caller holds.
 fn discard(
     state: &DaemonState,
-    round: &Round<'_>,
+    asker: &Asker<'_>,
     target: &str,
     house: &SafeHouse,
     approval: Option<(&str, &str)>,
@@ -404,7 +400,7 @@ fn discard(
         Some((_, id)) => format!("{} approved by {id}", mission.mission_id),
         None => format!("{} exported", mission.mission_id),
     };
-    audit(state, round, &mission, "head_of_station.removed", &audited);
+    audit(state, asker, &mission, "head_of_station.removed", &audited);
     let mut tidied = Tidied::new(&mission, "removed");
     tidied.removed.push(report.path.clone());
     tidied.freed_bytes = size;
@@ -420,13 +416,10 @@ fn bounded(text: &str, max: usize) -> String {
     text[..end].to_owned()
 }
 
-fn audit(state: &DaemonState, round: &Round<'_>, mission: &Mission, action: &str, target: &str) {
+fn audit(state: &DaemonState, asker: &Asker<'_>, mission: &Mission, action: &str, target: &str) {
     let record = AuditRecord {
         id: format!("{action}-{}", uuid::Uuid::new_v4().simple()),
-        actor: format!(
-            "agent:{}",
-            round.mission.agent_id.as_deref().unwrap_or("unknown")
-        ),
+        actor: format!("agent:{}", asker.agent),
         action: action.to_owned(),
         operation: mission.operation_id.clone().unwrap_or_default(),
         resource: Some(format!("station:{}", state.station_id)),
@@ -440,18 +433,16 @@ fn audit(state: &DaemonState, round: &Round<'_>, mission: &Mission, action: &str
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
-    use super::super::tests::{
-        call, kept_safe_house, lease_round, lease_sleeper_round, start, station,
-    };
+    use super::super::tests::{desk, kept_safe_house, station};
     use super::*;
     use crate::directorates::m::mission::MissionState;
     use crate::directorates::m::roster::Roster;
     use crate::directorates::registry::approvals::{ClassAuthorization, Ruling};
-    use crate::directorates::registry::logbook::HEAD_OF_STATION_ROLE;
     use crate::station::safehouse::SafeHouseHygiene;
 
     /// The Station of `super::super::tests::station`, whose Operation `G`, which owns the
@@ -465,9 +456,7 @@ mod tests {
             format!(
                 "[operation.G]\npath = {checkout:?}\nworkspace = {{ provider = \"mock-safehouse\" }}\n\
                  [operation.G.green_ink]\nunattended = {{ field = [\"safe-house-delete\"] }}\n\
-                 [operation.H]\npath = {checkout:?}\n\
-                 [operation.H.sleepers.rounds]\nschedule = \"0 * * * *\"\ntitle = \"Station round\"\n\
-                 role = \"head-of-station\"\neach_station = true\n",
+                 [operation.H]\npath = {checkout:?}\n",
                 checkout = checkout.to_string_lossy()
             ),
         )
@@ -480,10 +469,6 @@ mod tests {
         state
     }
 
-    fn json(text: &str) -> serde_json::Value {
-        serde_json::from_str(text).unwrap_or_else(|_| panic!("not JSON: {text}"))
-    }
-
     fn audited(state: &DaemonState, action: &str) -> Vec<AuditRecord> {
         state
             .intake
@@ -494,9 +479,9 @@ mod tests {
             .collect()
     }
 
-    fn round_of<'a>(mission: &'a Mission) -> Round<'a> {
-        Round {
-            mission,
+    fn asker() -> Asker<'static> {
+        Asker {
+            agent: "M",
             run: "provider-id-hos",
         }
     }
@@ -505,23 +490,19 @@ mod tests {
     fn caches_go_only_from_a_safe_house_left_alone_long_enough_by_a_mission_that_is_over() {
         let root = tempfile::tempdir().unwrap();
         let pid = std::process::id();
-        let round_id = format!("hos-caches-round-{pid}");
         let done_id = format!("hos-caches-done-{pid}");
         let live_id = format!("hos-caches-live-{pid}");
         let tracked_id = format!("hos-caches-tracked-{pid}");
 
         // Left alone for less than the cache age: the caches stay.
         let state = lenient_station(root.path(), Duration::from_secs(7 * 24 * 3600));
-        lease_round(&state, "H", &round_id, HEAD_OF_STATION_ROLE, &["test"]);
         let done = kept_safe_house(&state, root.path(), &done_id, MissionState::Done, &[]);
         std::fs::write(done.join(".mock-ignored"), "target\n").unwrap();
         let live = kept_safe_house(&state, root.path(), &live_id, MissionState::Working, &[]);
         // Its target/ holds a file version control tracks: it is not ignored whole.
         let tracked = kept_safe_house(&state, root.path(), &tracked_id, MissionState::Done, &[]);
-        let round_mission = state.missions.lock().unwrap().get(&round_id).cloned();
-        let round_mission = round_mission.unwrap();
-        let round = round_of(&round_mission);
-        let young = tidy(&state, &round, &done_id, Tidy::Caches, None).unwrap_err();
+        let asker = asker();
+        let young = tidy(&state, &asker, &done_id, Tidy::Caches, None).unwrap_err();
         assert!(young.contains("left alone"), "{young}");
         assert!(done.join("target").exists());
 
@@ -531,7 +512,7 @@ mod tests {
             .station
             .clone()
             .with_safe_house_hygiene(SafeHouseHygiene::default().with_cache_age(Duration::ZERO));
-        let tidied = tidy(&state, &round, &done_id, Tidy::Caches, None).unwrap();
+        let tidied = tidy(&state, &asker, &done_id, Tidy::Caches, None).unwrap();
         assert_eq!(tidied.status, "caches-removed");
         assert_eq!(tidied.removed, ["target"]);
         assert_eq!(tidied.freed_bytes, 64);
@@ -544,7 +525,7 @@ mod tests {
         assert_eq!(records[0].target, format!("{done_id} target"));
 
         // A cache directory version control does not ignore whole stays.
-        let kept = tidy(&state, &round, &tracked_id, Tidy::Caches, None).unwrap();
+        let kept = tidy(&state, &asker, &tracked_id, Tidy::Caches, None).unwrap();
         assert!(kept.removed.is_empty(), "{kept:?}");
         assert!(
             kept.kept[0].starts_with("target: it holds files"),
@@ -552,14 +533,13 @@ mod tests {
         );
         assert!(tracked.join("target/debug/app").exists());
 
-        // A Mission that is not over, one this Station does not keep, the round itself and an
-        // unknown action are refused, and nothing is touched.
-        let refused = tidy(&state, &round, &live_id, Tidy::Caches, None).unwrap_err();
+        // A Mission that is not over, one this Station does not keep and an unknown action are
+        // refused, and nothing is touched.
+        let refused = tidy(&state, &asker, &live_id, Tidy::Caches, None).unwrap_err();
         assert!(refused.contains("not over"), "{refused}");
         assert!(live.join("target").exists());
-        let unknown = tidy(&state, &round, "elsewhere-1", Tidy::Remove, None).unwrap_err();
+        let unknown = tidy(&state, &asker, "elsewhere-1", Tidy::Remove, None).unwrap_err();
         assert!(unknown.contains("no such Mission"), "{unknown}");
-        assert!(tidy(&state, &round, &round_id, Tidy::Remove, None).is_err());
         assert!("chmod".parse::<Tidy>().is_err());
         assert!(live.join("main.rs").exists());
     }
@@ -569,22 +549,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let pid = std::process::id();
         let state = lenient_station(root.path(), Duration::ZERO);
-        let round_id = format!("hos-race-round-{pid}");
         let target = format!("hos-race-{pid}");
-        lease_round(&state, "H", &round_id, HEAD_OF_STATION_ROLE, &["test"]);
         let house = kept_safe_house(&state, root.path(), &target, MissionState::Failed, &[]);
-        let round_mission = state
-            .missions
-            .lock()
-            .unwrap()
-            .get(&round_id)
-            .cloned()
-            .unwrap();
         // A retry holds the Mission's start reservation, as start_mission does.
         state.starting.lock().unwrap().insert(target.clone());
         for action in [Tidy::Remove, Tidy::Caches] {
-            let refused =
-                tidy(&state, &round_of(&round_mission), &target, action, None).unwrap_err();
+            let refused = tidy(&state, &asker(), &target, action, None).unwrap_err();
             assert!(refused.contains("being started"), "{refused}");
         }
         assert!(house.join("main.rs").exists() && house.join("target").exists());
@@ -597,10 +567,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_round_removes_exported_work_unattended_and_asks_the_owning_operation_for_the_rest() {
+    async fn the_charge_removes_exported_work_unattended_and_asks_the_owning_operation_for_the_rest()
+     {
         let root = tempfile::tempdir().unwrap();
         let pid = std::process::id();
         let state = lenient_station(root.path(), Duration::ZERO);
+        super::super::super::charges::tend(&state, false, true).await;
+        assert!(state.charges.is_live("station:test"));
+        let desk = desk(&state);
         let exported_id = format!("hos-exported-{pid}");
         let secrets_id = format!("hos-secrets-{pid}");
         let unexported_id = format!("hos-unexported-{pid}");
@@ -636,25 +610,20 @@ mod tests {
                 )
                 .unwrap();
         }
-        let round = format!("hos-tidy-round-{pid}");
-        lease_sleeper_round(&state, &round);
-        start(&state, &round).await;
         let tidy_call = |mission: String| {
-            let (state, round) = (state.clone(), round.clone());
+            let desk = desk.clone();
             async move {
-                call(
-                    &state,
-                    &round,
-                    "tidy_safe_house",
-                    serde_json::json!({ "mission": mission, "action": "remove", "reason": "disk is low" }),
-                )
+                tokio::task::spawn_blocking(move || {
+                    desk.tidy("run-1", &mission, "remove", Some("disk is low".to_owned()))
+                })
                 .await
+                .unwrap()
                 .unwrap()
             }
         };
 
         // Everything in it exists elsewhere or is a cache: removed at once and audited.
-        let removed = json(&tidy_call(exported_id.clone()).await);
+        let removed = tidy_call(exported_id.clone()).await;
         assert_eq!(removed["status"], "removed", "{removed}");
         assert!(!exported.exists());
         let record = state.missions.lock().unwrap().get(&exported_id).cloned();
@@ -665,13 +634,13 @@ mod tests {
         );
 
         // An ignored file outside the caches exists nowhere else: a person decides.
-        let asked = json(&tidy_call(secrets_id.clone()).await);
+        let asked = tidy_call(secrets_id.clone()).await;
         assert_eq!(asked["status"], "pending", "{asked}");
         assert!(secrets.join("main.rs").exists());
 
         // Unexported work: a request under `G`, the Operation that owns the safe house, on its
         // Mission; neither the policy's unattended list nor a class authorisation approves it.
-        let asked = json(&tidy_call(unexported_id.clone()).await);
+        let asked = tidy_call(unexported_id.clone()).await;
         assert_eq!(asked["status"], "pending", "{asked}");
         assert_eq!(asked["green_ink"]["operation"], "G");
         let request_id = asked["green_ink"]["request_id"]
@@ -692,8 +661,9 @@ mod tests {
         assert_eq!(request.mission.as_str(), unexported_id);
         assert!(request.reason.contains("1 change(s) no remote holds"));
         assert!(request.reason.contains("disk is low"));
+        assert!(request.reason.contains("charge of Station test"));
         assert!(state.intake.pending_approvals("H", now).unwrap().is_empty());
-        let again = json(&tidy_call(unexported_id.clone()).await);
+        let again = tidy_call(unexported_id.clone()).await;
         assert_eq!(again["status"], "pending");
         assert_eq!(
             again["green_ink"]["request_id"],
@@ -702,7 +672,7 @@ mod tests {
         );
         assert!(unexported.exists(), "asking again removes nothing");
 
-        // A person of `G` approves: a later round removes it and spends the approval.
+        // A person of `G` approves: a later wake removes it and spends the approval.
         state
             .intake
             .decide_approval(
@@ -711,19 +681,7 @@ mod tests {
                 &Ruling::approve("operator-g", now, now + 600.0),
             )
             .unwrap();
-        let later = format!("hos-tidy-later-{pid}");
-        lease_sleeper_round(&state, &later);
-        start(&state, &later).await;
-        let approved = json(
-            &call(
-                &state,
-                &later,
-                "tidy_safe_house",
-                serde_json::json!({ "mission": unexported_id, "action": "remove" }),
-            )
-            .await
-            .unwrap(),
-        );
+        let approved = tidy_call(unexported_id.clone()).await;
         assert_eq!(approved["status"], "removed", "{approved}");
         assert!(!unexported.exists());
         let Some(ApprovalStatus::Decided(approval)) =
@@ -743,17 +701,17 @@ mod tests {
 
         // A live Mission's safe house is refused, whatever the action.
         for action in ["remove", "caches"] {
-            let refused = call(
-                &state,
-                &round,
-                "tidy_safe_house",
-                serde_json::json!({ "mission": live_id, "action": action }),
-            )
-            .await
-            .unwrap();
+            let desk = desk.clone();
+            let live_id = live_id.clone();
+            let refused =
+                tokio::task::spawn_blocking(move || desk.tidy("run-1", &live_id, action, None))
+                    .await
+                    .unwrap()
+                    .unwrap_err();
             assert!(refused.contains("not over"), "{refused}");
         }
         assert!(live.join("target").exists() && live.join("main.rs").exists());
+        super::super::super::charges::close_all(&state).await;
         state.stopping.store(true, Ordering::Release);
     }
 }

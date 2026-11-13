@@ -1,8 +1,8 @@
 //! An Agent's Report tools: file what it observed, and read the Reports it may.
 //!
 //! `file_report` exists for every Run whose Station opened its [`ReportDesk`]. It files
-//! against the Run's Operation, linked to its Mission. A Head of Station round files its
-//! round's report instead: the Station's logbook, its check-in and the heads-of-station channel,
+//! against the Run's Operation, linked to its Mission. The Station's charge files its
+//! report instead: the Station's logbook, its check-in and the heads-of-station channel,
 //! and a Report of its Station.
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -17,7 +17,7 @@ use crate::station::server::reports::ReportDesk;
 
 #[derive(Deserialize, JsonSchema)]
 struct FindingArgs {
-    /// What it is about. A Head of Station round uses disk, theater, safe-house, provider or
+    /// What it is about. The Station's charge uses disk, theater, safe-house, provider or
     /// other.
     kind: String,
     /// How much it matters: info, warning or critical.
@@ -47,7 +47,7 @@ struct LinkArgs {
 
 #[derive(Deserialize, JsonSchema)]
 struct FileReportArgs {
-    /// What you found (for a Head of Station round, what this round saw and did), in a few
+    /// What you found (for the Station's charge, what it saw and did), in a few
     /// lines; its first line names the report.
     summary: String,
     /// Detail beyond the summary.
@@ -85,7 +85,7 @@ struct FileReportArgs {
 
 #[derive(Deserialize, JsonSchema)]
 struct ReportsArgs {
-    /// operation:ID (your own by default), or station:ID for a Head of Station round.
+    /// operation:ID (your own by default), or station:ID for the Station's charge.
     scope: Option<String>,
     /// Only reports tied to this Mission.
     mission: Option<String>,
@@ -174,13 +174,13 @@ impl FileReportArgs {
 
 impl CableTools {
     /// The Run, once the harness has reported it.
-    fn bound_run(&self) -> Option<String> {
+    pub(super) fn bound_run(&self) -> Option<String> {
         self.principal()
             .ok()
             .and_then(|principal| principal.run_id().map(str::to_owned))
     }
 
-    /// The Station whose Reports this Run reads as a Head of Station round.
+    /// The Station whose Reports this Run reads as the Station's charge.
     fn round_station(&self) -> Option<String> {
         self.station.get().map(|desk| desk.station().to_owned())
     }
@@ -209,7 +209,7 @@ impl CableTools {
         }
     }
 
-    /// A Head of Station round's report: the logbook, the check-in, the channel, and a Report of
+    /// The Station charge's report: the logbook, the check-in, the channel, and a Report of
     /// its Station.
     async fn file_round_report(
         &self,
@@ -257,7 +257,7 @@ impl CableTools {
 impl CableTools {
     /// File a report of what this Run observed.
     #[tool(
-        description = "File a report of something you observed that someone should know or decide about: a problem found along the way, a risk, an idea for later work, a follow-up. It is recorded against your Operation and linked to your Mission, for your Operation's charge or a person to assess; it starts no work by itself, so propose_mission is still how work is asked for. Give a summary whose first line names it, optionally detail, typed findings, a proposed priority and deadline, and markings: a classification, a handling mark and compartments limit who reads it, and a tearline is a sanitised part for those cleared only for its lower marking. A Head of Station round files its round's report this way: findings typed disk, theater, safe-house, provider or other go into the Station's logbook, which the next round reads, are published with the Station's check-in, are sent as a Cable to the heads-of-station channel when that channel exists, and are kept as a report of the Station. Filing is rate limited per Run and per Operation."
+        description = "File a report of something you observed that someone should know or decide about: a problem found along the way, a risk, an idea for later work, a follow-up. It is recorded against your Operation and linked to your Mission, for your Operation's charge or a person to assess; it starts no work by itself, so propose_mission is still how work is asked for. Give a summary whose first line names it, optionally detail, typed findings, a proposed priority and deadline, and markings: a classification, a handling mark and compartments limit who reads it, and a tearline is a sanitised part for those cleared only for its lower marking. The Station's charge files its report this way: findings typed disk, theater, safe-house, provider or other go into the Station's logbook, are published with the Station's check-in, are sent as a Cable to the heads-of-station channel when that channel exists, and are kept as a report of the Station. Filing is rate limited per Run and per Operation."
     )]
     async fn file_report(&self, Parameters(args): Parameters<FileReportArgs>) -> String {
         if let Some(desk) = self.station.get().cloned() {

@@ -50,6 +50,7 @@ mod recovery;
 mod reload;
 #[cfg(feature = "cables-mcp")]
 mod reports;
+mod resources;
 mod review;
 mod routes;
 #[cfg(feature = "publisher")]
@@ -268,7 +269,7 @@ impl StationConfig {
     }
 
     /// Sets which directories in a kept safe house are rebuildable caches and how long a
-    /// terminal Mission's safe house is left alone before the Head of Station may remove them
+    /// terminal Mission's safe house is left alone before the Station's charge may remove them
     /// (default [`SafeHouseHygiene::default`](crate::station::safehouse::SafeHouseHygiene)).
     #[must_use]
     pub fn with_safe_house_hygiene(
@@ -1782,7 +1783,8 @@ async fn scheduler_loop(base: DaemonState) {
             base.station_id.clone(),
             base.station.limits().sources.clone(),
         )
-        .with_cables(base.cables.clone()),
+        .with_cables(base.cables.clone())
+        .with_board(base.charges.polls.clone()),
     );
     let mut next_station_check_in = Instant::now();
     while !base.stopping.load(Ordering::Acquire) {
@@ -3420,6 +3422,25 @@ fn place_request(
     request: PlacementRequest,
     leases: &[Lease],
 ) -> Result<PlacementChoice, String> {
+    let (placed, stations) = placement_of(state, operation_id, &request, leases)?;
+    if let Some(choice) = placed
+        .choices
+        .iter()
+        .find(|choice| has_assignment_capacity(state, operation_id, &choice.agent))
+    {
+        return Ok(choice.clone());
+    }
+    Err(unplaced_reason(&placed, &request, &stations))
+}
+
+/// What M's placement makes of `request` for the Operation on what each Station published, and the
+/// Stations it judged: every choice and every rejection, before any capacity is taken.
+fn placement_of(
+    state: &DaemonState,
+    operation_id: &str,
+    request: &PlacementRequest,
+    leases: &[Lease],
+) -> Result<(placement::Placement, Vec<StationFacts>), String> {
     let mut policy = OperationPolicy::from_roster(&state.roster, operation_id)
         .map_err(|error| error.to_string())?;
     let mut unavailable = medical::quarantined_agents(state, Some(operation_id));
@@ -3443,15 +3464,7 @@ fn place_request(
             )
         })
         .collect();
-    let placed = placement::place(&policy, &request, &stations);
-    if let Some(choice) = placed
-        .choices
-        .iter()
-        .find(|choice| has_assignment_capacity(state, operation_id, &choice.agent))
-    {
-        return Ok(choice.clone());
-    }
-    Err(unplaced_reason(&placed, &request, &stations))
+    Ok((placement::place(&policy, request, &stations), stations))
 }
 
 /// How many of `leases` take up a place at `record`'s Station. A Mission whose harness is not
@@ -5256,16 +5269,6 @@ async fn start_mission(
     )
     .map_err(configuration_error)?;
     let mut initial_context = standing_context(&agent.context, role.as_ref());
-    let (worker, worker_mission) = (state.clone(), mission.clone());
-    let round = tokio::task::spawn_blocking(move || {
-        head_of_station::round_context(&worker, &worker_mission)
-    })
-    .await
-    .ok()
-    .flatten();
-    if let Some(round) = &round {
-        initial_context.push(round.context.clone());
-    }
     if plan_stage {
         initial_context.push(review::PLAN_CONTEXT.to_owned());
     }
@@ -5383,13 +5386,6 @@ async fn start_mission(
         ));
     }
     let exposure = medical::open_gate(&state, &mission);
-    // Earlier rounds' reports quote other Missions' text: a round that reads them is exposed.
-    if round.as_ref().is_some_and(|round| round.read_reports) {
-        exposure.mark(
-            crate::directorates::medical::exposure::STATION_LOGBOOK,
-            unix_now(),
-        );
-    }
     #[cfg(feature = "cables-mcp")]
     let mut cables_mcp = if let Some(operation_id) = mission
         .operation_id
@@ -5428,12 +5424,6 @@ async fn start_mission(
         endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
-        }
-        if round.is_some() {
-            endpoint.open_station_tools(head_of_station::Desk::new(
-                state.clone(),
-                mission.mission_id.as_str(),
-            ));
         }
         endpoint.add_environment(&mut environment);
         gate_environment(&state, &mut environment);
@@ -6450,17 +6440,6 @@ async fn resume_mission(
         endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
-        }
-        // A resumed round keeps its Station's tools, after the same check a start makes.
-        let (worker, worker_mission) = (state.clone(), mission.clone());
-        if tokio::task::spawn_blocking(move || head_of_station::is_round(&worker, &worker_mission))
-            .await
-            .unwrap_or(false)
-        {
-            endpoint.open_station_tools(head_of_station::Desk::new(
-                state.clone(),
-                mission.mission_id.as_str(),
-            ));
         }
         endpoint.add_environment(&mut environment);
         gate_environment(&state, &mut environment);

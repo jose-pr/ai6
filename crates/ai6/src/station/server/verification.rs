@@ -12,9 +12,7 @@ use std::time::Duration;
 
 use coqui_acp_provider::AgentEvent;
 
-use super::{
-    DaemonState, agents, head_of_station, observations, publish_lifecycle, run_hold, vetting,
-};
+use super::{DaemonState, agents, observations, publish_lifecycle, run_hold, vetting};
 use crate::directorates::m::deliverables::{self, Deliverable, DeliverableKind};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::theaters::{LOCAL_THEATER, TheaterAccess};
@@ -35,12 +33,10 @@ pub(super) const VERIFYING_EVENT: &str = "verifying";
 static PROBING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Whether a Mission's `done` waits to be verified. The Missions that supervise others' work
-/// (reviews, panels, Head of Station rounds) and Missions with no Operation, whose outcome is
-/// nobody's to answer for, do not.
-fn owes_verification(state: &DaemonState, mission: &Mission) -> bool {
-    mission.operation_id.is_some()
-        && !vetting::is_review_mission(mission)
-        && !head_of_station::is_round(state, mission)
+/// (reviews, panels) and Missions with no Operation, whose outcome is nobody's to answer for,
+/// do not.
+fn owes_verification(mission: &Mission) -> bool {
+    mission.operation_id.is_some() && !vetting::is_review_mission(mission)
 }
 
 /// `event`, or for a `completed` whose Mission owes verification, the event that leaves it
@@ -56,7 +52,7 @@ pub(super) fn verify_done(
     let owes = state.missions.lock().ok().is_some_and(|missions| {
         missions.get(mission_id).is_some_and(|mission| {
             !matches!(mission.state, MissionState::Held | MissionState::Verifying)
-                && owes_verification(state, mission)
+                && owes_verification(mission)
         })
     });
     if owes {

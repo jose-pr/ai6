@@ -249,6 +249,43 @@ pub(super) fn no_room(pools: &[&AccountPool], states: &[AccountState], now: f64)
     placement::no_account_headroom("", &ids, frees_at(pools, states, now)).reason
 }
 
+/// What an Operation's Agent may draw from here, for a request of an account: the pools that
+/// have an account with room, or why none does. No account is claimed and none is named.
+pub(super) fn answer_for(
+    state: &DaemonState,
+    operation: &str,
+    agent: &str,
+) -> Result<serde_json::Value, String> {
+    let named = state
+        .roster
+        .agent(Some(operation), agent)
+        .map_err(|error| format!("outside the Operation's allowance: {error}"))?;
+    match source_of(state, Some(operation), &named) {
+        Source::Unpooled => Ok(serde_json::json!({
+            "agent": agent,
+            "pools": [],
+            "note": "no pool serves this Agent: it uses the login of its own harness",
+        })),
+        Source::Refused(reason) => Err(format!("outside the Operation's allowance: {reason}")),
+        Source::Pools(ids) => {
+            let Some(catalog) = state.station.credentials.catalog() else {
+                return Err(
+                    "not fitted: this Station has no loadouts to read accounts from".to_owned(),
+                );
+            };
+            let pools: Vec<&AccountPool> = ids.iter().filter_map(|id| catalog.pool(id)).collect();
+            let states = state.intake.accounts().unwrap_or_default();
+            let now = state.clock.now() as f64;
+            let unknown_use = state.station.limits().accounts.unknown_use_permille;
+            if best_account(&pools, &states, now, unknown_use, &state.station_id).is_some() {
+                Ok(serde_json::json!({ "agent": agent, "pools": ids }))
+            } else {
+                Err(format!("busy: {}", no_room(&pools, &states, now)))
+            }
+        }
+    }
+}
+
 /// Whether a Run can move to an account of `route`'s pools.
 pub(super) fn route_carries_run(
     state: &DaemonState,

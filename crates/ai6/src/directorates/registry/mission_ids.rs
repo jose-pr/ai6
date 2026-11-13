@@ -124,11 +124,9 @@ enum EntryKind {
     Sleeper {
         name: String,
         window: String,
-        station: Option<String>,
     },
     Standing {
         name: String,
-        station: Option<String>,
     },
     FollowUp {
         instance: String,
@@ -170,27 +168,25 @@ impl MissionEntry {
         )
     }
 
-    /// One round of a Sleeper: `<operation>-<sleeper>-<n>`, from the Operation's counter, the
-    /// same one for the same window and Station.
-    pub fn sleeper(operation: &str, name: &str, window: &str, station: Option<&str>) -> Self {
+    /// One window of a Sleeper: `<operation>-<sleeper>-<n>`, from the Operation's counter, the
+    /// same one for the same window.
+    pub fn sleeper(operation: &str, name: &str, window: &str) -> Self {
         Self::of(
             Some(operation),
             EntryKind::Sleeper {
                 name: name.to_owned(),
                 window: window.to_owned(),
-                station: station.map(str::to_owned),
             },
         )
     }
 
-    /// A standing Sleeper's one Mission, per Station when it holds a round on each:
-    /// `<operation>-<sleeper>-<n>`, the same one for every window, each window a run of it.
-    pub fn standing(operation: &str, name: &str, station: Option<&str>) -> Self {
+    /// A standing Sleeper's one Mission: `<operation>-<sleeper>-<n>`, the same one for every
+    /// window, each window a run of it.
+    pub fn standing(operation: &str, name: &str) -> Self {
         Self::of(
             Some(operation),
             EntryKind::Standing {
                 name: name.to_owned(),
-                station: station.map(str::to_owned),
             },
         )
     }
@@ -244,18 +240,8 @@ impl MissionEntry {
             EntryKind::Person | EntryKind::FollowUp { .. } => return None,
             EntryKind::Proposal { id } => vec!["proposal", operation, id],
             EntryKind::Review { id } => vec!["review", operation, id],
-            EntryKind::Sleeper {
-                name,
-                window,
-                station,
-            } => match station {
-                Some(station) => vec!["sleeper", operation, name, window, station],
-                None => vec!["sleeper", operation, name, window],
-            },
-            EntryKind::Standing { name, station } => match station {
-                Some(station) => vec!["standing", operation, name, station],
-                None => vec!["standing", operation, name],
-            },
+            EntryKind::Sleeper { name, window } => vec!["sleeper", operation, name, window],
+            EntryKind::Standing { name } => vec!["standing", operation, name],
             EntryKind::Source { instance, item, .. } => vec!["source", operation, instance, item],
         };
         Some(parts.join(&SEPARATOR.to_string()))
@@ -710,7 +696,7 @@ mod tests {
 
         let sleeper = crate::directorates::registry::sleepers::tests::nightly();
         registry
-            .fire_sleeper("ai6", "nightly", &sleeper, (1_792_922_400, None), "hq")
+            .fire_sleeper("ai6", "nightly", &sleeper, 1_792_922_400, "hq")
             .unwrap();
         let round = &registry.list_new().unwrap()[0];
         assert_eq!(handle_of(round), "ai6-nightly-2");
@@ -754,7 +740,7 @@ mod tests {
 
     fn a_repeated_entry_keeps_its_mission_and_a_number_is_never_reused(store: &dyn Store) {
         let registry = store.handle();
-        let entry = MissionEntry::sleeper("G", "deps", "20261025T0300Z", Some("a"));
+        let entry = MissionEntry::sleeper("G", "deps", "20261025T0300Z");
         let first = registry.allot_mission_id(&entry).unwrap();
         assert_eq!(first.handle, "G-deps-1");
         assert!(is_uid(&first.mission_id));
@@ -769,7 +755,7 @@ mod tests {
             registry.entered_mission_id(&entry).unwrap(),
             Some(first.mission_id.clone())
         );
-        let other = MissionEntry::sleeper("G", "deps", "20261025T0300Z", Some("b"));
+        let other = MissionEntry::sleeper("G", "deps", "20261026T0300Z");
         assert_eq!(registry.entered_mission_id(&other).unwrap(), None);
         assert_eq!(
             registry.allot_mission_id(&other).unwrap().handle,
@@ -1071,7 +1057,7 @@ mod tests {
         // Sleeper `b` of Operation `a` and the Missions of Operation `a-b`.
         let plain = person(registry.as_ref(), Some("a-b"));
         assert_eq!(plain, "a-b-1");
-        let round = MissionEntry::sleeper("a", "b", "w", None);
+        let round = MissionEntry::sleeper("a", "b", "w");
         assert_eq!(registry.allot_mission_id(&round).unwrap().handle, "a-b-2");
     }
 

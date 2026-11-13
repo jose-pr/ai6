@@ -574,7 +574,7 @@ pub struct StationRuntime {
     /// requirements probe. Default: 60.
     #[schema(title = "Sample a Theater's resources every", format = "seconds")]
     pub resources_every: Option<f64>,
-    /// Directory names the Head of Station may remove from a finished Mission's safe house.
+    /// Directory names the Station's charge may remove from a finished Mission's safe house.
     /// Default: `target`, `node_modules` and `.dart_tool`.
     #[schema(title = "Rebuildable cache directories")]
     pub safe_house_caches: Option<Vec<String>>,
@@ -666,8 +666,8 @@ pub struct StationRuntime {
     #[schema(title = "Remote-hands tools")]
     #[map(default)]
     pub theater_tools: limits::TheaterToolLimits,
-    /// `[head_of_station]`: the Head of Station's rounds.
-    #[schema(title = "The Head of Station's rounds")]
+    /// `[head_of_station]`: what the Station's charge reads and tidies.
+    #[schema(title = "The Station charge's tools")]
     #[map(default)]
     pub head_of_station: limits::HeadOfStationLimits,
     /// `[probes]`: reading a Mission's deliverables back.

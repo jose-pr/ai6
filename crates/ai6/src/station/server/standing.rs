@@ -535,7 +535,7 @@ mod tests {
     fn standing_mission(state: &DaemonState) -> String {
         state
             .intake
-            .entered_mission_id(&MissionEntry::standing("G", "nightly", None))
+            .entered_mission_id(&MissionEntry::standing("G", "nightly"))
             .unwrap()
             .expect("the standing Mission entered")
     }
@@ -598,7 +598,7 @@ mod tests {
             0,
             "the next window comes while the first run is queued"
         );
-        let skipped = format!("skipped/G/nightly//{}", window_label(FIRST + DAY));
+        let skipped = format!("skipped/G/nightly/{}", window_label(FIRST + DAY));
         assert!(warned.contains(&skipped), "{warned:?}");
         let mission = run_attempt(&state).await;
 
@@ -913,9 +913,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = standing_state(root.path(), false);
         let sleeper = state.roster.operation("G").unwrap().sleepers["nightly"].clone();
-        let brief = crate::directorates::registry::sleepers::sleeper_brief(
-            "G", "nightly", &sleeper, FIRST, None,
-        );
+        let brief =
+            crate::directorates::registry::sleepers::sleeper_brief("G", "nightly", &sleeper, FIRST);
         attempt_failed(
             &state,
             &brief,

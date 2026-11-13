@@ -2,7 +2,7 @@
 //!
 //! A check (`apply = false`) only looks. Applying runs [`provision`] with the Theater's own
 //! `requires` and `provision` settings: the steps the operator declared, idempotent, and
-//! nothing else, which is why a round may run them unattended. What the declaration does
+//! nothing else, which is why the charge may run them unattended. What the declaration does
 //! not cover is reported, never acted on. A Theater made for one Mission and an ephemeral
 //! template are refused: they are fitted out when they are made. Applying is refused while a
 //! Mission of this Station works on the Theater. What a failed command printed stays out of
@@ -11,7 +11,7 @@
 
 use serde::Serialize;
 
-use crate::directorates::m::mission::Mission;
+use super::hygiene::Asker;
 use crate::directorates::m::theaters::TheaterAccess;
 use crate::directorates::q::provision::{self, ProvisionStep, StepStatus};
 use crate::directorates::q::transport::describe;
@@ -38,7 +38,7 @@ pub(super) struct Provisioned {
 /// one without a transport.
 pub(super) fn provision_theater(
     state: &DaemonState,
-    round: &Mission,
+    asker: &Asker<'_>,
     id: &str,
     apply: bool,
 ) -> Result<Provisioned, String> {
@@ -94,7 +94,7 @@ pub(super) fn provision_theater(
             .map(|step| step.name.as_str())
             .collect();
         if !changed.is_empty() {
-            audit(state, round, &format!("{id} {}", changed.join(" ")));
+            audit(state, asker, &format!("{id} {}", changed.join(" ")));
         }
     }
     Ok(Provisioned {
@@ -127,7 +127,7 @@ fn working_on(state: &DaemonState, id: &str) -> Vec<String> {
         .collect()
 }
 
-fn audit(state: &DaemonState, round: &Mission, target: &str) {
+fn audit(state: &DaemonState, asker: &Asker<'_>, target: &str) {
     let bound = state.station.limits().head_of_station.audit_target_bytes;
     let mut end = target.len().min(bound.or_max());
     while !target.is_char_boundary(end) {
@@ -138,9 +138,9 @@ fn audit(state: &DaemonState, round: &Mission, target: &str) {
             "head_of_station.provisioned-{}",
             uuid::Uuid::new_v4().simple()
         ),
-        actor: format!("agent:{}", round.agent_id.as_deref().unwrap_or("unknown")),
+        actor: format!("agent:{}", asker.agent),
         action: "head_of_station.provisioned".to_owned(),
-        operation: round.operation_id.clone().unwrap_or_default(),
+        operation: String::new(),
         resource: Some(format!("station:{}", state.station_id)),
         target: target[..end].to_owned(),
         at: state.clock.now() as f64,
@@ -159,7 +159,7 @@ mod tests {
     use guatiao::library::ProviderError;
     use guatiao::{Bytes, FromValue, Status, ToValue, Value};
 
-    use super::super::tests::{call, lease_sleeper_round, start, station};
+    use super::super::tests::{desk, station};
     use crate::directorates::m::theaters::{SshAccess, Theater, Theaters};
     use crate::directorates::q::provision::{ProvisionSpec, Requirements};
     use crate::directorates::q::transport::{Capabilities, Output, RunSpec, Transport};
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_drifted_theater_is_fitted_out_again_on_a_round_and_then_checks_ok() {
+    async fn a_drifted_theater_is_fitted_out_again_by_the_charge_and_then_checks_ok() {
         let root = tempfile::tempdir().unwrap();
         let mut state = station(root.path());
         let installed = Arc::new(Mutex::new(BTreeSet::new()));
@@ -285,23 +285,20 @@ mod tests {
                     }),
                 ),
         );
-        let round = format!("hos-provision-round-{}", std::process::id());
-        lease_sleeper_round(&state, &round);
-        start(&state, &round).await;
-        let provision = |apply: bool| {
-            let (state, round) = (state.clone(), round.clone());
+        super::super::super::charges::tend(&state, false, true).await;
+        assert!(state.charges.is_live("station:test"));
+        let desk = desk(&state);
+        let call = |theater: &'static str, apply: bool| {
+            let desk = desk.clone();
             async move {
-                let text = call(
-                    &state,
-                    &round,
-                    "provision_theater",
-                    serde_json::json!({ "theater": "build-box", "apply": apply }),
-                )
-                .await
-                .unwrap();
-                serde_json::from_str::<serde_json::Value>(&text)
-                    .unwrap_or_else(|_| panic!("not JSON: {text}"))
+                tokio::task::spawn_blocking(move || desk.provision(theater, apply))
+                    .await
+                    .unwrap()
             }
+        };
+        let provision = |apply: bool| {
+            let call = call("build-box", apply);
+            async move { call.await.unwrap() }
         };
         let step = |status: &str| vec![("buildtool".to_owned(), status.to_owned())];
 
@@ -311,13 +308,13 @@ mod tests {
         assert_eq!(checked["fit"], false);
         assert!(installed.lock().unwrap().is_empty());
 
-        // A round fits it out, then finds it fit.
+        // The charge fits it out, then finds it fit.
         let applied = provision(true).await;
         assert_eq!(statuses(&applied), step("changed"), "{applied}");
         assert_eq!(applied["fit"], true);
         assert_eq!(statuses(&provision(true).await), step("ok"));
 
-        // It drifts: the next round puts it back, and the run is audited.
+        // It drifts: the next wake puts it back, and the run is audited.
         installed.lock().unwrap().clear();
         assert_eq!(statuses(&provision(true).await), step("changed"));
         assert_eq!(statuses(&provision(false).await), step("ok"));
@@ -333,14 +330,7 @@ mod tests {
         assert_eq!(audited[0].resource.as_deref(), Some("station:test"));
 
         // What a failed command printed stays out of the answer.
-        let failed = call(
-            &state,
-            &round,
-            "provision_theater",
-            serde_json::json!({ "theater": "leaky-box", "apply": true }),
-        )
-        .await
-        .unwrap();
+        let failed = call("leaky-box", true).await.unwrap().to_string();
         assert!(failed.contains("\"failed\""), "{failed}");
         assert!(!failed.contains("SECRET-1234"), "{failed}");
         assert!(failed.contains("withheld"), "{failed}");
@@ -386,14 +376,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let busy = call(
-            &state,
-            &round,
-            "provision_theater",
-            serde_json::json!({ "theater": "build-box", "apply": true }),
-        )
-        .await
-        .unwrap();
+        let busy = call("build-box", true).await.unwrap_err();
         assert!(busy.contains(&working), "{busy}");
         assert_eq!(
             statuses(&provision(false).await),
@@ -402,14 +385,7 @@ mod tests {
         );
 
         // A Theater this Station does not reach is refused.
-        let refused = call(
-            &state,
-            &round,
-            "provision_theater",
-            serde_json::json!({ "theater": "elsewhere", "apply": true }),
-        )
-        .await
-        .unwrap();
+        let refused = call("elsewhere", true).await.unwrap_err();
         assert!(refused.contains("does not reach"), "{refused}");
         state.stopping.store(true, Ordering::Release);
     }

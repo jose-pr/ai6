@@ -216,8 +216,7 @@ pub use directorates::registry::limits::{
     TokenLimits, UsageLimits,
 };
 pub use directorates::registry::logbook::{
-    HEAD_OF_STATION_ROLE, Severity, StationFinding, StationFindingKind, StationReport,
-    is_head_of_station_role,
+    Severity, StationFinding, StationFindingKind, StationReport,
 };
 pub use directorates::registry::memories::{
     MemoryEntry, MemoryError, MemoryHeader, MemoryProposal, MemoryScope, MemorySource, MemoryStore,

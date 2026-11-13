@@ -1,11 +1,7 @@
-//! Station logbooks: the reports a Head of Station files on each round of its Station.
+//! Station logbooks: the reports the Station's charge files on its Station.
 //!
-//! A round of an `each_station` Sleeper is a Mission of its own, so what one round saw
-//! reaches the next through the logbook: the Station keeps the newest
-//! `[registry.limits.logbook] entries` reports and hands them to the next round as context.
-//! The newest report
-//! is also published with the Station's check-in, so the operator sees each Station's state
-//! in one place.
+//! The Station keeps the newest `[registry.limits.logbook] entries` reports. The newest is
+//! published with the Station's check-in, so the operator sees each Station's state in one place.
 
 use std::fmt;
 use std::fs;
@@ -18,15 +14,6 @@ use sha2::{Digest, Sha256};
 
 use super::limits::LogbookLimits;
 use super::store::{FileRegistry, hex_digest, invalid_data, safe_component, validate_station_id};
-
-/// The role of the Agent that keeps a Station: a Mission for this role narrowed to one Station
-/// is that Station's round, given its logbook and the Station's own tools.
-pub const HEAD_OF_STATION_ROLE: &str = "head-of-station";
-/// Whether `role` is [`HEAD_OF_STATION_ROLE`] or a role beneath it: only an authorized
-/// Sleeper may queue a brief for it.
-pub fn is_head_of_station_role(role: &str) -> bool {
-    role == HEAD_OF_STATION_ROLE || role.starts_with("head-of-station/")
-}
 
 /// The Cable channel a filed report is sent to, when `cables.toml` configures it.
 pub const HEAD_OF_STATION_CHANNEL: &str = "heads-of-station";
@@ -133,7 +120,7 @@ impl fmt::Display for Severity {
     }
 }
 
-/// One thing a round found.
+/// One thing the Station's charge found.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -157,7 +144,7 @@ impl StationFinding {
     }
 }
 
-/// A report a Head of Station filed on its Station.
+/// A report the Station's charge filed on its Station.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -166,12 +153,12 @@ pub struct StationReport {
     pub station: String,
     /// When it was filed, as Unix seconds.
     pub at: i64,
-    /// What the round saw and did, in a few lines.
+    /// What the charge saw and did, in a few lines.
     pub summary: String,
     /// What needs the operator's eye.
     #[serde(default)]
     pub findings: Vec<StationFinding>,
-    /// The Mission of the round that filed it.
+    /// The Mission that filed it, when one did; the Station's charge is no Mission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mission: Option<String>,
     /// The Agent that filed it.
@@ -199,7 +186,7 @@ impl StationReport {
         self
     }
 
-    /// Records the round's Mission and Agent.
+    /// Records the filing Mission and Agent.
     #[must_use]
     pub fn filed_by(mut self, mission: impl Into<String>, agent: impl Into<String>) -> Self {
         self.mission = Some(mission.into());
@@ -267,7 +254,7 @@ pub(super) fn append_report(
     logbook.drain(..excess);
 }
 
-/// Each Station's logbook of Head of Station reports.
+/// Each Station's logbook of the reports its charge filed.
 pub trait LogbookStore {
     /// Files `report` in its Station's logbook, dropping the oldest past
     /// `[registry.limits.logbook] entries`.

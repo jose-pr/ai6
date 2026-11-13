@@ -3,8 +3,8 @@
 //! Every Agent's Run files Reports against its Mission's Operation, linked to that Mission,
 //! and reads them under the same rule as a person: the Operation's read (its own Operation, or
 //! another through a compartment granting `mission.read`, audited first), being read in to each
-//! of a Report's compartments, and a clearance at or above its classification. A Head of
-//! Station round also reads its own Station's Reports. Filing creates no Mission, brief or
+//! of a Report's compartments, and a clearance at or above its classification. The
+//! Station's charge also reads its own Station's Reports. Filing creates no Mission, brief or
 //! placement.
 //!
 //! Every call asks the configuration what is granted now, and works from the Run as the
@@ -51,7 +51,7 @@ struct RunReader<'a> {
     state: &'a DaemonState,
     reader: &'a Reader,
     principal: FieldPrincipal,
-    /// The Station whose Reports a Head of Station round reads.
+    /// The Station whose Reports the Station's charge reads.
     station: Option<&'a str>,
     /// What is granted now; `None` when it cannot be read, which grants nothing.
     compiled: Option<CompiledCompartments>,

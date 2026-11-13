@@ -135,6 +135,17 @@ pub struct ChargeDefinition {
     #[schema(title = "Held without renewing for", advanced)]
     #[map(default = ChargeDefinition::DEFAULTS.lease)]
     pub lease: Seconds,
+    /// For a Station's charge: seconds a Run of that Station may make no progress before the
+    /// charge is told it is stalled and may surrender its claim; `none` leaves it to the Run's own
+    /// stall judgement.
+    #[schema(title = "Run stalled after")]
+    #[map(default = ChargeDefinition::DEFAULTS.stall_after)]
+    pub stall_after: TimeLimit,
+    /// For M's charge: seconds a Source poll may run, or a Source stay unpolled past its interval,
+    /// before the charge is told the poll is frozen; `none` never flags one.
+    #[schema(title = "Source poll frozen after")]
+    #[map(default = ChargeDefinition::DEFAULTS.poll_frozen_after)]
+    pub poll_frozen_after: TimeLimit,
 }
 
 impl ChargeDefinition {
@@ -148,6 +159,8 @@ impl ChargeDefinition {
         max_waiting_events: Limit::at(500),
         turn_timeout: TimeLimit::secs(1_800),
         lease: Seconds::new(60),
+        stall_after: TimeLimit::secs(1_800),
+        poll_frozen_after: TimeLimit::secs(600),
     };
 
     /// A charge kept by `agent`, every other setting at its default.

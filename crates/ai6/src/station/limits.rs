@@ -66,7 +66,7 @@ pub struct StationLimits {
     pub theaters: TheaterLimits,
     /// `[theater_tools]`: the `theater_*` tools of remote-hands Runs.
     pub theater_tools: TheaterToolLimits,
-    /// `[head_of_station]`: the Head of Station's rounds.
+    /// `[head_of_station]`: what the Station's charge reads and tidies.
     pub head_of_station: HeadOfStationLimits,
     /// `[probes]`: reading a Mission's deliverables back.
     pub probes: ProbeLimits,
@@ -1221,11 +1221,11 @@ pub struct HeadOfStationLimits {
     #[schema(title = "Directory entries one survey walks")]
     #[map(default = HeadOfStationLimits::default().survey_entries)]
     pub survey_entries: Limit,
-    /// Bytes of the reason a round gives when it asks to delete a safe house; longer is cut.
+    /// Bytes of the reason the charge gives when it asks to delete a safe house; longer is cut.
     #[schema(title = "Longest reason for a safe house deletion", format = "bytes")]
     #[map(default = HeadOfStationLimits::default().reason_bytes)]
     pub reason_bytes: Limit,
-    /// Bytes of what a provisioning round's audit record names; longer is cut.
+    /// Bytes of what a provisioning audit record names; longer is cut.
     #[schema(title = "Longest provisioning audit target", format = "bytes")]
     #[map(default = HeadOfStationLimits::default().audit_target_bytes)]
     pub audit_target_bytes: Limit,

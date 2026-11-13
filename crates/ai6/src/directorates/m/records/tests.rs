@@ -147,8 +147,7 @@ fn full_example(record: ConfigRecord) -> Value {
                         "agent": "007",
                         "role": "case-officer",
                         "priority": 2,
-                        "stations": ["station-a"],
-                        "each_station": true
+                        "stations": ["station-a"]
                     }
                 }
             });
@@ -294,7 +293,9 @@ fn full_example(record: ConfigRecord) -> Value {
             "max_events_per_turn": 20,
             "max_waiting_events": "none",
             "turn_timeout": 600,
-            "lease": 30
+            "lease": 30,
+            "stall_after": 900,
+            "poll_frozen_after": "none"
         }),
         ConfigRecord::Compartment => json!({
             "description": "Release work",

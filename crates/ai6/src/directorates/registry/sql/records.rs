@@ -961,10 +961,10 @@ impl SleeperStore for SqlRegistry {
         operation: &str,
         name: &str,
         sleeper: &Sleeper,
-        round: (i64, Option<&str>),
+        window: i64,
         received_by: &str,
     ) -> io::Result<Fire> {
-        fire_round(self, (operation, name, sleeper), round, received_by)
+        fire_round(self, (operation, name, sleeper), window, received_by)
     }
 }
 

@@ -1718,16 +1718,10 @@
                 "description": "The Stations its briefs are limited to; empty adds no limit. It can only narrow the Operation's own list.",
                 "default": []
               },
-              "each_station": {
-                "type": "boolean",
-                "title": "A brief for each Station",
-                "description": "Queue one brief for every live Station that may take it: a round of all Stations.",
-                "default": false
-              },
               "standing": {
                 "type": "boolean",
                 "title": "One standing Mission",
-                "description": "One standing Mission for the Sleeper (one per Station with `each_station`), each window a new run of it, instead of a Mission per window. A window that comes while an run is in flight is skipped, unless that run has stalled: the window then supersedes it. A failed run leaves the order standing.",
+                "description": "One standing Mission for the Sleeper, each window a new run of it, instead of a Mission per window. A window that comes while an run is in flight is skipped, unless that run has stalled: the window then supersedes it. A failed run leaves the order standing.",
                 "default": false
               },
               "resume": {
@@ -5840,6 +5834,50 @@
           "description": "Seconds the Station running the charge holds it without renewing before another Station may take it over.",
           "x-advanced": true,
           "default": 60.0
+        },
+        "stall_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Run stalled after",
+          "description": "For a Station's charge: seconds a Run of that Station may make no progress before the charge is told it is stalled and may surrender its claim; `none` leaves it to the Run's own stall judgement.",
+          "default": 1800.0
+        },
+        "poll_frozen_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Source poll frozen after",
+          "description": "For M's charge: seconds a Source poll may run, or a Source stay unpolled past its interval, before the charge is told the poll is frozen; `none` never flags one.",
+          "default": 600.0
         }
       },
       "additionalProperties": false,
@@ -8034,7 +8072,7 @@
             "type": "string"
           },
           "title": "Rebuildable cache directories",
-          "description": "Directory names the Head of Station may remove from a finished Mission's safe house. Default: `target`, `node_modules` and `.dart_tool`."
+          "description": "Directory names the Station's charge may remove from a finished Mission's safe house. Default: `target`, `node_modules` and `.dart_tool`."
         },
         "safe_house_cache_age": {
           "type": [
@@ -10267,7 +10305,7 @@
               ],
               "format": "bytes",
               "title": "Longest reason for a safe house deletion",
-              "description": "Bytes of the reason a round gives when it asks to delete a safe house; longer is cut.",
+              "description": "Bytes of the reason the charge gives when it asks to delete a safe house; longer is cut.",
               "default": 2000
             },
             "audit_target_bytes": {
@@ -10288,13 +10326,13 @@
               ],
               "format": "bytes",
               "title": "Longest provisioning audit target",
-              "description": "Bytes of what a provisioning round's audit record names; longer is cut.",
+              "description": "Bytes of what a provisioning audit record names; longer is cut.",
               "default": 500
             }
           },
           "additionalProperties": false,
-          "title": "The Head of Station's rounds",
-          "description": "`[head_of_station]`: the Head of Station's rounds.",
+          "title": "The Station charge's tools",
+          "description": "`[head_of_station]`: what the Station's charge reads and tidies.",
           "default": {
             "listed_changes": 20,
             "survey_entries": 500000,
