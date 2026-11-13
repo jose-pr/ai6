@@ -582,7 +582,13 @@ fn malformed(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Ou
     ];
     for (what, bytes, expected, id) in cases {
         conn.send_bytes(&bytes)?;
-        let answer = conn.next()?;
+        // A harness may tell a session's commands, its title or its options right after `session/new`: not an answer.
+        let answer = loop {
+            let message = conn.next()?;
+            if message.get("method") != Some(&json!("session/update")) {
+                break message;
+            }
+        };
         ensure!(
             code(&answer) == Some(expected) && answer["id"] == id,
             "{what} was answered {answer}, not {expected} for id {id}"

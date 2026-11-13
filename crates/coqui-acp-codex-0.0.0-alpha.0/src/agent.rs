@@ -32,7 +32,11 @@ pub struct CodexAgent {
     spawn: Arc<dyn Spawn>,
     settings: CodexSettings,
     version: Arc<OnceLock<Option<String>>>,
+    seeds: Seeds,
 }
+
+/// The ids a host seeded with no history, each with the thread Codex assigned once one was started under it.
+pub type Seeds = Arc<std::sync::Mutex<alloc::collections::BTreeMap<String, Option<String>>>>;
 
 impl core::fmt::Debug for CodexAgent {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -58,6 +62,7 @@ impl CodexAgent {
             spawn: Arc::new(PlainSpawn),
             settings: CodexSettings::new(),
             version: Arc::new(OnceLock::new()),
+            seeds: Seeds::default(),
         }
     }
 
@@ -80,6 +85,32 @@ impl CodexAgent {
     pub fn settings(mut self, settings: CodexSettings) -> Self {
         self.settings = settings;
         self
+    }
+
+    /// The ids a host seeded with no history. Codex starts a thread under an id of its own, so opening one of these
+    /// starts a thread, keeps which, and answers to the host's id from then on; later opens reach that thread.
+    #[must_use]
+    pub fn seeded_sessions(mut self, seeds: Seeds) -> Self {
+        self.seeds = seeds;
+        self
+    }
+
+    /// Starts the session `request` asks for.
+    fn begin(
+        &self,
+        request: &OpenRequest,
+        events: &EventSink,
+    ) -> Result<(CodexLaunch, CodexSession), HarnessError> {
+        let launch = self.launch_for(request)?;
+        let sink = events.clone();
+        let session = CodexSession::start(
+            &launch,
+            self.spawn.as_ref(),
+            self.settings.clone(),
+            move |event| sink.send(event),
+        )
+        .map_err(HarnessError::from)?;
+        Ok((launch, session))
     }
 
     /// Codex's version, from `codex --version`, asked once; `None` when it does not answer within
@@ -198,15 +229,38 @@ impl Harness for CodexAgent {
         request: OpenRequest,
         events: EventSink,
     ) -> Result<Box<dyn Conversation>, HarnessError> {
-        let launch = self.launch_for(&request)?;
-        let sink = events.clone();
-        let session = CodexSession::start(
-            &launch,
-            self.spawn.as_ref(),
-            self.settings.clone(),
-            move |event| sink.send(event),
-        )
-        .map_err(HarnessError::from)?;
+        let mut request = request;
+        let mut alias = None;
+        let mut mapped = None;
+        if let Open::Resume(id) | Open::Load(id) = &request.open
+            && let Some(known) = self
+                .seeds
+                .lock()
+                .ok()
+                .and_then(|seeds| seeds.get(id).cloned())
+        {
+            alias = Some(id.clone());
+            mapped.clone_from(&known);
+            request.open = match (&request.open, known) {
+                (Open::Load(_), Some(thread)) => Open::Load(thread),
+                (_, Some(thread)) => Open::Resume(thread),
+                (_, None) => Open::New,
+            };
+        }
+        let (launch, session) = match self.begin(&request, &events) {
+            Ok(started) => started,
+            // A thread nothing was said in is not kept by Codex: this one starts over.
+            Err(_) if mapped.is_some() => {
+                request.open = Open::New;
+                self.begin(&request, &events)?
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(id) = &alias
+            && let Ok(mut seeds) = self.seeds.lock()
+        {
+            seeds.insert(id.clone(), Some(session.thread().to_string()));
+        }
         // What a client may choose: what the host named; else the host's own mode and every stricter one, the host's mode
         // being what its policy and sandbox amount to, or what the thread is really in when the host set neither.
         let loosest = match (&launch.approval_policy, &launch.sandbox) {
@@ -221,7 +275,11 @@ impl Harness for CodexAgent {
             launch.modes.as_deref().unwrap_or(&[]),
             launch.allow_bypass,
         );
-        Ok(Box::new(CodexConversation { session, offered }))
+        Ok(Box::new(CodexConversation {
+            session,
+            offered,
+            alias,
+        }))
     }
 }
 
@@ -236,6 +294,8 @@ impl From<Error> for HarnessError {
 
 struct CodexConversation {
     session: CodexSession,
+    /// The host's id for a session it seeded, which every id this conversation reports is.
+    alias: Option<String>,
     /// The modes that can be chosen.
     offered: Vec<Mode>,
 }
@@ -255,7 +315,9 @@ impl CodexConversation {
 
 impl Conversation for CodexConversation {
     fn session_id(&self) -> String {
-        self.session.thread().to_string()
+        self.alias
+            .clone()
+            .unwrap_or_else(|| self.session.thread().to_string())
     }
 
     fn options(&self) -> Vec<ConfigOption> {

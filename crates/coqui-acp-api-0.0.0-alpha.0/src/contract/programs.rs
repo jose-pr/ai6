@@ -41,7 +41,7 @@ const HOME_VARIABLES: [&str; 7] = [
 ];
 
 /// The variables a command line reads its configuration directory from, which are not passed on.
-const CONFIG_VARIABLES: [&str; 2] = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"];
+const CONFIG_VARIABLES: [&str; 3] = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR"];
 
 /// What one output stream of the program holds that has not been read.
 #[derive(Default)]
@@ -201,8 +201,15 @@ impl Program {
                 "this spawner keeps standard error apart",
             ));
         }
-        let mut command = Command::new(&spec.program);
-        command.args(&spec.args);
+        let args: alloc::vec::Vec<std::ffi::OsString> =
+            spec.args.iter().map(std::ffi::OsString::from).collect();
+        let (program, args) = match &spec.cwd {
+            Some(cwd) => crate::batch::start_in(spec.program.as_ref(), &args, Path::new(cwd))
+                .map_err(|error| refuse(Status::GUATIAO_ERR_UNSUPPORTED, &error.to_string()))?,
+            None => (std::ffi::OsString::from(&spec.program), args),
+        };
+        let mut command = Command::new(program);
+        command.args(args);
         if let Some(cwd) = &spec.cwd {
             command.current_dir(cwd);
         }

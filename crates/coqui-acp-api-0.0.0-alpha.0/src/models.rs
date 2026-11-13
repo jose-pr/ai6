@@ -213,20 +213,37 @@ impl StartRequestBuilder {
 pub struct ModelInfo {
     /// The harness's own identifier or alias for it.
     pub id: String,
-    /// What the harness shows a person, when it has a name apart from the identifier.
+    /// What the harness shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too.
     pub name: Option<String>,
     /// The harness's one-line description, when it gives one.
     pub description: Option<String>,
+    /// The model an alias or default resolves to, as the harness names it.
+    pub resolved: Option<String>,
+    /// The model and its version as a person reads them (`Opus 5.5`), when the harness can say it.
+    pub version: Option<String>,
+    /// The efforts this model takes, in the harness's order; empty when the harness lists none for it.
+    #[map(default)]
+    pub efforts: Vec<String>,
+    /// The effort the model uses when none is named, when the harness says.
+    pub default_effort: Option<String>,
+    /// Whether the harness uses this model when none is named.
+    #[map(default)]
+    pub is_default: bool,
 }
 
 impl ModelInfo {
-    /// The model `id`, with no name or description.
+    /// The model `id`, with no name, description, version or efforts.
     #[must_use]
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             name: None,
             description: None,
+            resolved: None,
+            version: None,
+            efforts: Vec::new(),
+            default_effort: None,
+            is_default: false,
         }
     }
 }
@@ -489,7 +506,21 @@ impl ImportReport {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Whether the harness took the history as context in a prompt (`replayed_as_prompt` among the
+    /// losses) rather than as a session of its own. When it did, the session is a fresh one in the
+    /// harness that the provider opens at the imported id, and the history reaches the model in the
+    /// first prompt only.
+    #[must_use]
+    pub fn replayed(&self) -> bool {
+        self.losses
+            .iter()
+            .any(|loss| loss.kind == REPLAYED_AS_PROMPT)
+    }
 }
+
+/// The loss kind of an import that replayed the history as a prompt's context.
+pub const REPLAYED_AS_PROMPT: &str = "replayed_as_prompt";
 
 /// A position in a history.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]

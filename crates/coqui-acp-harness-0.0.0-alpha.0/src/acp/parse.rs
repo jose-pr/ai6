@@ -41,6 +41,25 @@ pub(crate) fn network(path: &Path) -> bool {
     bytes.len() >= 2 && matches!(bytes[0], b'\\' | b'/') && matches!(bytes[1], b'\\' | b'/')
 }
 
+/// Whether `path` is in a device namespace, written `\\.\…` or `\\?\…` (with `/` as well): no folder of any machine's.
+pub(crate) fn device(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    let bytes = text.as_bytes();
+    let separator = |byte: u8| matches!(byte, b'\\' | b'/');
+    bytes.len() >= 3
+        && separator(bytes[0])
+        && separator(bytes[1])
+        && matches!(bytes[2], b'.' | b'?')
+        && bytes.get(3).is_none_or(|byte| separator(*byte))
+}
+
+/// Whether `path` has a `.` or `..` part, whichever separator it is written with.
+pub(crate) fn dotted(path: &Path) -> bool {
+    path.to_string_lossy()
+        .split(['/', '\\'])
+        .any(|part| part == "." || part == "..")
+}
+
 /// Whether a path a link led to is on the network. A resolved path on Windows is written `\\?\C:\…` for a local disk and
 /// `\\?\UNC\…` for a share.
 pub(crate) fn network_resolved(path: &Path) -> bool {

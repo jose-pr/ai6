@@ -1,4 +1,4 @@
-# coqui-agentic-peer/crates/coqui-agentic-peer at 2966a25c956678e44e23faf3757d2b34c6a769f3, with what it inherits written out.
+# coqui-agentic-peer/crates/coqui-agentic-peer at 8dad1766ba1b925f2bee9ebd403805e42e6afc47, with what it inherits written out.
 [package]
 name = "coqui-agentic-peer"
 description = "A proven link between two peers: pair once, then ACP, A2A, MCP or anything else over it"
@@ -32,9 +32,10 @@ features = ["pin"]
 git = "https://github.com/Boriken-Dev/coqui-peer-noise"
 rev = "3a5b30689780a6e6291af565ff6abbaae515973c"
 features = ["pin"]
-[dependencies.coqui-web-channel]
-git = "https://github.com/Boriken-Dev/coqui-web-channel.git"
-rev = "0b5b05c9af3417f6b13edc0fc7d9c86c02a63eca"
+[dependencies.coqui-transport]
+git = "https://github.com/Boriken-Dev/coqui-transport"
+rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+default-features = false
 [dev-dependencies]
 proptest = "1"
 [lints]

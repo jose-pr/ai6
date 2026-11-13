@@ -649,8 +649,9 @@ impl Shared {
         }
     }
 
-    /// What the host does not let a client choose: MCP servers when they are off, a path outside the working roots,
-    /// and a network or device path unless allowed.
+    /// What the host does not let a client choose: MCP servers when they are off, a working directory outside the working
+    /// roots or in a device namespace, and (unless allowed) an MCP server's command on a network path. A folder on a share
+    /// is a working directory like any other.
     fn admitted(&self, request: &OpenRequest) -> Result<(), String> {
         if !self.settings.client_mcp_servers && !request.mcp_servers.is_empty() {
             return Err("this agent takes no MCP servers from a client".into());
@@ -663,7 +664,7 @@ impl Shared {
                 .map(std::path::PathBuf::as_path),
         );
         for path in &paths {
-            super::path_admitted(
+            super::directory_admitted(
                 path,
                 &self.settings.working_roots,
                 self.settings.network_paths,

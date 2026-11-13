@@ -1,6 +1,6 @@
-# coqui-acp/crates/coqui-acp-harness at 2972b6ad93cd5a922469bfedb12fc2949024d5f5, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-harness at ce40cfe10396a83ecfbfefd8d1143edfd3441d44, with what it inherits written out.
 example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }]
-test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }]
+test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }]
 [package]
 name = "coqui-acp-harness"
 description = "Serve a coding agent's own command line as an Agent Client Protocol agent: process trees, bounded lines, neutral events, and ACP v1 and v2 shapes"
@@ -22,7 +22,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
 antigravity = ["dep:serde", "dep:time", "dep:ureq"]
-kind = ["dep:guatiao-serde"]
+kind = ["dep:guatiao-serde", "dep:coqui-acp-history"]
 [dependencies]
 [dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
@@ -49,6 +49,9 @@ optional = true
 git = "https://github.com/Boriken-Dev/guatiao"
 rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 default-features = false
+optional = true
+[dependencies.coqui-acp-history]
+path = "../coqui-acp-history"
 optional = true
 [dependencies.serde_json]
 version = "1"

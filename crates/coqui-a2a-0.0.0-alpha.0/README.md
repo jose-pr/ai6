@@ -13,6 +13,8 @@
 - A table of every A2A error type to its wire form, walked by a test.
 - The link's proof is the authentication. An agent's own token still travels, in service parameters.
 - `coqui-a2a loopback`: a standard HTTP JSON-RPC endpoint on a loopback address, so a stock A2A client or SDK works on a link.
+- `TaskStore` (feature `tasks`): task creation, status and artifacts, per-caller ownership, subscribers served the task as it is and then each update, terminal-state rules and every limit a setting.
+- `Server::call` and `Server::stream`: a host calls its own agent in process, through the checks a link meets, as a `Caller::local`.
 
 ## Installation
 
@@ -24,10 +26,11 @@ cargo add --git https://github.com/Boriken-Dev/coqui-a2a coqui-a2a
 
 | Feature | Adds |
 | --- | --- |
+| `tasks` | the `tasks` module: a `TaskStore` for an agent's tasks, their owners, subscribers and limits (no dependency) |
 | `loopback` | the `loopback` module: an HTTP endpoint on a loopback address (`axum`, `hyper`, `tokio`) |
 | `cli` | the `coqui-a2a` command (`loopback`, `clap`, the link's identity and TLS pieces) |
 
-A default build depends on `coqui-agentic-peer`, `coqui-web-channel`, `serde`, `serde_json` and `time`. MSRV is Rust 1.89.
+A default build depends on `coqui-agentic-peer`, `coqui-transport`, `serde`, `serde_json` and `time`. MSRV is Rust 1.89.
 
 ## Quick start
 
@@ -37,7 +40,7 @@ A client, over the mux of a link that has proved its peer:
 use coqui_a2a::model::{Message, Role, SendMessageRequest};
 use coqui_a2a::{Client, ClientError};
 use coqui_agentic_peer::mux::Mux;
-use coqui_web_channel::Channel;
+use coqui_transport::Channel;
 
 fn ask<C: Channel>(mux: &Mux<'_, C>) -> Result<(), ClientError> {
     let client = Client::new(mux);
@@ -107,10 +110,11 @@ coqui-a2a loopback --url ws://127.0.0.1:9000/link --peer sha256:<the agent's pee
 
 | Module | Purpose |
 | --- | --- |
-| `coqui_a2a` | `PROTOCOL`, `BINDING`, `Agent`, `Server`, `Client` and their errors |
+| `coqui_a2a` | `PROTOCOL`, `BINDING`, `Agent`, `Caller`, `Server`, `Reply`, `Client` and their errors |
 | `model` | the A2A data model as serde types |
 | `wire` | requests, responses and service parameters of the binding |
 | `error` | every A2A error type, its code and its wire form |
+| `tasks` | the in-memory task store (feature `tasks`) |
 | `loopback` | the HTTP endpoint (feature `loopback`) |
 
 ## Development

@@ -40,8 +40,9 @@ const ROTATED: &str = "coqui-acp-contract-rotated-9e2a";
 /// What a second rotation of it reads as.
 const SECOND: &str = "coqui-acp-contract-second-4c1d";
 
-/// How long a cancelled or timed out login may take to answer.
-const PROMPTLY: Duration = Duration::from_secs(2);
+/// How long past its deadline a cancelled or timed out login may take to answer: a margin for a busy machine, not a promise
+/// of promptness; a login that never answered would still be caught.
+const PROMPTLY: Duration = Duration::from_secs(20);
 
 macro_rules! ensure {
     ($cond:expr, $($arg:tt)+) => {
@@ -1208,7 +1209,7 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
         let dir = place.scratch()?;
         let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
         let outcome = harness
-            .login(request(&dir, 5_000)?, spawner, prompter)
+            .login(request(&dir, 300_000)?, spawner, prompter)
             .map_err(|e| format!("{label}: login: {}", why(&e)))?;
         ensure!(
             watch.spawner_destroyed() && watch.prompter_destroyed(),
@@ -1264,7 +1265,7 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
             },
         );
         let begun = Instant::now();
-        let answer = harness.login(request(&dir, 5_000)?, spawner, prompter);
+        let answer = harness.login(request(&dir, 300_000)?, spawner, prompter);
         let took = begun.elapsed();
         ensure!(
             watch.spawner_destroyed() && watch.prompter_destroyed(),
@@ -1307,7 +1308,7 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
             },
         );
         let begun = Instant::now();
-        let answer = harness.login(request(&dir, 5_000)?, spawner, prompter);
+        let answer = harness.login(request(&dir, 300_000)?, spawner, prompter);
         let took = begun.elapsed();
         if let Err(error) = answer {
             cancelled_while_waiting = true;

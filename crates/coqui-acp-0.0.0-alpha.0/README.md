@@ -18,6 +18,7 @@ deciding, and line transports. It knows nothing of the application above it. Doc
 - `Elicitor`: puts an agent's questions (`elicitation/create`, form mode) to the person, and sends an answer only when it fits the form.
 - Refused tool kinds: refused without asking, and a tool of such a kind that runs unasked ends the session.
 - Extensions: `_meta`, `_`-prefixed notifications both ways, and `turn_end_by` for an agent with its own turn events.
+- `secret` (feature): an agent asks the person for a secret, or shows them one, and the value travels sealed (HPKE) to a key only its receiver holds, bound to an identity the collector knows.
 - `Exchange::describe`: an agent's start options, modes and sessions before any session, each known, unknown with a reason, or not supported.
 - No async runtime required, and a finite default on every wait.
 
@@ -29,7 +30,7 @@ ACP version 1. A v2 agent selects version 1 when asked for it.
 cargo add coqui-acp
 ```
 
-There are no Cargo features. The SDK turns on `serde_json`'s `preserve_order` for the whole build.
+One Cargo feature, `secret`, off by default: `coqui_acp::secret`, the messages and sealing of the [secret-prompt extension](https://boriken-dev.github.io/coqui-acp/secrets/). The SDK turns on `serde_json`'s `preserve_order` for the whole build.
 
 ## Quick start
 

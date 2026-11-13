@@ -1,0 +1,67 @@
+# coqui-acp/crates/coqui-acp-history at ce40cfe10396a83ecfbfefd8d1143edfd3441d44, with what it inherits written out.
+bin = [{ name = "coqui-acp-history", path = "src/main.rs", required-features = ["cli"] }]
+[package]
+name = "coqui-acp-history"
+description = "One file format for an Agent Client Protocol session's history: write, read, bound, redact, seed from a compaction and move it between harnesses"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-acp"
+homepage = "https://boriken-dev.github.io/coqui-acp/"
+readme = "README.md"
+keywords = ["acp", "agent", "session", "history", "jsonl"]
+categories = ["parser-implementations", "development-tools"]
+exclude = [".*", "*.local.*"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+cli = ["dep:clap"]
+[dependencies]
+[dependencies.agent-client-protocol]
+version = "3.6"
+default-features = false
+[dependencies.clap]
+version = "4"
+features = ["derive", "env"]
+optional = true
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+[dependencies.guatiao]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+features = ["derive"]
+[dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+default-features = false
+features = ["json"]
+[dependencies.regex]
+version = "1"
+default-features = false
+features = ["std", "unicode"]
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+[dependencies.serde_json]
+version = "1"
+features = ["float_roundtrip"]
+[dependencies.sha2]
+version = "0.11"
+default-features = false
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

@@ -119,6 +119,8 @@ pub struct CodexProvider {
     accounts: Arc<Accounts>,
     /// For each home a key or token was saved in, a fingerprint of it.
     saved: std::sync::Mutex<alloc::collections::BTreeMap<String, u64>>,
+    /// The ids a host seeded with no history, and the thread Codex gave each once started.
+    seeds: crate::Seeds,
 }
 
 impl From<ProviderSettings> for CodexProvider {
@@ -136,6 +138,7 @@ impl CodexProvider {
             reports: Arc::new(Reports::new()),
             accounts: Arc::new(Accounts::new()),
             saved: std::sync::Mutex::new(alloc::collections::BTreeMap::new()),
+            seeds: crate::Seeds::default(),
         }
     }
 
@@ -374,8 +377,14 @@ impl AcpHarness for CodexProvider {
                 hold.finish();
             });
         }
+        let seeds = Arc::clone(&self.seeds);
         serving.open_shared(spawner, sink, move |spawn| {
-            Ok(shared(CodexAgent::new().defaults(launch).spawn(spawn)))
+            Ok(shared(
+                CodexAgent::new()
+                    .seeded_sessions(seeds)
+                    .defaults(launch)
+                    .spawn(spawn),
+            ))
         })
     }
 
@@ -401,29 +410,45 @@ impl AcpHarness for CodexProvider {
     fn import_session(
         &self,
         session: SessionImport,
-        _spawner: Object<dyn ProcessSpawner>,
+        spawner: Object<dyn ProcessSpawner>,
         _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ImportReport, ProviderError> {
         if let Some(account) = &session.account {
             accounts::plan(account)?;
         }
-        Err(unsupported(
-            "this provider does not import a session into Codex yet",
-        ))
+        #[cfg(feature = "history")]
+        {
+            crate::provider_history::import(&session, &spawner, &self.seeds)
+        }
+        #[cfg(not(feature = "history"))]
+        {
+            drop(spawner);
+            Err(unsupported(
+                "this provider does not import a session into Codex yet",
+            ))
+        }
     }
 
     fn export_session(
         &self,
         export: SessionExport,
-        _spawner: Object<dyn ProcessSpawner>,
+        spawner: Object<dyn ProcessSpawner>,
         _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ExportPage, ProviderError> {
         if let Some(account) = &export.account {
             accounts::plan(account)?;
         }
-        Err(unsupported(
-            "this provider does not export a Codex thread yet",
-        ))
+        #[cfg(feature = "history")]
+        {
+            crate::provider_history::export(&export, &spawner, &self.seeds)
+        }
+        #[cfg(not(feature = "history"))]
+        {
+            drop(spawner);
+            Err(unsupported(
+                "this provider does not export a Codex thread yet",
+            ))
+        }
     }
 
     fn models(
@@ -444,6 +469,9 @@ impl AcpHarness for CodexProvider {
                         let mut info = ModelInfo::new(model.id);
                         info.name = Some(model.name);
                         info.description = model.description;
+                        info.efforts = model.efforts;
+                        info.default_effort = model.default_effort;
+                        info.is_default = model.is_default;
                         info
                     })
                     .collect(),

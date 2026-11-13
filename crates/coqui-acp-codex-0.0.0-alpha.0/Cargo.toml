@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-codex at 2972b6ad93cd5a922469bfedb12fc2949024d5f5, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-codex at ce40cfe10396a83ecfbfefd8d1143edfd3441d44, with what it inherits written out.
 bin = [{ name = "coqui-acp-codex", path = "src/main.rs" }]
 example = [{ name = "codex_provider", crate-type = ["cdylib"] }]
 [package]
@@ -20,6 +20,9 @@ publish = false
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+history = ["dep:coqui-acp-history"]
 [dependencies]
 [dependencies.clap]
 version = "4"
@@ -31,9 +34,17 @@ path = "../coqui-acp-harness"
 features = ["kind"]
 [dependencies.serde_json]
 version = "1"
+[dependencies.coqui-acp-history]
+path = "../coqui-acp-history"
+optional = true
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"
+[dev-dependencies.coqui-acp-claude]
+path = "../coqui-acp-claude"
+features = ["history"]
+[dev-dependencies.coqui-acp-history]
+path = "../coqui-acp-history"
 [dev-dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
 features = ["contract"]

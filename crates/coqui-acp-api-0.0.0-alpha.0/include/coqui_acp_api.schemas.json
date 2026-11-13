@@ -694,7 +694,7 @@
                 "string",
                 "null"
               ],
-              "description": "What the harness shows a person, when it has a name apart from the identifier."
+              "description": "What the harness shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too."
             },
             "description": {
               "type": [
@@ -702,6 +702,40 @@
                 "null"
               ],
               "description": "The harness's one-line description, when it gives one."
+            },
+            "resolved": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The model an alias or default resolves to, as the harness names it."
+            },
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The model and its version as a person reads them (`Opus 5.5`), when the harness can say it."
+            },
+            "efforts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The efforts this model takes, in the harness's order; empty when the harness lists none for it.",
+              "default": []
+            },
+            "default_effort": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The effort the model uses when none is named, when the harness says."
+            },
+            "is_default": {
+              "type": "boolean",
+              "description": "Whether the harness uses this model when none is named.",
+              "default": false
             }
           },
           "additionalProperties": false,
@@ -731,7 +765,7 @@
           "string",
           "null"
         ],
-        "description": "What the harness shows a person, when it has a name apart from the identifier."
+        "description": "What the harness shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too."
       },
       "description": {
         "type": [
@@ -739,6 +773,40 @@
           "null"
         ],
         "description": "The harness's one-line description, when it gives one."
+      },
+      "resolved": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The model an alias or default resolves to, as the harness names it."
+      },
+      "version": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The model and its version as a person reads them (`Opus 5.5`), when the harness can say it."
+      },
+      "efforts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The efforts this model takes, in the harness's order; empty when the harness lists none for it.",
+        "default": []
+      },
+      "default_effort": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The effort the model uses when none is named, when the harness says."
+      },
+      "is_default": {
+        "type": "boolean",
+        "description": "Whether the harness uses this model when none is named.",
+        "default": false
       }
     },
     "additionalProperties": false,

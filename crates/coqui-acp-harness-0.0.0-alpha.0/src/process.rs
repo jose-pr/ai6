@@ -344,9 +344,14 @@ impl Spawn for PlainSpawn {
 
 /// Starts `launch` as [`PlainSpawn`] does, standard error going where `errors` says.
 pub(crate) fn start(launch: &Launch, errors: ErrorStream) -> io::Result<Spawned> {
-    let mut command = Command::new(&launch.program);
+    // A batch file does not start in a folder on a share: what it names starts there instead.
+    let (program, args) = match &launch.cwd {
+        Some(cwd) => coqui_acp_api::batch::start_in(&launch.program, &launch.args, cwd)?,
+        None => (launch.program.clone(), launch.args.clone()),
+    };
+    let mut command = Command::new(program);
     command
-        .args(&launch.args)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     let mut merged = None;

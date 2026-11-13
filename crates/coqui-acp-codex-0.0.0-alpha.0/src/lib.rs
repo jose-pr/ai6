@@ -6,11 +6,16 @@ extern crate alloc;
 
 pub mod accounts;
 mod agent;
+#[cfg(feature = "history")]
+#[cfg_attr(docsrs, doc(cfg(feature = "history")))]
+pub mod history;
 mod launch;
 mod limits;
 pub mod mode;
 pub mod parse;
 mod provider;
+#[cfg(feature = "history")]
+mod provider_history;
 mod session;
 mod signin;
 
@@ -19,7 +24,7 @@ use core::fmt;
 use core::time::Duration;
 use std::io;
 
-pub use agent::{CodexAgent, DEFAULT};
+pub use agent::{CodexAgent, DEFAULT, Seeds};
 pub use coqui_acp_harness::{self as harness, Launch, PlainSpawn, Spawn, Spawned};
 pub use launch::{
     ClientInfo, CodexLaunch, ThreadStart, toml_value, valid_config_key, valid_thread_id,

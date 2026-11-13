@@ -516,7 +516,12 @@ impl CodexSession {
                     .pointer("/thread/cwd")
                     .and_then(Value::as_str)
                     .is_some_and(|cwd| {
-                        coqui_acp_harness::acp::within_roots(Path::new(cwd), &launch.working_roots)
+                        coqui_acp_harness::acp::directory_admitted(
+                            Path::new(cwd),
+                            &launch.working_roots,
+                            false,
+                        )
+                        .is_ok()
                     })
             {
                 return Err(Error::Refused(

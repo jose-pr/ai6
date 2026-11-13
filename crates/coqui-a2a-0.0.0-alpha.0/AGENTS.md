@@ -4,12 +4,13 @@ Header-file-style reference for the `coqui-a2a` crate: every public item with it
 
 | Feature | Adds | Default |
 | --- | --- | --- |
+| `tasks` | module `tasks`: a `TaskStore` for an agent's tasks (std only) | off |
 | `loopback` | module `loopback`: an HTTP endpoint on a loopback address (`axum`, `hyper`, `hyper-util`, `tokio`, `futures-util`, `subtle`, `serde_json/raw_value`) | off |
-| `cli` | the `coqui-a2a` command (`loopback`, `clap`, `coqui-peer`, `coqui-peer-webcrypto`, `coqui-peer-tls`, `rustls`, `url`) | off |
+| `cli` | the `coqui-a2a` command (`loopback`, `clap`, `coqui-peer`, `coqui-peer-webcrypto`, `coqui-peer-tls`, `rustls`, `url`, `coqui-transport-web`) | off |
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published. A default build depends on `coqui-agentic-peer`, `coqui-web-channel`, `serde`, `serde_json` and `time`. No `unsafe` code. The crate holds the mapping of A2A onto a link and no proof, pairing, sealing or discovery: those are `coqui-agentic-peer`'s. The wire is specified in the binding page (<https://boriken-dev.github.io/coqui-a2a/binding/>).
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published. A default build depends on `coqui-agentic-peer`, `coqui-transport`, `serde`, `serde_json` and `time`. No `unsafe` code. The crate holds the mapping of A2A onto a link and no proof, pairing, sealing or discovery: those are `coqui-agentic-peer`'s. The wire is specified in the binding page (<https://boriken-dev.github.io/coqui-a2a/binding/>).
 
-Imports: the root re-exports `PROTOCOL`, `BINDING`, `A2A_VERSION`, `Agent`, `Caller`, `Events`, `Watch`, `Server`, `ServerLimits`, `Client`, `ClientError`, `ClientTimeouts`, `A2aError`, `ErrorKind`. Public modules: `agent`, `client`, `error`, `model`, `server`, `wire`, and `loopback` (feature).
+Imports: the root re-exports `PROTOCOL`, `BINDING`, `A2A_VERSION`, `Agent`, `Caller`, `Events`, `Watch`, `Server`, `ServerLimits`, `Reply`, `Client`, `ClientError`, `ClientTimeouts`, `A2aError`, `ErrorKind`. Public modules: `agent`, `client`, `error`, `model`, `server`, `wire`, and `tasks`, `loopback` (features).
 
 ## Constants (`coqui_a2a`)
 
@@ -36,7 +37,10 @@ pub type Events = Box<dyn Iterator<Item = Result<StreamResponse, A2aError>> + Se
 pub struct Caller<'a> { pub peer: &'a str, pub claims: &'a BTreeMap<String, String>, pub service_parameters: &'a ServiceParameters }   // Copy
 pub fn Caller::is_open(&self) -> bool          // false once the client left, the link went or the operation ended
 pub fn Caller::watch(&self) -> Watch           // a handle an Events iterator keeps
-pub fn Watch::is_closed(&self) -> bool         // Clone
+pub fn Caller::local(peer: &str, claims: &BTreeMap<String, String>, service_parameters: &ServiceParameters, watch: &Watch) -> Caller   // a caller in process; open until `watch` closes
+pub fn Caller::is_local(&self) -> bool          // true for Caller::local, false for a peer a link proved
+pub fn Watch::new() -> Watch;  pub fn Watch::is_closed(&self) -> bool;  pub fn Watch::close(&self)   // Clone; closing is for good and every clone sees it
+pub fn Watch::child(&self) -> Watch             // closes when self does, and can be closed alone
 
 pub struct Server;                              // Clone
 pub fn Server::new(agent: impl Agent + 'static) -> Server
@@ -45,15 +49,59 @@ pub fn Server::with_url(self, url: impl Into<String>) -> Server        // the `u
 pub fn Server::handler(self) -> coqui_agentic_peer::link::Handler
 pub fn Server::serving(self, services: Services) -> Services           // adds PROTOCOL
 pub fn Server::serve(&self, stream: &dyn LinkStream, accepted: &Accepted)
+pub fn Server::call(&self, caller: &Caller<'_>, method: Method, params: Value) -> Result<Reply, A2aError>     // in process; operations that answer once
+pub fn Server::stream(&self, caller: &Caller<'_>, method: Method, params: Value) -> Result<Events, A2aError>  // in process; SendStreamingMessage and SubscribeToTask
+pub enum Reply { Card(AgentCard), Message(SendMessageResponse), Task(Task), Tasks(ListTasksResponse) }          // non_exhaustive, Serialize
 pub struct ServerLimits { pub max_request: usize, pub request_timeout: Duration, pub reader_stall: Duration }   // non_exhaustive, Default: 1 MiB, 10 s, 30 s
 ```
 
+- `call` and `stream` run the checks `serve` runs, in the order it runs them, and answer the error a link would: `VersionNotSupported`, `ExtensionSupportRequired`, `PushNotificationNotSupported`, `UnsupportedOperation` for a streaming or extended-card call the card does not declare, `Internal` for a panic. A streaming method through `call`, or the reverse, is `InvalidRequest` before the agent runs. The card `call` answers has no webhooks and no link interface. `stream`'s iterator ends as a link's stream does (after the item that ends the task, a first message, or an error). The agent is given a `Watch` of the call's own (`caller.watch()` is a child of the caller's): it closes when the caller's watch closes and when the iterator is dropped, so an agent waiting on it is released and the host's watch stays open for its other operations. `call` hands the agent the caller's own watch.
+- `Caller::local`'s `peer` is whatever the host says, as true as the host's own code; nothing proves it. The agent authorizes by it as for a proven peer. **Name local peers `local:<name>`**: a proved id is the link crate's `sha256:` form, so no proof produces a `local:` id (a test samples this), and use one local peer per party whose tasks must not reach another's, such as `local:` and the session id of each parent session. `Caller::is_local` tells them apart in an agent.
 - Each stream runs on a thread of the link's, one operation per stream. A panic in an agent method is `InternalError` for that operation.
 - Before an agent method runs the server checks the method, `a2a-version` (major 1), required extensions, streaming and extended-card capabilities against the card, and refuses any push-notification request. The card the server serves has `capabilities.pushNotifications` false and an interface for this binding first.
 - A stream of items ends after the item that puts the task in a terminal state, or after a first item that is a message.
 - A send waits for a slow client's credit, up to `reader_stall`. Past that the stream is closed as `broken`. `finish` follows only an answer sent whole.
 - An `Events` iterator runs on a thread of its own. A quiet one must return soon after its `Watch` closes, since the operation waits for it.
 - `Caller::peer` is the identity: it comes from the link's proof. Authorize per caller; `ListTasks` returns only the caller's tasks.
+
+## Tasks (`coqui_a2a::tasks`, feature `tasks`)
+
+The tasks of an agent in memory, for a host that runs work for callers. No I/O, no thread of its own; std only.
+
+```rust
+pub struct TaskStore;                                   // Clone (clones share one store), Debug
+pub fn TaskStore::builder() -> TaskStoreBuilder
+pub fn TaskStore::limits(&self) -> TaskLimits
+
+// Caller-facing: the owner is `caller.peer`; another caller's task is TaskNotFound; the caller's Watch ends a subscription.
+pub fn TaskStore::create(&self, caller: &Caller<'_>, request: &SendMessageRequest) -> Result<Task, A2aError>   // the message names no task; SUBMITTED; history = [message]; request.tenant and metadata kept
+pub fn TaskStore::append(&self, caller: &Caller<'_>, request: &SendMessageRequest) -> Result<Task, A2aError>   // the message names the task; changes no state
+pub fn TaskStore::get(&self, caller: &Caller<'_>, request: &GetTaskRequest) -> Result<Task, A2aError>          // historyLength: last N, 0 none
+pub fn TaskStore::list(&self, caller: &Caller<'_>, request: &ListTasksRequest) -> Result<ListTasksResponse, A2aError>   // newest change first; no artifacts unless includeArtifacts
+pub fn TaskStore::cancel(&self, caller: &Caller<'_>, request: &CancelTaskRequest) -> Result<Task, A2aError>    // cancel hook, then CANCELED
+pub fn TaskStore::subscribe(&self, caller: &Caller<'_>, request: &SubscribeToTaskRequest) -> Result<Events, A2aError>   // the task as it is, then each update
+
+// For the code that does the work (not a caller; owns nothing):
+pub fn TaskStore::update_status(&self, id: &str, state: TaskState, message: Option<Message>) -> Result<Task, A2aError>
+pub fn TaskStore::add_artifact(&self, id: &str, artifact: Artifact, append: bool, last_chunk: bool) -> Result<(), A2aError>
+pub fn TaskStore::snapshot(&self, id: &str) -> Option<Task>        // whoever owns it: the host's, never a caller's
+pub fn TaskStore::inspect(&self, id: &str) -> Option<TaskRecord>   // the same with the owner (a Caller::peer) and tenant, so the host can route
+pub struct TaskRecord { pub owner: String, pub tenant: Option<String>, pub task: Task }   // non_exhaustive
+
+pub struct TaskStoreBuilder;                         // #[must_use]; setters named for the setting
+pub fn TaskStoreBuilder::limits(self, TaskLimits) / max_tasks / max_tasks_per_owner / max_history / max_history_bytes / max_metadata_bytes / max_artifacts / max_artifact_bytes / max_subscribers / subscriber_queue / default_page_size / max_page_size (self, usize) -> Self
+pub fn TaskStoreBuilder::cancel_hook(self, hook: impl Fn(&Task) -> Result<(), A2aError> + Send + Sync + 'static) -> Self
+pub fn TaskStoreBuilder::build(self) -> TaskStore
+pub struct TaskLimits { pub max_tasks: usize, pub max_tasks_per_owner: usize, pub max_history: usize, pub max_history_bytes: usize, pub max_metadata_bytes: usize, pub max_artifacts: usize, pub max_artifact_bytes: usize, pub max_subscribers: usize, pub subscriber_queue: usize, pub default_page_size: usize, pub max_page_size: usize }   // non_exhaustive, Copy, Default: 1024, 256, 64, 1 MiB, 64 KiB, 16, 1 MiB, 8, 256, 50, 100
+```
+
+- **Terminal states.** `COMPLETED`, `FAILED`, `CANCELED` and `REJECTED` are final. After one: `append`, `update_status` and `add_artifact` are `UnsupportedOperation`, `subscribe` is `UnsupportedOperation`, `cancel` is `TaskNotCancelable`, and nothing in the task changes. A task waits (`INPUT_REQUIRED`, `AUTH_REQUIRED`) and works again as often as it needs, never goes back to `SUBMITTED`, and takes no unspecified or unknown state (`InvalidParams`).
+- **Subscribers.** The first item is the task as it is, taken under the lock that registers the subscriber, so no update is missed or repeated; then a status update for each `update_status` (its message joins the history) and an artifact update for each `add_artifact`, in the order made. The iterator ends after the update that ends the task, or when the caller's `Watch` closes. An agent that streams a task it has just made subscribes before it starts the work, else a quick task has ended first and the subscription is refused.
+- **A slow subscriber never holds up the work.** One whose queue (`subscriber_queue`) is full is cut off; its iterator yields its queued items and then `Err(Internal)`, so a stream is never mistaken for whole. The same error ends a subscription whose store went away before the task ended.
+- **Limits are settings, none has a floor.** At `max_tasks` or `max_tasks_per_owner` a new task drops the caller's own ended task that changed longest ago and is `InvalidRequest` when it has none: **another owner's task is never dropped**, so a shared store lets no owner evict or lock out another's tasks except by filling `max_tasks` itself (keep `max_tasks` at least the owners times `max_tasks_per_owner`). Over `max_history` messages or `max_history_bytes` the oldest go; one message past `max_history_bytes` alone, and `metadata` past `max_metadata_bytes`, are `InvalidRequest`. A new artifact past `max_artifacts`, or a change past `max_artifact_bytes` (JSON bytes), is `InvalidAgentResponse` and changes nothing. More than `max_subscribers` live subscribers on a task is `InvalidRequest`; a dropped iterator frees its place. Every limit error carries `ErrorInfo.metadata.limit` naming the setting (`max_tasks`, `max_history_bytes`, ...).
+- **Cancel.** The task is marked cancelling under the lock, then the hook runs with no lock held and stops the work. A terminal state the work reports meanwhile (the waiter on a killed child says `FAILED`) lands as `CANCELED`. A second cancel while one is under way answers the task as it is and runs no hook. On `Ok` the store ends the task `CANCELED`; on an error (or a panic, which is `Internal`) that error is the answer, the mark is cleared and the task is as it was.
+- **Tenant.** `create` stores `request.tenant`. A request that names a tenant sees only tasks of that tenant (others are `TaskNotFound`, and `ListTasks` filters); one that names none sees all of the caller's tasks. An empty tenant, context id or page token, and a page size of 0, are unset (proto3 JSON); `AgentCard::select_skill` reads `Some("")` as none. The store does not choose the agent: that is the host's, by `AgentCard::select_skill`.
+- `list` pages by an opaque token (`p` and hex, bound to this store); a task changed while paging moves to the front. `statusTimestampAfter` is read as an RFC 3339 instant in any offset, else `InvalidParams`. Ids and context ids are `task-` or `context-` and 16 random hex digits; ownership, not secrecy, is what protects a task.
 
 ## Client (`coqui_a2a::client`)
 
@@ -106,6 +154,7 @@ pub fn SendMessageRequest::new(message: Message) -> SendMessageRequest;  pub fn 
 pub fn TaskState::is_terminal(&self) -> bool;  pub fn TaskState::is_interrupted(&self) -> bool
 pub fn StreamResponse::ends_task(&self) -> bool
 pub fn AgentCard::link_interface(&self) -> Option<&AgentInterface>
+pub fn AgentCard::select_skill(&self, tenant: Option<&str>) -> Result<&AgentSkill, A2aError>   // several agents on one card: the skill whose id is the request's tenant
 pub fn TaskStatus::now(state: TaskState) -> TaskStatus
 pub fn timestamp_now() -> String                    // 2026-11-02T10:30:00.123Z
 pub fn params_as<T: DeserializeOwned>(params: Value) -> Result<T, A2aError>

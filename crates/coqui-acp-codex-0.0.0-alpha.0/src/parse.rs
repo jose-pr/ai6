@@ -656,6 +656,9 @@ impl Parser {
                     self.edits.insert(id.clone(), call.clone());
                 }
                 call.status = Some(status(item, done));
+                if done {
+                    call.output = Some(json!({"status": item.get("status")}));
+                }
                 vec![Event::Tool(call)]
             }
             "mcpToolCall" | "dynamicToolCall" => {
@@ -705,9 +708,10 @@ impl Parser {
                             content: ToolContent::Text(said),
                         });
                     }
-                    call.output = item
-                        .get("result")
-                        .filter(|result| !result.is_null())
+                    call.output = ["result", "error"]
+                        .iter()
+                        .filter_map(|key| item.get(*key))
+                        .find(|value| !value.is_null())
                         .cloned();
                 }
                 events.push(Event::Tool(call));
@@ -723,11 +727,16 @@ impl Parser {
                         None => "Search the web".to_string(),
                     },
                 );
+                call.input =
+                    Some(json!({"query": item.get("query"), "action": item.get("action")}));
                 call.status = Some(if done {
                     ToolStatus::Completed
                 } else {
                     ToolStatus::InProgress
                 });
+                if done {
+                    call.output = Some(json!({"status": "completed"}));
+                }
                 vec![Event::Tool(call)]
             }
             "imageView" => {
@@ -737,11 +746,15 @@ impl Parser {
                 let path = text(item, "/path").unwrap_or_default();
                 call.title = Some(format!("View {path}"));
                 call.locations = Some(vec![Location::new(path, None)]);
+                call.input = Some(json!({"path": path}));
                 call.status = Some(if done {
                     ToolStatus::Completed
                 } else {
                     ToolStatus::InProgress
                 });
+                if done {
+                    call.output = Some(json!({"status": "completed"}));
+                }
                 vec![Event::Tool(call)]
             }
             "contextCompaction" if done => vec![Event::Compaction { id, summary: None }],
@@ -757,6 +770,13 @@ impl Parser {
         call.title = Some(self.title(command));
         call.input = Some(json!({"command": command, "cwd": item.get("cwd")}));
         call.status = Some(status(item, done));
+        if done {
+            call.output = Some(json!({
+                "aggregatedOutput": item.get("aggregatedOutput"),
+                "exitCode": item.get("exitCode"),
+                "status": item.get("status"),
+            }));
+        }
         call.content = Some(vec![ToolContent::Terminal(id.to_string())]);
         let mut terminal = Terminal::new(id);
         if done {
@@ -1406,6 +1426,7 @@ fn file_change(id: &str, item: &Value) -> ToolCall {
     let mut call = ToolCall::new(id);
     call.name = Some("apply_patch".into());
     call.kind = Some(ToolKind::Edit);
+    call.input = Some(json!({"changes": changes}));
     let paths: Vec<String> = changes
         .iter()
         .filter_map(|change| text(change, "/path").map(str::to_string))

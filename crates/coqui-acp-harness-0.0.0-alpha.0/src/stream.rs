@@ -293,6 +293,10 @@ impl Stream {
         if let Some(error) = failed_read {
             reason.push_str(&format!(" (its output could not be read: {error})"));
         }
+        // Standard error is read on a thread of its own and may not have delivered its last line when the output ends.
+        if locked(&self.tail).is_empty() {
+            std::thread::sleep(self.exit_wait.min(Duration::from_millis(150)));
+        }
         let tail = locked(&self.tail);
         if !tail.is_empty() {
             reason.push_str("; its last output:\n");

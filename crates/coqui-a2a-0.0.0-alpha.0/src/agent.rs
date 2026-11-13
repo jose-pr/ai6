@@ -23,21 +23,49 @@ pub type Events = Box<dyn Iterator<Item = Result<StreamResponse, A2aError>> + Se
 /// went, or the operation ended. An [`Events`] iterator that waits holds one, and returns soon
 /// after it closes.
 #[derive(Debug, Clone, Default)]
-pub struct Watch(Arc<AtomicBool>);
+pub struct Watch(Arc<Flag>);
+
+#[derive(Debug, Default)]
+struct Flag {
+    closed: AtomicBool,
+    /// Closing this one closes the watch that was made from it, not the other way.
+    parent: Option<Watch>,
+}
 
 impl Watch {
+    /// An open watch.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Whether nobody is listening.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.closed.load(Ordering::SeqCst) || self.0.parent.as_ref().is_some_and(Watch::is_closed)
     }
 
-    pub(crate) fn close(&self) {
-        self.0.store(true, Ordering::SeqCst);
+    /// A watch that closes when this one does, and can be closed alone. [`Server::stream`] gives
+    /// each streaming call one, so that dropping the stream releases what waits on it without
+    /// ending the caller's other operations.
+    ///
+    /// [`Server::stream`]: crate::Server::stream
+    #[must_use]
+    pub fn child(&self) -> Watch {
+        Watch(Arc::new(Flag {
+            closed: AtomicBool::new(false),
+            parent: Some(self.clone()),
+        }))
+    }
+
+    /// Says nobody is listening. Every clone sees it, and it cannot be undone. A host that calls
+    /// its own agent through [`Caller::local`] closes the watch to stop an operation it started.
+    pub fn close(&self) {
+        self.0.closed.store(true, Ordering::SeqCst);
     }
 }
 
-/// Who is calling, as the link proved it.
+/// Who is calling: the peer a link proved, or the host itself, calling in process.
 #[derive(Clone, Copy)]
 pub struct Caller<'a> {
     /// The peer, as its proof showed. This is the authentication.
@@ -46,7 +74,7 @@ pub struct Caller<'a> {
     pub claims: &'a BTreeMap<String, String>,
     /// The request's service parameters, which hold an agent's own token if it wants one.
     pub service_parameters: &'a ServiceParameters,
-    stream: &'a dyn LinkStream,
+    stream: Option<&'a dyn LinkStream>,
     watch: &'a Watch,
 }
 
@@ -71,7 +99,38 @@ impl<'a> Caller<'a> {
             peer,
             claims,
             service_parameters,
-            stream,
+            stream: Some(stream),
+            watch,
+        }
+    }
+
+    /// A caller that is not on a link: a host calling its own agent through [`Server::call`] or
+    /// [`Server::stream`](crate::Server::stream).
+    ///
+    /// `peer` is the identity the host answers to the agent, which authorizes by it exactly as
+    /// for a peer a link proved; nothing here proves it, so it is as true as the host's own code.
+    /// The caller is open until `watch` is closed.
+    ///
+    /// Name a local caller in a namespace no proof can produce: a proved peer id is the link
+    /// crate's hash form (`sha256:` and digits), so `local:` followed by a name of the host's own
+    /// never equals one, and an agent or a store keyed by `peer` cannot confuse the two. Use one
+    /// local peer for each party whose tasks must not reach another's, such as `local:` and a
+    /// session id for each parent session, since a store gives a task to the peer that made it.
+    /// [`Caller::is_local`] tells the two kinds apart in an agent.
+    ///
+    /// [`Server::call`]: crate::Server::call
+    #[must_use]
+    pub fn local(
+        peer: &'a str,
+        claims: &'a BTreeMap<String, String>,
+        service_parameters: &'a ServiceParameters,
+        watch: &'a Watch,
+    ) -> Self {
+        Self {
+            peer,
+            claims,
+            service_parameters,
+            stream: None,
             watch,
         }
     }
@@ -80,7 +139,24 @@ impl<'a> Caller<'a> {
     /// it is not.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        !self.watch.is_closed() && self.stream.life() == StreamLife::Open
+        !self.watch.is_closed()
+            && self
+                .stream
+                .is_none_or(|stream| stream.life() == StreamLife::Open)
+    }
+
+    /// This caller with another watch, which is the one it is open until.
+    pub(crate) fn watched<'b>(self, watch: &'b Watch) -> Caller<'b>
+    where
+        'a: 'b,
+    {
+        Caller { watch, ..self }
+    }
+
+    /// Whether the caller is the host itself, in process, and not a peer a link proved.
+    #[must_use]
+    pub fn is_local(&self) -> bool {
+        self.stream.is_none()
     }
 
     /// A handle an [`Events`] iterator keeps to learn when to stop.

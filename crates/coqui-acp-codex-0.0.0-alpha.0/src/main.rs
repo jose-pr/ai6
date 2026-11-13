@@ -26,6 +26,9 @@ use coqui_acp_codex::{CodexAgent, CodexLaunch};
     and others) from the environment it is given."
 )]
 struct Cli {
+    #[cfg(feature = "history")]
+    #[command(subcommand)]
+    command: Option<Command>,
     /// The Codex program.
     #[arg(long, env = "COQUI_ACP_CODEX_EXECUTABLE", default_value = "codex")]
     executable: OsString,
@@ -61,6 +64,103 @@ struct Cli {
     allow_network_paths: bool,
 }
 
+/// What `coqui_acp_codex` does besides serving.
+#[cfg(feature = "history")]
+#[derive(Debug, clap::Subcommand)]
+enum Command {
+    /// Moves a session in and out of the standard history format (`docs/session-history.md`).
+    History {
+        #[command(subcommand)]
+        action: Action,
+    },
+}
+
+#[cfg(feature = "history")]
+#[derive(Debug, clap::Subcommand)]
+enum Action {
+    /// Writes the session's history to standard output, as it is.
+    Export {
+        /// Codex's home directory; by default `CODEX_HOME`, else `.codex` in the home directory.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// The thread's UUID.
+        id: String,
+    },
+    /// Reads a history from standard input and writes it as a session Codex resumes. Prints what could not
+    /// be carried over on standard error; never replaces a session.
+    Import {
+        /// Codex's home directory; by default `CODEX_HOME`, else `.codex` in the home directory.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// The directory the thread works in.
+        cwd: PathBuf,
+        /// The thread's UUID.
+        id: String,
+        /// Seed from the first line of the history, not from its latest compaction summary.
+        #[arg(long)]
+        no_summary: bool,
+        /// The model provider the thread names, which Codex resumes only under the same one (default `openai`).
+        #[arg(long)]
+        model_provider: Option<String>,
+    },
+}
+
+#[cfg(feature = "history")]
+fn history_main(action: Action) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    use coqui_acp_codex::history::{DEFAULT_MAX_BYTES, ImportOptions, export_file, import_file};
+
+    let place = |given: Option<PathBuf>| {
+        given
+            .or_else(|| {
+                coqui_acp_codex::history::codex_home(&std::collections::BTreeMap::new(), false)
+            })
+            .ok_or_else(|| "the home directory is unknown: pass --config".to_owned())
+    };
+    match action {
+        Action::Export { config, id } => {
+            let config = place(config)?;
+            let doc =
+                export_file(&config, &id, DEFAULT_MAX_BYTES).map_err(|error| error.to_string())?;
+            let bytes = doc.to_vec().map_err(|error| error.to_string())?;
+            std::io::stdout()
+                .write_all(&bytes)
+                .map_err(|error| error.to_string())
+        }
+        Action::Import {
+            config,
+            cwd,
+            id,
+            no_summary,
+            model_provider,
+        } => {
+            let config = place(config)?;
+            let mut text = Vec::new();
+            std::io::stdin()
+                .read_to_end(&mut text)
+                .map_err(|error| error.to_string())?;
+            let doc = coqui_acp_history::Document::from_slice(&text)
+                .map_err(|error| error.to_string())?;
+            let options = ImportOptions::default().use_summary(!no_summary);
+            let options = match model_provider {
+                Some(provider) => options.model_provider(provider),
+                None => options,
+            };
+            let imported = import_file(&config, &cwd, &id, &doc, &options)
+                .map_err(|error| error.to_string())?;
+            let lost: Vec<String> = imported
+                .report
+                .losses()
+                .iter()
+                .map(|loss| format!("{}:{}", loss.kind, loss.count))
+                .collect();
+            eprintln!("imported; lost: [{}]", lost.join(", "));
+            Ok(())
+        }
+    }
+}
+
 fn settings_of(cli: &Cli) -> Settings {
     let mut settings = Settings::new();
     settings.max_version = cli.max_acp_version;
@@ -74,6 +174,16 @@ fn settings_of(cli: &Cli) -> Settings {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    #[cfg(feature = "history")]
+    if let Some(Command::History { action }) = cli.command {
+        return match history_main(action) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("coqui-acp-codex: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let settings = settings_of(&cli);
     let mut defaults = CodexLaunch::new(".");
     defaults.executable = cli.executable;

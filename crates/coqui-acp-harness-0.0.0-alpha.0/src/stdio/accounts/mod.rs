@@ -18,7 +18,6 @@ use crate::provider::{credential, schema};
 
 pub mod antigravity;
 pub mod grok;
-pub mod pi;
 
 /// The longest text a setting or a credential may be.
 const MAX_TEXT: usize = 1 << 20;

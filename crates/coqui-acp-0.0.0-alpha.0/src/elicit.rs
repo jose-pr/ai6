@@ -139,11 +139,11 @@ pub(crate) struct Limits {
     pub(crate) options: usize,
 }
 
-fn text(map: &Map<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn text(map: &Map<String, Value>, key: &str) -> Option<String> {
     map.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
-fn count(map: &Map<String, Value>, key: &str) -> Option<u64> {
+pub(crate) fn count(map: &Map<String, Value>, key: &str) -> Option<u64> {
     map.get(key).and_then(Value::as_u64)
 }
 
@@ -181,7 +181,7 @@ fn options(map: &Map<String, Value>, titled: &str) -> Option<Vec<ChoiceOption>> 
     None
 }
 
-fn kind_of(schema: &Map<String, Value>) -> FieldKind {
+pub(crate) fn kind_of(schema: &Map<String, Value>) -> FieldKind {
     let named = schema.get("type").and_then(Value::as_str).unwrap_or("");
     match named {
         "string" => match options(schema, "oneOf") {
